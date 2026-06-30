@@ -17,7 +17,7 @@
 4. Muster can auto-configure from this endpoint
 **Status:** done (df71f0c)
 
-### [ ] WI-002: SQLite graph engine
+### [x] WI-002: SQLite graph engine
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/graph/store.go (new), internal/graph/discovery.go (new), internal/graph/store_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/graph/...`
@@ -29,7 +29,7 @@
 5. BFS discovery query (recursive CTE) — return exact match + parent versions + lateral edges
 6. Full-text search via SQLite FTS5 on problem_classes.title + description
 7. Unit tests for all CRUD + discovery queries
-**Status:** ready
+**Status:** done (ce2bf6e)
 
 ### [ ] WI-003: Ingest queue
 **Model:** ollama-cloud/minimax-m3
