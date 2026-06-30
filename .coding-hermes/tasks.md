@@ -6,7 +6,7 @@
 
 ## Phase 1: Core Infrastructure
 
-### [ ] WI-001: OpenAPI spec generation
+### [x] WI-001: OpenAPI spec generation
 **Model:** ollama-cloud/minimax-m3
 **Files:** pkg/api/openapi.yaml (new)
 **Verify:** `yamllint pkg/api/openapi.yaml && curl -s localhost:8766/openapi.json | python3 -m json.tool`
@@ -15,7 +15,7 @@
 2. Embed spec via go:embed in cmd/off-by-one/main.go
 3. Serve at GET /openapi.json
 4. Muster can auto-configure from this endpoint
-**Status:** ready
+**Status:** done (df71f0c)
 
 ### [ ] WI-002: SQLite graph engine
 **Model:** ollama-cloud/minimax-m3
