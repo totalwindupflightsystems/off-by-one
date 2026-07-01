@@ -90,7 +90,7 @@
 7. Unit tests with mock bwrap executor
 **Status:** done (28a54a9)
 
-### [ ] WI-007: Idle cron loop
+### [x] WI-007: Idle cron loop
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/cron/loop.go (new), internal/cron/loop_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/cron/...`
@@ -102,7 +102,7 @@
 5. Concurrency limit: 1 solve at a time (single-machine)
 6. Metrics: track solve count, success rate, avg solve time
 7. Unit tests with mock queue + mock sandbox
-**Status:** ready
+**Status:** done (889dbeb)
 
 ## Phase 3: Web UI
 
