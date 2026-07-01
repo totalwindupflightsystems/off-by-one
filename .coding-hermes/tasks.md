@@ -31,7 +31,7 @@
 7. Unit tests for all CRUD + discovery queries
 **Status:** done (ce2bf6e)
 
-### [ ] WI-003: Ingest queue
+### [x] WI-003: Ingest queue
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/ingest/queue.go (new), internal/ingest/submit.go (new), internal/ingest/queue_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/ingest/...`
@@ -43,7 +43,7 @@
 5. Dequeue method for idle cron
 6. Queue status tracking (pending → in_progress → complete/failed)
 7. Unit tests with concurrent submit + dequeue
-**Status:** ready
+**Status:** done (24f0d81)
 
 ### [ ] WI-004: HTTP API server
 **Model:** ollama-cloud/minimax-m3
