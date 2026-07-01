@@ -88,6 +88,31 @@ func TestHandler_JSAsset(t *testing.T) {
 	}
 }
 
+// TestHandler_SearchJSAsset asserts /js/search.js (WI-009) is
+// served with a JS Content-Type and contains the module entry point.
+func TestHandler_SearchJSAsset(t *testing.T) {
+	srv := httptest.NewServer(Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/js/search.js")
+	if err != nil {
+		t.Fatalf("GET /js/search.js: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", resp.StatusCode)
+	}
+	ct := resp.Header.Get("Content-Type")
+	if !strings.HasPrefix(ct, "application/javascript") && !strings.HasPrefix(ct, "text/javascript") {
+		t.Errorf("content-type: got %q, want javascript…", ct)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "initView_search") {
+		t.Errorf("search.js body missing initView_search registration")
+	}
+}
+
 // TestHandler_SPAFallback asserts a path with no extension and no
 // /api/ prefix is treated as a SPA client route and returns
 // index.html. This is what allows the client-side router to handle
