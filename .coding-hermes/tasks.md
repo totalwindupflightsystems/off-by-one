@@ -132,7 +132,7 @@
 6. Version warnings highlighted in yellow
 **Status:** done (f756cca)
 
-### [ ] WI-010: Web UI — Submit view
+### [x] WI-010: Web UI — Submit view
 **Model:** ollama-cloud/minimax-m3
 **Files:** web/js/submit.js (new)
 **Verify:** `go build ./...`
@@ -141,7 +141,7 @@
 2. Cadence selector: pre-phase, end-of-day, post-debug
 3. Submit → POST /api/v1/problems/submit → show queue position + estimated time
 4. Auto-suggest existing problem classes as user types (from GET /api/v1/taxonomy)
-**Status:** ready
+**Status:** done (6ab466b)
 
 ### [ ] WI-011: Web UI — Explore view (taxonomy browser)
 **Model:** ollama-cloud/minimax-m3
