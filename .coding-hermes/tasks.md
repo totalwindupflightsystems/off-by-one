@@ -119,7 +119,7 @@
 6. D3.js loaded for graph visualization (Explore view)
 **Status:** done (817de90) — Note: AC#4 (HTMX) and AC#6 (D3.js) deferred to per-view tasks (WI-009+)
 
-### [ ] WI-009: Web UI — Search view
+### [x] WI-009: Web UI — Search view
 **Model:** ollama-cloud/minimax-m3
 **Files:** web/js/search.js (new), web/css/style.css (modify)
 **Verify:** `curl -s localhost:8766/ | grep "search"`
@@ -130,7 +130,7 @@
 4. Click result → expand full solution inline (GET /api/v1/problems/{class}/answers/{id})
 5. Related problems shown as D3.js force graph
 6. Version warnings highlighted in yellow
-**Status:** ready
+**Status:** done (f756cca)
 
 ### [ ] WI-010: Web UI — Submit view
 **Model:** ollama-cloud/minimax-m3
