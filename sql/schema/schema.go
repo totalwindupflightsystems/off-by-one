@@ -9,6 +9,14 @@ import _ "embed"
 //go:embed schema.sql
 var Schema string
 
+//go:embed queue.sql
+var QueueSchema string
+
+// QueueFTS5Extra is a no-op placeholder. Kept parallel to FTS5Extra so
+// future FTS5 virtual tables on queue entries (e.g., a "search the queue
+// history" view) have a natural home.
+const QueueFTS5Extra = ``
+
 // FTS5Extra is the SQL to set up the FTS5 virtual tables and triggers.
 // Kept in Go (not the schema file) because the FTS5 extension is loaded
 // by modernc.org/sqlite and we want the triggers to be in source control

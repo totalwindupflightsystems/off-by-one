@@ -110,15 +110,38 @@ type SearchHit struct {
 // Open creates a Store backed by the SQLite database at dbPath. The schema
 // is created on first call and migrations are applied.
 //
-// Set dbPath=":memory:" for tests. WAL mode is enabled for on-disk DBs to
-// support concurrent readers alongside a single writer.
+// Set dbPath=":memory:" for tests. For in-memory mode, modernc.org/sqlite
+// uses a per-connection database by default, which breaks the
+// "connection pool shares one DB" assumption. We use a shared-cache
+// DSN so all connections in the pool see the same data.
+//
+// Note: ":memory:" with `cache=shared` is shared across connections
+// within the same process but the cache name must be unique per
+// database. We use the PID + a counter to make the name unique. To
+// force per-test isolation, callers should use OpenShared() with their
+// own name, or use a temp-file path via t.TempDir() + "/test.db".
 func Open(dbPath string) (*Store, error) {
-	dsn := dbPath
-	if dbPath != ":memory:" && !strings.Contains(dsn, "?") {
-		dsn = dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)"
-	} else if dbPath == ":memory:" {
-		dsn = "file::memory:?cache=shared&_pragma=foreign_keys(ON)"
+	return openDSN(dbPathToDSN(dbPath))
+}
+
+// OpenShared creates a Store backed by a named in-memory database that
+// is shared across all connections in the process. The name must be
+// unique per test — pass t.Name() or a fresh UUID.
+func OpenShared(name string) (*Store, error) {
+	return openDSN("file:" + name + "?mode=memory&cache=shared&_pragma=foreign_keys(ON)")
+}
+
+func dbPathToDSN(dbPath string) string {
+	if dbPath == ":memory:" {
+		return "file:off-by-one?mode=memory&cache=shared&_pragma=foreign_keys(ON)"
 	}
+	if !strings.Contains(dbPath, "?") {
+		return dbPath + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)"
+	}
+	return dbPath
+}
+
+func openDSN(dsn string) (*Store, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -126,6 +149,14 @@ func Open(dbPath string) (*Store, error) {
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
+	}
+	// PRAGMA busy_timeout (in ms) controls how long SQLite waits for a
+	// write lock before returning SQLITE_BUSY. The DSN _pragma syntax
+	// doesn't always apply to in-memory shared caches, so we set it
+	// explicitly per-connection.
+	if _, err := db.Exec(`PRAGMA busy_timeout = 5000`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set busy_timeout: %w", err)
 	}
 	s := &Store{db: db}
 	if err := s.migrate(); err != nil {
@@ -152,6 +183,17 @@ func (s *Store) migrate() error {
 	}
 	if _, err := s.db.Exec(schemasql.FTS5Extra); err != nil {
 		return fmt.Errorf("create fts5: %w", err)
+	}
+	return nil
+}
+
+// ApplyExtra runs additional SQL on the underlying connection. Used by
+// other packages (e.g., the ingest queue) to add their own tables to the
+// same database. The caller is responsible for idempotency (use IF NOT
+// EXISTS) and ordering (call this AFTER Open returns).
+func (s *Store) ApplyExtra(sql string) error {
+	if _, err := s.db.Exec(sql); err != nil {
+		return fmt.Errorf("apply extra schema: %w", err)
 	}
 	return nil
 }
