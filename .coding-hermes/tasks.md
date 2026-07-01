@@ -76,7 +76,7 @@
 7. Unit tests with mock bwrap (exec.Command override)
 **Status:** done (d3f75de)
 
-### [ ] WI-006: Pi Agent solver integration
+### [x] WI-006: Pi Agent solver integration
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/solver/piagent.go (new), internal/solver/piagent_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/solver/...`
@@ -88,7 +88,7 @@
 5. Parse solution.md + evidence.md output
 6. Store result in graph via internal/graph
 7. Unit tests with mock bwrap executor
-**Status:** ready
+**Status:** done (28a54a9)
 
 ### [ ] WI-007: Idle cron loop
 **Model:** ollama-cloud/minimax-m3
