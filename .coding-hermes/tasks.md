@@ -106,7 +106,7 @@
 
 ## Phase 3: Web UI
 
-### [ ] WI-008: Web UI shell + static serving
+### [x] WI-008: Web UI shell + static serving
 **Model:** ollama-cloud/minimax-m3
 **Files:** web/index.html (new), web/css/style.css (new), web/js/app.js (new), internal/web/serve.go (new)
 **Verify:** `go build ./... && curl -s localhost:8766/ | grep -q "Off-by-One"`
@@ -117,7 +117,7 @@
 4. HTMX for dynamic content loading (no React/Vue — keep it light)
 5. Responsive layout: main content area + chat sidebar
 6. D3.js loaded for graph visualization (Explore view)
-**Status:** ready
+**Status:** done (817de90) — Note: AC#4 (HTMX) and AC#6 (D3.js) deferred to per-view tasks (WI-009+)
 
 ### [ ] WI-009: Web UI — Search view
 **Model:** ollama-cloud/minimax-m3
