@@ -13,9 +13,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/totalwindupflightsystems/off-by-one/internal/web"
 	"github.com/totalwindupflightsystems/off-by-one/pkg/api"
 )
 
@@ -44,9 +46,37 @@ func main() {
 	mux.HandleFunc("/openapi.json", openapiHandler)
 	mux.HandleFunc("/health", healthHandler)
 
+	// The web handler serves the SPA shell and static assets. It
+	// only matches paths that don't collide with the API routes
+	// registered above (the web handler explicitly returns 404 for
+	// /api/* and known API paths). We compose the two with a small
+	// dispatcher: the API mux is consulted first; if the mux did
+	// not match (its default 404), the web handler gets a chance.
+	webHandler := web.Handler()
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The stdlib mux returns 404 for unmatched paths; the
+		// cheapest way to detect that is to ask the mux but capture
+		// the status code via a ResponseWriter wrapper. We do it
+		// the simple way here: only defer to the web handler when
+		// the request path is not an API path.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			mux.ServeHTTP(w, r)
+			return
+		}
+		// /openapi.json and /health are explicitly handled by mux.
+		// For everything else, the web handler serves the SPA shell
+		// or static assets.
+		switch r.URL.Path {
+		case "/openapi.json", "/health":
+			mux.ServeHTTP(w, r)
+			return
+		}
+		webHandler.ServeHTTP(w, r)
+	})
+
 	srv := &http.Server{
 		Addr:              fmt.Sprintf(":%d", *port),
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
