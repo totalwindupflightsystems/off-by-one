@@ -45,7 +45,7 @@
 7. Unit tests with concurrent submit + dequeue
 **Status:** done (24f0d81)
 
-### [ ] WI-004: HTTP API server
+### [x] WI-004: HTTP API server
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/api/server.go (new), internal/api/handlers.go (new), internal/api/handlers_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/api/...`
@@ -58,7 +58,7 @@
 6. GET /api/v1/queue/{id} — queue status
 7. GET /api/v1/stats — hit rate, coverage, queue depth
 8. httptest-based integration tests for all endpoints
-**Status:** ready
+**Status:** done (2e65698)
 
 ## Phase 2: Sandbox + Solver
 
