@@ -62,7 +62,7 @@
 
 ## Phase 2: Sandbox + Solver
 
-### [ ] WI-005: Bubblewrap sandbox
+### [x] WI-005: Bubblewrap sandbox
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/sandbox/bwrap.go (new), internal/sandbox/bwrap_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/sandbox/...`
@@ -74,7 +74,7 @@
 5. Destroy() kills bwrap process + cleans workspace
 6. Handle bwrap not installed: skip tests gracefully
 7. Unit tests with mock bwrap (exec.Command override)
-**Status:** ready
+**Status:** done (d3f75de)
 
 ### [ ] WI-006: Pi Agent solver integration
 **Model:** ollama-cloud/minimax-m3
