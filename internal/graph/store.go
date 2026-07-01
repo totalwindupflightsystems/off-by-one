@@ -420,6 +420,147 @@ func (s *Store) ListEdgesFrom(ctx context.Context, sourceID int64) ([]Edge, erro
 	return out, rows.Err()
 }
 
+// RelatedTitles returns the titles of problem classes connected to
+// sourceID via any problem_edge. Used by the API to populate the
+// SubmitProblemResponse.related_problems list. Deduplicates by title
+// and caps at 20 entries.
+func (s *Store) RelatedTitles(ctx context.Context, sourceID int64) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT pc.title
+		FROM problem_edges e
+		JOIN problem_classes pc ON pc.id = e.target_id
+		WHERE e.source_id = ?
+		UNION
+		SELECT DISTINCT pc.title
+		FROM problem_edges e
+		JOIN problem_classes pc ON pc.id = e.source_id
+		WHERE e.target_id = ?
+		LIMIT 20
+	`, sourceID, sourceID)
+	if err != nil {
+		return nil, fmt.Errorf("related titles: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var title string
+		if err := rows.Scan(&title); err != nil {
+			return nil, err
+		}
+		out = append(out, title)
+	}
+	return out, rows.Err()
+}
+
+// Stats is the per-system counter snapshot the /api/v1/stats endpoint
+// returns. Fields map 1:1 to the Stats schema in the OpenAPI spec.
+type Stats struct {
+	TotalProblems   int     `json:"total_problems"`
+	TotalAnswers    int     `json:"total_answers"`
+	VerifiedAnswers int     `json:"verified_answers"`
+	QueueDepth      int     `json:"queue_depth"`
+	HitRate         float64 `json:"hit_rate"`
+	Coverage        float64 `json:"coverage"`
+	AvgSolveTime    string  `json:"avg_solve_time"`
+}
+
+// Stats returns aggregate counters across the graph. Hit rate is
+// computed as verified_answers / total_answers (when total > 0).
+// Coverage is verified / total problems. Avg solve time is left as
+// an empty string — the cron loop populates it once solves begin.
+func (s *Store) Stats(ctx context.Context) (*Stats, error) {
+	var st Stats
+	row := s.db.QueryRowContext(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM problem_classes),
+			(SELECT COUNT(*) FROM answer_nodes),
+			(SELECT COUNT(*) FROM answer_nodes WHERE status IN ('verified', 'ci_passed'))
+	`)
+	if err := row.Scan(&st.TotalProblems, &st.TotalAnswers, &st.VerifiedAnswers); err != nil {
+		return nil, fmt.Errorf("stats: %w", err)
+	}
+	if st.TotalAnswers > 0 {
+		st.HitRate = float64(st.VerifiedAnswers) / float64(st.TotalAnswers)
+	}
+	if st.TotalProblems > 0 {
+		st.Coverage = float64(st.VerifiedAnswers) / float64(st.TotalProblems)
+	}
+	return &st, nil
+}
+
+// AnswerCount returns the number of answers associated with a problem
+// class. Used by ProblemClass.AnswerCount after a List to populate the
+// answer_count field the OpenAPI spec requires.
+func (s *Store) AnswerCount(ctx context.Context, classID int64) (int, error) {
+	var n int
+	row := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM answer_nodes WHERE class_id = ?`, classID)
+	if err := row.Scan(&n); err != nil {
+		return 0, fmt.Errorf("answer count: %w", err)
+	}
+	return n, nil
+}
+
+// ProblemClassWithCounts is the ProblemClass plus derived fields the
+// /api/v1/problems endpoint needs: answer_count, status (best answer's
+// status), hit_count, last_hit.
+type ProblemClassWithCounts struct {
+	ProblemClass
+	AnswerCount int    `json:"answer_count"`
+	Status      string `json:"status"`
+	HitCount    int    `json:"hit_count"`
+	LastHit     string `json:"last_hit,omitempty"`
+}
+
+// ListProblemClassesWithCounts returns problem classes joined with
+// derived counts. status is the highest-precedence answer status
+// (ci_passed > verified > pending > failed). hit_count and last_hit
+// are placeholder zeros for now — the cron loop will populate them
+// once the discovery endpoint begins logging hits.
+func (s *Store) ListProblemClassesWithCounts(ctx context.Context, limit, offset int) ([]ProblemClassWithCounts, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT pc.id, pc.title, pc.description, pc.created_at,
+		       COALESCE(ac.cnt, 0) AS answer_count,
+		       COALESCE(ac.best_status, 'pending') AS status
+		FROM problem_classes pc
+		LEFT JOIN (
+			SELECT class_id,
+			       COUNT(*) AS cnt,
+			       CASE
+			           WHEN MAX(CASE WHEN status = 'ci_passed' THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
+			           WHEN MAX(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) = 1 THEN 'verified'
+			           WHEN MAX(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) = 1 THEN 'pending'
+			           ELSE 'failed'
+			       END AS best_status
+			FROM answer_nodes
+			GROUP BY class_id
+		) ac ON ac.class_id = pc.id
+		ORDER BY pc.id DESC
+		LIMIT ? OFFSET ?
+	`, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("list problem_classes with counts: %w", err)
+	}
+	defer rows.Close()
+	var out []ProblemClassWithCounts
+	for rows.Next() {
+		var p ProblemClassWithCounts
+		var created string
+		if err := rows.Scan(&p.ID, &p.Title, &p.Description, &created, &p.AnswerCount, &p.Status); err != nil {
+			return nil, fmt.Errorf("scan: %w", err)
+		}
+		p.CreatedAt = parseSQLiteTime(created)
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
 // --- Scanning helpers -----------------------------------------------------
 
 type rowScanner interface {
