@@ -143,7 +143,7 @@
 4. Auto-suggest existing problem classes as user types (from GET /api/v1/taxonomy)
 **Status:** done (6ab466b)
 
-### [ ] WI-011: Web UI — Explore view (taxonomy browser)
+### [x] WI-011: Web UI — Explore view (taxonomy browser)
 **Model:** ollama-cloud/minimax-m3
 **Files:** web/js/explore.js (new)
 **Verify:** `go build ./...`
