@@ -152,9 +152,9 @@
 2. Expandable nodes: problem class → environment → language → version → answer
 3. Click node to see details
 4. D3.js force graph for related problems when viewing a problem class
-**Status:** ready
+**Status:** done
 
-### [ ] WI-012: Web UI — Export/Import views
+### [x] WI-012: Web UI — Export/Import views
 **Model:** ollama-cloud/minimax-m3
 **Files:** web/js/export.js (new), web/js/import.js (new)
 **Verify:** `go build ./...`
@@ -163,7 +163,7 @@
 2. Import: enter repo URL → preview incoming answers (diff against local) → select → import
 3. Show conflict resolution UI (same class+version, different answer)
 4. Progress indicators for git operations
-**Status:** ready
+**Status:** done (425f6b7)
 
 ### [ ] WI-013: Web UI — AI Agent Chat
 **Model:** ollama-cloud/minimax-m3
