@@ -237,7 +237,7 @@
 
 ## Phase 6: Muster Integration
 
-### [ ] WI-018: Muster MCP bridge — end-to-end wiring
+### [x] WI-018: Muster MCP bridge — end-to-end wiring
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/muster/bridge.go (new), internal/muster/bridge_test.go (new), scripts/connect-muster.sh (new), muster-config.yaml (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/muster/... && bash scripts/connect-muster.sh --dry-run`
@@ -255,7 +255,7 @@
 4. Integration test: spawn Off-by-One → spawn Muster → submit problem via MCP tool → verify it appears in Off-by-One queue → discover solution → verify response
 5. `make connect-muster` target that runs the connect script
 6. Update AGENTS.md with Muster integration architecture
-**Status:** ready
+**Status:** done (6e20d10)
 
 ### [ ] WI-019: Muster MCP — bidirectional verification
 **Model:** ollama-cloud/minimax-m3
