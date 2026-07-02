@@ -195,7 +195,7 @@
 7. Unit tests with in-memory git repo (go-git or git init --bare)
 **Status:** done (08896ba)
 
-### [ ] WI-015: Git import engine
+### [x] WI-015: Git import engine
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/import/git.go (new), internal/import/git_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/import/...`
@@ -207,7 +207,7 @@
 5. Handle merge conflicts: same class+version with different answer
 6. Return import summary (added, updated, skipped, conflicted)
 7. Unit tests with mock repos
-**Status:** ready
+**Status:** done (0be7f2f)
 
 ## Phase 5: Integration + Polish
 
