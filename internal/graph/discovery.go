@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 )
 
 // Discovery is the central query that powers the /api/v1/problems/discover
@@ -202,77 +201,6 @@ func (s *Store) versionWarnings(ctx context.Context, classID int64, env, lang, v
 		}
 		seen[key] = true
 		out = append(out, fmt.Sprintf("This solution is for %s; newer answers exist for %s (see %s).", version, v, t))
-	}
-	return out, rows.Err()
-}
-
-// Search runs a full-text query across problem_classes and answer_nodes.
-// Results are ranked by FTS5 rank, with the matched snippet returned for
-// display in the web UI.
-//
-// env, lang, status act as additional filters (empty = no filter).
-// limit, offset paginate.
-func (s *Store) Search(ctx context.Context, query, env, lang, status string, limit, offset int) ([]SearchHit, error) {
-	if strings.TrimSpace(query) == "" {
-		return nil, nil
-	}
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
-	if offset < 0 {
-		offset = 0
-	}
-
-	// Escape the query for FTS5. We use double-quote wrapping so any
-	// characters are treated as a phrase. FTS5 also has a "NEAR" syntax
-	// that we don't expose — by quoting, the user gets literal matching.
-	ftsQuery := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
-
-	// We UNION two queries: problem_classes title/description and
-	// answer_nodes solution. The answer query joins the FTS index with
-	// its parent problem_class for the title. Status filter applies to
-	// both.
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT pc.id, pc.title, snippet(problem_classes_fts, 1, '[', ']', '…', 8) AS snip,
-		       rank, NULL AS answer_id
-		FROM problem_classes_fts
-		JOIN problem_classes pc ON pc.id = problem_classes_fts.rowid
-		WHERE problem_classes_fts MATCH ?
-		  AND (? = '' OR EXISTS (
-		      SELECT 1 FROM answer_nodes a
-		      WHERE a.class_id = pc.id AND a.env = ?))
-		  AND (? = '' OR EXISTS (
-		      SELECT 1 FROM answer_nodes a
-		      WHERE a.class_id = pc.id AND a.lang = ?))
-		  AND (? = '' OR EXISTS (
-		      SELECT 1 FROM answer_nodes a
-		      WHERE a.class_id = pc.id AND a.status = ?))
-		UNION
-		SELECT pc.id, pc.title, snippet(answer_nodes_fts, 0, '[', ']', '…', 8) AS snip,
-		       rank, a.id AS answer_id
-		FROM answer_nodes_fts
-		JOIN answer_nodes a ON a.id = answer_nodes_fts.rowid
-		JOIN problem_classes pc ON pc.id = a.class_id
-		WHERE answer_nodes_fts MATCH ?
-		  AND (? = '' OR a.env = ?)
-		  AND (? = '' OR a.lang = ?)
-		  AND (? = '' OR a.status = ?)
-		ORDER BY rank
-		LIMIT ? OFFSET ?
-	`, ftsQuery, env, env, lang, lang, status, status,
-		ftsQuery, env, env, lang, lang, status, status,
-		limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("search query: %w", err)
-	}
-	defer rows.Close()
-	var out []SearchHit
-	for rows.Next() {
-		var hit SearchHit
-		if err := rows.Scan(&hit.ClassID, &hit.Title, &hit.Snippet, &hit.Score, &hit.AnswerID); err != nil {
-			return nil, fmt.Errorf("scan search hit: %w", err)
-		}
-		out = append(out, hit)
 	}
 	return out, rows.Err()
 }

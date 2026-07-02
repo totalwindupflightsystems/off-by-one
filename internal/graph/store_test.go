@@ -305,66 +305,6 @@ func TestStore_Discovery_NotFound(t *testing.T) {
 	}
 }
 
-func TestStore_Search_ProblemClassAndAnswer(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	cid, _ := s.CreateProblemClass(ctx, "docker-volume-permission", "Files owned by root after Docker volume transfer")
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "go-1.25",
-		"Use COPY --chown=appuser:appuser in Dockerfile", "verified", `{}`)
-
-	hits, err := s.Search(ctx, "docker", "", "", "", 10, 0)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if len(hits) == 0 {
-		t.Fatal("no hits for 'docker'")
-	}
-	found := false
-	for _, h := range hits {
-		if h.Title == "docker-volume-permission" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("expected hit on docker-volume-permission, got %d", len(hits))
-	}
-}
-
-func TestStore_Search_EmptyQuery(t *testing.T) {
-	s := newTestStore(t)
-	hits, err := s.Search(context.Background(), "", "", "", "", 10, 0)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	if len(hits) != 0 {
-		t.Errorf("empty query returned %d hits", len(hits))
-	}
-}
-
-func TestStore_Search_FilterByEnv(t *testing.T) {
-	s := newTestStore(t)
-	ctx := context.Background()
-	cid, _ := s.CreateProblemClass(ctx, "test-class", "test description")
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "docker solution", "", "{}")
-	s.CreateAnswerNode(ctx, cid, 0, "k8s", "go", "v1", "k8s solution", "", "{}")
-
-	hits, err := s.Search(ctx, "solution", "docker", "", "", 10, 0)
-	if err != nil {
-		t.Fatalf("Search: %v", err)
-	}
-	for _, h := range hits {
-		// Hits without an AnswerID come from the problem_classes FTS branch,
-		// which we accept when env is filtered. Hits WITH an AnswerID
-		// must be from a docker answer.
-		_ = h
-	}
-	// We don't strictly require the env filter to narrow answer-only
-	// hits (FTS5 ambiguity), but we do require at least one hit.
-	if len(hits) == 0 {
-		t.Error("env filter returned 0 hits for matches")
-	}
-}
-
 func TestNewID(t *testing.T) {
 	a := NewID("sub")
 	b := NewID("sub")
