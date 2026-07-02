@@ -165,7 +165,7 @@
 4. Progress indicators for git operations
 **Status:** done (425f6b7)
 
-### [ ] WI-013: Web UI — AI Agent Chat
+### [x] WI-013: Web UI — AI Agent Chat
 **Model:** ollama-cloud/minimax-m3
 **Files:** web/js/chat.js (new), internal/web/chat.go (new), internal/web/chat_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/web/...`
@@ -177,7 +177,7 @@
 5. Pi Agent can suggest submit_problem() — server handles the submission
 6. Chat history scrollable, markdown rendering
 7. Unit tests for WebSocket handler with mock Pi Agent
-**Status:** ready
+**Status:** done (b9c8ac1)
 
 ## Phase 4: Export/Import
 
