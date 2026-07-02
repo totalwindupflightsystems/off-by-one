@@ -211,7 +211,7 @@
 
 ## Phase 5: Integration + Polish
 
-### [ ] WI-016: Main binary wiring
+### [x] WI-016: Main binary wiring
 **Model:** ollama-cloud/minimax-m3
 **Files:** cmd/off-by-one/main.go (rewrite)
 **Verify:** `go build ./... && go test -short -count=1 ./...`
@@ -221,7 +221,7 @@
 3. Graceful shutdown (SIGINT/SIGTERM → stop cron, close DB, kill sandboxes)
 4. Health check endpoint: GET /health
 5. `--version` flag
-**Status:** ready
+**Status:** done (c88ecc0)
 
 ### [ ] WI-017: FTS5 full-text search
 **Model:** ollama-cloud/minimax-m3
