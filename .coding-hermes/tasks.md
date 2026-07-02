@@ -181,7 +181,7 @@
 
 ## Phase 4: Export/Import
 
-### [ ] WI-014: Git export engine
+### [x] WI-014: Git export engine
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/export/git.go (new), internal/export/git_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/export/...`
@@ -193,7 +193,7 @@
 5. Return commit SHA + PR URL (if branch)
 6. Handle auth: SSH key or token from config
 7. Unit tests with in-memory git repo (go-git or git init --bare)
-**Status:** ready
+**Status:** done (08896ba)
 
 ### [ ] WI-015: Git import engine
 **Model:** ollama-cloud/minimax-m3
