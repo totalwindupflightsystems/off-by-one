@@ -235,6 +235,40 @@
 5. Pagination: limit + offset
 **Status:** ready
 
+## Phase 6: Muster Integration
+
+### [ ] WI-018: Muster MCP bridge — end-to-end wiring
+**Model:** ollama-cloud/minimax-m3
+**Files:** internal/muster/bridge.go (new), internal/muster/bridge_test.go (new), scripts/connect-muster.sh (new), muster-config.yaml (new)
+**Verify:** `go build ./... && go test -short -count=1 ./internal/muster/... && bash scripts/connect-muster.sh --dry-run`
+**AC:**
+1. Create muster-config.yaml pointing Muster at Off-by-One's `/openapi.json` endpoint (default: `http://localhost:8766/openapi.json`)
+2. Script `scripts/connect-muster.sh` that:
+   a. Starts Off-by-One server if not running
+   b. Verifies `/openapi.json` returns valid OpenAPI spec
+   c. Starts Muster MCP server with `--host http://localhost:8766`
+   d. Verifies MCP tools are generated (submit_problem, discover_solution, list_problems, get_queue_status)
+3. Bridge module `internal/muster/bridge.go` that:
+   a. Validates the OpenAPI spec is Muster-compatible (operationId on every path, valid requestBody schemas)
+   b. Provides health check: is Muster connected? are MCP tools live?
+   c. Logs MCP tool calls for debugging
+4. Integration test: spawn Off-by-One → spawn Muster → submit problem via MCP tool → verify it appears in Off-by-One queue → discover solution → verify response
+5. `make connect-muster` target that runs the connect script
+6. Update AGENTS.md with Muster integration architecture
+**Status:** ready
+
+### [ ] WI-019: Muster MCP — bidirectional verification
+**Model:** ollama-cloud/minimax-m3
+**Files:** internal/muster/e2e_test.go (new)
+**Verify:** `go test -short -count=1 -run TestMusterE2E ./internal/muster/...`
+**AC:**
+1. Full E2E test: Muster client → submit_problem → Off-by-One queue → sandbox solve → graph store → discover_solution → verify answer returned
+2. Test error paths: submit duplicate problem (expect dedup), discover nonexistent problem (expect not found), submit invalid cadence (expect validation error)
+3. Test queue lifecycle: pending → in_progress → complete
+4. Test Muster reconnection: kill Muster → restart → verify tools still work
+5. All tests pass with `go test -short` (skip long-running solve in short mode)
+**Status:** ready
+
 ---
 
 ## Task Summary
@@ -246,8 +280,9 @@
 | 3. Web UI | WI-008–013 | Shell, search, submit, explore, export/import, chat |
 | 4. Git | WI-014–015 | Export, import |
 | 5. Polish | WI-016–017 | Wiring, FTS5 |
+| 6. Muster | WI-018–019 | Bridge, E2E verification |
 
-**Total:** 17 tasks
+**Total:** 19 tasks
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
