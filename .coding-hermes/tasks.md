@@ -223,7 +223,7 @@
 5. `--version` flag
 **Status:** done (c88ecc0)
 
-### [ ] WI-017: FTS5 full-text search
+### [x] WI-017: FTS5 full-text search
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/graph/search.go (new), internal/graph/search_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/graph/...`
@@ -233,7 +233,7 @@
 3. Ranked results with snippets (highlight matching terms)
 4. Filters: env, lang, status
 5. Pagination: limit + offset
-**Status:** ready
+**Status:** done (08443d2)
 
 ## Phase 6: Muster Integration
 
