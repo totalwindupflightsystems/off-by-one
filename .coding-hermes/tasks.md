@@ -267,7 +267,7 @@
 3. Test queue lifecycle: pending → in_progress → complete
 4. Test Muster reconnection: kill Muster → restart → verify tools still work
 5. All tests pass with `go test -short` (skip long-running solve in short mode)
-**Status:** ready
+**Status:** done (fad216a)
 
 ---
 
