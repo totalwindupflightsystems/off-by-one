@@ -257,7 +257,7 @@
 6. Update AGENTS.md with Muster integration architecture
 **Status:** done (6e20d10)
 
-### [ ] WI-019: Muster MCP — bidirectional verification
+### [x] WI-019: Muster MCP — bidirectional verification
 **Model:** ollama-cloud/minimax-m3
 **Files:** internal/muster/e2e_test.go (new)
 **Verify:** `go test -short -count=1 -run TestMusterE2E ./internal/muster/...`
