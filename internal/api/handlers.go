@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/totalwindupflightsystems/off-by-one/internal/export"
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
+	importgit "github.com/totalwindupflightsystems/off-by-one/internal/import"
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
 )
 
@@ -133,6 +135,38 @@ type taxonomyNode struct {
 	Description string         `json:"description,omitempty"`
 	Children    []taxonomyNode `json:"children,omitempty"`
 	Answers     []answerWire   `json:"answers,omitempty"`
+}
+
+// --- Export/Import request/response types --------------------------------
+
+// exportRequest mirrors ExportRequest from the OpenAPI spec.
+type exportRequest struct {
+	TargetRepo    string  `json:"target_repo"`
+	AnswerIDs     []int64 `json:"answer_ids"`
+	Branch        string  `json:"branch,omitempty"`
+	CommitMessage string  `json:"commit_message,omitempty"`
+}
+
+// exportResponse mirrors ExportResponse from the OpenAPI spec.
+type exportResponse struct {
+	CommitSHA    string `json:"commit_sha"`
+	PRURL        string `json:"pr_url,omitempty"`
+	FilesChanged int    `json:"files_changed"`
+}
+
+// importRequest mirrors ImportRequest from the OpenAPI spec.
+type importRequest struct {
+	SourceRepo       string `json:"source_repo"`
+	Branch           string `json:"branch,omitempty"`
+	ConflictStrategy string `json:"conflict_strategy,omitempty"`
+}
+
+// importResponse mirrors ImportResponse from the OpenAPI spec.
+type importResponse struct {
+	Added      int `json:"added"`
+	Updated    int `json:"updated"`
+	Skipped    int `json:"skipped"`
+	Conflicted int `json:"conflicted"`
 }
 
 // --- Handlers ------------------------------------------------------------
@@ -597,6 +631,96 @@ func (s *Server) relatedFor(r *http.Request, slug string) []string {
 		return nil
 	}
 	return titles
+}
+
+// --- Export/Import handlers ----------------------------------------------
+
+// handleExport accepts an ExportRequest, constructs an export.Engine,
+// runs the export, and returns an ExportResponse. When ExportLocalDir
+// is empty, the handler returns 501 (export not configured).
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	if s.ExportLocalDir == "" {
+		writeError(w, http.StatusNotImplemented, "not_configured", "export directory not configured")
+		return
+	}
+	var req exportRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if strings.TrimSpace(req.TargetRepo) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "target_repo is required")
+		return
+	}
+	if len(req.AnswerIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "invalid_request", "answer_ids must be non-empty")
+		return
+	}
+
+	items := make([]export.ExportItem, len(req.AnswerIDs))
+	for i, id := range req.AnswerIDs {
+		items[i] = export.ExportItem{AnswerID: id}
+	}
+
+	engine := export.NewEngine(export.Config{
+		RepoURL:       req.TargetRepo,
+		Branch:        req.Branch,
+		LocalDir:      s.ExportLocalDir,
+		SubtreePrefix: "pre-solve-answers",
+		Push:          true,
+		GitPath:       "git",
+	}, s.Store)
+
+	result, err := engine.Export(r.Context(), items)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "export_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, exportResponse{
+		CommitSHA:    result.CommitSHA,
+		FilesChanged: len(result.FilesWritten),
+	})
+}
+
+// handleImport accepts an ImportRequest, constructs an import.Engine,
+// runs the import, and returns an ImportResponse. When ImportLocalDir
+// is empty, the handler returns 501 (import not configured).
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	if s.ImportLocalDir == "" {
+		writeError(w, http.StatusNotImplemented, "not_configured", "import directory not configured")
+		return
+	}
+	var req importRequest
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if strings.TrimSpace(req.SourceRepo) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "source_repo is required")
+		return
+	}
+
+	engine := importgit.NewEngine(importgit.Config{
+		RepoURL:       req.SourceRepo,
+		Branch:        req.Branch,
+		LocalDir:      s.ImportLocalDir,
+		SubtreePrefix: "pre-solve-answers",
+		GitPath:       "git",
+	}, s.Store)
+
+	result, err := engine.Import(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "import_failed", err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, importResponse{
+		Added:      result.Added,
+		Updated:    result.Updated,
+		Skipped:    result.Skipped,
+		Conflicted: result.Conflicted,
+	})
 }
 
 // parseIntDefault returns the parsed int or def if invalid. Bounds

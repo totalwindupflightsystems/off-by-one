@@ -613,3 +613,106 @@ func intToString(n int64) string {
 	}
 	return string(buf[i:])
 }
+
+// --- Export/Import handler tests -----------------------------------------
+
+// TestExportNotConfigured verifies the handler returns 501 when
+// ExportLocalDir is empty (the default for newTestServer).
+func TestExportNotConfigured(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	rr := do(t, s, "POST", "/api/v1/export", exportRequest{
+		TargetRepo: "https://github.com/example/repo.git",
+		AnswerIDs:  []int64{1},
+	})
+	if rr.Code != http.StatusNotImplemented {
+		t.Errorf("status = %d, want 501", rr.Code)
+	}
+}
+
+// TestExportBadRequest verifies the handler returns 400 for missing
+// target_repo or empty answer_ids.
+func TestExportBadRequest(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	s.ExportLocalDir = "/tmp/obo-test-export"
+
+	// Missing target_repo.
+	rr := do(t, s, "POST", "/api/v1/export", exportRequest{
+		AnswerIDs: []int64{1},
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("missing target_repo: status = %d, want 400", rr.Code)
+	}
+
+	// Empty answer_ids.
+	rr = do(t, s, "POST", "/api/v1/export", exportRequest{
+		TargetRepo: "https://github.com/example/repo.git",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("empty answer_ids: status = %d, want 400", rr.Code)
+	}
+
+	// Malformed JSON.
+	req := httptest.NewRequest("POST", "/api/v1/export", strings.NewReader("{bad"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("malformed JSON: status = %d, want 400", w.Code)
+	}
+}
+
+// TestImportNotConfigured verifies the handler returns 501 when
+// ImportLocalDir is empty.
+func TestImportNotConfigured(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	rr := do(t, s, "POST", "/api/v1/import", importRequest{
+		SourceRepo: "https://github.com/example/repo.git",
+	})
+	if rr.Code != http.StatusNotImplemented {
+		t.Errorf("status = %d, want 501", rr.Code)
+	}
+}
+
+// TestImportBadRequest verifies the handler returns 400 for missing
+// source_repo.
+func TestImportBadRequest(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	s.ImportLocalDir = "/tmp/obo-test-import"
+
+	// Missing source_repo.
+	rr := do(t, s, "POST", "/api/v1/import", importRequest{})
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("missing source_repo: status = %d, want 400", rr.Code)
+	}
+
+	// Malformed JSON.
+	req := httptest.NewRequest("POST", "/api/v1/import", strings.NewReader("{bad"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("malformed JSON: status = %d, want 400", w.Code)
+	}
+}
+
+// TestExportImportRouteRegistered verifies the routes are wired by
+// checking that a POST to them does NOT return 404 (it should return
+// 501 when not configured, proving the route exists).
+func TestExportImportRouteRegistered(t *testing.T) {
+	s, _, _ := newTestServer(t)
+
+	rr := do(t, s, "POST", "/api/v1/export", exportRequest{
+		TargetRepo: "x",
+		AnswerIDs:  []int64{1},
+	})
+	if rr.Code == http.StatusNotFound {
+		t.Error("POST /api/v1/export returned 404 — route not registered")
+	}
+
+	rr = do(t, s, "POST", "/api/v1/import", importRequest{
+		SourceRepo: "x",
+	})
+	if rr.Code == http.StatusNotFound {
+		t.Error("POST /api/v1/import returned 404 — route not registered")
+	}
+}

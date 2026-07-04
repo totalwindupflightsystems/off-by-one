@@ -33,6 +33,14 @@ type Server struct {
 	// construction so the handler is a single write.
 	OpenAPISpec []byte
 
+	// ExportLocalDir is the working directory for git export clones.
+	// When empty, POST /api/v1/export returns 501.
+	ExportLocalDir string
+
+	// ImportLocalDir is the working directory for git import clones.
+	// When empty, POST /api/v1/import returns 501.
+	ImportLocalDir string
+
 	// StartedAt is set in New and used by /health to report uptime.
 	StartedAt time.Time
 }
@@ -70,6 +78,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/queue/{submission_id}", s.handleGetQueueStatus)
 	mux.HandleFunc("GET /api/v1/taxonomy", s.handleTaxonomy)
 	mux.HandleFunc("GET /api/v1/stats", s.handleStats)
+	mux.HandleFunc("POST /api/v1/export", s.handleExport)
+	mux.HandleFunc("POST /api/v1/import", s.handleImport)
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /health", s.handleHealth)
 

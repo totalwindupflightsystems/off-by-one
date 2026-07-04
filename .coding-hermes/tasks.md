@@ -269,6 +269,23 @@
 5. All tests pass with `go test -short` (skip long-running solve in short mode)
 **Status:** done (fad216a)
 
+## Phase 7: Spec Gap Fixes
+
+### [ ] WI-020: Wire export/import API endpoints
+**Model:** ollama-cloud/minimax-m3 (foreman direct-write)
+**Files:** internal/api/server.go (modify), internal/api/handlers.go (modify), internal/api/handlers_test.go (modify), cmd/off-by-one/main.go (modify)
+**Verify:** `go build ./... && go test -short -count=1 ./internal/api/...`
+**AC:**
+1. Register `POST /api/v1/export` route in Server.Handler() — matches OpenAPI spec §10
+2. Register `POST /api/v1/import` route in Server.Handler() — matches OpenAPI spec §10
+3. Export handler: parse ExportRequest JSON (target_repo, answer_ids, branch, commit_message) → construct export.Engine → call Export() → return ExportResponse JSON (commit_sha, pr_url, files_changed)
+4. Import handler: parse ImportRequest JSON (source_repo, branch, conflict_strategy) → construct import.Engine → call Import() → return ImportResponse JSON (added, updated, skipped, conflicted)
+5. Error handling: 400 for bad request body, 500 for engine errors, 501 if export/import not configured
+6. Server struct gains optional ExportLocalDir and ImportLocalDir fields for the working clone directories
+7. Main binary wires the local dirs from env vars (OFF_BY_ONE_EXPORT_DIR, OFF_BY_ONE_IMPORT_DIR) or defaults to temp dirs
+8. Integration tests: httptest POST /api/v1/export with mock items, POST /api/v1/import with mock repo
+**Status:** ready
+
 ---
 
 ## Task Summary
