@@ -284,7 +284,7 @@
 6. Server struct gains optional ExportLocalDir and ImportLocalDir fields for the working clone directories
 7. Main binary wires the local dirs from env vars (OFF_BY_ONE_EXPORT_DIR, OFF_BY_ONE_IMPORT_DIR) or defaults to temp dirs
 8. Integration tests: httptest POST /api/v1/export with mock items, POST /api/v1/import with mock repo
-**Status:** ready
+**Status:** done (cc5fde4)
 
 ---
 
