@@ -355,3 +355,19 @@ func TestSandbox_Kill_NoProcess(t *testing.T) {
 	// Kill without a running process should not panic.
 	s.Kill()
 }
+
+func TestSandbox_ID(t *testing.T) {
+	x := &Executor{BwrapPath: "/bin/true"}
+	s, err := x.Create(context.Background(), "my-id-test", Config{BwrapPath: "/bin/true"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer s.Destroy()
+	id := s.ID()
+	if id == "" {
+		t.Fatal("ID() returned empty string")
+	}
+	if !strings.Contains(id, "my-id-test") {
+		t.Errorf("ID() = %q, want it to contain 'my-id-test'", id)
+	}
+}
