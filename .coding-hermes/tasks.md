@@ -271,7 +271,7 @@
 
 ## Phase 7: Spec Gap Fixes
 
-### [ ] WI-020: Wire export/import API endpoints
+### [x] WI-020: Wire export/import API endpoints
 **Model:** ollama-cloud/minimax-m3 (foreman direct-write)
 **Files:** internal/api/server.go (modify), internal/api/handlers.go (modify), internal/api/handlers_test.go (modify), cmd/off-by-one/main.go (modify)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/api/...`
