@@ -28,7 +28,6 @@ import (
 // to override the default behavior.
 type fakeRunner struct {
 	mu         sync.Mutex
-	h          *fakeHandle
 	script     string
 	piAgentDir string
 }
@@ -650,7 +649,6 @@ func TestExecutor_Solve_PropagatesAPIVars(t *testing.T) {
 type recordingRunner struct {
 	mu         sync.Mutex
 	root       string
-	lastEnv    []string
 	lastHandle *recordingHandle
 }
 
@@ -767,7 +765,6 @@ func TestExecutor_Solve_ContextCanceled(t *testing.T) {
 type blockingRunner struct {
 	root    string
 	unblock chan struct{}
-	mu      sync.Mutex
 }
 
 type blockingHandle struct {

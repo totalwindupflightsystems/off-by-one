@@ -10,8 +10,10 @@ func TestSearch_MatchesProblemClassTitle(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	cid, _ := s.CreateProblemClass(ctx, "docker-volume-permission", "Files owned by root after Docker volume transfer")
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "go-1.25",
-		"Use COPY --chown=appuser:appuser in Dockerfile", "", `{}`)
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "go-1.25",
+		"Use COPY --chown=appuser:appuser in Dockerfile", "", `{}`); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
 
 	hits, err := s.Search(ctx, "docker", "", "", "", 10, 0)
 	if err != nil {
@@ -46,8 +48,12 @@ func TestSearch_FilterByEnv(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	cid, _ := s.CreateProblemClass(ctx, "test-class", "test description")
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "docker solution", "", "{}")
-	s.CreateAnswerNode(ctx, cid, 0, "k8s", "go", "v1", "k8s solution", "", "{}")
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "docker solution", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "k8s", "go", "v1", "k8s solution", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
 
 	hits, err := s.Search(ctx, "solution", "docker", "", "", 10, 0)
 	if err != nil {
@@ -64,8 +70,12 @@ func TestSearch_FilterByLang(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	cid, _ := s.CreateProblemClass(ctx, "lang-test", "test description")
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "go solution text", "", "{}")
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "python", "v1", "python solution text", "", "{}")
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "go solution text", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "python", "v1", "python solution text", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
 
 	hits, err := s.Search(ctx, "solution", "", "python", "", 10, 0)
 	if err != nil {
@@ -93,8 +103,12 @@ func TestSearch_FilterByStatus(t *testing.T) {
 	ctx := context.Background()
 	cid, _ := s.CreateProblemClass(ctx, "status-test", "test description")
 	aid, _ := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "verified solution text", "", "{}")
-	s.UpdateAnswerStatus(ctx, aid, AnswerVerified)
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v2", "pending solution text", "", "{}")
+	if err := s.UpdateAnswerStatus(ctx, aid, AnswerVerified); err != nil {
+		t.Fatalf("UpdateAnswerStatus: %v", err)
+	}
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v2", "pending solution text", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
 
 	hits, err := s.Search(ctx, "solution", "", "", AnswerVerified, 10, 0)
 	if err != nil {
@@ -110,7 +124,9 @@ func TestSearch_SnippetContainsHighlight(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	cid, _ := s.CreateProblemClass(ctx, "snippet-test", "The docker container has permission issues")
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "Fix with chmod", "", "{}")
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "Fix with chmod", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
 
 	hits, err := s.Search(ctx, "docker", "", "", "", 10, 0)
 	if err != nil {
@@ -139,7 +155,9 @@ func TestSearch_Pagination(t *testing.T) {
 
 	// Create multiple problem classes that share a common search term.
 	for i := 0; i < 6; i++ {
-		s.CreateProblemClass(ctx, "pagination-test-"+string(rune('a'+i)), "common keyword for pagination")
+		if _, err := s.CreateProblemClass(ctx, "pagination-test-"+string(rune('a'+i)), "common keyword for pagination"); err != nil {
+			t.Fatalf("CreateProblemClass: %v", err)
+		}
 	}
 
 	// Page 1: limit=3, offset=0
@@ -188,8 +206,10 @@ func TestSearch_AnswerContentIndexed(t *testing.T) {
 	// answer solution does. This verifies the answer_nodes_fts index is
 	// working.
 	cid, _ := s.CreateProblemClass(ctx, "obscure-name", "Generic description without keywords")
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1",
-		"Set the LD_LIBRARY_PATH to include the custom lib directory", "", "{}")
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1",
+		"Set the LD_LIBRARY_PATH to include the custom lib directory", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
 
 	hits, err := s.Search(ctx, "LD_LIBRARY_PATH", "", "", "", 10, 0)
 	if err != nil {
@@ -204,7 +224,9 @@ func TestSearch_FTSSpecialChars(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	cid, _ := s.CreateProblemClass(ctx, "special-chars", "Handling paths like /usr/local/bin")
-	s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "solution", "", "{}")
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "solution", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
 
 	// FTS5 special characters are quoted by our escaping, so the search
 	// should not error. It may or may not find matches depending on the
@@ -220,7 +242,9 @@ func TestSearch_LimitClampedToMax(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	for i := 0; i < 5; i++ {
-		s.CreateProblemClass(ctx, "clamp-"+string(rune('a'+i)), "clamp test keyword")
+		if _, err := s.CreateProblemClass(ctx, "clamp-"+string(rune('a'+i)), "clamp test keyword"); err != nil {
+			t.Fatalf("CreateProblemClass: %v", err)
+		}
 	}
 
 	// limit > 100 should be clamped to 20 by Search internally.

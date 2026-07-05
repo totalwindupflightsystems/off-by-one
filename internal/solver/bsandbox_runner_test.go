@@ -58,7 +58,7 @@ exit 0
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	defer handle.Destroy()
+	defer func() { _ = handle.Destroy() }()
 
 	// Write a problem file via the wrapper.
 	if err := handle.WriteFile("problem.json", []byte(`{"problem_class":"bwrap-test"}`)); err != nil {

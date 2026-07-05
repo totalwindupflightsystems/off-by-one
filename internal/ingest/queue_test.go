@@ -221,8 +221,12 @@ func TestQueue_Dequeue_HighestPriorityFirst(t *testing.T) {
 	ctx := context.Background()
 
 	// Submit pre-phase first, then post-debug — post-debug should win.
-	q.Submit(ctx, Submission{ProblemClass: "a", Cadence: CadencePrePhase})
-	q.Submit(ctx, Submission{ProblemClass: "b", Cadence: CadencePostDebug})
+	if _, _, err := q.Submit(ctx, Submission{ProblemClass: "a", Cadence: CadencePrePhase}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, _, err := q.Submit(ctx, Submission{ProblemClass: "b", Cadence: CadencePostDebug}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
 
 	got, err := q.Dequeue(ctx)
 	if err != nil {
@@ -325,7 +329,9 @@ func TestQueue_MarkComplete(t *testing.T) {
 	q, _ := newTestQueue(t)
 	ctx := context.Background()
 	id, _, _ := q.Submit(ctx, Submission{ProblemClass: "test", Cadence: CadencePrePhase})
-	q.Dequeue(ctx)
+	if _, err := q.Dequeue(ctx); err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
 	if err := q.MarkComplete(ctx, id, 42); err != nil {
 		t.Fatalf("MarkComplete: %v", err)
 	}
@@ -345,7 +351,9 @@ func TestQueue_MarkFailed(t *testing.T) {
 	q, _ := newTestQueue(t)
 	ctx := context.Background()
 	id, _, _ := q.Submit(ctx, Submission{ProblemClass: "test", Cadence: CadencePrePhase})
-	q.Dequeue(ctx)
+	if _, err := q.Dequeue(ctx); err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
 	if err := q.MarkFailed(ctx, id, "sandbox timeout"); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
 	}
@@ -358,9 +366,11 @@ func TestQueue_MarkFailed(t *testing.T) {
 func TestQueue_List_FilterByStatus(t *testing.T) {
 	q, _ := newTestQueue(t)
 	ctx := context.Background()
-	q.Submit(ctx, Submission{ProblemClass: "a", Cadence: CadencePrePhase})
-	q.Submit(ctx, Submission{ProblemClass: "b", Cadence: CadencePrePhase})
-	q.Submit(ctx, Submission{ProblemClass: "c", Cadence: CadencePrePhase})
+	for _, p := range []string{"a", "b", "c"} {
+		if _, _, err := q.Submit(ctx, Submission{ProblemClass: p, Cadence: CadencePrePhase}); err != nil {
+			t.Fatalf("Submit: %v", err)
+		}
+	}
 
 	pending, err := q.List(ctx, StatusPending, 100, 0)
 	if err != nil {

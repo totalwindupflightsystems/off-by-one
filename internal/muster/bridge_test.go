@@ -229,7 +229,9 @@ func TestBridge_HealthCheck_ServerUp(t *testing.T) {
 	})
 	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(spec)
+		if err := json.NewEncoder(w).Encode(spec); err != nil {
+			http.Error(w, err.Error(), 500)
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -255,7 +257,9 @@ func TestBridge_HealthCheck_SpecInvalid(t *testing.T) {
 	})
 	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(spec)
+		if err := json.NewEncoder(w).Encode(spec); err != nil {
+			http.Error(w, err.Error(), 500)
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -275,7 +279,9 @@ func TestBridge_ValidateSpec_Remote(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/openapi.json", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(spec)
+		if err := json.NewEncoder(w).Encode(spec); err != nil {
+			http.Error(w, err.Error(), 500)
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

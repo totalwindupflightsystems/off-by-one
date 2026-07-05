@@ -107,7 +107,7 @@ func TestSandbox_CopyIn_CopyOut(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer s.Destroy()
+	defer func() { _ = s.Destroy() }()
 
 	// CopyIn writes to workspace.
 	want := []byte("hello world")
@@ -129,7 +129,7 @@ func TestSandbox_CopyIn_NestedPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer s.Destroy()
+	defer func() { _ = s.Destroy() }()
 
 	if err := s.CopyIn("sub/dir/file.txt", []byte("nested")); err != nil {
 		t.Errorf("nested copy_in: %v", err)
@@ -166,7 +166,7 @@ func TestSandbox_CopyInFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer s.Destroy()
+	defer func() { _ = s.Destroy() }()
 
 	srcDir := t.TempDir()
 	srcPath := filepath.Join(srcDir, "source.txt")
@@ -194,7 +194,7 @@ func TestSandbox_Run_RealBwrap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer s.Destroy()
+	defer func() { _ = s.Destroy() }()
 
 	// Run a simple command. `/bin/echo` is in the ro-bind set
 	// (/bin). The output should be "hello from bwrap".
@@ -216,7 +216,7 @@ func TestSandbox_Run_Timeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer s.Destroy()
+	defer func() { _ = s.Destroy() }()
 
 	// `/bin/sleep 5` should be killed by the 1s context timeout.
 	_, _, err = s.Run(context.Background(), "/bin/sleep", "5")
@@ -234,7 +234,7 @@ func TestSandbox_Run_CommandFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer s.Destroy()
+	defer func() { _ = s.Destroy() }()
 
 	// /bin/false always returns non-zero.
 	_, _, err = s.Run(context.Background(), "/bin/false")
@@ -257,7 +257,7 @@ func TestSandbox_Run_FakeBwrap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer s.Destroy()
+	defer func() { _ = s.Destroy() }()
 
 	// /bin/sh -c 'echo $BWRAP_WORKSPACE' should print the workspace path.
 	stdout, stderr, err := s.Run(context.Background(), "/bin/sh", "-c", "echo $BWRAP_WORKSPACE")
@@ -351,7 +351,7 @@ func TestSandbox_Kill_NoProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer s.Destroy()
+	defer func() { _ = s.Destroy() }()
 	// Kill without a running process should not panic.
 	s.Kill()
 }
@@ -362,7 +362,7 @@ func TestSandbox_ID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	defer s.Destroy()
+	defer func() { _ = s.Destroy() }()
 	id := s.ID()
 	if id == "" {
 		t.Fatal("ID() returned empty string")

@@ -179,11 +179,6 @@ func (m *mustermock) discoverSolution(class, env, lang, version string) (int, ma
 	return m.postJSON("/api/v1/problems/discover", body)
 }
 
-// listProblems invokes the listProblems MCP tool.
-func (m *mustermock) listProblems() (int, map[string]any) {
-	return m.getJSON("/api/v1/problems")
-}
-
 // getQueueStatus invokes the getQueueStatus MCP tool.
 func (m *mustermock) getQueueStatus(submissionID string) (int, map[string]any) {
 	return m.getJSON("/api/v1/queue/" + submissionID)

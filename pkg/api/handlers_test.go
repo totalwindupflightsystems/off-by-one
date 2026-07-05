@@ -151,7 +151,9 @@ func TestOpenAPIHandler_ServesJSON(t *testing.T) {
 			http.Error(w, err.Error(), 500)
 			return
 		}
-		w.Write(body)
+		if _, err := w.Write(body); err != nil {
+			http.Error(w, err.Error(), 500)
+		}
 	})
 
 	srv := httptest.NewServer(mux)

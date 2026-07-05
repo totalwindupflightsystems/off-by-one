@@ -71,7 +71,6 @@ type Sandbox struct {
 	mu      sync.Mutex
 	cmd     *exec.Cmd
 	done    chan struct{}
-	err     error
 }
 
 // ID returns the unique identifier for this sandbox. The same value

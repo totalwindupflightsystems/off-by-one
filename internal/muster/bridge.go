@@ -29,7 +29,6 @@ type Bridge struct {
 	mu         sync.Mutex
 	connected  bool
 	lastCheck  time.Time
-	lastError  string
 	toolCalls  int64      // total tool calls logged
 	callLog    []ToolCall // ring buffer of recent calls
 	maxCallLog int

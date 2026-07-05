@@ -174,11 +174,6 @@ func (e *Engine) Export(ctx context.Context, items []ExportItem) (*ExportResult,
 		res.ItemsExported++
 	}
 
-	if e.cfg.Push {
-		// Even when Push=true, a dry-run path may be requested by setting
-		// Push=false explicitly. But when Push=true we still commit.
-	}
-
 	// Step 3: nothing to do if no files were written.
 	if len(res.FilesWritten) == 0 {
 		return res, nil
@@ -234,9 +229,8 @@ func (e *Engine) prepareClone(ctx context.Context) error {
 				return fmt.Errorf("checkout branch %s: %w (fallback also failed: %v)", e.cfg.Branch, err, err2)
 			}
 		}
-		if err := e.runGit(ctx, e.cfg.LocalDir, "pull", "origin", e.cfg.Branch); err != nil {
-			// Pull may fail if the branch is brand new locally; that's OK.
-		}
+		// Pull may fail if the branch is brand new locally; that's OK — ignore.
+		_ = e.runGit(ctx, e.cfg.LocalDir, "pull", "origin", e.cfg.Branch)
 		return nil
 	}
 

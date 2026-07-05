@@ -113,7 +113,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// websocket.Accept already wrote an error response.
 		return
 	}
-	defer c.CloseNow()
+	defer func() { _ = c.CloseNow() }()
 
 	// Use a cancellable context so that when the client disconnects
 	// (c.Read returns an error), we can cancel any in-flight runner.
@@ -147,7 +147,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		var userMsg ChatMessage
 		if err := json.Unmarshal(data, &userMsg); err != nil {
-			h.send(ctx, c, ChatMessage{Type: "error", Message: "invalid message format"})
+			_ = h.send(ctx, c, ChatMessage{Type: "error", Message: "invalid message format"})
 			continue
 		}
 
@@ -164,7 +164,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // responses back.
 func (h *ChatHandler) handleMessage(ctx context.Context, c *websocket.Conn, userMsg *ChatMessage) {
 	if h.runner == nil {
-		h.send(ctx, c, ChatMessage{
+		_ = h.send(ctx, c, ChatMessage{
 			Type:    "agent",
 			Message: "AI Agent is offline in this build. Configure an AgentRunner to enable chat.",
 		})
@@ -197,7 +197,7 @@ func (h *ChatHandler) handleMessage(ctx context.Context, c *websocket.Conn, user
 
 	if runnerErr != nil && !errors.Is(runnerErr, context.Canceled) {
 		log.Printf("chat: agent runner error: %v", runnerErr)
-		h.send(ctx, c, ChatMessage{
+		_ = h.send(ctx, c, ChatMessage{
 			Type:    "error",
 			Message: "Agent encountered an error. Please try again.",
 		})

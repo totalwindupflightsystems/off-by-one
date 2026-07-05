@@ -162,9 +162,11 @@ func TestStore_ListAnswers_OrderedNewestFirst(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	cid, _ := s.CreateProblemClass(ctx, "test", "")
-	s.CreateAnswerNode(ctx, cid, 0, "e", "l", "v1", "a", "b", "{}")
-	s.CreateAnswerNode(ctx, cid, 0, "e", "l", "v2", "a", "b", "{}")
-	s.CreateAnswerNode(ctx, cid, 0, "e", "l", "v3", "a", "b", "{}")
+	for _, v := range []string{"v1", "v2", "v3"} {
+		if _, err := s.CreateAnswerNode(ctx, cid, 0, "e", "l", v, "a", "b", "{}"); err != nil {
+			t.Fatalf("CreateAnswerNode: %v", err)
+		}
+	}
 
 	answers, err := s.ListAnswers(ctx, cid)
 	if err != nil {
@@ -255,7 +257,9 @@ func TestStore_Discovery_WalksParentChain(t *testing.T) {
 	a3, _ := s.CreateAnswerNode(ctx, cid, a2, "e", "l", "v3", "newest", "", "{}")
 	// Mark all verified so bestAnswer picks the latest.
 	for _, id := range []int64{a1, a2, a3} {
-		s.UpdateAnswerStatus(ctx, id, AnswerVerified)
+		if err := s.UpdateAnswerStatus(ctx, id, AnswerVerified); err != nil {
+			t.Fatalf("UpdateAnswerStatus: %v", err)
+		}
 	}
 
 	res, err := s.Discovery(ctx, "test", "e", "l", "v3", false)
@@ -280,9 +284,15 @@ func TestStore_Discovery_RelatedEdges(t *testing.T) {
 	c1, _ := s.CreateProblemClass(ctx, "main", "")
 	c2, _ := s.CreateProblemClass(ctx, "related-1", "")
 	c3, _ := s.CreateProblemClass(ctx, "related-2", "")
-	s.CreateEdge(ctx, c1, c2, EdgeSameRootCause, 0.95)
-	s.CreateEdge(ctx, c1, c3, EdgePrerequisite, 0.7)
-	s.CreateAnswerNode(ctx, c1, 0, "e", "l", "v", "x", "", "{}")
+	if _, err := s.CreateEdge(ctx, c1, c2, EdgeSameRootCause, 0.95); err != nil {
+		t.Fatalf("CreateEdge: %v", err)
+	}
+	if _, err := s.CreateEdge(ctx, c1, c3, EdgePrerequisite, 0.7); err != nil {
+		t.Fatalf("CreateEdge: %v", err)
+	}
+	if _, err := s.CreateAnswerNode(ctx, c1, 0, "e", "l", "v", "x", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
 
 	res, err := s.Discovery(ctx, "main", "e", "l", "v", true)
 	if err != nil {
