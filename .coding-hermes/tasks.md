@@ -272,6 +272,18 @@
 ## Phase 7: Spec Gap Fixes
 
 ### [x] WI-020: Wire export/import API endpoints
+
+### [x] WI-021: Solver execution hardening
+**Model:** ollama-cloud/minimax-m3 (foreman direct-write)
+**Files:** cmd/off-by-one/main.go, internal/sandbox/bwrap.go, internal/sandbox/bwrap_test.go, internal/solver/piagent.go, internal/solver/piagent_test.go, internal/cron/loop.go, internal/cron/loop_test.go
+**Verify:** `go build ./... && go test -short -count=1 ./...`
+**AC:**
+1. --share-net in bwrap so pi-agent reaches DeepSeek API from sandbox
+2. ExtraReadOnlyPaths on Executor + Config for pi-agent tool paths (/home/kara/.local/bin, /tmp/pi, /etc)
+3. Commit(ctx, sub, sol) — solver uses submission's problem_class, falls back to extracted
+4. Answer status: Pending → Verified (validator ring deferred to post-MVP)
+5. All tests pass, gitreins guard PASS
+**Status:** done (26cd445)
 **Model:** ollama-cloud/minimax-m3 (foreman direct-write)
 **Files:** internal/api/server.go (modify), internal/api/handlers.go (modify), internal/api/handlers_test.go (modify), cmd/off-by-one/main.go (modify)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/api/...`
@@ -298,8 +310,9 @@
 | 4. Git | WI-014–015 | Export, import |
 | 5. Polish | WI-016–017 | Wiring, FTS5 |
 | 6. Muster | WI-018–019 | Bridge, E2E verification |
+| 7. Execution | WI-020–021 | API endpoints, solver hardening |
 
-**Total:** 19 tasks
+**Total:** 21 tasks
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
