@@ -272,7 +272,7 @@ func TestSandbox_Run_FakeBwrap(t *testing.T) {
 
 func TestBuildBwrapArgs(t *testing.T) {
 	workDir := "/tmp/work"
-	args := buildBwrapArgs([]string{"/usr", "/bin", "/etc"}, workDir)
+	args := buildBwrapArgs([]string{"/usr", "/bin", "/etc"}, nil, workDir)
 	// Required flags in any order.
 	checks := map[string]bool{
 		"--unshare-all":     false,

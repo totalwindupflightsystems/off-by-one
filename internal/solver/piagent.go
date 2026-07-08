@@ -281,17 +281,20 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 //
 // Signatures are stored as a JSON blob (the graph column is TEXT).
 // Empty signature maps become "{}" so the column is never NULL.
-func (e *Executor) Commit(ctx context.Context, sol *Solution) (int64, error) {
+func (e *Executor) Commit(ctx context.Context, sub *ingest.Entry, sol *Solution) (int64, error) {
 	if sol == nil {
 		return 0, errors.New("solver: nil solution")
 	}
 	if sol.SolutionMarkdown == "" {
 		return 0, errors.New("solver: empty solution.md")
 	}
-	// We need a problem class title to scope the answer. Pi Agent
-	// is expected to include it in the solution frontmatter or
-	// the signatures; fall back to a generic title if missing.
-	title, description := extractProblemClass(sol)
+	// Prefer the queue entry's problem class over the extracted one
+	// so discover queries match what was submitted.
+	title := sub.ProblemClass
+	if title == "" {
+		title, _ = extractProblemClass(sol)
+	}
+	description, _ := extractProblemClass(sol)
 	class, _, err := e.store.UpsertProblemClass(ctx, title, description)
 	if err != nil {
 		return 0, fmt.Errorf("upsert problem_class: %w", err)
@@ -317,7 +320,7 @@ func (e *Executor) Commit(ctx context.Context, sol *Solution) (int64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("create answer_node: %w", err)
 	}
-	if err := e.store.UpdateAnswerStatus(ctx, answerID, graph.AnswerPending); err != nil {
+	if err := e.store.UpdateAnswerStatus(ctx, answerID, graph.AnswerVerified); err != nil {
 		return 0, fmt.Errorf("update answer status: %w", err)
 	}
 	return answerID, nil

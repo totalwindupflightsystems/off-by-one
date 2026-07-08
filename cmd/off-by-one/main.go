@@ -106,6 +106,11 @@ func main() {
 				BwrapPath: *bwrapPath,
 				WorkDir:   os.TempDir(),
 				Timeout:   sandbox.DefaultBwrapTimeout,
+				ExtraReadOnlyPaths: []string{
+					"/home/kara/.local/bin",
+					"/tmp/pi",
+					"/etc",
+				},
 			}
 			runner := solver.NewBSandboxRunner(sandboxExec)
 			apiKey := os.Getenv("DEEPSEEK_API_KEY")

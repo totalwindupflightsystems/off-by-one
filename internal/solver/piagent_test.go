@@ -452,7 +452,7 @@ func TestExecutor_Commit_StoresAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Solve: %v", err)
 	}
-	answerID, err := ex.Commit(context.Background(), sol)
+	answerID, err := ex.Commit(context.Background(), sampleEntry("sub-commit"), sol)
 	if err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
@@ -474,15 +474,15 @@ func TestExecutor_Commit_StoresAnswer(t *testing.T) {
 		t.Errorf("answer scope = (%q, %q, %q), want (docker, go, 1.26)",
 			answer.Env, answer.Lang, answer.Version)
 	}
-	// Status should be pending right after commit.
-	if answer.Status != graph.AnswerPending {
-		t.Errorf("answer.Status = %q, want %q", answer.Status, graph.AnswerPending)
+	// Status should be verified right after commit (MVP — validator ring deferred).
+	if answer.Status != graph.AnswerVerified {
+		t.Errorf("answer.Status = %q, want %q", answer.Status, graph.AnswerVerified)
 	}
 }
 
 func TestExecutor_Commit_NilSolution(t *testing.T) {
 	ex, _, _ := newTestSolver(t, "")
-	_, err := ex.Commit(context.Background(), nil)
+	_, err := ex.Commit(context.Background(), sampleEntry("nil"), nil)
 	if err == nil {
 		t.Error("expected error for nil solution")
 	}
@@ -490,7 +490,7 @@ func TestExecutor_Commit_NilSolution(t *testing.T) {
 
 func TestExecutor_Commit_EmptySolution(t *testing.T) {
 	ex, _, _ := newTestSolver(t, "")
-	_, err := ex.Commit(context.Background(), &Solution{})
+	_, err := ex.Commit(context.Background(), sampleEntry("empty"), &Solution{})
 	if err == nil {
 		t.Error("expected error for empty solution")
 	}

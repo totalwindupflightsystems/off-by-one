@@ -49,6 +49,11 @@ type Config struct {
 	// Defaults to the standard library set (/usr, /lib, /lib64, /bin)
 	// when empty. Add /etc for tools that need resolver config.
 	ReadOnlyPaths []string
+
+	// ExtraReadOnlyPaths are appended to the default ReadOnlyPaths
+	// (or the explicit ReadOnlyPaths if set). Use this to add
+	// tool-specific paths without overriding the defaults.
+	ExtraReadOnlyPaths []string
 }
 
 // DefaultBwrapTimeout is the spec-recommended 5-minute cap.
@@ -96,6 +101,11 @@ type Executor struct {
 
 	// Timeout is the default per-Run timeout.
 	Timeout time.Duration
+
+	// ExtraReadOnlyPaths are appended to the sandbox's default
+	// read-only bind mounts. Use this for tool-specific paths
+	// (e.g. /home/user/.local/bin for pi-agent).
+	ExtraReadOnlyPaths []string
 }
 
 // NewExecutor returns an Executor using the OS-detected bwrap path
@@ -143,6 +153,15 @@ func (e *Executor) Create(ctx context.Context, id string, cfg Config) (*Sandbox,
 	}
 	if cfg.ReadOnlyPaths == nil {
 		cfg.ReadOnlyPaths = []string{"/usr", "/lib", "/lib64", "/bin"}
+	}
+	if cfg.ExtraReadOnlyPaths == nil {
+		cfg.ExtraReadOnlyPaths = e.ExtraReadOnlyPaths
+	} else if len(e.ExtraReadOnlyPaths) > 0 {
+		// Merge: per-call extras come after executor defaults.
+		cfg.ExtraReadOnlyPaths = append(
+			append([]string{}, e.ExtraReadOnlyPaths...),
+			cfg.ExtraReadOnlyPaths...,
+		)
 	}
 
 	workDir := filepath.Join(cfg.WorkDir, "off-by-one-sandbox-"+id)
@@ -231,7 +250,7 @@ func (s *Sandbox) Run(ctx context.Context, name string, args ...string) (stdout,
 	timeoutCtx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
 
-	bwrapArgs := buildBwrapArgs(s.cfg.ReadOnlyPaths, s.workDir)
+	bwrapArgs := buildBwrapArgs(s.cfg.ReadOnlyPaths, s.cfg.ExtraReadOnlyPaths, s.workDir)
 	bwrapArgs = append(bwrapArgs, "--", name)
 	bwrapArgs = append(bwrapArgs, args...)
 
@@ -292,9 +311,10 @@ func (s *Sandbox) Destroy() error {
 // buildBwrapArgs constructs the bwrap argument list. The workspace
 // is bind-mounted at /workspace inside the sandbox; commands are
 // expected to live there (or in the read-only host paths).
-func buildBwrapArgs(readOnlyPaths []string, workDir string) []string {
+func buildBwrapArgs(readOnlyPaths, extraReadOnlyPaths []string, workDir string) []string {
 	args := []string{
 		"--unshare-all",
+		"--share-net",
 		"--die-with-parent",
 		"--new-session",
 		"--proc", "/proc",
@@ -304,6 +324,9 @@ func buildBwrapArgs(readOnlyPaths []string, workDir string) []string {
 		"--tmpfs", "/run",
 	}
 	for _, p := range readOnlyPaths {
+		args = append(args, "--ro-bind", p, p)
+	}
+	for _, p := range extraReadOnlyPaths {
 		args = append(args, "--ro-bind", p, p)
 	}
 	args = append(args, "--bind", workDir, "/workspace")

@@ -115,7 +115,7 @@ func (s *fakeSolver) Solve(ctx context.Context, sub *ingest.Entry) (*solver.Solu
 	return fn(sub)
 }
 
-func (s *fakeSolver) Commit(ctx context.Context, sol *solver.Solution) (int64, error) {
+func (s *fakeSolver) Commit(ctx context.Context, _ *ingest.Entry, sol *solver.Solution) (int64, error) {
 	s.commitCalls.Add(1)
 	s.mu.Lock()
 	s.commitInputs = append(s.commitInputs, sol)

@@ -159,7 +159,7 @@ type Queue interface {
 // *solver.Executor; tests use a fake.
 type Solver interface {
 	Solve(ctx context.Context, sub *ingest.Entry) (*solver.Solution, error)
-	Commit(ctx context.Context, sol *solver.Solution) (int64, error)
+	Commit(ctx context.Context, sub *ingest.Entry, sol *solver.Solution) (int64, error)
 }
 
 // ResolveConfig returns a copy of cfg with zero values replaced
@@ -345,7 +345,7 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 	}
 
 	_ = l.cfg.Queue.SetStage(ctx, entry.ID, "committing")
-	answerID, err := l.cfg.Solver.Commit(ctx, sol)
+	answerID, err := l.cfg.Solver.Commit(ctx, entry, sol)
 	if err != nil {
 		_ = l.cfg.Queue.SetStage(ctx, entry.ID, "commit_failed")
 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, err.Error())
