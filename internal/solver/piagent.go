@@ -16,7 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -169,11 +169,9 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 	if e.cfg.PiAgentPath == "" {
 		return nil, ErrPiAgentNotFound
 	}
-	if _, err := os.Stat(e.cfg.PiAgentPath); err != nil {
-		if os.IsNotExist(err) {
-			return nil, ErrPiAgentNotFound
-		}
-		return nil, fmt.Errorf("stat pi-agent: %w", err)
+	resolvedPath, err := exec.LookPath(e.cfg.PiAgentPath)
+	if err != nil {
+		return nil, ErrPiAgentNotFound
 	}
 	if sub == nil {
 		return nil, errors.New("solver: nil queue entry")
@@ -232,7 +230,7 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 	defer cancel()
 
 	start := time.Now()
-	stdout, err := handle.Exec(timeoutCtx, e.cfg.PiAgentPath, args, env)
+	stdout, err := handle.Exec(timeoutCtx, resolvedPath, args, env)
 	duration := time.Since(start)
 	if err != nil {
 		// Return the stdout too so the caller can log it — pi-agent
