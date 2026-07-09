@@ -300,6 +300,52 @@
 
 ---
 
+## Phase 8: Discovery Sweep
+
+> Tasks discovered during 2026-07-09 empty-board sweep. Build+test+endpoints all green.
+
+### [ ] DS-001: Add CI workflow (GitHub Actions)
+**Priority:** high
+**Files:** .github/workflows/ci.yml (new)
+**Verify:** `gh run list --limit 1 --json status,conclusion` shows a run
+**AC:**
+1. Create `.github/workflows/ci.yml` with Go build + test + vet on push to main
+2. Run `go build ./...`, `go vet ./...`, `go test -short -count=1 ./...`
+3. Cache Go modules
+4. Matrix: Go 1.25, 1.26
+
+### [ ] DS-002: Expand README with architecture + API reference
+**Priority:** medium
+**Files:** README.md (modify)
+**Verify:** `wc -l README.md` shows >100 lines
+**AC:**
+1. Add architecture diagram (mermaid or ASCII)
+2. Add API endpoint reference table (all 14 endpoints from OpenAPI spec)
+3. Add configuration reference (env vars, flags, defaults)
+4. Add development guide (build, test, lint, guard)
+
+### [ ] DS-003: Semantic similarity scoring via OpenRouter embeddings
+**Priority:** low
+**Files:** internal/graph/embeddings.go (new), internal/graph/embeddings_test.go (new)
+**Verify:** `go build ./... && go test -short -count=1 ./internal/graph/...`
+**AC:**
+1. Call OpenRouter embeddings API for problem class descriptions
+2. Store embedding vectors in SQLite (new column or separate table)
+3. Cosine similarity ranking during discovery (spec §7.3)
+4. Unit tests with mock HTTP server
+
+### [ ] DS-004: File attachment support for problem submissions
+**Priority:** low
+**Files:** internal/api/handlers.go (modify), web/js/submit.js (modify)
+**Verify:** `go build ./... && go test -short -count=1 ./internal/api/...`
+**AC:**
+1. Accept multipart/form-data file uploads in POST /api/v1/problems/submit
+2. Store attachments in sandbox workspace alongside problem.json
+3. Pass file paths to Pi Agent via problem context
+4. Unit tests with multipart writer
+
+---
+
 ## Task Summary
 
 | Phase | Tasks | Description |
@@ -311,8 +357,9 @@
 | 5. Polish | WI-016–017 | Wiring, FTS5 |
 | 6. Muster | WI-018–019 | Bridge, E2E verification |
 | 7. Execution | WI-020–021 | API endpoints, solver hardening |
+| 8. Discovery | DS-001–004 | CI, docs, embeddings, attachments |
 
-**Total:** 21 tasks
+**Total:** 25 tasks (21 done, 4 pending)
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
