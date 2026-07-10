@@ -326,7 +326,7 @@
 4. Add development guide (build, test, lint, guard)
 **Status:** done (d26322c)
 
-### [ ] DS-003: Semantic similarity scoring via OpenRouter embeddings
+### [x] DS-003: Semantic similarity scoring via OpenRouter embeddings
 **Priority:** low
 **Files:** internal/graph/embeddings.go (new), internal/graph/embeddings_test.go (new)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/graph/...`
@@ -335,6 +335,7 @@
 2. Store embedding vectors in SQLite (new column or separate table)
 3. Cosine similarity ranking during discovery (spec §7.3)
 4. Unit tests with mock HTTP server
+**Status:** done (1dd8642)
 
 ### [ ] DS-004: File attachment support for problem submissions
 **Priority:** low
