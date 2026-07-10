@@ -337,7 +337,7 @@
 4. Unit tests with mock HTTP server
 **Status:** done (1dd8642)
 
-### [ ] DS-004: File attachment support for problem submissions
+### [x] DS-004: File attachment support for problem submissions
 **Priority:** low
 **Files:** internal/api/handlers.go (modify), web/js/submit.js (modify)
 **Verify:** `go build ./... && go test -short -count=1 ./internal/api/...`
@@ -346,6 +346,7 @@
 2. Store attachments in sandbox workspace alongside problem.json
 3. Pass file paths to Pi Agent via problem context
 4. Unit tests with multipart writer
+**Status:** done (21162a4)
 
 ---
 
@@ -362,7 +363,7 @@
 | 7. Execution | WI-020–021 | API endpoints, solver hardening |
 | 8. Discovery | DS-001–004 | CI, docs, embeddings, attachments |
 
-**Total:** 25 tasks (21 done, 4 pending)
+**Total:** 25 tasks (25 done, 0 pending)
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
