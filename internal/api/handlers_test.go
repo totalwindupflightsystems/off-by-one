@@ -735,15 +735,15 @@ func TestSubmitWithFiles(t *testing.T) {
 	// Write the JSON data field.
 	dataJSON := `{"problem_class":"go-npe","environment":"linux","language":"go","version":"1.26","description":"NPE","cadence":"post-debug"}`
 	w, _ := mw.CreateFormField("data")
-	w.Write([]byte(dataJSON))
+	_, _ = w.Write([]byte(dataJSON))
 
 	// Write a file attachment.
 	fw, _ := mw.CreateFormFile("logfile", "error.log")
-	fw.Write([]byte("panic: runtime error\n"))
+	_, _ = fw.Write([]byte("panic: runtime error\n"))
 
 	// Write another file.
 	fw2, _ := mw.CreateFormFile("trace", "trace.txt")
-	fw2.Write([]byte("goroutine 1 [running]:\n"))
+	_, _ = fw2.Write([]byte("goroutine 1 [running]:\n"))
 
 	mw.Close()
 
@@ -778,7 +778,7 @@ func TestSubmitMultipartWithoutDataField(t *testing.T) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	fw, _ := mw.CreateFormFile("file", "test.txt")
-	fw.Write([]byte("content"))
+	_, _ = fw.Write([]byte("content"))
 	mw.Close()
 
 	req := httptest.NewRequest("POST", "/api/v1/problems/submit", &buf)
@@ -816,9 +816,9 @@ func TestSubmitMultipartNoAttachmentsDir(t *testing.T) {
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
 	w, _ := mw.CreateFormField("data")
-	w.Write([]byte(`{"problem_class":"no-dir","cadence":"post-debug"}`))
+	_, _ = w.Write([]byte(`{"problem_class":"no-dir","cadence":"post-debug"}`))
 	fw, _ := mw.CreateFormFile("file", "test.txt")
-	fw.Write([]byte("content"))
+	_, _ = fw.Write([]byte("content"))
 	mw.Close()
 
 	req := httptest.NewRequest("POST", "/api/v1/problems/submit", &buf)

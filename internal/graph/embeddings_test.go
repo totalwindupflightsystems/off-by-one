@@ -140,7 +140,7 @@ func TestStoreEmbeddingValidation(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	store.InitEmbeddings(ctx)
+	_ = store.InitEmbeddings(ctx)
 
 	// Zero classID.
 	if err := store.StoreEmbedding(ctx, 0, []float64{1.0}); err == nil {
@@ -188,7 +188,7 @@ func TestSimilaritySearch(t *testing.T) {
 	}
 	defer store.Close()
 	ctx := context.Background()
-	store.InitEmbeddings(ctx)
+	_ = store.InitEmbeddings(ctx)
 
 	// Create 3 classes with embeddings.
 	c1, _ := store.CreateProblemClass(ctx, "python-async", "Python async/await issues")
@@ -196,9 +196,9 @@ func TestSimilaritySearch(t *testing.T) {
 	c3, _ := store.CreateProblemClass(ctx, "rust-tokio", "Rust Tokio async runtime issues")
 
 	// Embeddings that make c1 and c3 close (both async), c2 far.
-	store.StoreEmbedding(ctx, c1, []float64{1.0, 0.8, 0.0, 0.0})
-	store.StoreEmbedding(ctx, c2, []float64{0.0, 0.0, 1.0, 0.0})
-	store.StoreEmbedding(ctx, c3, []float64{0.9, 1.0, 0.0, 0.0})
+	_ = store.StoreEmbedding(ctx, c1, []float64{1.0, 0.8, 0.0, 0.0})
+	_ = store.StoreEmbedding(ctx, c2, []float64{0.0, 0.0, 1.0, 0.0})
+	_ = store.StoreEmbedding(ctx, c3, []float64{0.9, 1.0, 0.0, 0.0})
 
 	// Query with a vector close to c1/c3.
 	query := []float64{1.0, 1.0, 0.0, 0.0}
@@ -245,7 +245,7 @@ func TestOpenRouterEmbedder_HTTPMock(t *testing.T) {
 			Model string `json:"model"`
 			Input string `json:"input"`
 		}
-		json.NewDecoder(r.Body).Decode(&body)
+		_ = json.NewDecoder(r.Body).Decode(&body)
 
 		// Return a mock embedding based on the model.
 		resp := map[string]interface{}{
@@ -258,7 +258,7 @@ func TestOpenRouterEmbedder_HTTPMock(t *testing.T) {
 			"model": body.Model,
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 	defer server.Close()
 
@@ -303,7 +303,7 @@ func TestOpenRouterEmbedder_EmptyText(t *testing.T) {
 func TestOpenRouterEmbedder_HTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"error": map[string]interface{}{
 				"message": "rate limit exceeded",
 			},
@@ -372,8 +372,8 @@ func TestSimilarClasses(t *testing.T) {
 	// Create two classes and embed them.
 	c1, _ := store.CreateProblemClass(ctx, "similar-1", "first test class")
 	c2, _ := store.CreateProblemClass(ctx, "similar-2", "second test class")
-	store.EmbedAndStoreClass(ctx, emb, c1, "first test class")
-	store.EmbedAndStoreClass(ctx, emb, c2, "second test class")
+	_ = store.EmbedAndStoreClass(ctx, emb, c1, "first test class")
+	_ = store.EmbedAndStoreClass(ctx, emb, c2, "second test class")
 
 	hits, err := store.SimilarClasses(ctx, emb, "first test class", 5, 0)
 	if err != nil {
@@ -397,11 +397,11 @@ func TestDiscoveryWithSimilar(t *testing.T) {
 	// Create problem class and embed it.
 	c1, _ := store.CreateProblemClass(ctx, "discovery-sim", "discovery similarity test")
 	c2, _ := store.CreateProblemClass(ctx, "discovery-sim-2", "another similar class")
-	store.EmbedAndStoreClass(ctx, emb, c1, "discovery similarity test")
-	store.EmbedAndStoreClass(ctx, emb, c2, "another similar class")
+	_ = store.EmbedAndStoreClass(ctx, emb, c1, "discovery similarity test")
+	_ = store.EmbedAndStoreClass(ctx, emb, c2, "another similar class")
 
 	// Add an answer so Discovery returns something.
-	store.CreateAnswerNode(ctx, c1, 0, "linux", "go", "1.26", "solution", "evidence", "{}")
+	_, _ = store.CreateAnswerNode(ctx, c1, 0, "linux", "go", "1.26", "solution", "evidence", "{}")
 
 	result, err := store.DiscoveryWithSimilar(ctx, emb, "discovery-sim", "linux", "go", "1.26", false)
 	if err != nil {
@@ -432,7 +432,7 @@ func TestDiscoveryWithSimilar_NilEmbedder(t *testing.T) {
 	ctx := context.Background()
 
 	c1, _ := store.CreateProblemClass(ctx, "nil-disco", "nil embedder test")
-	store.CreateAnswerNode(ctx, c1, 0, "linux", "go", "1.26", "sol", "ev", "{}")
+	_, _ = store.CreateAnswerNode(ctx, c1, 0, "linux", "go", "1.26", "sol", "ev", "{}")
 
 	result, err := store.DiscoveryWithSimilar(ctx, nil, "nil-disco", "", "", "", false)
 	if err != nil {

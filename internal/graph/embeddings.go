@@ -94,7 +94,7 @@ func (e *OpenRouterEmbedder) Embed(ctx context.Context, text string) ([]float64,
 				Message string `json:"message"`
 			} `json:"error"`
 		}
-		json.NewDecoder(resp.Body).Decode(&errBody)
+		_ = json.NewDecoder(resp.Body).Decode(&errBody)
 		if errBody.Error.Message != "" {
 			return nil, fmt.Errorf("graph: embeddings API returned %d: %s", resp.StatusCode, errBody.Error.Message)
 		}
