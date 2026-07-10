@@ -7,10 +7,61 @@ A system that converts idle GPU time into pre-verified answers for AI agents. Ag
 ## Architecture
 
 ```
-AGENT → Muster (submit) → Off-by-One queue → Sandbox → Pi Agent (solve) → SQLite Graph → Export (git)
-                                                                                      ↓
-AGENT ← Muster (discover) ← Off-by-One graph traversal ← Import (git) ←───────────────┘
+                    ┌──────────────┐
+                    │   AI Agent   │
+                    └──┬───────┬───┘
+                submit │       │ discover
+                       ▼       ▲
+                  ┌─────────┐  │
+                  │  Muster │  │
+                  │  MCP    │──┘
+                  └────┬────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│                   Off-by-One                          │
+│                                                       │
+│  ┌─────────┐   ┌─────────┐   ┌─────────┐            │
+│  │ Submit  │──▶│  Queue  │──▶│ Sandbox │            │
+│  │ (API)   │   │ (SQLite)│   │ (bwrap) │            │
+│  └─────────┘   └─────────┘   └────┬────┘            │
+│                                    │                  │
+│                              ┌─────▼─────┐           │
+│                              │  Pi Agent │           │
+│                              │  (solver) │           │
+│                              └─────┬─────┘           │
+│                                    │                  │
+│  ┌─────────┐   ┌─────────┐   ┌────▼────┐            │
+│  │ Export  │◀──│  Graph  │◀──│  Answer │            │
+│  │ (git)   │──▶│ (SQLite)│   │  Store  │            │
+│  │ Import  │   │  + FTS5 │   └─────────┘            │
+│  └─────────┘   └─────────┘                          │
+│       │              │                                │
+│       ▼              ▼                                │
+│  ┌─────────┐   ┌─────────┐                           │
+│  │ Web UI  │   │ Cron    │                           │
+│  │ (HTMX)  │   │ Loop    │                           │
+│  └─────────┘   └─────────┘                           │
+└──────────────────────────────────────────────────────┘
 ```
+
+### Component Map
+
+| Component | Package | Role |
+|-----------|---------|------|
+| `cmd/off-by-one` | `main` | Main binary — wires all components, handles signals |
+| `internal/api` | HTTP server + handlers | REST API on port 8766 (configurable), 15 endpoints |
+| `internal/ingest` | Queue + submission | Priority queue with deduplication, Muster polling |
+| `internal/sandbox` | Bubblewrap executor | Isolated solve environment with timeout |
+| `internal/solver` | Pi Agent integration | Spawns pi-agent inside sandbox, parses output |
+| `internal/graph` | SQLite graph store | Problem-class tree, FTS5 search, BFS discovery |
+| `internal/export` | Git export engine | Push verified answers as git subtree commits |
+| `internal/import` | Git import engine | Pull community answers with diff + conflict resolution |
+| `internal/muster` | Muster MCP bridge | Validates OpenAPI spec, logs MCP tool calls |
+| `internal/cron` | Idle cron loop | Polls queue, spawns solves during idle cycles |
+| `internal/web` | Web UI server | Embedded SPA (go:embed), WebSocket chat |
+| `pkg/api` | OpenAPI spec | Embedded OpenAPI 3.0.3 spec for Muster auto-config |
+| `sql/schema.sql` | Database DDL | Embedded schema for SQLite initialization |
 
 ### Core Loop
 
@@ -22,7 +73,115 @@ AGENT ← Muster (discover) ← Off-by-One graph traversal ← Import (git) ←�
 6. **Export** — Verified answers pushed as git subtree commits
 7. **Discover** — Agents query graph, get answers + related problems
 
-## Quick Start
+## API Reference
+
+Base URL: `http://localhost:8766`
+
+### Problems
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/problems/submit` | Submit a problem to the pre-solve queue |
+| `POST` | `/api/v1/problems/discover` | Query for a pre-verified answer (graph traversal) |
+| `GET` | `/api/v1/problems` | List/browse/search problem classes with filters |
+| `GET` | `/api/v1/problems/{class}` | Get problem class detail |
+| `GET` | `/api/v1/problems/{class}/answers` | List answers for a problem class |
+| `GET` | `/api/v1/problems/{class}/answers/{id}` | Get a specific answer |
+| `GET` | `/api/v1/problems/{class}/related` | Get related problems (graph edges) |
+
+### Queue
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/queue` | List all queued submissions (filterable by status) |
+| `GET` | `/api/v1/queue/{submission_id}` | Check submission status |
+
+### Export / Import
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/v1/export` | Export verified answers to a git repo |
+| `POST` | `/api/v1/import` | Import answers from a git repo |
+
+### System
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/taxonomy` | Full problem-class tree |
+| `GET` | `/api/v1/stats` | System statistics (hit rate, coverage, queue depth) |
+| `GET` | `/openapi.json` | OpenAPI 3.0.3 specification |
+| `GET` | `/health` | Health check (status + uptime) |
+
+### Example: Submit a Problem
+
+```bash
+curl -s -X POST http://localhost:8766/api/v1/problems/submit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "problem_class": "go-nil-pointer-deref",
+    "environment": "linux",
+    "language": "go",
+    "version": "1.26.1",
+    "description": "Nil pointer dereference in HTTP handler",
+    "error_message": "runtime error: invalid memory address",
+    "cadence": "post-debug"
+  }'
+```
+
+### Example: Discover an Answer
+
+```bash
+curl -s -X POST http://localhost:8766/api/v1/problems/discover \
+  -H "Content-Type: application/json" \
+  -d '{
+    "problem_class": "go-nil-pointer-deref",
+    "environment": "linux",
+    "language": "go",
+    "version": "1.26"
+  }'
+```
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DEEPSEEK_API_KEY` | Yes | — | DeepSeek API key for Pi Agent solving |
+| `OPENROUTER_API_KEY` | No | — | OpenRouter API key for embeddings (DS-003) |
+| `OFF_BY_ONE_PORT` | No | `8766` | HTTP server port |
+| `OFF_BY_ONE_DB_PATH` | No | `./data/off-by-one.db` | SQLite database path |
+| `OFF_BY_ONE_BWRAP_PATH` | No | `bwrap` | Path to bubblewrap binary |
+| `OFF_BY_ONE_PI_AGENT_PATH` | No | `pi-agent` | Path to Pi Agent binary (resolved via PATH) |
+| `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
+| `OFF_BY_ONE_LOAD_THRESHOLD` | No | `2.0` | System load threshold for idle detection |
+| `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `5m` | Per-solve timeout |
+| `OFF_BY_ONE_EXPORT_DIR` | No | temp dir | Working directory for git export |
+| `OFF_BY_ONE_IMPORT_DIR` | No | temp dir | Working directory for git import |
+
+### Command-Line Flags
+
+```bash
+go run ./cmd/off-by-one --help
+```
+
+| Flag | Description |
+|------|-------------|
+| `--port` | HTTP server port |
+| `--db` | SQLite database path |
+| `--bwrap` | Bubblewrap binary path |
+| `--version` | Print version and exit |
+
+## Development
+
+### Prerequisites
+
+- Go 1.25+
+- Bubblewrap (`bwrap`) — optional, tests skip gracefully when absent
+- Pi Agent (`pi-agent`) — optional, solver tests mock the executor
+- Docker (for Muster integration tests)
+
+### Quick Start
 
 ```bash
 # Clone
@@ -31,12 +190,96 @@ cd off-by-one
 
 # Configure
 cp .env.example .env
-# Add your keys to .env
+# Edit .env with your DEEPSEEK_API_KEY and OPENROUTER_API_KEY
+
+# Build
+go build ./cmd/off-by-one
 
 # Run
-go run ./cmd/off-by-one
+./off-by-one
+```
+
+### Build, Test, Lint
+
+```bash
+# Build all packages
+go build ./...
+
+# Run all tests (short mode — skips long-running solves)
+go test -short -count=1 ./...
+
+# Run full test suite
+go test -count=1 ./...
+
+# Run vet (static analysis)
+go vet ./...
+
+# Check test coverage
+go test -short -cover ./...
+```
+
+### GitReins Quality Harness
+
+Every commit runs static guards. If guards fail, the commit is BLOCKED.
+
+```bash
+PATH="$HOME/gitreins-poc/.venv/bin:$PATH" gitreins guard
+```
+
+What's checked:
+
+| Gate | Command | Blocks? |
+|------|---------|---------|
+| **Secrets** | Custom scanner (API keys, tokens) | ✅ Blocks |
+| **Build** | `go build ./...` | ✅ Blocks |
+| **Lint** | `go vet ./...` | ⚠️ Warns |
+| **Tests** | `go test -short -count=1 ./...` | ✅ Blocks |
+
+### CI/CD
+
+GitHub Actions runs on every push to `main` and every PR:
+
+- **Matrix:** Go 1.25, Go 1.26
+- **Steps:** Checkout → Setup Go → Cache modules → Build → Vet → Test (short)
+- **Workflow:** `.github/workflows/ci.yml`
+
+## Project Structure
+
+```
+off-by-one/
+├── cmd/off-by-one/          # Main binary entrypoint
+├── internal/
+│   ├── api/                 # HTTP server, handlers, tests
+│   ├── cron/                # Idle cron loop
+│   ├── export/              # Git export engine
+│   ├── graph/               # SQLite graph + FTS5 search
+│   ├── import/              # Git import engine
+│   ├── ingest/              # Priority queue + submission
+│   ├── muster/              # Muster MCP bridge
+│   ├── sandbox/             # Bubblewrap sandbox
+│   ├── solver/              # Pi Agent integration
+│   └── web/                 # Web UI serving + WebSocket chat
+├── pkg/api/                 # Embedded OpenAPI spec
+├── web/                     # Frontend assets (go:embed)
+│   ├── index.html
+│   ├── css/style.css
+│   └── js/*.js
+├── sql/schema.sql           # Database schema (go:embed)
+├── specs/system-spec.md     # System specification
+├── muster-config.yaml       # Muster connection config
+├── scripts/connect-muster.sh # Muster connection script
+├── Makefile                 # Build targets
+├── AGENTS.md                # Agent development guide
+└── .coding-hermes/tasks.md  # Implementation task board
 ```
 
 ## License
 
 MIT
+
+## Related Projects
+
+- [Muster](https://github.com/totalwindupflightsystems/muster) — Agent job board that talks to Off-by-One
+- [Pi Agent](https://github.com/totalwindupflightsystems/pi-agent) — Minimalist coding agent used in the sandbox
+- [GitReins](https://github.com/totalwindupflightsystems/gitreins) — Git-native quality harness
+- [Hilo](https://github.com/totalwindupflightsystems/hilo) — Codebase graph for blast-radius analysis
