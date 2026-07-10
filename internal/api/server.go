@@ -41,6 +41,12 @@ type Server struct {
 	// When empty, POST /api/v1/import returns 501.
 	ImportLocalDir string
 
+	// AttachmentsDir is the directory where uploaded file attachments
+	// are stored. Created on first use. When empty, multipart uploads
+	// are silently accepted but files are discarded (only JSON body
+	// is processed).
+	AttachmentsDir string
+
 	// StartedAt is set in New and used by /health to report uptime.
 	StartedAt time.Time
 }

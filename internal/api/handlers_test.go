@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -714,5 +716,117 @@ func TestExportImportRouteRegistered(t *testing.T) {
 	})
 	if rr.Code == http.StatusNotFound {
 		t.Error("POST /api/v1/import returned 404 — route not registered")
+	}
+}
+
+// --- Multipart file upload tests ------------------------------------------
+
+func TestSubmitWithFiles(t *testing.T) {
+	s, _, _ := newTestServer(t)
+
+	// Create a temp dir for attachments.
+	dir := t.TempDir()
+	s.AttachmentsDir = dir
+
+	// Build multipart form body: "data" field + a file.
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+
+	// Write the JSON data field.
+	dataJSON := `{"problem_class":"go-npe","environment":"linux","language":"go","version":"1.26","description":"NPE","cadence":"post-debug"}`
+	w, _ := mw.CreateFormField("data")
+	w.Write([]byte(dataJSON))
+
+	// Write a file attachment.
+	fw, _ := mw.CreateFormFile("logfile", "error.log")
+	fw.Write([]byte("panic: runtime error\n"))
+
+	// Write another file.
+	fw2, _ := mw.CreateFormFile("trace", "trace.txt")
+	fw2.Write([]byte("goroutine 1 [running]:\n"))
+
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/problems/submit", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var resp submitProblemResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.Status != "queued" {
+		t.Fatalf("expected status queued, got %s", resp.Status)
+	}
+
+	// Verify files were saved.
+	entries, _ := os.ReadDir(dir)
+	if len(entries) < 2 {
+		t.Fatalf("expected 2 files in attachments dir, got %d", len(entries))
+	}
+}
+
+func TestSubmitMultipartWithoutDataField(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	s.AttachmentsDir = t.TempDir()
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, _ := mw.CreateFormFile("file", "test.txt")
+	fw.Write([]byte("content"))
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/problems/submit", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestSubmitJSONStillWorks(t *testing.T) {
+	s, _, _ := newTestServer(t)
+
+	body := submitProblemRequest{
+		ProblemClass: "go-npe-json",
+		Cadence:      "post-debug",
+	}
+	b, _ := json.Marshal(body)
+	req := httptest.NewRequest("POST", "/api/v1/problems/submit", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+func TestSubmitMultipartNoAttachmentsDir(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	// AttachmentsDir is empty — files should be silently discarded.
+
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	w, _ := mw.CreateFormField("data")
+	w.Write([]byte(`{"problem_class":"no-dir","cadence":"post-debug"}`))
+	fw, _ := mw.CreateFormFile("file", "test.txt")
+	fw.Write([]byte("content"))
+	mw.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/problems/submit", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }

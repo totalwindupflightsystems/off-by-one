@@ -191,6 +191,23 @@
     errGroup.appendChild(errLabel);
     errGroup.appendChild(errArea);
 
+    // --- File attachments ---
+    var fileGroup = el('div', 'form-group');
+    var fileLabel = el('label', 'form-label');
+    fileLabel.textContent = 'Attachments';
+    fileLabel.htmlFor = 'submit-files';
+    var fileInput = el('input', 'form-input');
+    fileInput.type = 'file';
+    fileInput.id = 'submit-files';
+    fileInput.name = 'files';
+    fileInput.multiple = true;
+    fileInput.accept = '.log,.txt,.json,.yaml,.yml,.md,.py,.go,.rs,.ts,.js,.toml';
+    var fileHint = el('div', 'form-hint');
+    fileHint.textContent = 'Log files, stack traces, config files (optional)';
+    fileGroup.appendChild(fileLabel);
+    fileGroup.appendChild(fileInput);
+    fileGroup.appendChild(fileHint);
+
     // --- Cadence selector ---
     var cadenceGroup = el('div', 'form-group');
     var cadenceLabel = el('label', 'form-label');
@@ -254,6 +271,7 @@
     form.appendChild(verGroup);
     form.appendChild(descGroup);
     form.appendChild(errGroup);
+    form.appendChild(fileGroup);
     form.appendChild(cadenceGroup);
     form.appendChild(btnRow);
 
@@ -344,6 +362,9 @@
     btn.disabled = true;
     btn.textContent = 'Submitting…';
 
+    var fileInput = form.querySelector('#submit-files');
+    var hasFiles = fileInput && fileInput.files && fileInput.files.length > 0;
+
     var body = {
       problem_class: classInput.value.trim(),
       environment: form.querySelector('#submit-env').value,
@@ -354,29 +375,34 @@
       cadence: form.querySelector('#submit-cadence').value,
     };
 
-    fetch('/api/v1/problems/submit', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-      body: JSON.stringify(body),
-    })
-      .then(function (r) {
-        return r.json().then(function (j) {
-          return { ok: r.ok, status: r.status, data: j };
-        });
+    if (hasFiles) {
+      // Use FormData for multipart upload with file attachments.
+      var fd = new FormData();
+      fd.append('data', JSON.stringify(body));
+      for (var i = 0; i < fileInput.files.length; i++) {
+        fd.append('file_' + i, fileInput.files[i]);
+      }
+      fetch('/api/v1/problems/submit', {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        body: fd,
       })
-      .then(function (res) {
-        renderResult(resultArea, res);
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, data: j }; }); })
+        .then(function (res) { renderResult(resultArea, res); })
+        .catch(function (err) { renderError(resultArea, 'Network error: ' + err.message); })
+        .finally(function () { btn.disabled = false; btn.textContent = 'Submit Problem'; });
+    } else {
+      // JSON-only (no files).
+      fetch('/api/v1/problems/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(body),
       })
-      .catch(function (err) {
-        renderError(resultArea, 'Network error: ' + err.message);
-      })
-      .finally(function () {
-        btn.disabled = false;
-        btn.textContent = 'Submit Problem';
-      });
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, data: j }; }); })
+        .then(function (res) { renderResult(resultArea, res); })
+        .catch(function (err) { renderError(resultArea, 'Network error: ' + err.message); })
+        .finally(function () { btn.disabled = false; btn.textContent = 'Submit Problem'; });
+    }
   }
 
   function renderResult(area, res) {

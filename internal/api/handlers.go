@@ -4,7 +4,13 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"mime/multipart"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -171,23 +177,72 @@ type importResponse struct {
 
 // --- Handlers ------------------------------------------------------------
 
-// handleSubmitProblem accepts a JSON body matching SubmitProblemRequest,
-// runs it through the queue (validate + dedup + priority), and returns
-// SubmitProblemResponse. Status is "queued" on success, "deduplicated"
-// when the queue rejects as duplicate.
+// handleSubmitProblem accepts either JSON or multipart/form-data. JSON is the
+// standard flow. Multipart adds file attachments: the "data" field contains
+// the JSON body, and any additional file parts are stored in AttachmentsDir
+// and their paths added to the submission Context.
 func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 	var req submitProblemRequest
-	if err := readJSON(r, &req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
-		return
+	var attachmentPaths []string
+
+	ct := r.Header.Get("Content-Type")
+	mediaType, _, _ := mime.ParseMediaType(ct)
+
+	if mediaType == "multipart/form-data" {
+		// 10 MB max for multipart bodies.
+		if err := r.ParseMultipartForm(10 << 20); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "failed to parse multipart form: "+err.Error())
+			return
+		}
+
+		// Extract the JSON data from the "data" field.
+		dataField := r.FormValue("data")
+		if dataField == "" {
+			writeError(w, http.StatusBadRequest, "invalid_request", "multipart form requires a \"data\" field with JSON body")
+			return
+		}
+		if err := json.Unmarshal([]byte(dataField), &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "invalid JSON in \"data\" field: "+err.Error())
+			return
+		}
+
+		// Save uploaded files to AttachmentsDir.
+		if s.AttachmentsDir != "" {
+			if err := os.MkdirAll(s.AttachmentsDir, 0o755); err != nil {
+				writeError(w, http.StatusInternalServerError, "internal_error", "failed to create attachments dir: "+err.Error())
+				return
+			}
+			for _, fhs := range r.MultipartForm.File {
+				for _, fh := range fhs {
+					path, err := saveUpload(s.AttachmentsDir, fh)
+					if err != nil {
+						writeError(w, http.StatusInternalServerError, "internal_error", "failed to save attachment: "+err.Error())
+						return
+					}
+					attachmentPaths = append(attachmentPaths, path)
+				}
+			}
+		}
+	} else {
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
 	}
+
 	if strings.TrimSpace(req.ProblemClass) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "problem_class is required")
 		return
 	}
-	// Slugify the problem class so titles in problem_classes stay
-	// consistent with the queue's problem_class column.
 	slug := ingest.SanitizeForID(req.ProblemClass)
+
+	// Merge attachment paths into the context map.
+	if len(attachmentPaths) > 0 {
+		if req.Context == nil {
+			req.Context = map[string]any{}
+		}
+		req.Context["attachments"] = attachmentPaths
+	}
 
 	sub := ingest.Submission{
 		ProblemClass: slug,
@@ -204,11 +259,6 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		status := ingest.StatusForHTTP(err)
 		if errors.Is(err, ingest.ErrDuplicate) {
-			// Two dedup paths: pending-dup returns the existing
-			// entry; verified-answer dedup returns no entry but
-			// still ErrDuplicate. We surface "deduplicated" for
-			// both — the API consumer only cares that the work
-			// was already done.
 			resp := submitProblemResponse{
 				ProblemClass: slug,
 				Status:       "deduplicated",
@@ -230,7 +280,6 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Successful submit. Compute position + ETA from the queue.
 	depth, _ := s.Queue.Depth(r.Context())
 	resp := submitProblemResponse{
 		SubmissionID:      id,
@@ -242,6 +291,47 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 		RelatedProblems:   s.relatedFor(r, slug),
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// saveUpload persists a multipart.FileHeader to disk under dir/ and
+// returns the absolute path. The file is saved with its original name;
+// a random suffix is appended on collision.
+func saveUpload(dir string, fh *multipart.FileHeader) (string, error) {
+	src, err := fh.Open()
+	if err != nil {
+		return "", err
+	}
+	defer src.Close()
+
+	// Sanitize filename — use base name only, no path traversal.
+	name := filepath.Base(fh.Filename)
+	if name == "." || name == "/" || name == "" {
+		name = "upload"
+	}
+	dstPath := filepath.Join(dir, name)
+
+	// Avoid overwriting: append a suffix if the file exists.
+	for i := 1; fileExists(dstPath); i++ {
+		ext := filepath.Ext(name)
+		base := name[:len(name)-len(ext)]
+		dstPath = filepath.Join(dir, fmt.Sprintf("%s_%d%s", base, i, ext))
+	}
+
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return "", err
+	}
+	return dstPath, nil
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }
 
 // handleDiscover runs the graph discovery query and returns either
