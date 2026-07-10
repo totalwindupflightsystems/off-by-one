@@ -315,7 +315,7 @@
 4. Matrix: Go 1.25, 1.26
 **Status:** done (9df77f3)
 
-### [ ] DS-002: Expand README with architecture + API reference
+### [x] DS-002: Expand README with architecture + API reference
 **Priority:** medium
 **Files:** README.md (modify)
 **Verify:** `wc -l README.md` shows >100 lines
@@ -324,6 +324,7 @@
 2. Add API endpoint reference table (all 14 endpoints from OpenAPI spec)
 3. Add configuration reference (env vars, flags, defaults)
 4. Add development guide (build, test, lint, guard)
+**Status:** done (d26322c)
 
 ### [ ] DS-003: Semantic similarity scoring via OpenRouter embeddings
 **Priority:** low
