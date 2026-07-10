@@ -304,7 +304,7 @@
 
 > Tasks discovered during 2026-07-09 empty-board sweep. Build+test+endpoints all green.
 
-### [ ] DS-001: Add CI workflow (GitHub Actions)
+### [x] DS-001: Add CI workflow (GitHub Actions)
 **Priority:** high
 **Files:** .github/workflows/ci.yml (new)
 **Verify:** `gh run list --limit 1 --json status,conclusion` shows a run
@@ -313,6 +313,7 @@
 2. Run `go build ./...`, `go vet ./...`, `go test -short -count=1 ./...`
 3. Cache Go modules
 4. Matrix: Go 1.25, 1.26
+**Status:** done (9df77f3)
 
 ### [ ] DS-002: Expand README with architecture + API reference
 **Priority:** medium
