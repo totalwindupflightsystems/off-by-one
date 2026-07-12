@@ -350,6 +350,24 @@
 
 ---
 
+## Phase 9: Discovery Sweep 2
+
+> Tasks discovered during 2026-07-12 empty-board sweep. Build+test local green, CI failure from missing git identity.
+
+### [ ] DS-005: Fix CI — configure git identity for export/import tests
+**Priority:** high
+**Files:** .github/workflows/ci.yml (modify) OR internal/export/git_test.go (modify), internal/import/git_test.go (modify)
+**Verify:** `gh run list --limit 1 --json status,conclusion` shows success
+**AC:**
+1. Export tests (`TestExport_*`, `TestExport_IdempotentNoChanges`, `TestExport_PullExistingClone`) call real `git commit` which fails in CI with "Author identity unknown — fatal: empty ident name"
+2. Fix: either add `git config --global user.email / user.name` in the CI workflow (preferred — one change, all tests fixed), or set git identity in the test setup
+3. Also check import tests for the same issue
+4. CI goes green on push to master
+**Status:** pending
+**Discovered:** 2026-07-12 sweep — CI run 29184632098, Go 1.26 Test (short) step fails: export tests
+
+---
+
 ## Task Summary
 
 | Phase | Tasks | Description |
@@ -362,8 +380,9 @@
 | 6. Muster | WI-018–019 | Bridge, E2E verification |
 | 7. Execution | WI-020–021 | API endpoints, solver hardening |
 | 8. Discovery | DS-001–004 | CI, docs, embeddings, attachments |
+| 9. Discovery 2 | DS-005 | CI git identity fix |
 
-**Total:** 25 tasks (25 done, 0 pending)
+**Total:** 26 tasks (25 done, 1 pending)
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
