@@ -354,16 +354,16 @@
 
 > Tasks discovered during 2026-07-12 empty-board sweep. Build+test local green, CI failure from missing git identity.
 
-### [ ] DS-005: Fix CI — configure git identity for export/import tests
+### [x] DS-005: Fix CI — configure git identity for export/import tests
 **Priority:** high
-**Files:** .github/workflows/ci.yml (modify) OR internal/export/git_test.go (modify), internal/import/git_test.go (modify)
+**Files:** .github/workflows/ci.yml (modify)
 **Verify:** `gh run list --limit 1 --json status,conclusion` shows success
 **AC:**
 1. Export tests (`TestExport_*`, `TestExport_IdempotentNoChanges`, `TestExport_PullExistingClone`) call real `git commit` which fails in CI with "Author identity unknown — fatal: empty ident name"
-2. Fix: either add `git config --global user.email / user.name` in the CI workflow (preferred — one change, all tests fixed), or set git identity in the test setup
+2. Fix: add `git config --global user.email / user.name` before test step in CI workflow
 3. Also check import tests for the same issue
 4. CI goes green on push to master
-**Status:** pending
+**Status:** done (3ea4298)
 **Discovered:** 2026-07-12 sweep — CI run 29184632098, Go 1.26 Test (short) step fails: export tests
 
 ---
