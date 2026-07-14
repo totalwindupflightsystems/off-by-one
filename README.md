@@ -237,7 +237,7 @@ What's checked:
 
 ### CI/CD
 
-GitHub Actions runs on every push to `main` and every PR:
+GitHub Actions runs on every push to `master` and every PR:
 
 - **Matrix:** Go 1.25, Go 1.26
 - **Steps:** Checkout → Setup Go → Cache modules → Build → Vet → Test (short)
