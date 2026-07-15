@@ -382,7 +382,7 @@
 | 8. Discovery | DS-001–004 | CI, docs, embeddings, attachments |
 | 9. Discovery 2 | DS-005 | CI git identity fix |
 
-**Total:** 26 tasks (25 done, 1 pending)
+**Total:** 26 tasks (26 done, 0 pending)
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
