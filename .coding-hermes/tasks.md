@@ -368,6 +368,22 @@
 
 ---
 
+## Phase 10: Discovery Sweep 3
+
+> Tasks discovered during 2026-07-16 empty-board sweep. Build+test+endpoints all green. All 26 tasks done.
+
+### [ ] DS-006: Install govulncheck for dependency vuln scanning
+**Priority:** low
+**Type:** INFRA
+**Verify:** `govulncheck ./...` runs successfully
+**AC:**
+1. Install `golang.org/x/vuln/cmd/govulncheck@latest`
+2. Run `govulncheck ./...` to verify installation
+3. Confirm zero vulnerabilities found
+**Discovered:** 2026-07-16 sweep — `govulncheck: command not found`
+
+---
+
 ## Task Summary
 
 | Phase | Tasks | Description |
@@ -381,8 +397,9 @@
 | 7. Execution | WI-020–021 | API endpoints, solver hardening |
 | 8. Discovery | DS-001–004 | CI, docs, embeddings, attachments |
 | 9. Discovery 2 | DS-005 | CI git identity fix |
+| 10. Discovery 3 | DS-006 | govulncheck install |
 
-**Total:** 26 tasks (26 done, 0 pending)
+**Total:** 27 tasks (26 done, 1 pending)
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
