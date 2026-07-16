@@ -372,7 +372,7 @@
 
 > Tasks discovered during 2026-07-16 empty-board sweep. Build+test+endpoints all green. All 26 tasks done.
 
-### [ ] DS-006: Install govulncheck for dependency vuln scanning
+### [ ] DS-006: Install govulncheck for dependency vuln scanning ⚠️ BLOCKED — security scanner blocks `go install` in cron context. Requires manual intervention (Bane to install `golang.org/x/vuln/cmd/govulncheck@latest`).
 **Priority:** low
 **Type:** INFRA
 **Verify:** `govulncheck ./...` runs successfully
