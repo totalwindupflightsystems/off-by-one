@@ -381,7 +381,7 @@
 2. Run `govulncheck ./...` to verify installation
 3. Confirm zero vulnerabilities found
 **Discovered:** 2026-07-16 sweep — `govulncheck: command not found`
-**Idle ticks:** 3 (→ every 4h. DuckBrain reachable. Base interval 30m stored.)
+**Idle ticks:** 4 (→ every 4h. DuckBrain unreachable. Base interval 30m stored.)
 
 ---
 
