@@ -381,7 +381,7 @@
 2. Run `govulncheck ./...` to verify installation
 3. Confirm zero vulnerabilities found
 **Discovered:** 2026-07-16 sweep — `govulncheck: command not found`
-**Idle ticks:** 8 → STILL IDLE. Project complete. All 26 phases [x], E2E verified (health OK, uptime 16h11m, 3 problems/3 answers/0 queue). DS-006 BLOCKED (govulncheck). DuckBrain UNREACHABLE (recall empty, list_keys conn error) — idle counter tracked on board. Foreman cron paused in old system but scheduler daemon on :9090 still firing. Needs: either scheduler cooldown integration with board-based counter, or DuckBrain connectivity fix.
+**Idle ticks:** 9 → STILL IDLE. Project complete. All 26 phases [x], E2E verified (health OK, uptime 16h+, 15MB RSS, 14 threads). DS-006 BLOCKED (govulncheck). DuckBrain UNREACHABLE (recall empty, list_keys conn error) — idle counter tracked on board. Foreman cron paused in old system but scheduler daemon on :9090 still firing. Scheduler tick #9 with no work found. Needs: either scheduler cooldown integration with board-based counter, or DuckBrain connectivity fix.
 
 ---
 
