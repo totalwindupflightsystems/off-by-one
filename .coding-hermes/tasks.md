@@ -381,7 +381,7 @@
 2. Run `govulncheck ./...` to verify installation
 3. Confirm zero vulnerabilities found
 **Discovered:** 2026-07-16 sweep — `govulncheck: command not found`
-**Idle ticks:** 6 (→ every 12h. DuckBrain unreachable — falling back to board counter. Base interval 30m stored at tick 3.)
+**Idle ticks:** 7 → SELF-PAUSED. Project complete. All 26 phases [x], E2E verified (health OK, uptime 16h8m). DS-006 BLOCKED (govulncheck). Resume manually or via supervisor. DuckBrain counter synced.
 
 ---
 
