@@ -381,7 +381,7 @@
 2. Run `govulncheck ./...` to verify installation
 3. Confirm zero vulnerabilities found
 **Discovered:** 2026-07-16 sweep — `govulncheck: command not found`
-**Idle ticks:** 4 (→ every 4h. DuckBrain unreachable. Base interval 30m stored.)
+**Idle ticks:** 4 (→ every 4h. DuckBrain unreachable — recall returned empty, list_keys connection error. Base interval 30m stored at tick 3.)
 
 ---
 
