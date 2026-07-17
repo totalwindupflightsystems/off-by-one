@@ -381,6 +381,7 @@
 2. Run `govulncheck ./...` to verify installation
 3. Confirm zero vulnerabilities found
 **Discovered:** 2026-07-16 sweep — `govulncheck: command not found`
+**Idle ticks:** 2 (DuckBrain unreachable — connection error, counter tracked via commit messages)
 
 ---
 
