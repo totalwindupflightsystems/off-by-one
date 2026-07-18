@@ -381,7 +381,7 @@
 2. Run `govulncheck ./...` to verify installation
 3. Confirm zero vulnerabilities found
 **Discovered:** 2026-07-16 sweep — `govulncheck: command not found`
-**Idle ticks:** 11 → STILL IDLE. Project complete. All 26 phases [x], E2E verified (daemon active, port 8766, uptime 35h, 11/11 test packages PASS, CI green). DS-006 BLOCKED (govulncheck). DuckBrain UNREACHABLE (connection error) — counter not synced. Scheduler daemon on :9090 still firing despite paused cron. Dep updates available (minor, non-critical). No new GitHub issues. No TODOs/FIXMEs. ⚠️ Foreman should be self-paused at 7+ idle ticks but scheduler keeps firing — known bug (coding-hermes-cron § State Machine).
+**Idle ticks:** 12 → STILL IDLE. Project complete. All 26 phases [x], E2E verified (ports 8766+9090 live, 11/11 test packages PASS, CI green). DS-006 BLOCKED (govulncheck). DuckBrain UNREACHABLE (connection error) — counter not synced. Scheduler daemon on :9090 still firing despite paused cron (`enabled: false, state: paused, repeat: 4/2147483647`). 12 non-critical dep bumps available. No new GitHub issues. No TODOs/FIXMEs. ⚠️ Foreman should be self-paused at 7+ idle ticks but scheduler keeps firing — known bug (coding-hermes-cron § State Machine).
 
 ---
 
