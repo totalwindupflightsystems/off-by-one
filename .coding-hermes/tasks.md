@@ -381,7 +381,7 @@
 2. Run `govulncheck ./...` to verify installation
 3. Confirm zero vulnerabilities found
 **Discovered:** 2026-07-16 sweep — `govulncheck: command not found`
-**Idle ticks:** 17 → STILL IDLE. DuckBrain unreachable (connection error). Project complete. All 26 phases [x], E2E verified (health `{"status":"ok","uptime":"40h"}`, 11/11 test packages PASS, `go mod verify` OK, CI green, 0 TODOs/FIXMEs, 0 GitHub issues, OpenAPI 3.0.3 spec serving 14 endpoints live). DS-006 BLOCKED (govulncheck — requires manual install by Bane). 12 non-critical dep bumps available. No remote commits. Scheduler daemon on :9090 still firing despite paused cron (`enabled: false, state: paused`). ⚠️ Foreman should be self-paused at 7+ idle ticks but scheduler keeps firing — known bug (coding-hermes-cron § State Machine).
+**Idle ticks:** 18 → SCHEDULER DISABLED. DuckBrain reachable. Project complete. All 26 phases [x], E2E verified (health `{"status":"ok","uptime":"40h"}`, 11/11 test packages PASS, `go mod verify` OK, CI green, 0 TODOs/FIXMEs, 0 GitHub issues, OpenAPI 3.0.3 spec serving 14 endpoints live). DS-006 BLOCKED (govulncheck — requires manual install by Bane). 12 non-critical dep bumps available. No remote commits. ✅ Scheduler disabled via `PUT /api/v1/projects/off-by-one {"enabled":false}` — this is the LAST zombie tick. Hermes cron already paused. No further foreman ticks will fire.
 
 ---
 
