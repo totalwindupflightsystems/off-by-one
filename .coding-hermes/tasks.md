@@ -425,6 +425,17 @@
   5. Reports success/failure in tick output
   6. Files a `## [ ] BUG` task if the pipeline is broken
 **Why:** 18 of 21 submissions failed over 3 months because the solver was misconfigured and nobody tested it. The board said "complete" but the core value prop was dead.
+**Results (tick 24):** 
+  - Build: PASS | Tests: PASS (11/11) | Vet: PASS | Vulns: 0 | Guard: PASS
+  - Server: healthy (systemd, uptime 19s) — was crash-looping 576× since Jul 16
+  - Submit: deduplicated (shell-script already cached) — queue depth 0
+  - Discover: PASS — found answer id=14, env=shell, lang=bash, version=5, status=verified
+  - BUG-001: CONFIRMED FIXED — metadata matches submission (shell/bash/5)
+  - Stats: 12 problems, 14 verified answers, hit rate 1.0
+  - Hilo: 351 edges, 44 files, graph healthy
+  - DS-008 after-action: systemd service file was correct but stale manual PID blocked port
+  - All 11 audit points clean — board complete, no new gaps
+
 **Results (tick 23):** 
   - Submit: PASS — `sub_8bc0be` queued (also `sub_3eba0f` — sibling agent)
   - Solve: PASS — 2 answers verified (id=12, id=13)
@@ -464,3 +475,5 @@
   3. Solver flags: `-load-threshold -1 -cron-interval 60s -pi-agent ... -bwrap ...`
   4. Service restarted, health OK, cron loop started
 **Status:** done (2026-07-19) — Go+Python+Shell problems all solving and discoverable now. 6 verified answers.
+
+**Tick 24 note (2026-07-19):** Service file was correct but systemd crash-looped 576 times since July 16 — port 8766 occupied by stale manual instance (PID 2670742, up 49m). Killed manual instance → systemd auto-restarted cleanly → active+healthy.
