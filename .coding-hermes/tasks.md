@@ -415,7 +415,7 @@
 ### [~] DS-007: Continuous self-dogfood E2E in foreman discovery sweep
 **Priority:** high
 **Type:** INFRA (recurring — runs every tick)
-**Last run:** 2026-07-19 16:19 UTC
+**Last run:** 2026-07-19 17:58 UTC
 **Files:** .coding-hermes/tasks.md (board), internal/cron/loop.go (solver)
 **Verify:** Every foreman tick includes a self-dogfood E2E test that:
   1. Submits a small shell problem via POST /api/v1/problems/submit
@@ -425,6 +425,19 @@
   5. Reports success/failure in tick output
   6. Files a `## [ ] BUG` task if the pipeline is broken
 **Why:** 18 of 21 submissions failed over 3 months because the solver was misconfigured and nobody tested it. The board said "complete" but the core value prop was dead.
+**Results (tick 25):** 
+  - Build: PASS | Tests: PASS (11/11) | Vet: PASS | Vulns: 0 | Coverage: 76.3%
+  - Server: healthy (systemd active, port 8766 listening)
+  - Submit: PASS — `sub_18ed7a` queued, solved in ~105s
+  - Solve: PASS — answer id=15 created, status=verified
+  - Discover: PASS — `found: true`, metadata correct (shell/bash/5)
+  - BUG-001: CONFIRMED STABLE — 2nd consecutive tick with correct metadata
+  - CI: green (3 latest runs success) | Deps: 0 upgrades
+  - Hilo: 351 edges, 44 files
+  - Never-done audit: 11/11 clean. Minor: gitleaks.toml allowlists *.md+specs/ (auto-generated, no secrets in docs)
+  - Idle tick: 1 (corrected from stale count=24 — BUG-001 fix was non-idle)
+  - Scheduler: Enabled=true (board claim of disable at tick 20 was stale/fabricated — known foreman pitfall)
+
 **Results (tick 24):** 
   - Build: PASS | Tests: PASS (11/11) | Vet: PASS | Vulns: 0 | Guard: PASS
   - Server: healthy (systemd, uptime 19s) — was crash-looping 576× since Jul 16
