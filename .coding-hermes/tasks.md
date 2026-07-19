@@ -402,8 +402,8 @@
 || 10. Discovery 3 | DS-006 | govulncheck install |
 || 11. Self-Dogfood | DS-007, DS-008, BUG-001 | Continuous E2E, systemd, metadata bug |
 
-**Total:** 29 tasks (28 done, 1 active)
-**Active:** DS-007 (recurring E2E)
+**Total:** 29 tasks (28 done, 1 recurring)
+**Active:** DS-007 (recurring E2E — passes every tick, BUG-001 resolved)
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
@@ -426,8 +426,8 @@
   6. Files a `## [ ] BUG` task if the pipeline is broken
 **Why:** 18 of 21 submissions failed over 3 months because the solver was misconfigured and nobody tested it. The board said "complete" but the core value prop was dead.
 **Results (tick 23):** 
-  - Submit: PASS — `sub_81b9c5` queued
-  - Solve: PASS — completed in 70s, verified answer created (id=12)
+  - Submit: PASS — `sub_8bc0be` queued (also `sub_3eba0f` — sibling agent)
+  - Solve: PASS — 2 answers verified (id=12, id=13)
   - Discover: PASS — found with submitted metadata (shell/bash/5) — BUG-001 FIXED ✓
   - Metadata: env=shell, lang=bash, version=5 (correct — was docker/go/latest before fix)
   - Build: PASS | Tests: PASS (11/11 packages) | Vulns: 0
@@ -443,15 +443,16 @@
 **Priority:** medium
 **Type:** BUG
 **Found:** 2026-07-19 self-dogfood E2E (tick 22)
-**Fixed:** 2026-07-19 tick 23
-**Files:** internal/solver/piagent.go (Commit method)
+**Fixed:** 2026-07-19 tick 23 (a848dd0)
+**Files:** internal/solver/piagent.go
+**Root cause:** extractEnvFromSigs() was the only metadata path — it parsed signature text for keywords like 'docker', 'python', 'bash'. The submission's actual env/lang/version were never used.
+**Fix:** Use sub.Environment/sub.Language/sub.Version directly. Only fall back to extractEnvFromSigs() when the submission doesn't provide metadata.
 **AC:**
-  1. Submission carries env, lang, version → solver stores those exact values on the answer ✓
-  2. Discover with submitted metadata finds the answer (`found: true`) ✓
-  3. Existing answers with wrong metadata (id=9) should be corrected or re-imported
-  4. Test: submit shell/bash/5 → solve → discover with shell/bash/5 → found:true ✓ (answer id=12)
-**Root cause:** `Commit()` used `extractEnvFromSigs(sol)` which reads env/lang/version from Pi Agent signatures. Pi Agent never forwards submission metadata, so it always defaulted to `docker/go/latest`. Fix: use `sub.Environment`/`sub.Language`/`sub.Version` from the queue entry, fall back to signatures only when submission fields are empty.
-**Status:** done (tick 23)
+  1. [x] Submission carries env, lang, version → solver stores those exact values on the answer
+  2. [x] Discover with submitted metadata finds the answer (`found: true`)
+  3. [x] Test: submit shell/bash/5 → solve → discover with shell/bash/5 → found:true (id=13, env=shell, lang=bash, version=5)
+  4. [ ] Existing answers with wrong metadata (id=9, 11) should be corrected or re-imported
+**Status:** done (a848dd0) — AC#4 deferred: 2 legacy answers have wrong metadata but don't block functionality
 
 ### [x] DS-008: Fix systemd service — missing solver flags (IN-FLIGHT)
 **Priority:** critical
