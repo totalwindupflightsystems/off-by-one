@@ -399,9 +399,11 @@
 | 7. Execution | WI-020–021 | API endpoints, solver hardening |
 | 8. Discovery | DS-001–004 | CI, docs, embeddings, attachments |
 | 9. Discovery 2 | DS-005 | CI git identity fix |
-| 10. Discovery 3 | DS-006 | govulncheck install |
+|| 10. Discovery 3 | DS-006 | govulncheck install |
+|| 11. Self-Dogfood | DS-007, DS-008, BUG-001 | Continuous E2E, systemd, metadata bug |
 
-**Total:** 27 tasks (27 done, 0 pending)
+**Total:** 29 tasks (27 done, 2 pending)
+**Active:** DS-007 (recurring E2E), BUG-001 (metadata propagation)
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
@@ -410,9 +412,10 @@
 
 > Discovered 2026-07-19. Solver was dead for months with 18 failures — board said "complete" but pipeline was broken. Every tick MUST verify the full submit→solve→discover loop with a real problem.
 
-### [ ] DS-007: Continuous self-dogfood E2E in foreman discovery sweep
+### [~] DS-007: Continuous self-dogfood E2E in foreman discovery sweep
 **Priority:** high
-**Type:** INFRA
+**Type:** INFRA (recurring — runs every tick)
+**Last run:** 2026-07-19 16:19 UTC
 **Files:** .coding-hermes/tasks.md (board), internal/cron/loop.go (solver)
 **Verify:** Every foreman tick includes a self-dogfood E2E test that:
   1. Submits a small shell problem via POST /api/v1/problems/submit
@@ -422,6 +425,23 @@
   5. Reports success/failure in tick output
   6. Files a `## [ ] BUG` task if the pipeline is broken
 **Why:** 18 of 21 submissions failed over 3 months because the solver was misconfigured and nobody tested it. The board said "complete" but the core value prop was dead.
+**Results (tick 22):** 
+  - Submit: PASS — `sub_73ee80` queued
+  - Solve: PASS — completed in 15s, verified answer created (id=9)
+  - Discover: PARTIAL — found with wrong metadata (docker/go/latest), NOT found with submitted metadata (shell/bash/5)
+  - ⚠️ BUG-001 filed: solver stores answers with default metadata, not submission metadata
+  - Build: PASS | Tests: PASS | Vulns: 0
+
+### [ ] BUG-001: Solver stores answers with default metadata (docker/go/latest) instead of submission metadata
+**Priority:** medium
+**Type:** BUG
+**Found:** 2026-07-19 self-dogfood E2E (tick 22)
+**Files:** internal/solver/piagent.go, internal/cron/loop.go
+**AC:**
+  1. Submission carries env, lang, version → solver stores those exact values on the answer
+  2. Discover with submitted metadata finds the answer (`found: true`)
+  3. Existing answers with wrong metadata (id=9) should be corrected or re-imported
+  4. Test: submit shell/bash/5 → solve → discover with shell/bash/5 → found:true
 
 ### [x] DS-008: Fix systemd service — missing solver flags (IN-FLIGHT)
 **Priority:** critical
