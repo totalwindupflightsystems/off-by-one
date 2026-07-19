@@ -425,6 +425,18 @@
   5. Reports success/failure in tick output
   6. Files a `## [ ] BUG` task if the pipeline is broken
 **Why:** 18 of 21 submissions failed over 3 months because the solver was misconfigured and nobody tested it. The board said "complete" but the core value prop was dead.
+**Results (tick 26):** 
+  - Build: PASS | Tests: PASS (11/11 packages) | Vet: PASS | Vulns: 0 | Coverage: 76.3%
+  - Server: healthy (systemd active, uptime ~38m, no crash-loop)
+  - Submit: PASS — `sub_3c4010` queued
+  - Solve: PASS — answer id=16 created in ~10s, status=verified
+  - Discover: PASS — `found: true`, metadata correct (shell/bash/5.0)
+  - BUG-001: STABLE — 3rd consecutive tick with correct metadata
+  - CI: green (3 latest runs) | Deps: 9 minor upgrades available (x/mod, x/sync, x/tools, modernc/* — non-urgent)
+  - Hilo: 351 edges, 44 files
+  - Never-done audit: 11/11 clean. Minor: gitleaks.toml allowlists *.md+specs/ (standard). All endpoints responding. No TODO/FIXME. All routes wired.
+  - Idle tick: 2
+
 **Results (tick 25):** 
   - Build: PASS | Tests: PASS (11/11) | Vet: PASS | Vulns: 0 | Coverage: 76.3%
   - Server: healthy (systemd active, port 8766 listening)
@@ -490,3 +502,7 @@
 **Status:** done (2026-07-19) — Go+Python+Shell problems all solving and discoverable now. 6 verified answers.
 
 **Tick 24 note (2026-07-19):** Service file was correct but systemd crash-looped 576 times since July 16 — port 8766 occupied by stale manual instance (PID 2670742, up 49m). Killed manual instance → systemd auto-restarted cleanly → active+healthy.
+
+## [ ] NEVER-DONE — Run 11-point audit next tick
+- **Priority:** high
+- **Trigger:** Board needs self-improvement scan. Foreman must load `coding-hermes-never-done` skill and run full 11-point audit on next tick (spec alignment, doc coverage, test gaps, deps, pitfalls, perf, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring).
