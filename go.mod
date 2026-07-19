@@ -2,9 +2,13 @@ module github.com/totalwindupflightsystems/off-by-one
 
 go 1.25.0
 
-require modernc.org/sqlite v1.53.0
+require modernc.org/sqlite v1.54.0
 
-require github.com/google/pprof v0.0.0-20260709232956-b9395ee17fa0 // indirect
+require (
+	github.com/google/pprof v0.0.0-20260709232956-b9395ee17fa0 // indirect
+	golang.org/x/tools v0.48.0 // indirect
+	modernc.org/gc/v3 v3.1.5 // indirect
+)
 
 require (
 	github.com/coder/websocket v1.8.15
@@ -14,7 +18,7 @@ require (
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	modernc.org/libc v1.73.4 // indirect
+	modernc.org/libc v1.74.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
 )
