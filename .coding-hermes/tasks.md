@@ -406,4 +406,30 @@
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
 
-## [x] DEPS: upgrade Go deps — coder/websocket v1.8.13→v1.8.15, google/pprof update, mattn/go-isatty v0.0.20→v0.0.23
+## Phase 11: Continuous Self-Dogfood E2E
+
+> Discovered 2026-07-19. Solver was dead for months with 18 failures — board said "complete" but pipeline was broken. Every tick MUST verify the full submit→solve→discover loop with a real problem.
+
+### [ ] DS-007: Continuous self-dogfood E2E in foreman discovery sweep
+**Priority:** high
+**Type:** INFRA
+**Files:** .coding-hermes/tasks.md (board), internal/cron/loop.go (solver)
+**Verify:** Every foreman tick includes a self-dogfood E2E test that:
+  1. Submits a small shell problem via POST /api/v1/problems/submit
+  2. Waits for cron to solve it (max 120s)
+  3. Discovers the answer via POST /api/v1/problems/discover
+  4. Verifies `found: true` and `status: verified`
+  5. Reports success/failure in tick output
+  6. Files a `## [ ] BUG` task if the pipeline is broken
+**Why:** 18 of 21 submissions failed over 3 months because the solver was misconfigured and nobody tested it. The board said "complete" but the core value prop was dead.
+
+### [x] DS-008: Fix systemd service — missing solver flags (IN-FLIGHT)
+**Priority:** critical
+**Type:** INFRA
+**Files:** /etc/systemd/system/off-by-one.service
+**AC:**
+  1. Service runs as `User=kara` (not root — bwrap needs home dir access)
+  2. `EnvironmentFile=/home/kara/off-by-one/.env` for API keys
+  3. Solver flags: `-load-threshold -1 -cron-interval 60s -pi-agent ... -bwrap ...`
+  4. Service restarted, health OK, cron loop started
+**Status:** done (2026-07-19) — Go+Python+Shell problems all solving and discoverable now. 6 verified answers.
