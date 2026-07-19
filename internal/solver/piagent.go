@@ -307,11 +307,14 @@ func (e *Executor) Commit(ctx context.Context, sub *ingest.Entry, sol *Solution)
 		sigs = string(b)
 	}
 
-	// env/lang/version are not part of the Solution struct — they
-	// are owned by the queue entry. The caller passes them in
-	// via this method's signature. We use sensible defaults if
-	// missing (pi-agent may have been told only a class title).
-	env, lang, version := extractEnvFromSigs(sol)
+	// env/lang/version are owned by the submission entry.
+	// Use the submission's metadata first; fall back to
+	// signatures only when the submission doesn't provide them
+	// (legacy entries or admin-injected problems).
+	env, lang, version := sub.Environment, sub.Language, sub.Version
+	if env == "" {
+		env, lang, version = extractEnvFromSigs(sol)
+	}
 	answerID, err := e.store.CreateAnswerNode(ctx,
 		class.ID, 0, env, lang, version,
 		sol.SolutionMarkdown, sol.EvidenceMarkdown, sigs)
