@@ -438,6 +438,18 @@
   - All 3 discovery sweep 4 tasks complete. Board returning to empty.
   - Idle tick: reset to 0 (this tick was NOT idle — completed 3 tasks + spawned no worker)
 
+**Results (tick 30):** 
+  - Build: PASS | Tests: PASS (11/11) | Vet: PASS | Vulns: 0
+  - Server: healthy (systemd active, uptime ~3h40m, listening :8766)
+  - Submit: deduplicated (shell-script already cached) — queue_depth=0
+  - Discover: PASS — found answer id=16, env=shell, lang=bash, version=5.0, status=verified
+  - Stats: 15 problems, 18 verified answers, hit_rate=1.0
+  - Hilo: 352 edges, 45 files
+  - CI: green (3 latest runs) | Deps: 5 minor (go-cmp, demangle, goldmark, x/exp, x/telemetry — non-urgent)
+  - Never-done audit: 11/11 checks executed. 2 minor findings: missing CONTRIBUTING.md + LICENSE. All other checks clean (no stubs, no TODOs, all routes wired+responding, gitleaks tight). Dep upgrades noted but non-urgent (same batch as tick 29).
+  - DuckBrain: operational snapshot written (tick 30)
+  - Idle tick: 2
+
 **Results (tick 29):** 
   - Build: PASS | Tests: PASS (11/11) | Vet: PASS | Vulns: 0 | Coverage: 76.3%
   - Server: healthy (systemd active, uptime 2h31m, listening :8766)
