@@ -405,3 +405,5 @@
 **Target model:** MiniMax M3 via ollama-cloud
 **Verification:** `go build ./... && go test -short -count=1 ./...` on every task
 **Quality gate:** GitReins guard must pass before every commit
+
+## [x] DEPS: upgrade Go deps — coder/websocket v1.8.13→v1.8.15, google/pprof update, mattn/go-isatty v0.0.20→v0.0.23
