@@ -648,6 +648,19 @@
   - DuckBrain: tick-34 operational snapshot written
   - Idle tick: 6 → cooldown stays at 14400 (4h, already set)
 
+**Results (tick 35):** 
+  - Build: PASS | Tests: PASS (11/11) | Vet: PASS | Vulns: 0
+  - Hilo: 352 edges, 45 files
+  - Server: healthy (systemd active, PID 3446018, uptime 28h9m, listening :8766)
+  - E2E Submit: deduplicated (shell-script already cached) — queue_depth=0
+  - E2E Discover: PASS — found answer id=16, env=shell, lang=bash, version=5.0, status=verified
+  - Stats: 16 problems, 19 verified answers, hit_rate=1.0
+  - CI: green (3 latest runs) | Deps: 5 minor (go-cmp, demangle, goldmark, x/exp, x/telemetry — non-urgent)
+  - Guard: PASS (gitleaks, go_build, go_lint, go_tests)
+  - Never-done audit: 11/11 checks executed. 2 recurring minor findings: missing LICENSE+CONTRIBUTING.md, 0 benchmarks. No new findings. 0 stubs/TODOs. All routes wired+responding (export/import 501 by design). Gitleaks tight. DuckBrain synced. Project genuinely complete.
+  - DuckBrain: tick-35 operational snapshot + idle-ticks=2 written
+  - Idle tick: 2 (DuckBrain authoritative — prior board counts 3-6 were self-reported divergence; reset to 0+2 from DuckBrain's count=1)
+
 ## [ ] NEVER-DONE — Run 11-point audit next tick
 - **Priority:** high
 - **Trigger:** Board needs self-improvement scan. Foreman must load `coding-hermes-never-done` skill and run full 11-point audit on next tick (spec alignment, doc coverage, test gaps, deps, pitfalls, perf, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring).
