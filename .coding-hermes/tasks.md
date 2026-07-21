@@ -14,6 +14,7 @@
 | ID | Task | Priority | Complexity | Deps | Tags | Model | Reasoning | Fallback |
 |----|------|----------|------------|------|------|-------|-----------|----------|
 | DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 ± 1 | server running | +++terminal, ++testing, +api-use | deepseek-v4-pro | Low | MiniMax-M3 |
+| BUG-002 | Pi Agent solver broken — dist/cli.js missing, source files deleted from /tmp/pi/ | High | 3 ± 1 | server running | +++terminal, +++infra, +++typescript | MiniMax-M3 | Medium | Step-3.7-Flash |
 | NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | DS-007 results | +++terminal, +++file-editing, +documentation | deepseek-v4-pro | Medium | MiniMax-M3 |
 
 ## Completed (32/32 done)
