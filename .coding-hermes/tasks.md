@@ -675,6 +675,20 @@
   - DuckBrain: tick-36 operational snapshot + idle-ticks=3 written
   - Idle tick: 3 → cooldown stays at 14400 (already set; no action needed ≤6)
 
+**Results (tick 37):** 
+  - Build: PASS | Tests: PASS (11/11) | Vet: PASS | Vulns: 0
+  - Hilo: 352 edges, 45 files
+  - Server: healthy (systemd active, PID 3446018, uptime ~34h, listening :8766)
+  - E2E Submit: deduplicated (shell-script already cached) — queue_depth=0
+  - E2E Discover: PASS — found answer id=16, env=shell, lang=bash, version=5.0, status=verified
+  - Stats: 16 problems, 19 verified answers, hit_rate=1.0
+  - CI: green (5/5 latest runs) | Deps: 0 direct upgradable
+  - Guard: PASS (gitleaks, go_build, go_lint, go_tests)
+  - Never-done audit: 11/11 checks executed with concrete tool calls. All 17 nil,nil returns verified as legitimate guard clauses (ErrNotFound, empty-input, emb==nil, version=="", parallel-dequeue races). Zero stubs. Zero TODOs/FIXMEs. Gitleaks tight (only .git/ + .gitreins/ allowlisted). LICENSE + CONTRIBUTING.md created as mechanical fixes (removes 2 recurring findings). 1 remaining recurring: 0 benchmarks. All 15 routes wired+responding (export/import 501 by design). Project genuinely complete.
+  - Scheduler: CooldownS re-set to 14400 via API PUT (2nd daemon restart reversion — WARNING level, escalate to Bane)
+  - DuckBrain: tick-37 operational snapshot + idle-ticks=4 written
+  - Idle tick: 4 → cooldown at 14400 (already set; no action needed ≤6)
+
 ## [ ] NEVER-DONE — Run 11-point audit next tick
 - **Priority:** high
 - **Trigger:** Board needs self-improvement scan. Foreman must load `coding-hermes-never-done` skill and run full 11-point audit on next tick (spec alignment, doc coverage, test gaps, deps, pitfalls, perf, endpoint verification, CI/CD health, DuckBrain sync, code quality, middle-out wiring).
