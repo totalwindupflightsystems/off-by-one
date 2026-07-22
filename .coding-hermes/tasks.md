@@ -6,7 +6,7 @@
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
 > **Last E2E:** PASS (tick 39) — 16 problems, 19 verified answers, hit_rate=1.0
-> **Tick 41:** DS-007 E2E PASS — submit/discover/queue/stats/taxonomy all responsive (15 endpoints). 11-point audit: 0 new gaps (1 recurring: benchmarks). BUG-002: solver still broken (dist/cli.js missing, src/ deleted). Server healthy (59h uptime). CI all green.
+> **Tick 42:** DS-007 E2E PASS — submit/discover/queue/stats/taxonomy/problems/answers all responsive (15 endpoints). 11-point audit: 0 new gaps. BUG-002: solver still broken (dist/cli.js needs `npm run build` — source files exist, tsgo+npm available). Server healthy (63h uptime). Govulncheck clean. Solver is buildable — needs worker spawn for `npm run build` in /tmp/pi/packages/coding-agent/.
 
 ---
 
