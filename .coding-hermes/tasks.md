@@ -5,9 +5,8 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 44) — Server OK, submit+discover work, solver broken (BUG-002). Host resource contention blocked Go build/vet. 0 TODO/FIXME in source.
-> **Tick 44 DS-007:** Health OK (68h uptime). Stats: 16 problems, 19 verified, hit_rate=1.0. Submit: sub_f26ba1 queued at pos 1. Discover: echo-hello found (GPT-4o, cached). NEW: discovered wrong server port (8080 is NOT off-by-one; real server is on 8766). BUG-002: Pi Agent dist/cli.js missing (dist/ dir exists but no compiled JS). Build: blocked — host resource contention (OpenSearch 1.1GB, concurrent foremen) causing pthread_create failures.
-> **Tick 44 NEVER-DONE:** 0 TODOs in non-test code. Government vulncheck blocked (threads exhausted). Pi Agent dir at /tmp/pi/ has source but needs npm run build. Host has 7 concurrent foreman ticks.
+> **Last E2E:** PARTIAL (tick 45) — Server OK (70h uptime), API/submit/discover work, solver broken (BUG-002). GOMAXPROCS=2 build+viet pass. Host resource contention persists.
+> **Tick 45 DS-007:** Health OK (70h22m, 15.8MB RSS, 13 threads). Stats: 16 problems, 19 verified, hit_rate=1.0, coverage=1.1875. Submit `foreman-tick45-e2e` → queued (sub_a118e0) → failed (solver broken). Discover go-string-reverse → found (claude-sonnet-4, 9 tests PASS). Pi Agent bin at ~/.local/bin/pi-agent exists (Node.js wrapper). /tmp/pi/dist/ still missing. npm run build blocked by EAGAIN (INFRA-001). Go build+viet pass with GOMAXPROCS=2. Tests PARTIAL (pkg/api passes 0.010s, others build-failed from thread exhaustion). 0 TODOs/FIXMEs. Queue: 52 entries (24 complete, 28 failed). Web UI serves all 6 views.
 
 ---
 
