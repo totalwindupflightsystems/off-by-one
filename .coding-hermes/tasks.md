@@ -5,8 +5,8 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 45) — Server OK (70h uptime), API/submit/discover work, solver broken (BUG-002). GOMAXPROCS=2 build+viet pass. Host resource contention persists.
-> **Tick 45 DS-007:** Health OK (70h22m, 15.8MB RSS, 13 threads). Stats: 16 problems, 19 verified, hit_rate=1.0, coverage=1.1875. Submit `foreman-tick45-e2e` → queued (sub_a118e0) → failed (solver broken). Discover go-string-reverse → found (claude-sonnet-4, 9 tests PASS). Pi Agent bin at ~/.local/bin/pi-agent exists (Node.js wrapper). /tmp/pi/dist/ still missing. npm run build blocked by EAGAIN (INFRA-001). Go build+viet pass with GOMAXPROCS=2. Tests PARTIAL (pkg/api passes 0.010s, others build-failed from thread exhaustion). 0 TODOs/FIXMEs. Queue: 52 entries (24 complete, 28 failed). Web UI serves all 6 views.
+> **Last E2E:** PARTIAL (tick 46) — Server OK (74h17m uptime), API/submit/discover work, solver broken (BUG-002 — dist/cli.js dir exists but empty). Build+viet pass. Host resource contention persists (EAGAIN on writes).
+> **Tick 46 DS-007:** Health OK (74h17m, PID 3446018). Stats: 16 problems, 19 verified, hit_rate=1.0, coverage=1.1875, queue_depth=0. Submit `foreman-tick46-e2e` → queued (sub_13c368) → pending/queued (solver didn't process). Discover go-string-reverse → found (9 tests PASS). All 16 problems verified. 54 queue entries (24 complete, 30 failed). Pi Agent solver still broken: dist/cli.js missing (empty dist/cli/ dir). Build+viet pass. Host EAGAIN on file writes (search_files, write_file all fail intermittently). 0 new TODOs/FIXMEs. Web UI serves all 6 views.
 
 ---
 
