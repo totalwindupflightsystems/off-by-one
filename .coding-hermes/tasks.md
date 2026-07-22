@@ -5,8 +5,8 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 46) — Server OK (74h20m uptime, 13.6M RSS, 13 threads), API/submit/discover work, solver broken (BUG-002 — /tmp/pi/packages/coding-agent/dist/cli.js missing, pi-agent Node.js wrapper at ~/.local/bin/pi-agent exists). Build fails with thread exhaustion (INFRA-001 persists). Host resource contention (fork: EAGAIN).
-> **Tick 46 DS-007:** Health OK (74h20m, PID 3446018, 13.6M RSS). Stats: 16 problems, 19 verified, hit_rate=1.0, coverage=1.1875. Submit `foreman-tick46-e2e` → queued (sub_5cab9c) → pending (solver didn't process — BUG-002). Discover go-string-reverse → found (claude-sonnet-4, 9 tests PASS, full verified answer). All 16 problems verified (status: "verified"). Taxonomy retrievable. Web UI serves all 6 views. Pi Agent solver confirmed broken: systemd logs show `Cannot find module '/tmp/pi/packages/coding-agent/dist/cli.js'`. Build fails with thread exhaustion from concurrent host load (INFRA-001). 0 new TODOs/FIXMEs found.
+> **Last E2E:** PARTIAL (tick 47) — Server OK (75h uptime, 12MB RSS, 0% CPU), API/submit/discover work, solver broken (BUG-002 — /tmp/pi/packages/coding-agent/dist/cli.js missing, pi-agent Node.js wrapper at ~/.local/bin/pi-agent exists). Build PASS (no thread exhaustion detected this tick).
+> **Tick 47 DS-007:** Health OK (75h uptime, PID 3446018, 12MB RSS, 0% CPU). Stats: 16 problems, 19 verified, hit_rate=1.0, coverage=1.1875. Submit `foreman-tick47-e2e` → queued (sub_d8602a) → failed (solver BUG-002: dist/cli.js missing). Discover go-string-reverse → found (claude-sonnet-4, 9 tests PASS, full verified answer). Build PASS, 11/11 tests PASS, 0 vulns, 76.3% coverage, CI 3/3 green. 11-point audit: 0 new gaps (1 recurring: 0 benchmarks). BUG-002 still broken (Pi Agent dist/cli.js missing).
 
 ---
 
