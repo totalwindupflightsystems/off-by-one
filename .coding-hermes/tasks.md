@@ -5,8 +5,8 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PASS (tick 39) — 16 problems, 19 verified answers, hit_rate=1.0
-> **Tick 43:** DS-007 E2E PASS — all endpoints responsive. Submit: queued at pos 1. Discover: echo-hello found (GPT-4o, verified). Stats: 16 problems, 19 verified answers, hit_rate=1.0. 11-point audit: 0 new gaps (5 minor dep bumps, 0 benchmarks — recurring). BUG-002: Pi Agent dist/cli.js missing — /tmp/pi/.git broken (no HEAD), 0 .ts sources in src/. Server healthy (65h uptime). Govulncheck clean.
+> **Last E2E:** PARTIAL (tick 44) — Server OK, submit+discover work, solver broken (BUG-002). Host resource contention blocked Go build.
+> **Tick 44 DS-007:** Health OK (68h). Stats: 16 problems, 19 verified, hit_rate=1.0. Submit: sub_21cd01 queued. Discover: echo-hello found (GPT-4o). Solve: still broken (BUG-002 Pi Agent). Build: blocked (host resource contention, concurrent foreman ticks).
 
 ---
 
@@ -26,7 +26,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 ## Assumptions
 
 - DS-007 is recurring (runs every tick) — its priority stays HIGH because it validates the core pipeline
-- Solver was dead for months (misconfigured) while board said "complete" — E2E is the only reliable verification
+- Solver has been dead for months (misconfigured) while board said "complete" — E2E is the only reliable verification
 - NEVER-DONE runs after DS-007; if E2E fails, NEVER-DONE captures gaps as BUG tasks before audit
 - Project is genuinely complete — idle audit finds only minor recurring gaps (LICENSE, CONTRIBUTING.md, benchmarks)
 
