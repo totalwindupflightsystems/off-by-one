@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 73.9-89% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 53) — Server OK (3d18h05m uptime, PID 3446018 since Jul 19). API: /health ✅, /stats ✅ (16 problems, 19 verified answers, hit rate 1.0), /problems ✅ (16 listed), /queue ✅ (63 entries), /problems/submit ✅ (queues successfully), /problems/discover ✅ (finds problem_class). Solver BUG-002 still broken: submit→queued→failed instantly (19s elapsed). Root cause confirmed: /tmp/pi/packages/coding-agent/dist/ has empty subdirectories — no .js files compiled. `pi-agent` binary at /home/kara/.local/bin/pi-agent works standalone but can't find dist/cli.js. Build PASS, vet PASS, 11/11 tests PASS, 0 vulns, 0 stubs, 0 TODOs. 11-point audit: 0 new gaps (1 recurring: 0 benchmarks). Coverage: 73.9-89%. CI: last 3 runs all success. Load avg: 8.68/10.48/9.61.
+> **Last E2E:** PARTIAL (tick 54) — Server OK (92h7m7s uptime, PID 3446018 since Jul 19). API: /health ✅, /stats ✅ (16 problems, 19 verified answers, hit rate 1.0), /problems ✅ (16 listed), /queue ✅ (65 entries), /problems/submit ✅ (queues successfully — sub_222a66), /problems/discover ❌ (solve never completed). Solver BUG-002 still broken: submit→queued→failed instantly (0s solve time). Root cause: `pi-agent` binary exists but can't find dist/cli.js. Build PASS, vet PASS, 9/9 tests PASS, 0 vulns, 0 stubs, 0 TODOs. 11-point audit: 0 new gaps (recurring: 0 benchmarks). CI: last 3 runs all green. Load avg: 8.00/7.92/7.96.
 
 ---
 
