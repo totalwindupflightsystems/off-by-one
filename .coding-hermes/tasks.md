@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 73.9-89% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 49) — Server OK (81h uptime), API/submit/discover work, solver broken (BUG-002 — /tmp/pi/packages/coding-agent/dist/cli.js missing: TypeScript sources exist but `npm run build` was never run). Build PASS, 11/11 tests PASS, vet PASS, 0 vulns, CI 3/3 green. 11-point audit: 0 new gaps. BUG-002 root cause refined: .ts source files exist in src/, but dist/ directories are empty — need to run `npm run build` in /tmp/pi/.
+> **Last E2E:** PARTIAL (tick 50) — Server OK (83h39m uptime), API/submit/discover/stats/queue all responsive, solver still broken (BUG-002). BUG-002 root cause refined: Pi Agent coding-agent package has zero .ts source files in src/ (only theme JSONs), dist/cli.js doesn't exist, node_modules exist at monorepo root but coding-agent package deps not resolved. Not a build issue — the Pi Agent was never properly set up. Build PASS, 11/11 tests PASS, vet PASS, 0 vulns. 11-point audit: 0 new gaps (1 recurring: 0 benchmarks).
 
 ---
 
@@ -14,7 +14,7 @@
 | ID | Task | Priority | Complexity | Deps | Tags | Model | Reasoning | Fallback |
 |----|------|----------|------------|------|------|-------|-----------|----------|
 | DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 ± 1 | server running | +++terminal, ++testing, +api-use | deepseek-v4-pro | Low | MiniMax-M3 |
-| BUG-002 | Pi Agent solver broken — dist/cli.js missing | High | 3 ± 1 | server running | +++terminal, +++infra, +++typescript | MiniMax-M3 | Medium | Step-3.7-Flash |
+|| BUG-002 | Pi Agent solver broken — dist/cli.js missing; Pi Agent never properly set up (no .ts sources, deps unresolved) | High | 3 ± 1 | server running | +++terminal, +++infra, +++typescript | MiniMax-M3 | Medium | Step-3.7-Flash |
 | U01 | Usability & coverage audit — find gaps in endpoint wiring, UX flow, error handling, edge cases, test coverage | High | 3±1 | — | +++testing, ++endpoint-verification, ++code-review, +e2e, -vision | DS-V4-Flash | Medium | GLM-5.2 |
 | INFRA-001 | Host resource contention — Go builds fail with pthread_create (pthread 17/threads exhausted); investigate process limits and concurrent foreman load | Medium | 2±1 | — | +++terminal, ++infra, +performance | DS-V4-Flash | Low | GLM-5.2 |
 | NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | DS-007 results | +++terminal, +++file-editing, +documentation | deepseek-v4-pro | Medium | MiniMax-M3 |
