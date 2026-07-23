@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 73.9-89% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 48) — Server OK (79h uptime), API/submit/discover work, solver broken (BUG-002 — Pi Agent at /tmp/pi/ has empty src/ dirs (no .ts files), incomplete git checkout). Build PASS, 11/11 tests PASS, vet PASS, 0 vulns, CI 3/3 green. 11-point audit: 0 new gaps. BUG-002 root cause confirmed: Pi Agent git repo partial — .ts source files never checked in to /tmp/pi/.
+> **Last E2E:** PARTIAL (tick 49) — Server OK (81h uptime), API/submit/discover work, solver broken (BUG-002 — /tmp/pi/packages/coding-agent/dist/cli.js missing: TypeScript sources exist but `npm run build` was never run). Build PASS, 11/11 tests PASS, vet PASS, 0 vulns, CI 3/3 green. 11-point audit: 0 new gaps. BUG-002 root cause refined: .ts source files exist in src/, but dist/ directories are empty — need to run `npm run build` in /tmp/pi/.
 
 ---
 
