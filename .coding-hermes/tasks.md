@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 73.9-89% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 50) — Server OK (83h39m uptime), API/submit/discover/stats/queue all responsive, solver still broken (BUG-002). BUG-002 root cause refined: Pi Agent coding-agent package has zero .ts source files in src/ (only theme JSONs), dist/cli.js doesn't exist, node_modules exist at monorepo root but coding-agent package deps not resolved. Not a build issue — the Pi Agent was never properly set up. Build PASS, 11/11 tests PASS, vet PASS, 0 vulns. 11-point audit: 0 new gaps (1 recurring: 0 benchmarks).
+> **Last E2E:** PARTIAL (tick 51) — Server OK (87h51m uptime), API/submit/discover/stats/queue all responsive, solver BUG-002 still broken (submit→queued→failed instantly, Pi Agent no .ts sources, no dist/cli.js). Stats: 16 problems, 19 verified answers, queue depth 0. Build PASS, 11/11 tests PASS, vet PASS, 0 vulns, 0 stubs, 0 TODOs. 11-point audit: 0 new gaps (1 recurring: 0 benchmarks). Coverage: 76.3%.
 
 ---
 
