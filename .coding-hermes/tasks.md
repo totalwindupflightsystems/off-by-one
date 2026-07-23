@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 73.9-89% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 51) — Server OK (87h51m uptime), API/submit/discover/stats/queue all responsive, solver BUG-002 still broken (submit→queued→failed instantly, Pi Agent no .ts sources, no dist/cli.js). Stats: 16 problems, 19 verified answers, queue depth 0. Build PASS, 11/11 tests PASS, vet PASS, 0 vulns, 0 stubs, 0 TODOs. 11-point audit: 0 new gaps (1 recurring: 0 benchmarks). Coverage: 76.3%.
+> **Last E2E:** PARTIAL (tick 52) — Server OK (87h57m uptime), API/submit/discover/stats/queue all responsive, solver BUG-002 still broken (submit→queued→failed instantly; Pi Agent at /tmp/pi/ has dist/ dirs + node_modules but no .ts sources, dist/cli.js missing — npm run build fails on missing tsgo inputs). Stats: 16 problems, 19 verified answers, queue depth 0, hit rate 1.0. Build PASS, 11/11 tests PASS, vet PASS, 0 vulns, 0 stubs, 0 TODOs. 11-point audit: 0 new gaps (1 recurring: 0 benchmarks). Coverage: 73.9-89% (11 pkg avg ~81.5%). CI: last 3 runs all success. Server build from 2026-07-19.
 
 ---
 
