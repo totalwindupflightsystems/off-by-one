@@ -4,9 +4,8 @@
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
-> **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 47) — Server OK (75h uptime, 12MB RSS, 0% CPU), API/submit/discover work, solver broken (BUG-002 — /tmp/pi/packages/coding-agent/dist/cli.js missing, pi-agent Node.js wrapper at ~/.local/bin/pi-agent exists). Build PASS (no thread exhaustion detected this tick).
-> **Tick 47 DS-007:** Health OK (75h uptime, PID 3446018, 12MB RSS, 0% CPU). Stats: 16 problems, 19 verified, hit_rate=1.0, coverage=1.1875. Submit `foreman-tick47-e2e` → queued (sub_d8602a) → failed (solver BUG-002: dist/cli.js missing). Discover go-string-reverse → found (claude-sonnet-4, 9 tests PASS, full verified answer). Build PASS, 11/11 tests PASS, 0 vulns, 76.3% coverage, CI 3/3 green. 11-point audit: 0 new gaps (1 recurring: 0 benchmarks). BUG-002 still broken (Pi Agent dist/cli.js missing).
+> **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 73.9-89% coverage). 0 stubs. 0 TODOs.
+> **Last E2E:** PARTIAL (tick 48) — Server OK (79h uptime), API/submit/discover work, solver broken (BUG-002 — Pi Agent at /tmp/pi/ has empty src/ dirs (no .ts files), incomplete git checkout). Build PASS, 11/11 tests PASS, vet PASS, 0 vulns, CI 3/3 green. 11-point audit: 0 new gaps. BUG-002 root cause confirmed: Pi Agent git repo partial — .ts source files never checked in to /tmp/pi/.
 
 ---
 
