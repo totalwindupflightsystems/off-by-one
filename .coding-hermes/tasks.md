@@ -4,8 +4,8 @@
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
-> **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PASS (tick 86) — Server OK (1h29m uptime, server running manually — systemd unit not present). All endpoints verified: /health ✅, /api/v1/stats ✅ (26 problems, 31 verified answers, hit_rate 1.0, coverage 1.19, queue_depth 1), POST /api/v1/problems/submit ✅ (sub_b48b82+sub_525b65 queued → first solved by solver), POST /api/v1/problems/discover ✅ (found=true — shell-echo-hello-fix by claude-sonnet-4, go-generics-stack, verified). Build PASS, vet PASS, Hilo: 351 edges / 44 files. NEVER-DONE: ALL 11 checks PASS — SECURITY.md ✅, CODE_OF_CONDUCT.md ✅, CHANGELOG.md ✅, SUPPORT.md ✅, CONTRIBUTING.md ✅, LICENSE ✅, 0 TODOs, 0 stubs. CI: last 5 runs all success. No vulns.
+|> **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested). 0 stubs. 0 TODOs.
+|> **Last E2E:** PASS (tick 87) — Server OK (1h51m uptime, server running manually — systemd unit not present). All endpoints verified: /health ✅, /api/v1/stats ✅ (27 problems, 32 verified answers, hit_rate 1.0, coverage 1.185, queue_depth 1), POST /api/v1/problems/submit ✅ (tick87-e2e submitted as sub_03ecf5 → solver in_progress), POST /api/v1/problems/discover ✅ (found=true — go-generics-stack matched with env go1.26). Build PASS, vet PASS, 11/11 tests PASS. NEVER-DONE: ALL 11 checks PASS — all docs files present ✅, 0 TODOs ✅, 0 real stubs ✅, no vulns ✅, CI last 3 runs all success ✅.
 
 ---
 
@@ -41,3 +41,24 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 - Audit finds test gap → create TEST task, assign Step 3.7 Flash
 - Server not healthy (systemd dead, port not listening) → CRITICAL, escalate to foreman
 - Solver broken (consecutive solve failures) → CRITICAL, escalate to foreman
+
+## Self-Improving Loop (NEVER-DONE → Matrix → Solve)
+
+**The audit MUST create tasks, not just report gaps:**
+
+1. NEVER-DONE runs after DS-007 each tick
+2. Every finding (missing file, regression, stale dep, coverage gap) MUST produce a matrix row
+3. Matrix rows drive worker spawns on the NEXT tick
+4. Workers fix the tasks → commit → board shows [x]
+5. Next NEVER-DONE audit confirms gaps are closed
+
+**Self-fix rule for trivial gaps:** If the same gap appears 3+ consecutive ticks AND the fix requires zero code (docs, boilerplate, config), the foreman fixes it directly rather than creating yet another task. Stale gap creation is itself a bug.
+
+**Matrix row format (every new finding):**
+```
+| ID | Task | Priority | Complexity | Deps | Tags | Model | Reasoning | Fallback |
+```
+
+**Example — finding → matrix row:**
+- Audit: "SECURITY.md missing" → row: `DOC-001 | Create SECURITY.md | Low | 1 | — | +docs | deepseek-v4-flash | Low | —`
+- Audit: "discover endpoint returns false" → row: `BUG-xxx | discover regression | High | 3 | server | ++api, ++debug | MiniMax-M3 | High | DS-V4-Flash`
