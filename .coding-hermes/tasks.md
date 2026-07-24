@@ -3,6 +3,23 @@
   All tasks MUST use matrix format: | ID | Task | Pri | Cpx | Deps | Tags | Model | Reasoning | Fallback |
   Before editing this file, load the skill: skill_view(name='coding-hermes-model-router')
   Validate: python3 ~/.hermes/scripts/validate-board-format.py .coding-hermes/tasks.md
+- [ ] **GITREINS-JUDGE — Configure LLM evaluator for commit quality review**
+  | 🔴 Critical | — | — | deepseek-v4-flash @ deepseek-foreman | GITREINS_LLM_API_KEY in ~/.hermes/.env | foreman-direct |
+
+  Run: `python3 ~/.hermes/scripts/check-gitreins-judge.py .` to verify.
+  Default limits (adjust per-project based on codebase size and task complexity):
+  - Fast/small projects: `max_iterations: 50`, `max_time: 10m`, tokens: `0.2M/0.4M`
+  - Large repos (Go monorepos, 100+ files): `max_iterations: 100`, `max_time: 30m`, tokens: `1M/2M`
+  - C++/Rust (slow compiles): `max_time: 30m` minimum
+  - Scheduler/production infra: `max_time: 30m`, tokens: `1M/2M`
+  Supervisor auto-flags projects where limits are too low for codebase size.
+
+| 🔴 Critical | — | — | deepseek-v4-flash @ deepseek-foreman | GITREINS_LLM_API_KEY in ~/.hermes/.env | foreman-direct |
+
+  Run: `python3 ~/.hermes/scripts/check-gitreins-judge.py .` to verify.
+  If missing, create/edit .gitreins/config.yaml with evaluator section using deepseek-v4-flash.
+  This is CRITICAL for code quality — no automated review of worker output without it.
+
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
