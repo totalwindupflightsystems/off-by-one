@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PASS (tick 85) — Server OK (systemd active, 1h20m uptime, port 8766). All endpoints verified: /health ✅, /api/v1/stats ✅ (25 problems, 30 verified answers, hit_rate 1.0, coverage 1.2, queue_depth 0), POST /api/v1/problems/submit ✅ (sub_3758dd queued → solved), POST /api/v1/problems/discover ✅ (found=true — foreman-tick85-e2e solved by deepseek-v4-flash, answer verified). Build PASS, vet PASS, Hilo: 352 edges / 45 files. NEVER-DONE: ALL 11 checks PASS — SECURITY.md ✅, CODE_OF_CONDUCT.md ✅, CHANGELOG.md ✅, SUPPORT.md ✅, CONTRIBUTING.md ✅, LICENSE ✅, 0 TODOs, 0 stubs. CI: last 3 runs all success.
+> **Last E2E:** PASS (tick 86) — Server OK (1h29m uptime, server running manually — systemd unit not present). All endpoints verified: /health ✅, /api/v1/stats ✅ (26 problems, 31 verified answers, hit_rate 1.0, coverage 1.19, queue_depth 1), POST /api/v1/problems/submit ✅ (sub_b48b82+sub_525b65 queued → first solved by solver), POST /api/v1/problems/discover ✅ (found=true — shell-echo-hello-fix by claude-sonnet-4, go-generics-stack, verified). Build PASS, vet PASS, Hilo: 351 edges / 44 files. NEVER-DONE: ALL 11 checks PASS — SECURITY.md ✅, CODE_OF_CONDUCT.md ✅, CHANGELOG.md ✅, SUPPORT.md ✅, CONTRIBUTING.md ✅, LICENSE ✅, 0 TODOs, 0 stubs. CI: last 5 runs all success. No vulns.
 
 ---
 
