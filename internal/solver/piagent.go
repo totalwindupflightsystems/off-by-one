@@ -31,7 +31,7 @@ const DefaultModel = "deepseek-v4-flash"
 // (search → fetch → reflect → answer). Complex problems (Raft, B-tree,
 // distributed systems) need more time. 10 minutes matches the wrapper's
 // execSync limit and gives models room to work through hard problems.
-const DefaultSolveTimeout = 10 * time.Minute
+const DefaultSolveTimeout = 30 * time.Minute
 
 // Config controls how the solver invokes Pi Agent. Zero values are
 // filled in by ResolveConfig before Solve is called.
