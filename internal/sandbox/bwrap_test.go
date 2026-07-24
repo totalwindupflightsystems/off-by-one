@@ -315,6 +315,55 @@ func TestBuildBwrapArgs(t *testing.T) {
 	}
 }
 
+// TestBuildBwrapArgs_DefaultReadOnlyPaths verifies the default mount
+// set (used when Config.ReadOnlyPaths is left empty) includes git's
+// binary and helper directory so shell problems can run git clone /
+// log / bisect inside the sandbox (SBOX-001).
+func TestBuildBwrapArgs_DefaultReadOnlyPaths(t *testing.T) {
+	workDir := "/tmp/work"
+	args := buildBwrapArgs(DefaultReadOnlyPaths, nil, workDir)
+	// Git binary and git-core helper directory must both be ro-bound.
+	for _, want := range []string{"/usr/bin/git", "/usr/lib/git-core"} {
+		bound := false
+		for i, a := range args {
+			if a == "--ro-bind" && i+2 < len(args) && args[i+1] == want && args[i+2] == want {
+				bound = true
+				break
+			}
+		}
+		if !bound {
+			t.Errorf("--ro-bind %s %s not found in default mount set: %v", want, want, args)
+		}
+	}
+}
+
+// TestSandbox_Run_GitAvailable drives a real bwrap sandbox and
+// confirms `git --version` succeeds — the end-to-end check for
+// SBOX-001. Skipped if bwrap or git isn't installed.
+func TestSandbox_Run_GitAvailable(t *testing.T) {
+	if !BwrapAvailable() {
+		t.Skip("bwrap not installed on this system")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed on this system")
+	}
+	x := &Executor{BwrapPath: lookupBwrap(), WorkDir: t.TempDir(), Timeout: 30 * time.Second}
+	s, err := x.Create(context.Background(), "git-test", Config{})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer func() { _ = s.Destroy() }()
+
+	stdout, stderr, err := s.Run(context.Background(), "git", "--version")
+	if err != nil {
+		t.Fatalf("git --version: %v (stderr=%s)", err, stderr)
+	}
+	got := strings.TrimSpace(string(stdout))
+	if !strings.HasPrefix(got, "git version ") {
+		t.Errorf("git --version output = %q, want prefix 'git version '", got)
+	}
+}
+
 func TestBwrapAvailable(t *testing.T) {
 	// Just exercises the path lookup; the result depends on the system.
 	got := BwrapAvailable()

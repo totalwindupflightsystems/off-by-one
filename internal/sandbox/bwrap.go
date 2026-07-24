@@ -59,6 +59,24 @@ type Config struct {
 // DefaultBwrapTimeout is the spec-recommended 5-minute cap.
 const DefaultBwrapTimeout = 5 * time.Minute
 
+// DefaultReadOnlyPaths is the standard read-only bind set mounted
+// into every sandbox: /usr, /lib, /lib64, /bin, plus /etc for tools
+// that need resolver config, and /usr/bin/git + /usr/lib/git-core
+// so shell problems can run git operations (clone, log, bisect)
+// without "command not found". On most distros /usr already covers
+// git's binary, but listing it explicitly documents the dependency
+// and survives layouts where git lives outside /usr (e.g. Nix,
+// custom installs).
+var DefaultReadOnlyPaths = []string{
+	"/usr",
+	"/lib",
+	"/lib64",
+	"/bin",
+	"/etc",
+	"/usr/bin/git",
+	"/usr/lib/git-core",
+}
+
 // ErrBwrapNotFound is returned when Config.BwrapPath is empty or
 // points to a non-existent binary.
 var ErrBwrapNotFound = errors.New("sandbox: bwrap not found at configured path")
@@ -152,7 +170,7 @@ func (e *Executor) Create(ctx context.Context, id string, cfg Config) (*Sandbox,
 		return nil, fmt.Errorf("stat bwrap: %w", err)
 	}
 	if cfg.ReadOnlyPaths == nil {
-		cfg.ReadOnlyPaths = []string{"/usr", "/lib", "/lib64", "/bin"}
+		cfg.ReadOnlyPaths = append([]string{}, DefaultReadOnlyPaths...)
 	}
 	if cfg.ExtraReadOnlyPaths == nil {
 		cfg.ExtraReadOnlyPaths = e.ExtraReadOnlyPaths
