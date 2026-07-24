@@ -20,8 +20,7 @@
 | U01 | Usability & coverage audit — find gaps in endpoint wiring, UX flow, error handling, edge cases, test coverage | High | 3±1 | — | +++testing, ++endpoint-verification, ++code-review, +e2e, -vision | DS-V4-Flash | Medium | GLM-5.2 |
 | INFRA-001 | Host resource contention — Go builds fail with pthread_create (pthread 17/threads exhausted); investigate process limits and concurrent foreman load | Medium | 2±1 | — | +++terminal, ++infra, +performance | DS-V4-Flash | Low | GLM-5.2 |
 | NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | DS-007 results | +++terminal, +++file-editing, +documentation | deepseek-v4-pro | Medium | MiniMax-M3 |
-| SBOX-001 | Install git inside bwrap sandbox — shell problems needing git (bisect, log analysis, repo ops) fail with `command not found`. Mount /usr/bin/git into sandbox. | High | 2 | — | ++sandbox, +shell | MiniMax-M3 | Medium | DS-V4-Flash |
-| SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install/mount them in bwrap before solving. Currently sandbox has only bash+coreutils. | High | 4 | SBOX-001 | ++sandbox, ++infra | MiniMax-M3 | High | Step-3.7-Flash |
+| SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install/mount them in bwrap before solving. Currently sandbox has only bash+coreutils. | High | 4 | — | ++sandbox, ++infra | MiniMax-M3 | High | Step-3.7-Flash |
 | SOLVER-001 | Add retry logic to cron loop — if solve fails with `signal: killed` or empty stdout, retry once. Raft consensus succeeded on 2nd attempt at 3m4s; TCP proxy passed after timeout bump. | Medium | 3 | — | ++solver, +cron | MiniMax-M3 | Medium | DS-V4-Flash |
 | SOLVER-002 | B-tree kill investigation — `go-concurrent-btree` crashes Pi Agent instantly (empty stdout, same-second kill). Not timeout. Suspect token overflow from large problem description. Test with smaller prompt. | Medium | 3 | — | ++debug, +solver | DS-V4-Flash | Low | MiniMax-M3 |
 | UI-001 | LaTeX + Markdown answer rendering — spectral theorem answers contain LaTeX ($\lambda$, $\langle$, etc.) that renders as raw text. Add MathJax/KaTeX to web UI for math notation, and upgrade the minimal markdown renderer (search.js, explore.js, chat.js) to handle full Markdown with syntax highlighting. | High | 3 | — | ++ui, ++javascript, +css | MiniMax-M3 | Medium | DS-V4-Flash |
@@ -30,9 +29,9 @@
 | CONFIG-001 | Custom Pi Agent config support — currently model is hardcoded to deepseek-v4-flash in DefaultModel. Let users bring their own Pi config (~/.pi/credentials.json) or pass --pi-config flag. Document how to use Anthropic/OpenAI/Gemini keys. Default recommendation stays deepseek-v4-flash in docs. | High | 4 | — | ++config, ++docs, +solver | MiniMax-M3 | High | DS-V4-Flash |
 | E2E-001 | Browser-based UI verification — spawn StepFun-3.7 Flash with browser tools to load the web UI at http://100.66.60.47:8766, screenshot every view (shell/search/submit/explore/export/import/chat), check for JS errors, verify LaTeX rendering after UI-001 completes, pipe findings back into tasks.md. Runs every 3-5 ticks. | High | 4 | UI-001 | ++browser, ++screenshots, ++verification | Step-3.7-Flash | High | DS-V4-Flash |
 
-## Completed (32/32 done)
+## Completed (33/33 done)
 
-All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API server, Bubblewrap sandbox, Pi Agent solver, idle cron loop, Web UI (6 views + AI chat), git export/import, main binary wiring, FTS5 search, Muster MCP bridge + E2E verification, spec gap fixes, solver hardening, CI, docs, embeddings, file attachments, govulncheck.
+All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API server, Bubblewrap sandbox, Pi Agent solver, idle cron loop, Web UI (6 views + AI chat), git export/import, main binary wiring, FTS5 search, Muster MCP bridge + E2E verification, spec gap fixes, solver hardening, CI, docs, embeddings, file attachments, govulncheck, git in sandbox (SBOX-001).
 
 ## Assumptions
 
