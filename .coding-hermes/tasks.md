@@ -11,7 +11,7 @@
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Status:** ALL PHASES COMPLETE (33 tasks, 11/11 packages tested). 0 stubs, 0 TODOs.
-> **Last E2E:** PASS (tick 94) — Server OK (8h39m uptime), 61 problems (+1), 67 verified answers (+1), hit_rate 1.0. E2E problem e2e-tick94 (time.Ticker resource leak) solved by deepseek-v4-flash in 4m9s, 10/10 tests. Build PASS, vet PASS, tests PASS (11 packages). Staticcheck clean. Govulncheck clean. Docs present (CHANGELOG.md, CODE_OF_CONDUCT.md, SECURITY.md, README.md). CI 2/2 green. NEVER-DONE audit: all 11 checks PASS, 0 new gaps.
+> **Last E2E:** PASS (tick 95) — Server OK (4h54m uptime), 62 problems (+1), 68 verified answers (+1), hit_rate 1.0. E2E problem e2e-tick95 (filepath.Walk file counter) solved by deepseek-v4-flash in 42s, 6 tests. Build PASS, vet PASS, tests PASS (11 packages). Staticcheck clean. Govulncheck clean. CI 2/2 green. NEVER-DONE audit: 10/11 checks PASS, 1 SKIP (DuckBrain MCP transient — connection error). 0 new gaps.
 
 ## Active Tasks
 
