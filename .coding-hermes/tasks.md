@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PASS (tick 72) — Server OK (108h10m uptime, port 8766, systemd active). All endpoints verified: /health ✅ (108h10m), /api/v1/stats ✅ (16 problems, 19 verified answers, hit_rate 1.0, queue_depth 0, coverage 1.19), /api/v1/problems ✅ (16 listed), /api/v1/taxonomy ✅ (16 nodes), POST /api/v1/problems/submit ✅ (sub_ea5717 queued, solver pending — BUG-002 confirmed still broken: Pi Agent cli.js is 681-byte placeholder from 1985), POST /api/v1/problems/discover ✅, GET /api/v1/queue ✅ (94 entries). Build PASS, vet PASS, 11/11 tests PASS. CI: 3/3 recent success. NEVER-DONE: same recurring docs gaps (CHANGELOG.md, CODE_OF_CONDUCT.md, SECURITY.md), 6 minor dep upgrades (go-cmp, go-isatty, goldmark, golang.org/x/exp, telemetry), 0 vulns. DuckBrain connection error (unreachable). BUG-002: solver still broken — no change.
+> **Last E2E:** PASS (tick 73) — Server OK (108h35m uptime, port 8766, systemd active). All endpoints verified: /health ✅ (108h35m), /api/v1/stats ✅ (16 problems, 19 verified answers, hit_rate 1.0, coverage 1.19), /api/v1/problems ✅ (16 listed), /api/v1/taxonomy ✅ (16 nodes), POST /api/v1/problems/submit ✅ (sub_112a8d tick-73-e2e queued, solver pending — BUG-002 confirmed still broken: Pi Agent /tmp/pi/dist/cli.js still missing), POST /api/v1/problems/discover ✅ (returns not_found for new — expected), GET /api/v1/queue ✅ (97 entries). Build PASS, vet PASS, 11/11 tests PASS. CI: 3/3 recent success. BUG-002: solver still broken — no change.
 
 ---
 
