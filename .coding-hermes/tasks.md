@@ -8,7 +8,7 @@
 
 | ID | Task | Pri | Cpx | Deps | Tags | Model | Lvl | Fallback |
 |----|------|-----|-----|------|------|-------|-----|----------|
-| DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 | server running | ++terminal, ++testing, +api-use | DeepSeek V4 Pro | Low | MiniMax-M3 |
+| DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 | server running | ++terminal, ++testing, +api-use | DeepSeek V4 Pro | Low | MiniMax-M3 — **tick 91 ✅** |
 | BUG-002 | ✅ RESOLVED — Solver now works end-to-end via bwrap + Pi Agent wrapper | — | — | — | — | — | — | — |
 | SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install them in bwrap | High | 4 | — | ++sandbox, ++infra | MiniMax-M3 | High | Step 3.7 Flash |
 | SOLVER-001 | Add retry logic to cron loop — if solve fails with signal: killed or empty stdout, retry once | Medium | 3 | — | ++solver, +cron | MiniMax-M3 | Medium | DeepSeek V4 Flash |
