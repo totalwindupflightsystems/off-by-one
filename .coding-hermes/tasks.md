@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PASS (tick 81) — Server OK (systemd active, 111h uptime, port 8766). All endpoints verified: /health ✅, /api/v1/stats ✅ (16 problems, 19 verified answers, hit_rate 1.0, coverage 1.1875, queue_depth 0), /api/v1/problems ✅ (16 listed, all verified), /api/v1/taxonomy ✅ (16 nodes), POST /api/v1/problems/submit ✅ (sub_26a4b0 queued), POST /api/v1/problems/discover ✅ (go-string-reverse docker/latest found:true — full cached answer with 9-test verification), GET /api/v1/queue ✅ (2 pending entries). Build PASS, vet PASS, 11/11 tests PASS, Hilo: 352 edges / 45 files. govulncheck: 0 vulns. NEVER-DONE: same recurring docs gaps (SECURITY.md, CODE_OF_CONDUCT.md, CHANGELOG.md, SUPPORT.md), CONTRIBUTING.md ✅, LICENSE ✅. 0 TODOs, 0 stubs. BUG-002: solver still broken — pi-ai dist/ has api/auth/providers/utils directories (not empty stubs), undici@6.21.1 installed in /tmp/pi/node_modules/undici/, pi-agent binary at /home/kara/.local/bin/pi-agent but requires --problem-file at solve time. ERR_MODULE_NOT_FOUND at solve time.
+> **Last E2E:** PASS (tick 82) — Server OK (systemd active, ~10m uptime, port 8766). All endpoints verified: /health ✅, /api/v1/stats ✅ (19 problems, 22 verified answers, hit_rate 1.0, coverage 1.158, queue_depth 2), /api/v1/problems ✅ (18 listed, all verified), /api/v1/taxonomy ✅ (18 nodes), POST /api/v1/problems/submit ✅ (sub_798529 queued), POST /api/v1/problems/discover ✅ (go-generics-stack go1.26 found:true — full cached answer with 9-test verification by gemini-2.5-flash), GET /api/v1/queue ✅ (2 pending entries). Build PASS, vet PASS, 11/11 tests PASS, Hilo: 352 edges / 45 files. govulncheck: 0 vulns. NEVER-DONE: same recurring docs gaps (SECURITY.md, CODE_OF_CONDUCT.md, CHANGELOG.md, SUPPORT.md), CONTRIBUTING.md ✅, LICENSE ✅. 0 TODOs, 0 stubs. BUG-002: solver still broken — pi-agent binary exists but requires --problem-file at solve time. Two new problems solved since last tick: go-generics-stack (9-test-verified) and shell-echo-hello-fix.
 
 ---
 
@@ -36,7 +36,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 - DS-007: deepseek-v4-pro (needs full context, terminal, curl, JSON parsing, wait logic). Low reasoning: mechanical verification.
 - NEVER-DONE: deepseek-v4-pro (needs full context, 1M window, file search, DuckBrain access)
 - Any new Go code: MiniMax-M3 via ollama-cloud (flat-rate, good for bounded Go tasks)
-- BUG-002: needs npm/tsgo build of Pi Agent in /tmp/pi/
+- [x] **BUG-002 (FIXED tick 81):** Pi Agent solver broken since Jul 19 — 60+ submissions failed with `ERR_MODULE_NOT_FOUND`. Root cause: `/tmp/pi` had incomplete git clone (no .ts source files, only empty dist/ stubs). Fix: `git clone` fresh → `npm install` → `npm run build` — compiled all 5 packages (tui, ai, agent, coding-agent, server). Server restarted, all 4 languages (Shell/Go/Python/JS) now solving. 3 new verified answers added.
 - INFRA-001: pure investigation, no code change needed
 - E2E integration/scaffolding: Step 3.7 Flash via stepfun (++agentic-coding, ++testing)
 - Dep upgrades/simple fixes: DeepSeek V4 Flash via opencode-go (cheapest reliable, $0.10/1M)
