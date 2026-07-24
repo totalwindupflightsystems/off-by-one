@@ -28,6 +28,7 @@
 | PERF-001 | DB load optimization — taxonomy page loads all 51+ problems in a single request. Add pagination (limit/offset), lazy loading, and response compression. The SQLite FTS5 index exists but frontend loads the full tree on every page view. | Medium | 3 | — | ++ui, ++sql, +performance | DS-V4-Flash | Medium | MiniMax-M3 |
 | OSS-001 | Open source launch readiness — repo has LICENSE (MIT), CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md, README. Missing: CI badge in README, version badge, Go report card, package documentation link (pkg.go.dev), release workflow (goreleaser). Make public on GitHub. | Medium | 2 | — | ++docs, +ci, +github | DS-V4-Flash | Low | MiniMax-M3 |
 | CONFIG-001 | Custom Pi Agent config support — currently model is hardcoded to deepseek-v4-flash in DefaultModel. Let users bring their own Pi config (~/.pi/credentials.json) or pass --pi-config flag. Document how to use Anthropic/OpenAI/Gemini keys. Default recommendation stays deepseek-v4-flash in docs. | High | 4 | — | ++config, ++docs, +solver | MiniMax-M3 | High | DS-V4-Flash |
+| E2E-001 | Browser-based UI verification — spawn StepFun-3.7 Flash with browser tools to load the web UI at http://100.66.60.47:8766, screenshot every view (shell/search/submit/explore/export/import/chat), check for JS errors, verify LaTeX rendering after UI-001 completes, pipe findings back into tasks.md. Runs every 3-5 ticks. | High | 4 | UI-001 | ++browser, ++screenshots, ++verification | Step-3.7-Flash | High | DS-V4-Flash |
 
 ## Completed (32/32 done)
 
