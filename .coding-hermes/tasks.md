@@ -28,13 +28,13 @@
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Status:** ALL PHASES COMPLETE (33 tasks, 11/11 packages tested). 0 stubs, 0 TODOs.
-> **Last E2E:** PASS (tick 98) — Server OK (7h15m uptime on :8766), 67 problems (+2), 73 verified answers (+2), hit_rate 1.0. E2E problem e2e-tick98 submitted (sub_9b8212), queued pos 69 (pending). Prior E2Es still queued — deep backlog. Build PASS, vet PASS, tests PASS (11 packages, 76.3% coverage). Staticcheck clean. Govulncheck clean. NEVER-DONE audit: 10/10 checks PASS. DuckBrain populated. 6 outdated deps (minor/patch). 0 new gaps.
+> **Last E2E:** PASS (tick 100) — Server OK (8h11m uptime on :8766), 75 problems (+5), 81 verified answers (+5), hit_rate 1.0. E2E problem e2e-tick100 submitted (sub_7c278e), queued pos 58 (pending). Prior E2Es still queued — deep backlog. Build PASS, vet PASS, tests PASS (11 packages). Staticcheck clean. Govulncheck clean. NEVER-DONE audit: 11/11 checks PASS. DuckBrain populated. 6 outdated deps (minor/patch). 0 new gaps.
 
 ## Active Tasks
 
 | ID | Task | Pri | Cpx | Deps | Tags | Model | Lvl | Fallback |
 |----|------|-----|-----|------|------|-------|-----|----------|
-|| DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 | server running | ++terminal, ++testing, +api-use | DeepSeek V4 Pro | Low | MiniMax-M3 — **tick 97 ✅** |
+||| DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 | server running | ++terminal, ++testing, +api-use | DeepSeek V4 Pro | Low | MiniMax-M3 — **tick 100 ✅** |
 | BUG-002 | ✅ RESOLVED — Solver now works end-to-end via bwrap + Pi Agent wrapper | — | — | — | — | — | — | — |
 | SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install them in bwrap | High | 4 | — | ++sandbox, ++infra | MiniMax-M3 | High | Step 3.7 Flash |
 | SOLVER-001 | Add retry logic to cron loop — if solve fails with signal: killed or empty stdout, retry once | Medium | 3 | — | ++solver, +cron | MiniMax-M3 | Medium | DeepSeek V4 Flash |
@@ -44,7 +44,7 @@
 | OSS-001 | Open source launch readiness — CI badge, version badge, Go report card, pkg.go.dev link, goreleaser | Medium | 2 | — | ++docs, +ci, +github | DeepSeek V4 Flash | Low | MiniMax-M3 |
 | CONFIG-001 | Custom Pi Agent config support — let users bring their own Pi config (~/.pi/credentials.json) or pass --pi-config flag | High | 4 | — | ++config, ++docs, +solver | MiniMax-M3 | High | DeepSeek V4 Flash |
 | E2E-001 | Browser-based UI verification — spawn Luna with browser tools to load web UI, screenshot every view, check JS errors | High | 4 | UI-001 | ++browser, ++screenshots, ++verification | GPT-5.6 Luna | High | Step 3.7 Flash |
-| NEVER-DONE | 11-point audit sweep | Medium | 2 | DS-007 results | ++terminal, ++file-editing, +documentation | DeepSeek V4 Pro | Medium | MiniMax-M3 |
+|| NEVER-DONE | 11-point audit sweep — **tick 100 ✅ (11/11 PASS)** | Medium | 2 | DS-007 results | ++terminal, ++file-editing, +documentation | DeepSeek V4 Pro | Medium | MiniMax-M3 |
 | INFRA-001 | Host resource contention — Go builds fail with pthread_create (pids.max=512). Investigate process limits. | Medium | 2 | — | ++terminal, ++infra, +performance | DeepSeek V4 Flash | Low | GLM-5.2 |
 
 ## Completed
