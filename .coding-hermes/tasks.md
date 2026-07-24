@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 76.3% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PASS (tick 80) — Server OK (systemd active, 110h37m uptime, port 8766). All endpoints verified: /health ✅, /api/v1/stats ✅ (16 problems, 19 verified answers, hit_rate 1.0, coverage 1.1875, queue_depth 1), /api/v1/problems ✅ (16 listed, all verified), /api/v1/taxonomy ✅ (16 nodes), POST /api/v1/problems/submit ✅ (sub_c82060 queued — correct cadence: post-debug), POST /api/v1/problems/discover ✅ (go-string-reverse docker/latest found:true — full cached answer with 9-test verification), GET /api/v1/queue ✅ (1 new pending entry). Build PASS, vet PASS, 11/11 tests PASS, Hilo: 352 edges / 45 files. govulncheck: 0 vulns. NEVER-DONE: same recurring docs gaps (CHANGELOG.md, CODE_OF_CONDUCT.md, SECURITY.md, SUPPORT.md), CONTRIBUTING.md ✅, LICENSE ✅. 0 TODOs, 0 stubs. BUG-002: solver still broken — pi-ai dist/index.js missing (only empty dir stubs in /tmp/pi/node_modules/@earendil-works/pi-ai/dist/). ERR_MODULE_NOT_FOUND at solve time.
+> **Last E2E:** PASS (tick 81) — Server OK (systemd active, 111h uptime, port 8766). All endpoints verified: /health ✅, /api/v1/stats ✅ (16 problems, 19 verified answers, hit_rate 1.0, coverage 1.1875, queue_depth 0), /api/v1/problems ✅ (16 listed, all verified), /api/v1/taxonomy ✅ (16 nodes), POST /api/v1/problems/submit ✅ (sub_26a4b0 queued), POST /api/v1/problems/discover ✅ (go-string-reverse docker/latest found:true — full cached answer with 9-test verification), GET /api/v1/queue ✅ (2 pending entries). Build PASS, vet PASS, 11/11 tests PASS, Hilo: 352 edges / 45 files. govulncheck: 0 vulns. NEVER-DONE: same recurring docs gaps (SECURITY.md, CODE_OF_CONDUCT.md, CHANGELOG.md, SUPPORT.md), CONTRIBUTING.md ✅, LICENSE ✅. 0 TODOs, 0 stubs. BUG-002: solver still broken — pi-ai dist/ has api/auth/providers/utils directories (not empty stubs), undici@6.21.1 installed in /tmp/pi/node_modules/undici/, pi-agent binary at /home/kara/.local/bin/pi-agent but requires --problem-file at solve time. ERR_MODULE_NOT_FOUND at solve time.
 
 ---
 
@@ -14,10 +14,10 @@
 | ID | Task | Priority | Complexity | Deps | Tags | Model | Reasoning | Fallback |
 |----|------|----------|------------|------|------|-------|-----------|----------|
 | DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 ± 1 | server running | +++terminal, ++testing, +api-use | deepseek-v4-pro | Low | MiniMax-M3 |
-||| BUG-002 | Pi Agent solver broken — 3-chain failure: (1) undici@8.5.0 npm package published with ZERO .js files (package.json declares main:index.js but tarball only has docs+types). Must extract undici@6.21.1. (2) @earendil-works/pi-ai, agent, orchestrator, tui all have empty dist/ — monorepo at /tmp/pi never fully built. (3) pi-agent binary calls node dist/cli.js which imports undici.Client/Pool/EnvHttpProxyAgent. Fix: install undici@6.21.1 in /tmp/pi/node_modules/undici/, then npm run build for all 5 packages, or extract dist/ from correct versions. | High | 4 ± 1 | server running | +++terminal, +++infra, +++typescript, +++npm | MiniMax-M3 | High | Step-3.7-Flash |
-| U01 | Usability & coverage audit — find gaps in endpoint wiring, UX flow, error handling, edge cases, test coverage | High | 3±1 | — | +++testing, ++endpoint-verification, ++code-review, +e2e, -vision | DS-V4-Flash | Medium | GLM-5.2 |
-| INFRA-001 | Host resource contention — Go builds fail with pthread_create (pthread 17/threads exhausted); investigate process limits and concurrent foreman load | Medium | 2±1 | — | +++terminal, ++infra, +performance | DS-V4-Flash | Low | GLM-5.2 |
-| NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | DS-007 results | +++terminal, +++file-editing, +documentation | deepseek-v4-pro | Medium | MiniMax-M3 |
+|||| BUG-002 | Pi Agent solver broken — pi-ai dist/ has api/auth/providers/utils dirs (not fully empty), undici installed, pi-agent binary exists but requires --problem-file flag at solve time. The root cause appears to be that the monorepo at /tmp/pi has dist/ stubs in all 5 packages and pi-agent tries to `import` from them. | High | 4 ± 1 | server running | +++terminal, +++infra, +++typescript, +++npm | MiniMax-M3 | High | Step-3.7-Flash |
+|| U01 | Usability & coverage audit — find gaps in endpoint wiring, UX flow, error handling, edge cases, test coverage | High | 3±1 | — | +++testing, ++endpoint-verification, ++code-review, +e2e, -vision | DS-V4-Flash | Medium | GLM-5.2 |
+|| INFRA-001 | Host resource contention — Go builds fail with pthread_create (pthread 17/threads exhausted); investigate process limits and concurrent foreman load | Medium | 2±1 | — | +++terminal, ++infra, +performance | DS-V4-Flash | Low | GLM-5.2 |
+|| NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | DS-007 results | +++terminal, +++file-editing, +documentation | deepseek-v4-pro | Medium | MiniMax-M3 |
 
 ## Completed (32/32 done)
 
@@ -28,8 +28,8 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 - DS-007 is recurring (runs every tick) — its priority stays HIGH because it validates the core pipeline
 - Solver has been dead for months (misconfigured) while board said "complete" — E2E is the only reliable verification
 - NEVER-DONE runs after DS-007; if E2E fails, NEVER-DONE captures gaps as BUG tasks before audit
-- Project is genuinely complete — idle audit finds only minor recurring gaps (LICENSE, CONTRIBUTING.md, benchmarks)
-- **Tick 44 surprise:** Previous ticks checked port 8080 for health (wrong server). Real off-by-one server is on 8766. All prior DS-007 results that reported health on 8080 may have been checking a different service.
+- Project is genuinely complete — idle audit finds only minor recurring gaps (SECURITY.md, CODE_OF_CONDUCT.md, CHANGELOG.md, SUPPORT.md)
+- **Tick 44 surprise:** Previous ticks checked port 8080 for health (wrong server). Real off-by-one server is on 8766. All prior DS-007 reports that reported health on 8080 may have been checking a different service.
 
 ## Routing Notes
 
