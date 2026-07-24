@@ -1,5 +1,8 @@
 # Off-by-One — Task Board (Model-Router Matrix)
 
+- [ ] **E2E-001 — E2E Testing Tick (self-improving loop)** 🔁 Recurring every 5-10 ticks
+  Spawn Luna (browser/screenshots) or Step 3.7 Flash (CLI/API). Deploy/build, Playwright, screenshots, endpoints, console. → e2e-output/tasks.md → inject into board. See foreman Step 1.5i. Proven: HEADING 10 bugs found.
+
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
@@ -17,6 +20,10 @@
 | U01 | Usability & coverage audit — find gaps in endpoint wiring, UX flow, error handling, edge cases, test coverage | High | 3±1 | — | +++testing, ++endpoint-verification, ++code-review, +e2e, -vision | DS-V4-Flash | Medium | GLM-5.2 |
 | INFRA-001 | Host resource contention — Go builds fail with pthread_create (pthread 17/threads exhausted); investigate process limits and concurrent foreman load | Medium | 2±1 | — | +++terminal, ++infra, +performance | DS-V4-Flash | Low | GLM-5.2 |
 | NEVER-DONE | 11-point audit sweep | Medium | 2 ± 1 | DS-007 results | +++terminal, +++file-editing, +documentation | deepseek-v4-pro | Medium | MiniMax-M3 |
+| SBOX-001 | Install git inside bwrap sandbox — shell problems needing git (bisect, log analysis, repo ops) fail with `command not found`. Mount /usr/bin/git into sandbox. | High | 2 | — | ++sandbox, +shell | MiniMax-M3 | Medium | DS-V4-Flash |
+| SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install/mount them in bwrap before solving. Currently sandbox has only bash+coreutils. | High | 4 | SBOX-001 | ++sandbox, ++infra | MiniMax-M3 | High | Step-3.7-Flash |
+| SOLVER-001 | Add retry logic to cron loop — if solve fails with `signal: killed` or empty stdout, retry once. Raft consensus succeeded on 2nd attempt at 3m4s; TCP proxy passed after timeout bump. | Medium | 3 | — | ++solver, +cron | MiniMax-M3 | Medium | DS-V4-Flash |
+| SOLVER-002 | B-tree kill investigation — `go-concurrent-btree` crashes Pi Agent instantly (empty stdout, same-second kill). Not timeout. Suspect token overflow from large problem description. Test with smaller prompt. | Medium | 3 | — | ++debug, +solver | DS-V4-Flash | Low | MiniMax-M3 |
 
 ## Completed (32/32 done)
 

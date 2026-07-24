@@ -28,9 +28,10 @@ import (
 const DefaultModel = "deepseek-v4-flash"
 
 // Default timeout for a single solve. Pi Agent can take a while
-// (search → fetch → reflect → answer); the cron loop is also
-// configured for idle cycles, so 4 minutes is a reasonable cap.
-const DefaultSolveTimeout = 4 * time.Minute
+// (search → fetch → reflect → answer). Complex problems (Raft, B-tree,
+// distributed systems) need more time. 10 minutes matches the wrapper's
+// execSync limit and gives models room to work through hard problems.
+const DefaultSolveTimeout = 10 * time.Minute
 
 // Config controls how the solver invokes Pi Agent. Zero values are
 // filled in by ResolveConfig before Solve is called.
