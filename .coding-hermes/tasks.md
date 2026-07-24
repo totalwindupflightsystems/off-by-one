@@ -5,7 +5,7 @@
 > **Foreman:** deepseek-v4-pro (planning) | **Worker:** MiniMax M3 via ollama-cloud
 > **DuckBrain:** operational snapshots written per tick
 > **Status:** ALL PHASES COMPLETE (32 tasks, 11/11 packages tested, 73.9-89% coverage). 0 stubs. 0 TODOs.
-> **Last E2E:** PARTIAL (tick 61) — Server OK (4d+ uptime). API: /api/v1/stats ✅ (16 problems, 19 verified answers, hit rate 1.0, queue_depth 0), /api/v1/problems ✅ (16 listed, all verified), /api/v1/problems/submit ✅ (sub_d63b6e queued → queue drained 1→0), /api/v1/problems/discover ✅ (echo-hello found with verified answer + evidence). Solver BUG-002: still broken — submission processed but no new problem created. Discover endpoint returns correct results. Build PASS, vet PASS, 11/11 tests PASS. CI: last 5 green. Coverage: 73.9-89%. NEVER-DONE: 3 recurring docs gaps (SECURITY.md, CHANGELOG.md, CODE_OF_CONDUCT.md), 0 benchmarks. No new gaps.
+> **Last E2E:** PARTIAL (tick 62) — Server OK (systemd active). API: /api/v1/stats ✅ (16 problems, 19 verified answers, hit rate 1.0, queue_depth 0), /api/v1/problems ✅ (16 listed, all verified), /api/v1/problems/submit ✅ (sub_34833c queued → queue drained 1→0), /api/v1/queue/sub_34833c ✅ (processed → failed in 1s — BUG-002), /api/v1/problems/discover ✅ (correct not_found response), /api/v1/problems/echo-hello ✅ (full problem + verified answer). Solver BUG-002: still broken — submission processed, queue drained, but status=failed. No new problem created. Build PASS, vet PASS, 11/11 tests PASS. CI: last 5 green. NEVER-DONE: 3 recurring docs gaps (SECURITY.md, CHANGELOG.md, CODE_OF_CONDUCT.md), 0 benchmarks. No new gaps.
 
 ---
 
