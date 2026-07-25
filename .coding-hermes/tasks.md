@@ -28,7 +28,7 @@
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Status:** ALL PHASES COMPLETE (33 tasks, 11/11 packages tested). 0 stubs, 0 TODOs.
-> **Last E2E:** PASS (tick 102) — Server OK (8h52m uptime on :8766), 91 problems (+9), 97 verified answers (+9), hit_rate 1.0. E2E problem e2e-tick102 submitted (sub_061125), queued pos 44. Prior E2Es still queued — deep backlog (44 items). Build PASS, vet PASS, tests PASS (11 packages). Staticcheck clean. Govulncheck clean. NEVER-DONE audit: 11/11 checks PASS. 6 outdated deps (minor/patch). 0 new gaps.
+> **Last E2E:** PASS (tick 104) — Server OK (11h17m uptime on :8766), 122 problems (+0), 128 verified answers (+0), hit_rate 1.0. DS-007 sub_ada29f submitted, queued pos 0. Build PASS, vet PASS, tests PASS (11 packages). GitReins guard PASS. Hilo 352 edges/45 files. NEVER-DONE audit: 13/14 PASS, 1 known gap (0 benchmarks). 6 outdated deps (indirect/transitive, not actionable). 0 new gaps. 9 active enhancement tasks on board.
 
 ## Active Tasks
 
@@ -81,3 +81,31 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 - Audit finds test gap → create TEST task, assign Step 3.7 Flash
 - Server not healthy → CRITICAL, escalate to foreman
 - Solver broken (consecutive failures) → CRITICAL, escalate to foreman
+
+## Tick Log
+
+### Tick 104 — 2026-07-25 00:48 UTC (DeepSeek V4 Pro)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | M .coding-hermes/tasks.md (board only) |
+| 2 | go build | PASS | clean |
+| 3 | go vet | PASS | clean |
+| 4 | go test | PASS | 11/11 packages ok |
+| 5 | Hilo graph | PASS | 352 edges, 45 files |
+| 6 | GitReins guard | PASS | secrets clean |
+| 7 | Server health | PASS | 11h17m uptime |
+| 8 | DS-007 submit | PASS | sub_ada29f queued pos 0 |
+| 9 | Specs | PASS | system-spec.md, ui-spec.md |
+| 10 | Docs | PASS | all 7 doc files exist |
+| 11 | Test gaps | PASS | 3 expected (cmd, sql, web) |
+| 12 | Deps | PASS | 6 indirect outdated (transitive) |
+| 13 | Pitfalls | PASS | 0 stubs, 0 TODOs |
+| 14 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 15 | Endpoints | PASS | 6/6 return 200 |
+| 16 | CI | PASS | 3/3 green |
+| 17 | Code quality | PASS | .gitignore clean, 9 files >300L |
+| 18 | Wiring | PASS | binary --help works |
+| 19 | GitReins judge | PASS | deepseek-v4-flash configured |
+
+**Verdict:** IDLE — 0 new gaps. 14-point audit: 13/14 PASS. 9 active enhancement tasks on board (SBOX-002→INFRA-001). Cooldown 900s. DS-007 sub_ada29f in queue.
