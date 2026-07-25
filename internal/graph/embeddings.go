@@ -32,11 +32,11 @@ type Embedder interface {
 // OpenRouterEmbedder calls the OpenRouter embeddings API. It requires an
 // API key (OPENROUTER_API_KEY) and optionally a model name.
 type OpenRouterEmbedder struct {
-	APIKey    string
-	BaseURL   string
-	Model     string
-	Client    *http.Client
-	initOnce  sync.Once
+	APIKey   string
+	BaseURL  string
+	Model    string
+	Client   *http.Client
+	initOnce sync.Once
 }
 
 // DefaultOpenRouterEmbeddingModel is the model name for OpenRouter embeddings.
