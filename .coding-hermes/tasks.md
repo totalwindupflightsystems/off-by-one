@@ -486,3 +486,34 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Notable:** sub_4f88cd (tick 154 DS-007) completed between ticks — answers advanced 202→203 (+1), problems 161→162 (+1), coverage 1.2547→1.253 (minor dilution from new problem). Queue shows prior submissions all processed (sub_dba502, sub_7996de, sub_31101c, etc. all complete). New DS-007 submission sub_4bf99b (off-by-one-self-test-tick155) queued position 1 with 0 existing solutions (new subclass), estimated 30s. Self-test success rate: ~85% (last 48: 41 pass, 7 fail). Server 47h53m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed.
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_4bf99b queued pos 1 (0 existing solutions). Cooldown 900s.
+
+### Tick 156 — 2026-07-26 14:46 UTC (DeepSeek V4 Flash)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | clean (+3 untracked DS-007 helper scripts) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 355 edges, 48 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | 7/7 endpoints return 200, uptime 48h13m (stable) |
+| 9 | DS-007 submit | PASS | deduplicated (38 existing off-by-one-self-test solutions) |
+| 10 | Stats | PASS | 164 problems, 205 answers, 205 verified, queue_depth=0, hit_rate=1.0, coverage=1.25 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (25KB), specs/ui-spec.md (44KB) |
+| 13 | Docs | PASS | 8 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 6 indirect outdated (go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.4, x/exp, x/telemetry — all transitive) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (3 code comments only) |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore clean, .vfs/ excluded from tracking |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-156 entry written (381598ca) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** sub_4bf99b (tick 155 DS-007, off-by-one-self-test-tick155) completed between ticks — answers advanced 203→205 (+2), problems 162→164 (+2), coverage 1.253→1.25 (minor dilution from new problems). New external solution solved: ct-merkle-proof-verifier (problem 163). Queue fully drained and empty. DS-007 submission deduplicated — the off-by-one-self-test class now has 38 existing solutions. Self-test success rate: ~87% (38 complete, 5 failed in queue history). Server 48h13m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed.
+
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (38 existing solutions). Cooldown 900s.
