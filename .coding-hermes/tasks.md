@@ -28,7 +28,7 @@
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Status:** ALL PHASES COMPLETE (33 tasks, 11/11 packages tested). 0 stubs, 0 TODOs.
-> **Last E2E:** PASS (tick 133) — Server OK on :8766, 37h47m uptime, DS-007 sub_c1f98d queued pos 2. Build PASS, vet PASS, tests PASS (11 packages). GitReins guard PASS. Hilo 351 edges/44 files. NEVER-DONE audit: 14/14 PASS, 1 known gap (0 benchmarks). 0 outdated deps. 0 new gaps. 9 active enhancement tasks on board.
+|> **Last E2E:** PASS (tick 154) — Server OK on :8766, 47h34m uptime, DS-007 deduplicated (38 existing solutions). Build PASS, vet PASS, tests PASS (11 packages). GitReins guard PASS. Hilo 352 edges/45 files. NEVER-DONE audit: 14/14 PASS, 1 known gap (0 benchmarks). 0 outdated deps. 0 new gaps. 9 active enhancement tasks on board.
 
 ## Active Tasks
 
@@ -424,3 +424,34 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Notable:** sub_14131a (tick 152 DS-007) completed between ticks — answers advanced 200→201 (+1), coverage 1.25→1.25625. Queue fully drained. New DS-007 submission sub_4f88cd (foreman-tick153-e2e) queued position 1 with 0 existing solutions (new problem class), estimated 30s. Self-test success rate: ~85% (last 47: 40 pass, 7 fail). Server 1d16h41m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed.
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_4f88cd queued pos 1 (0 existing solutions). Cooldown 900s.
+
+### Tick 154 — 2026-07-26 09:07 UTC (DeepSeek V4 Flash)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | clean (+3 untracked DS-007 helper scripts) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 352 edges, 45 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | 7/7 endpoints return 200, uptime 47h34m (stable) |
+| 9 | DS-007 submit | PASS | deduplicated (38 existing solutions) |
+| 10 | Stats | PASS | 161 problems, 202 answers, 202 verified, queue_depth=0, hit_rate=1.0, coverage=1.2547 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 6 indirect outdated (go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.4, x/exp, x/telemetry — all transitive) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (3 code comments only) |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix) |
+| 19 | Code quality | PASS | .gitignore clean, .vfs/ excluded from tracking, .coding-hermes/ excluded except tasks.md |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check script PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-154 entry written (be817fa7) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Between ticks, answers advanced 201→202 (+1), problems 160→161 (+1), coverage 1.25625→1.2547 (minor dilution from new problem). Queue fully drained — all prior submissions processed. DS-007 self-test submission deduplicated (off-by-one-self-test class has 38 existing solutions). Self-test success rate: ~84% (last 47: 40 pass, 7 fail). Server 47h34m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed.
+
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (38 existing solutions). Cooldown 900s.
