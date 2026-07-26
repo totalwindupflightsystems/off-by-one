@@ -115,7 +115,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_02dfbc queued pos 1 (28 existing solutions). Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
 
-### Tick 143 — 2026-07-26 09:28 UTC (DeepSeek V4 Flash)
+### Tick 144 — 2026-07-26 10:22 UTC (DeepSeek V4 Flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -126,9 +126,9 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 | 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
 | 6 | Hilo graph | PASS | 352 edges, 45 files (stable) |
 | 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
-| 8 | Server health | PASS | 7/7 endpoints return 200, uptime 43h11m (stable) |
-| 9 | DS-007 submit | PASS | sub_d19d65 queued pos 1 (30 existing solutions, estimated 30s) |
-| 10 | Stats | PASS | 155 problems, 188 answers, 188 verified, queue_depth=0, hit_rate=1.0, coverage=1.2129 |
+| 8 | Server health | PASS | 7/7 endpoints return 200, uptime 43h51m (stable) |
+| 9 | DS-007 submit | PASS | sub_621c57 queued pos 3 (32 existing solutions, est 1m30s) |
+| 10 | Stats | PASS | 155 problems, 190 answers, 190 verified, queue_depth=3, hit_rate=1.0, coverage=1.2258 |
 | 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
 | 12 | Specs | PASS | specs/system-spec.md (25KB), specs/ui-spec.md (43KB) |
 | 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
@@ -138,10 +138,10 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 | 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
 | 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix) |
 | 19 | Code quality | PASS | .gitignore clean, .vfs/ excluded from tracking |
-| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M |
-| 21 | DuckBrain | PASS | off-by-one ns: tick-143 entry written (1a587bf0) |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check script PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-144 entry written (4f9d17ea) |
 | 22 | E2E testing | PASS | E2E-001 on board |
 
-**Notable:** sub_846377 (tick 142 DS-007) completed between ticks — answers advanced 187→188 (+1), coverage 1.206→1.2129. Solve completed 2026-07-26 09:08:05→09:10:07 (~2m02s). Queue is now empty (all submissions processed). New submission sub_d19d65 queued pos 1 with 30 existing solutions (up from 29 — +1 solution was added between ticks). Self-test success rate: ~87% (last failure sub_c1f98d tick 133). Server 43h11m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed.
+**Notable:** sub_d19d65 solved → answer 189 (09:46→09:47, ~1m18s). sub_43b1e8 solved → answer 190 (10:04→10:05, ~1m30s). Answers advanced 188→190 (+2), coverage 1.2129→1.2258. New DS-007 submission sub_621c57 queued position 3 with 32 existing solutions. One new failure between ticks: sub_8b9b22 at 05:21:08 (pi-agent exec: signal: killed). Self-test success rate: ~85% (last 26: 22 pass, 4 fail). Server 43h51m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed.
 
-**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_d19d65 queued pos 1 (30 existing solutions). Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_621c57 queued pos 3 (32 existing solutions). Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
