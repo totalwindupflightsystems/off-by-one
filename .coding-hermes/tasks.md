@@ -800,6 +800,37 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 | 21 | DuckBrain | PASS | off-by-one ns: tick-128 entry written |
 | 22 | E2E testing | PASS | E2E-001 on board |
 
-**Notable:** sub_9e05f0 (tick 127 DS-007) COMPLETED successfully between ticks — answers advanced 168→169. Self-test success rate: 17/20 completed (~85%). 3 recent failures (sub_15787d, sub_1a7964, sub_9a2316) all between 2026-07-25 08:53-17:15 UTC — consistent with sporadic solver failures tracked by SOLVER-001/SOLVER-002 on board. New submission sub_90a436 queued pos 1.
+**Notable:** sub_90a436 (tick 128 DS-007) COMPLETED successfully between ticks — answers advanced 169→170. Self-test success rate: 18/21 completed (~86%). 3 recent failures (sub_15787d, sub_1a7964, sub_9a2316) all between 2026-07-25 08:53-17:15 UTC — consistent with sporadic solver failures tracked by SOLVER-001/SOLVER-002 on board. sub_90a436 completed in 34s (01:53→01:54 UTC) — very fast solve. New submission sub_9802dc queued pos 4.
 
 **Verdict:** IDLE — 0 new gaps. 14-point audit: 14/14 PASS (1 known gap: benchmarks). 9 active enhancement tasks on board. DS-007 sub_90a436 queued pos 1. Cooldown 900s. Fallback path (foreman skill unavailable).
+
+### Tick 129 — 2026-07-26 02:09 UTC (DeepSeek V4 Flash)
+
+|| # | Gate | Result | Detail |
+||---|------|--------|--------|
+|| 1 | Git status | PASS | clean |
+|| 2 | GitReins dual-source | PASS | 0 pending (board + GitReins consistent) |
+|| 3 | go build | PASS | clean |
+|| 4 | go vet | PASS | clean |
+|| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+|| 6 | Hilo graph | PASS | 352 edges, 45 files |
+|| 7 | GitReins guard | PASS | secrets clean, PASS (full mode) |
+|| 8 | Server health | PASS | :8766 returns 200 |
+|| 9 | DS-007 submit | PASS | sub_9802dc queued pos 4 (cadence: post-debug, 18 existing solutions, estimated 2m0s) |
+|| 10 | Stats | PASS | 149 problems, 170 answers, 170 verified, queue_depth=3, hit_rate=1.0, coverage=1.141 |
+|| 11 | Endpoints | PASS | 6/6 return 200 (/health, /openapi.json, /api/v1/problems, /queue, /taxonomy, /stats) |
+|| 12 | Specs | PASS | system-spec.md (766L), ui-spec.md (789L) |
+|| 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
+|| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+|| 15 | Deps | PASS | 6 indirect outdated (go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.4, x/exp, x/telemetry — all transitive) |
+|| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs (all return nil,nil are guard clauses) |
+|| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+|| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix) |
+|| 19 | Code quality | PASS | .gitignore clean, .vfs/ excluded |
+|| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M |
+|| 21 | DuckBrain | PASS | off-by-one ns: tick-129 entry written |
+|| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** sub_90a436 (tick 128 DS-007) COMPLETED successfully between ticks — answers advanced 169→170. Solve time 34s (01:53→01:54 UTC) — very fast. Self-test success rate: 18/21 completed (~86%). 3 recent failures (sub_15787d, sub_1a7964, sub_9a2316). New submission sub_9802dc queued pos 4.
+
+**Verdict:** IDLE — 0 new gaps. 14-point audit: 14/14 PASS (1 known gap: benchmarks). 9 active enhancement tasks on board. DS-007 sub_9802dc queued pos 4 (estimated 2m0s, 18 existing solutions). Cooldown 900s. Fallback path (foreman skill unavailable).
