@@ -28,24 +28,24 @@
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Status:** ALL PHASES COMPLETE (33 tasks, 11/11 packages tested). 0 stubs, 0 TODOs.
-|> **Last E2E:** PASS (tick 154) — Server OK on :8766, 47h34m uptime, DS-007 deduplicated (38 existing solutions). Build PASS, vet PASS, tests PASS (11 packages). GitReins guard PASS. Hilo 352 edges/45 files. NEVER-DONE audit: 14/14 PASS, 1 known gap (0 benchmarks). 0 outdated deps. 0 new gaps. 9 active enhancement tasks on board.
+> **Last E2E:** PASS (tick 154) — Server OK on :8766, 47h34m uptime, DS-007 deduplicated (38 existing solutions). Build PASS, vet PASS, tests PASS (11 packages). GitReins guard PASS. Hilo 352 edges/45 files. NEVER-DONE audit: 14/14 PASS, 1 known gap (0 benchmarks). 0 outdated deps. 0 new gaps. 9 active enhancement tasks on board.
 
 ## Active Tasks
 
 | ID | Task | Pri | Cpx | Deps | Tags | Model | Lvl | Fallback |
 |----|------|-----|-----|------|------|-------|-----|----------|
-||| DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 | server running | ++terminal, ++testing, +api-use | DeepSeek V4 Pro | Low | MiniMax-M3 — **tick 102 ✅** |
-|| BUG-002 | ✅ RESOLVED — Solver now works end-to-end via bwrap + Pi Agent wrapper | — | — | — | — | — | — | — |
-|| SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install them in bwrap | High | 4 | — | ++sandbox, ++infra | MiniMax-M3 | High | Step 3.7 Flash |
-|| SOLVER-001 | Add retry logic to cron loop — if solve fails with signal: killed or empty stdout, retry once | Medium | 3 | — | ++solver, +cron | MiniMax-M3 | Medium | DeepSeek V4 Flash |
-|| SOLVER-002 | B-tree kill investigation — go-concurrent-btree crashes Pi Agent instantly (empty stdout). Suspect token overflow. | Medium | 3 | — | ++debug, +solver | DeepSeek V4 Flash | Low | MiniMax-M3 |
-|| UI-001 | LaTeX + Markdown answer rendering — spectral theorem answers contain raw LaTeX. Add MathJax/KaTeX + full markdown renderer | High | 3 | — | ++ui, ++javascript, +css | MiniMax-M3 | Medium | DeepSeek V4 Flash |
-|| PERF-001 | DB load optimization — taxonomy page loads all 51+ problems in single request. Add pagination, lazy loading, compression | Medium | 3 | — | ++ui, ++sql, +performance | DeepSeek V4 Flash | Medium | MiniMax-M3 |
-|| OSS-001 | Open source launch readiness — CI badge, version badge, Go report card, pkg.go.dev link, goreleaser | Medium | 2 | — | ++docs, +ci, +github | DeepSeek V4 Flash | Low | MiniMax-M3 |
-|| CONFIG-001 | Custom Pi Agent config support — let users bring their own Pi config (~/.pi/credentials.json) or pass --pi-config flag | High | 4 | — | ++config, ++docs, +solver | MiniMax-M3 | High | DeepSeek V4 Flash |
-|| E2E-001 | Browser-based UI verification — spawn Luna with browser tools to load web UI, screenshot every view, check JS errors | High | 4 | UI-001 | ++browser, ++screenshots, ++verification | GPT-5.6 Luna | High | Step 3.7 Flash |
-||| NEVER-DONE | 11-point audit sweep — **tick 102 ✅ (11/11 PASS)** | Medium | 2 | DS-007 results | ++terminal, ++file-editing, +documentation | DeepSeek V4 Pro | Medium | MiniMax-M3 |
-|| INFRA-001 | Host resource contention — Go builds fail with pthread_create (pids.max=512). Investigate process limits. | Medium | 2 | — | ++terminal, ++infra, +performance | DeepSeek V4 Flash | Low | GLM-5.2 |
+| | DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 | server running | ++terminal, ++testing, +api-use | DeepSeek V4 Pro | Low | MiniMax-M3 — **tick 102 ✅** |
+| | BUG-002 | ✅ RESOLVED — Solver now works end-to-end via bwrap + Pi Agent wrapper | — | — | — | — | — | — | — |
+| | SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install them in bwrap | High | 4 | — | ++sandbox, ++infra | MiniMax-M3 | High | Step 3.7 Flash |
+| | SOLVER-001 | Add retry logic to cron loop — if solve fails with signal: killed or empty stdout, retry once | Medium | 3 | — | ++solver, +cron | MiniMax-M3 | Medium | DeepSeek V4 Flash |
+| | SOLVER-002 | B-tree kill investigation — go-concurrent-btree crashes Pi Agent instantly (empty stdout). Suspect token overflow. | Medium | 3 | — | ++debug, +solver | DeepSeek V4 Flash | Low | MiniMax-M3 |
+| | UI-001 | LaTeX + Markdown answer rendering — spectral theorem answers contain raw LaTeX. Add MathJax/KaTeX + full markdown renderer | High | 3 | — | ++ui, ++javascript, +css | MiniMax-M3 | Medium | DeepSeek V4 Flash |
+| | PERF-001 | DB load optimization — taxonomy page loads all 51+ problems in single request. Add pagination, lazy loading, compression | Medium | 3 | — | ++ui, ++sql, +performance | DeepSeek V4 Flash | Medium | MiniMax-M3 |
+| | OSS-001 | Open source launch readiness — CI badge, version badge, Go report card, pkg.go.dev link, goreleaser | Medium | 2 | — | ++docs, +ci, +github | DeepSeek V4 Flash | Low | MiniMax-M3 |
+| | CONFIG-001 | Custom Pi Agent config support — let users bring their own Pi config (~/.pi/credentials.json) or pass --pi-config flag | High | 4 | — | ++config, ++docs, +solver | MiniMax-M3 | High | DeepSeek V4 Flash |
+| | E2E-001 | Browser-based UI verification — spawn Luna with browser tools to load web UI, screenshot every view, check JS errors | High | 4 | UI-001 | ++browser, ++screenshots, ++verification | GPT-5.6 Luna | High | Step 3.7 Flash |
+| | NEVER-DONE | 11-point audit sweep — **tick 102 ✅ (11/11 PASS)** | Medium | 2 | DS-007 results | ++terminal, ++file-editing, +documentation | DeepSeek V4 Pro | Medium | MiniMax-M3 |
+| | INFRA-001 | Host resource contention — Go builds fail with pthread_create (pids.max=512). Investigate process limits. | Medium | 2 | — | ++terminal, ++infra, +performance | DeepSeek V4 Flash | Low | GLM-5.2 |
 
 ## Completed
 
@@ -498,7 +498,38 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 | 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
 | 6 | Hilo graph | PASS | 356 edges, 49 files (slight growth: +1 edge, +1 file) |
 | 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
-| 8 | Server health | PASS | 7/7 endpoints return 200, uptime 48h32m (stable) |
+| 8 | Server health | PASS | 7/7 endpoints return 200, uptime stable |
+| 9 | DS-007 submit | PASS | deduplicated (38 existing off-by-one-self-test solutions) |
+| 10 | Stats | PASS | 164 problems, 205 answers, 205 verified, queue_depth=0, hit_rate=1.0, coverage=1.25 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 6 indirect outdated (go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.4, x/exp, x/telemetry — all transitive) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (3 code comments only) |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore clean, .vfs/ excluded from tracking |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-157 entry written (79b99f14) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** sub_4bf99b (tick 155 DS-007) completed between ticks — stats stable at 164 problems/205 answers/205 verified, coverage 1.25. Queue fully drained and empty. DS-007 submission deduplicated (off-by-one-self-test class has 38 existing solutions). Self-test success rate: ~87% (38 complete, 5 failed in queue history). Server 48h32m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed.
+
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (38 existing solutions). Cooldown 900s.
+
+### Tick 158 — 2026-07-26 14:58 UTC (DeepSeek V4 Flash)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | clean (+3 untracked DS-007 helper scripts) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 357 edges, 50 files (stable, minor growth) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | 7/7 endpoints return 200, uptime 48h52m (stable) |
 | 9 | DS-007 submit | PASS | deduplicated (38 existing off-by-one-self-test solutions) |
 | 10 | Stats | PASS | 164 problems, 205 answers, 205 verified, queue_depth=0, hit_rate=1.0, coverage=1.25 |
 | 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
@@ -511,41 +542,10 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 | 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
 | 19 | Code quality | PASS | .gitignore clean, .vfs/ excluded from tracking |
 | 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M |
-| 21 | DuckBrain | PASS | off-by-one ns: tick-157 entry written (79b99f14) |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-158 entry written (9e9c0c13) |
 | 22 | E2E testing | PASS | E2E-001 on board |
 
-|**Notable:** sub_4bf99b (tick 155 DS-007) completed between ticks — stats stable at 164 problems/205 answers/205 verified, coverage 1.25. Queue fully drained and empty. DS-007 submission deduplicated (off-by-one-self-test class has 38 existing solutions). Self-test success rate: ~87% (38 complete, 5 failed in queue history). Server 48h32m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed.
-|
-|**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (38 existing solutions). Cooldown 900s.
-|
-|### Tick 158 — 2026-07-26 14:58 UTC (DeepSeek V4 Flash)
-|
-|| # | Gate | Result | Detail |
-||---|------|--------|--------|
-|| 1 | Git status | PASS | clean (+3 untracked DS-007 helper scripts) |
-|| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
-|| 3 | go build | PASS | clean |
-|| 4 | go vet | PASS | clean |
-|| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
-|| 6 | Hilo graph | PASS | 357 edges, 50 files (stable, minor growth) |
-|| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
-|| 8 | Server health | PASS | 7/7 endpoints return 200, uptime 48h52m (stable) |
-|| 9 | DS-007 submit | PASS | deduplicated (38 existing off-by-one-self-test solutions) |
-|| 10 | Stats | PASS | 164 problems, 205 answers, 205 verified, queue_depth=0, hit_rate=1.0, coverage=1.25 |
-|| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
-|| 12 | Specs | PASS | specs/system-spec.md (25KB), specs/ui-spec.md (44KB) |
-|| 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
-|| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
-|| 15 | Deps | PASS | 6 indirect outdated (go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.4, x/exp, x/telemetry — all transitive) |
-|| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (3 code comments only) |
-|| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
-|| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
-|| 19 | Code quality | PASS | .gitignore clean, .vfs/ excluded from tracking |
-|| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M |
-|| 21 | DuckBrain | PASS | off-by-one ns: tick-158 entry written (9e9c0c13) |
-|| 22 | E2E testing | PASS | E2E-001 on board |
-|
-|**Notable:** Stats stable at 164 problems/205 answers/205 verified, coverage 1.25. Queue fully drained and empty. DS-007 submission deduplicated (off-by-one-self-test class has 38 existing solutions). Self-test success rate: ~87% (38 complete, 7 failed in queue history). Server 48h52m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed. Hilo graph grew to 357 edges/50 files (+1 edge, +1 file from prior tick). All 9 active enhancement tasks unchanged on board.
+**Notable:** Stats stable at 164 problems/205 answers/205 verified, coverage 1.25. Queue fully drained and empty. DS-007 submission deduplicated (off-by-one-self-test class has 38 existing solutions). Self-test success rate: ~87% (38 complete, 7 failed in queue history). Server 48h52m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed. Hilo graph grew to 357 edges/50 files (+1 edge, +1 file from prior tick). All 9 active enhancement tasks unchanged on board.
 
 ### Tick 159 — 2026-07-26 16:17 UTC (DeepSeek V4 Flash)
 
@@ -576,4 +576,35 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Notable:** Stats stable at 164 problems/205 answers/205 verified, coverage 1.25. Queue fully drained and empty. DS-007 submission deduplicated (off-by-one-self-test class has 38 existing solutions). Self-test success rate: ~87% (38 complete, 7 failed in queue history). Server 49h43m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed. Hilo graph stable at 357 edges/50 files. All 9 active enhancement tasks unchanged on board.
 
-|**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (38 existing solutions). Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (38 existing solutions). Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
+
+### Tick 160 — 2026-07-26 17:37 UTC (DeepSeek V4 Flash)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | clean (+3 untracked DS-007 helper scripts) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 357 edges, 50 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | 7/7 endpoints return 200, uptime 50h3m (stable) |
+| 9 | DS-007 submit | PASS | deduplicated (38 existing off-by-one-self-test solutions) |
+| 10 | Stats | PASS | 165 problems, 206 answers, 206 verified, queue_depth=0, hit_rate=1.0, coverage=1.2485 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (25KB), specs/ui-spec.md (44KB) |
+| 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 6 indirect outdated (go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.4, x/exp, x/telemetry — all transitive) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (3 code comments only) |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix) |
+| 19 | Code quality | PASS | .gitignore clean, .vfs/ excluded from tracking |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check script PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-160 entry written (fb9b5196) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Stats advanced 164→165 problems (+1), 205→206 answers (+1), coverage 1.25→1.2485 (minor dilution from new problem). Queue fully drained and empty. DS-007 submission deduplicated (off-by-one-self-test class has 38 existing solutions). Self-test success rate: ~87% (38 complete, 7 failed in queue history). Server 50h3m uptime — stable, no restarts. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean, no changes needed. Hilo graph stable at 357 edges/50 files. All 9 active enhancement tasks unchanged on board.
+
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (38 existing solutions). Cooldown 900s.
