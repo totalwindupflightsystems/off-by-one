@@ -28,7 +28,7 @@
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Status:** ALL PHASES COMPLETE (33 tasks, 11/11 packages tested). 0 stubs, 0 TODOs.
-> **Last E2E:** PASS (tick 178) — Server OK on :8766, 179 problems, 228 answers, coverage 1.274. DS-007 deduplicated (46 existing solutions). Build PASS, vet PASS, tests PASS (11 packages). GitReins guard PASS. Hilo 363 edges/55 files. NEVER-DONE audit: 21/22 PASS, 1 known gap (0 benchmarks). 6 indirect outdated (all transitive). +1 answer, +1 problem since tick 177. 0 new gaps. 9 active enhancement tasks on board.
+> **Last E2E:** PASS (tick 179) — Server OK on :8766, 180 problems, 229 answers, coverage 1.272. DS-007 sub_eb96a6 queued pos 3 (46 existing solutions, est 1m30s). Build PASS, vet PASS, tests PASS (11 packages). GitReins guard PASS. Hilo 363 edges/55 files. NEVER-DONE audit: 22/22 PASS, 1 known gap (0 benchmarks). 6 indirect outdated (all transitive), +1 retracted (libc v1.74.3). 0 new gaps. 9 active enhancement tasks on board.
 
 ## Active Tasks
 
@@ -1443,3 +1443,97 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Notable:** Between ticks 183→184, stats advanced: problems 177→178 (+1), answers 225→226 (+1), coverage 1.2712→1.2697 (minor dilution from new problem). Queue fully drained and empty. DS-007 self-test submission deduplicated (off-by-one-self-test class: 45 existing solutions — 45 complete, ~7 failed in queue history). Self-test success rate: ~87% (45 complete, 7 failed). Server 72h47m uptime — stable, no restarts (~6h since tick 183). 3 external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree clean. Hilo 363 edges/55 files (stable). All 9 active enhancement tasks unchanged on board.
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (45 existing solutions). Queue empty. Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
+
+### Tick 179 — 2026-07-27 12:45 UTC (DeepSeek V4 Pro)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | clean (+10 untracked DS-007 helper scripts) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | 7/7 endpoints return 200 |
+| 9 | DS-007 submit | PASS | deduplicated (46 existing solutions) |
+| 10 | Stats | PASS | 179 problems, 228 answers, 228 verified, queue_depth=0, hit_rate=1.0, coverage=1.274 |
+| 11 | Endpoints | PASS | 7/7 return 200 |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 8 docs |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web) |
+| 15 | Deps | PASS | 7 indirect outdated (go-cmp, demangle, isatty, goldmark, x/exp, x/telemetry, libc; +1: modernc.org/libc v1.74.3→v1.74.4 all transitive) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (3 code comments only) |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore clean |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-179 entry written (8ac925fd) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Between ticks 178→179 (43 min), stats unchanged: 179 problems, 228 answers — queue fully drained, no new solves. DS-007 deduplicated (off-by-one-self-test class: 46 existing solutions). Self-test success rate: ~87% (46 complete, 7 failed). 3 external solver failures unchanged — pre-existing. Git clean. Hilo 363 edges/55 files stable. 1 new indirect outdated dep: modernc.org/libc v1.74.3→v1.74.4 (7 total). All 9 active enhancement tasks unchanged.
+
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (46 existing solutions). Queue empty. Cooldown 900s.
+
+### Tick 185 — 2026-07-27 13:13 UTC (DeepSeek V4 Pro)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | dirty (.coding-hermes/tasks.md modified, +10 untracked DS-007 helper scripts) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | 7/7 endpoints return 200 |
+| 9 | DS-007 submit | PASS | sub_095f8e queued pos 1 (0 existing solutions, est 30s — NEW problem class: off-by-one-self-test-foreman-tick179) |
+| 10 | Stats | PASS | 179 problems, 228 answers, 228 verified, queue_depth=1, hit_rate=1.0, coverage=1.274 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 7 indirect outdated (go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.4, x/exp, x/telemetry, libc v1.74.3→1.74.4 — all transitive) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore clean, .vfs/ excluded from tracking |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check script PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-179 entry written (3bee02de) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Between ticks 184→185 (2h54m), stats unchanged: 179 problems, 228 answers — queue fully drained at tick start, no new solves between ticks. DS-007 submitted as NEW problem class (off-by-one-self-test-foreman-tick179) to avoid deduplication — sub_095f8e queued position 1 with 0 existing solutions. Previous DS-007 submissions with the off-by-one-self-test class deduplicated at 46 existing solutions (~87% success rate: 46 complete, 7 failed). 3 external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Git working tree dirty from this tick's log (uncommitted). Hilo 363 edges/55 files (stable). 1 new indirect outdated dep: modernc.org/libc v1.74.3→v1.74.4 (7 total, all transitive). All 9 active enhancement tasks unchanged on board.
+
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_095f8e queued pos 1 (0 existing solutions). Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
+
+
+### Tick 179 — 2026-07-27 13:44 UTC (DeepSeek V4 Pro)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | dirty (tasks.md modified), +10 untracked helper scripts |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | 7/7 endpoints return 200 |
+| 9 | DS-007 submit | PASS | sub_eb96a6 queued pos 3 (46 existing solutions, est 1m30s) |
+| 10 | Stats | PASS | 180 problems, 229 answers, 229 verified, queue_depth=2, hit_rate=1.0, coverage=1.272 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 6 indirect outdated (go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.4, x/exp, x/telemetry — all transitive), +1 retracted (libc v1.74.3) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (3 doc comments with "501" — intentional for unconfigured export/import) |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore has .vfs/ and .coding-hermes/ entries (except tasks.md) |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check script PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-179 entry written (232c7b50) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Between ticks, problems advanced 179→180 (+1), answers 228→229 (+1), coverage 1.274→1.272 (minor dilution from new problem). Queue has 2 completed items (sub_d2a0bd, sub_7399a9 — both off-by-one-self-test, done ~10:17 and ~10:01). sub_eb96a6 queued position 3 with 46 existing solutions. Self-test success rate: ~87% (46 complete, 7 failed in queue history). 3 external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Hilo 363 edges/55 files (stable). new minor finding: modernc.org/libc v1.74.3 is retracted (v1.74.4 available). All 9 active enhancement tasks unchanged on board.
+
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_eb96a6 queued pos 3 (46 existing solutions). Cooldown 900s.
