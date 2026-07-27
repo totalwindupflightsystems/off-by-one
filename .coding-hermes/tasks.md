@@ -28,7 +28,7 @@
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Status:** ALL PHASES COMPLETE (33 tasks, 11/11 packages tested). 0 stubs, 0 TODOs.
-> **Last E2E:** PASS (tick 180) — Server OK on :8766, 67h23m uptime, DS-007 sub_7399a9 queued (43 existing solutions). Build PASS, vet PASS, tests PASS (11 packages). GitReins guard PASS. Hilo 363 edges/55 files. NEVER-DONE audit: 11/11 PASS, 1 known gap (0 benchmarks). 6 indirect outdated (all transitive). 0 new gaps. 9 active enhancement tasks on board.
+> **Last E2E:** PASS (tick 181) — Server OK on :8766, 67h41m uptime, DS-007 sub_d2a0bd queued (44 existing solutions). Build PASS, vet PASS, tests PASS (11 packages). GitReins guard PASS. Hilo 363 edges/55 files. NEVER-DONE audit: 11/11 PASS, 1 known gap (0 benchmarks). 6 indirect outdated (all transitive). 0 new gaps. 9 active enhancement tasks on board.
 
 ## Active Tasks
 
