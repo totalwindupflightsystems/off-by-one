@@ -115,6 +115,68 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 ## Tick Log
 
+### Tick 183 — 2026-07-28 01:55 UTC (DeepSeek V4 Pro — scheduler)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | dirty (tasks.md modified, +10 untracked DS-007 helper scripts) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | 7/7 endpoints return 200 |
+| 9 | DS-007 submit | PASS | deduplicated (48 existing solutions) |
+| 10 | Stats | PASS | 186 problems, 237 answers, 237 verified, queue_depth=2, hit_rate=1.0, coverage=1.274 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 7 outdated (6 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — all transitive; +1 retracted: libc v1.74.3→1.74.4) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore clean, .vfs/ and .coding-hermes/ excluded (except tasks.md) |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check script PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-183 entry written (611d3d93) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Stats unchanged from tick 182 (186 problems, 237 answers, coverage 1.274). Queue depth ticked from 0→2 (background solver activity). DS-007 deduplicated (off-by-one-self-test class has 48 existing solutions — 48 complete, 7 failed in queue history). Self-test success rate: ~87% (48 complete, 7 failed). Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Deps: 6 indirect outdated + 1 retracted (libc v1.74.3→1.74.4). Hilo 363 edges/55 files (stable). All 9 active enhancement tasks unchanged on board.
+
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (48 existing solutions). Cooldown 900s.
+
+### Tick 182 — 2026-07-28 01:15 UTC (DeepSeek V4 Pro)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 1 | Git status | PASS | clean (+10 untracked DS-007 helper scripts) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11/11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | 7/7 endpoints return 200 |
+| 9 | DS-007 submit | PASS | deduplicated (48 existing solutions) |
+| 10 | Stats | PASS | 186 problems, 237 answers, 237 verified, queue_depth=0, hit_rate=1.0, coverage=1.274 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 9 docs: AGENTS.md, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT + docs/landing-spec.md |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 7 outdated (6 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — all transitive; +1 retracted: libc v1.74.3→1.74.4) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore clean, .vfs/ and .coding-hermes/ excluded (except tasks.md) |
+| 20 | GitReins judge | PASS | evaluator: deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check script PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-182 entry written (a443f7cb) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Between ticks, answers advanced 236→237 (+1), problems stable at 186, coverage 1.269→1.274. Queue fully drained. DS-007 deduplicated (off-by-one-self-test class has 48 existing solutions — 48 complete, 7 failed in queue history). Self-test success rate: ~87% (48 complete, 7 failed). Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) remain in failed state — pre-existing, not regressions. Deps: 6 indirect outdated + 1 retracted (libc v1.74.3→1.74.4). Hilo 363 edges/55 files (stable). All 9 active enhancement tasks unchanged on board.
+
+**Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (48 existing solutions). Cooldown 900s.
+
 ### Tick 181 — 2026-07-27 23:59 UTC (DeepSeek V4 Pro)
 
 | # | Gate | Result | Detail |
