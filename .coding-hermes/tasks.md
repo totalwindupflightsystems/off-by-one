@@ -28,7 +28,7 @@
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Status:** ALL PHASES COMPLETE (33 tasks, 11/11 packages tested). 0 stubs, 0 TODOs.
-> **Last E2E:** PASS (tick 207) — Server OK on :8766, 213 problems, 270 answers, coverage 1.268. DS-007 sub_82504b queued pos 1 (0 existing, est 30s). Build PASS, vet PASS, tests PASS (14 packages, 249 funcs). GitReins guard PASS. Hilo 363 edges/55 files. NEVER-DONE audit: 21/22 PASS, 1 known gap (0 benchmarks). 8 outdated deps (7 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry, sqlite v1.54.0→1.55.0 — all transitive; +1 retracted: libc v1.74.3→1.74.4). 9 docs + CODEOWNERS confirmed (3 missing: GOVERNANCE.md, NOTICE, TRADEMARK_POLICY.md — tick 193 finding). 0 untracked scripts on disk (Hilo orphans phantom). 0 new gaps. 9 active enhancement tasks. DuckBrain: off-by-one ns confirmed, tick-207 stored (a1f31345). Cooldown: unavailable (scheduler unreachable).
+> **Last E2E:** PASS (tick 207) — Server OK on :8766, 214 problems, 271 answers, coverage 1.266. DS-007 sub_e0c118 queued pos 1 (0 existing, est 30s). Build PASS, vet PASS, tests PASS (14 packages). GitReins guard PASS. Hilo 363 edges/55 files. NEVER-DONE audit: 21/22 PASS, 1 known gap (0 benchmarks). 8 outdated deps (7 indirect + 1 retracted libc v1.74.3→1.74.4). 9 docs + CODEOWNERS confirmed (3 missing: GOVERNANCE.md, NOTICE, TRADEMARK_POLICY.md — tick 193 finding). 0 untracked scripts on disk. 0 new gaps. 9 active enhancement tasks. Govulncheck clean. DuckBrain: off-by-one ns confirmed, tick-207 stored (ff34452a). Cooldown: 43200s (SET — idle project).
 
 ## Active Tasks
 
@@ -210,6 +210,38 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 enhancement tasks active. DS-007 sub_16a6d8 queued pos 1. Cooldown unavailable.
 
 ## Tick Log
+
+### Tick 207 — 2026-07-29 09:02 UTC (DeepSeek V4 Pro — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | 43200s (SET — idle project, 1 known gap) |
+| 1 | Git status | PASS | dirty (tasks.md — this tick's board update; 0 untracked scripts — find confirms none on disk) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 14 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS |
+| 8 | Server health | PASS | :8766 returns 200, 214 problems, 271 answers, queue=0, coverage=1.266, uptime 114h27m |
+| 9 | DS-007 submit | PASS | sub_e0c118 queued pos 1 (0 existing solutions — new date variant, fresh solve) |
+| 10 | Stats | PASS | 214 problems, 271 answers, 271 verified, queue_depth=0, hit_rate=1.0, coverage=1.266 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 9 docs + CODEOWNERS: AGENTS.md, README, CHANGELOG, CODEOWNERS, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, docs/landing-spec.md (3 missing from expanded 12: NOTICE, GOVERNANCE.md, TRADEMARK_POLICY.md — tick 193 finding) |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 8 outdated (7 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry, sqlite v1.54.0→1.55.0 — all transitive; +1 retracted: libc v1.74.3→1.74.4) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source, gofmt clean (3 comment-only mentions) |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.26.5, 45 lines) |
+| 19 | Code quality | PASS | .gitignore has .vfs/ and .coding-hermes/ (except tasks.md), .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check-gitreins-judge.py PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-207 entry written (ff34452a), recall confirmed |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Between ticks 206-207, problems advanced 212→214 (+2), answers 269→271 (+2), coverage 1.269→1.266 (-0.003, minor dilution from new problems). Queue fully drained at check time. DS-007 sub_e0c118 queued position 1 with 0 existing solutions — new date variant (`off-by-one-self-test-tick207`), fresh solve path (no deduplication). Self-test success rate: ~87% historical. Server 114h27m uptime — stable. External solver failures unchanged (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix). Hilo 363 edges/55 files (stable). 0 untracked helper scripts on disk — Hilo orphan list shows 9 phantom entries (down from 11 in tick 206; 2 cleared by cache refresh). All 9 enhancement tasks unchanged. Scheduler cooldown SET to 43200s (was 1350s — idle project, 1 known gap). Govulncheck clean (Go 1.26.5). Deps: +1 newly outdated (sqlite v1.54.0→1.55.0, transitive). Docs gap unchanged since tick 193. Foreman skill unavailable — canonical fallback (board+cron+never-done+hilo+gitreins) used.
+
+**Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_e0c118 queued pos 1 (0 existing, fresh solve path). Cooldown 43200s.
 
 ### Tick 206 — 2026-07-29 03:22 UTC (DeepSeek V4 Pro — foreman)
 
@@ -2519,3 +2551,4 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Notable:** Between ticks 203-204, problems advanced 208→210 (+2), answers 265→267 (+2), coverage 1.274→1.271 (-0.003, minor dilution from new problems). Queue depth 2 at check time (2 ahead of sub_fad250 pos 3). DS-007 sub_fad250 queued position 3 with 0 existing solutions — new date variant (off-by-one-self-test-tick204), fresh solve path (no deduplication). Self-test success rate: ~87% historical. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) pre-existing, not regressions. Hilo 363 edges/55 files (stable). 0 untracked helper scripts on disk — confirmed via find. Hilo orphan list shows 11 phantom entries (known stale artifacts — no on-disk files). M4 scan: 12 matrix rows, 3 with checkmarks (DS-007, BUG-002, NEVER-DONE), 9 implicit-pending enhancement tasks (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001) — unchanged from ticks 199-203. Scheduler unreachable this tick — cooldown unverifiable; board uses last confirmed 1350s from tick 192. Docs: 3 missing from expanded 12-file checklist (GOVERNANCE.md, NOTICE, TRADEMARK_POLICY.md) — same finding as ticks 193-203. DS-007 helper scripts (_ds007_submit.py et al.) confirmed absent from disk since tick 192 correction; submit now via direct curl to preserve E2E pipeline.
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_fad250 queued pos 3 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
+
