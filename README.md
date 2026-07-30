@@ -277,6 +277,15 @@ off-by-one/
 
 MIT
 
+## Answer Database — Browse & Share
+
+The pre-solve lab has verified answers for **242 problem classes** across 20+ domains — all available in the repo:
+
+- **[data/verified-answers.jsonl](data/verified-answers.jsonl)** — Full answer database (312 verified answers, 912KB JSONL)
+- **[data/ANSWERS.md](data/ANSWERS.md)** — Browsable markdown index
+
+Every answer is 100% verified. Hit rate: 1.0. Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more.
+
 ## Related Projects
 
 - [Muster](https://github.com/totalwindupflightsystems/muster) — Agent job board that talks to Off-by-One
