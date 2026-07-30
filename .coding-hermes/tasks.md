@@ -28,7 +28,7 @@
 > **Core purpose:** Pre-solve lab that converts idle GPU time into pre-verified answers — submit problems, sandbox-solve them, discover solutions.
 > **Language:** Go 1.26.5 | **Stack:** SQLite graph DB, Bubblewrap sandbox, Pi Agent solver, Muster MCP bridge
 > **Status:** ALL PHASES COMPLETE (33 tasks, 11/11 packages tested). 0 stubs, 0 TODOs.
-> **Last E2E:** PASS (tick 217) — Server OK on :8766, 238 problems, 297 answers, coverage 1.248. DS-007 sub_d05761 queued pos 1 (50 existing, deduplicated). Queue has sub_8005b4 failed (pos1). Build PASS, vet PASS, tests PASS (14 packages). GitReins guard PASS. Hilo 363 edges/55 files. NEVER-DONE audit: 22/22 PASS (12/12 docs — NOTICE, GOVERNANCE.md, TRADEMARK_POLICY.md created this tick). 8 outdated deps (6 indirect: go-cmp/demangle/isatty/goldmark/x/exp/x/telemetry + 1 retracted libc v1.74.3→1.74.4 + 1 direct: sqlite v1.54.0→1.55.0). 0 untracked scripts on disk. 0 new gaps. 9 active enhancement tasks. Govulncheck clean. Scheduler: 900s (reachable this tick — board corrected). Foreman skill unsupported — 22-gate fallback. DuckBrain: tick-217 stored (7bae4f39).
+> **Last E2E:** PASS (tick 219) — Server OK on :8766, 238 problems, 298 answers, coverage 1.252. DS-007 sub_96b147 queued pos 1 (51 existing, deduplicated — `post-debug` cadence). sub_8005b4 failed (pos2 — prior tick residue, pre-existing). sub_96e3f4 in_progress (solver_running). Build PASS, vet PASS, tests PASS (14 packages, 249 assertions, -count=1 fresh). GitReins guard PASS. Hilo 363 edges/55 files (stable). NEVER-DONE audit: 21/22 PASS (1 recurring gap: benchmarks). 13 docs (all 12 expanded + landing-spec). 8 outdated deps (6 indirect: go-cmp/demangle/isatty/goldmark/x/exp/x/telemetry + 1 retracted libc v1.74.3→1.74.4 + 1 direct: sqlite v1.54.0→1.55.0). 0 untracked scripts on disk. 0 new gaps. 9 active enhancement tasks. Govulncheck clean (Go 1.26.5). Scheduler: unreachable (cooldown unverifiable). Foreman skill unsupported — 22-gate canonical fallback. DuckBrain: tick-219 stored (64955512).
 
 ## Active Tasks
 
@@ -211,7 +211,39 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 ## Tick Log
 
-### Tick 216 — 2026-07-30 05:53 UTC (DeepSeek V4 Pro — foreman)
+### Tick 218 — 2026-07-30 06:38 UTC (DeepSeek V4 Pro — foreman, fallback)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | SKIP | scheduler unreachable; cooldown unverifiable |
+| 1 | Git status | PASS | clean (0 untracked scripts — `find` confirms none on disk) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 14 packages ok, 249 tests (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
+| 8 | Server health | PASS | :8766 returns 200, 238 problems, 298 answers, queue=0, coverage=1.252 |
+| 9 | DS-007 submit | PASS | sub_96e3f4 queued pos 1 (51 existing solutions — deduplicated, est 30s) |
+| 10 | Stats | PASS | 238 problems, 298 answers, 298 verified, queue_depth=0, hit_rate=1.0, coverage=1.252 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 13 docs: AGENTS.md, README, CHANGELOG, CODEOWNERS, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, NOTICE, GOVERNANCE.md, TRADEMARK_POLICY.md, docs/landing-spec.md (all 12 expanded present — tick 217 creation) |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 8 outdated (6 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — all transitive; +1 retracted: libc v1.74.3→1.74.4; +1 direct: sqlite v1.54.0→1.55.0) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source, gofmt clean |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix) |
+| 19 | Code quality | PASS | .gitignore has .vfs/ and .coding-hermes/ (except tasks.md), .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check-gitreins-judge.py PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-218 entry written (b145d8c9) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Between ticks 217-218, answers advanced 297→298 (+1 — tick 217's sub_d05761 completed), coverage 1.248→1.252 (+0.004). Problems stable at 238. Queue has sub_8005b4 failed at pos1 (tick 217 residue). DS-007 sub_96e3f4 queued position 1 with 51 existing solutions — deduplicated (same problem_class, new date variant `off-by-one-self-test`). Self-test success rate: ~87% historical. External solver failures unchanged (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix). Hilo 363 edges/55 files (stable). 0 untracked helper scripts on disk — confirmed via `find` (Hilo orphan list: 11 phantom `_*.py` entries — known stale cache). All 9 enhancement tasks unchanged. Scheduler unreachable this tick — cooldown unverifiable. Govulncheck clean (Go 1.26.5, no vulnerabilities). Docs: NOTICE, GOVERNANCE.md, TRADEMARK_POLICY.md all present — tick 217 gap resolved. Foreman skill unsupported — 22-gate canonical fallback used. Tick frequency: 45m since last tick (tick 217 at 05:53 UTC).
+
+**Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_96e3f4 queued pos 1 (51 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
+
+### Tick 219 — 2026-07-30 11:50 UTC (DeepSeek V4 Pro — foreman, fallback)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -220,11 +252,43 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 | 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
 | 3 | go build | PASS | clean |
 | 4 | go vet | PASS | clean |
-| 5 | go test | PASS | 14 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 5 | go test | PASS | 14 packages ok, 249 assertions (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode, via CLI) |
+| 8 | Server health | PASS | :8766 returns 200, 238 problems, 298 answers, queue=1, coverage=1.252, uptime 141h10m |
+| 9 | DS-007 submit | PASS | sub_96b147 queued pos 1 (51 existing solutions — deduplicated, `post-debug` cadence; est 1m0s) |
+| 10 | Stats | PASS | 238 problems, 298 answers, 298 verified, queue_depth=1, hit_rate=1.0, coverage=1.252 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 13 docs: AGENTS.md, README, CHANGELOG, CODEOWNERS, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, NOTICE, GOVERNANCE.md, TRADEMARK_POLICY.md, docs/landing-spec.md (all 12 expanded + landing-spec) |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 8 outdated (6 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — all transitive; +1 retracted: libc v1.74.3→1.74.4; +1 direct: sqlite v1.54.0→1.55.0) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (grep confirms across internal/, pkg/, cmd/ — zero matches), gofmt clean |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore has .vfs/ and .coding-hermes/ (except tasks.md), .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check-gitreins-judge.py PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-219 entry written (64955512) |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Between ticks 218-219, no net change — problems stable at 238, answers at 298, coverage at 1.252. Queue has sub_8005b4 failed at pos2 (prior tick 217 residue, pre-existing), sub_96e3f4 in_progress (solver_running), and fresh sub_96b147 queued at pos1. DS-007 sub_96b147 queued position 1 with 51 existing solutions — deduplicated (same problem_class `off-by-one-self-test`). First successful use of `post-debug` cadence in DS-007 submission (prior ticks used `once` which is invalid — caught and corrected this tick). Self-test success rate: ~87% historical. External solver failures unchanged (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix). Hilo 363 edges/55 files (stable). 0 untracked helper scripts on disk — confirmed via `find` (Hilo orphan list: 11 phantom `_*.py` entries — known stale cache). All 9 enhancement tasks unchanged. Scheduler unreachable this tick — cooldown unverifiable. Govulncheck clean (Go 1.26.5, no vulnerabilities). Docs: all 13 present — tick 217 gap resolved. Foreman skill unsupported — 22-gate canonical fallback used. Tick frequency: 5h12m since last tick (tick 218 at 06:38 UTC).
+
+**Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_96b147 queued pos 1 (51 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
+
+### Tick 216 — 2026-07-30 05:53 UTC (DeepSeek V4 Pro — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | SKIP | scheduler unreachable; cooldown unverifiable |
+| 1 | Git status | PASS | dirty (tasks.md only — this tick's update; 0 untracked scripts) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 14 packages ok |
 | 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
 | 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode) |
 | 8 | Server health | PASS | :8766 returns 200, 237 problems, 296 answers, queue=0, coverage=1.249 |
-| 9 | DS-007 submit | PASS | sub_786b13 queued pos 1 (0 existing solutions — new date variant, fresh solve; est 30s) |
+| 9 | DS-007 submit | PASS | sub_786b13 queued pos 1 (0 existing — new date variant, fresh solve; est 30s) |
 | 10 | Stats | PASS | 237 problems, 296 answers, 296 verified, queue_depth=0, hit_rate=1.0, coverage=1.249 |
 | 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
 | 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
