@@ -23,6 +23,38 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+### Tick 241 — 2026-07-31 02:42 UTC (DeepSeek V4 Pro — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | GET /api/v1/projects/off-by-one → 200: Enabled=true, CooldownS=1350, Priority=5, Weight=10, deepseek-v4-flash @ deepseek-foreman |
+| 1 | Git status | PASS | clean (0 untracked scripts on root; 13 _*.py in .coding-hermes/ — gitignored) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty via MCP, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 14 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (via MCP — no staged Go files) |
+| 8 | Server health | PASS | :8766 returns 200, uptime 161h9m, 246 problems, 329 answers, queue=0, coverage=1.337 |
+| 9 | DS-007 submit | PASS | deduplicated — 74 existing solutions (same problem_class off-by-one-self-test); E2E pipeline confirmed functional |
+| 10 | Stats | PASS | 246 problems, 329 answers, 329 verified, queue_depth=0, hit_rate=1.0, coverage=1.337 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 13/13: NOTICE (no .md extension) present; AGENTS, README, CHANGELOG, CODEOWNERS, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, GOVERNANCE, TRADEMARK_POLICY, docs/landing-spec.md all present |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 8 outdated (6 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — all transitive; +1 retracted: libc v1.74.3→1.74.4; +1 direct: sqlite v1.54.0→1.55.0) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source, gofmt clean |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore has .vfs/ and .coding-hermes/ (except tasks.md), .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-241 entry written (e2ffacc5) |
+| 22 | E2E testing | PASS | DS-007 deduplicated (74 existing — E2E pipeline functional) |
+
+**Notable:** Between ticks 240-241 no delta — problems stable at 246, answers at 329, coverage at 1.337. Only 28m since last tick. DS-007 deduplicated (74 existing, problem_class off-by-one-self-test). Server uptime 161h9m — stable. Queue has 100 history entries (80 complete, 20 active). Scheduler cooldown verified (1350s/22.5m). Govulncheck clean (Go 1.26.5). Hilo 363 edges/55 files (stable). All 9 enhancement tasks unchanged. Deps: 8 outdated (same set). 13 _*.py helpers in .coding-hermes/ (gitignored). 0 untracked scripts on project root.
+
+**Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (74 existing). Cooldown verified (1350s).
+
 ### Tick 240 — 2026-07-31 02:13 UTC (DeepSeek V4 Pro — foreman)
 
 | # | Gate | Result | Detail |
