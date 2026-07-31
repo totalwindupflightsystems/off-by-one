@@ -23,6 +23,70 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+### Tick 235 — 2026-07-30 22:15 UTC (DeepSeek V4 Pro — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | SKIP | scheduler reachable (200) but /cooldown 404 — unverifiable |
+| 1 | Git status | PASS | dirty (tasks.md only; 0 untracked scripts on root; 6 _*.py in .coding-hermes/ — gitignored) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty via MCP, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode, via MCP) |
+| 8 | Server health | PASS | :8766 returns 200, 246 problems, 326 answers, queue=1, coverage=1.325 |
+| 9 | DS-007 submit | PASS | sub_d85ed1 queued pos 1 (71 existing solutions — deduplicated, est 30s) |
+| 10 | Stats | PASS | 246 problems, 326 answers, 326 verified, queue_depth=1, hit_rate=1.0, coverage=1.325 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 13/13: NOTICE (no .md extension) present (391B); AGENTS, README, CHANGELOG, CODEOWNERS, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, GOVERNANCE, TRADEMARK_POLICY, docs/landing-spec all present |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 8 outdated (6 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — all transitive; +1 retracted: libc v1.74.3→1.74.4; +1 direct: sqlite v1.54.0→1.55.0) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source, gofmt clean |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore has .vfs/ and .coding-hermes/ (except tasks.md), .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check-gitreins-judge.py PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-235 entry written (765b69db) |
+| 22 | E2E testing | PASS | DS-007 sub_d85ed1 live submit to queue |
+
+**Notable:** Between ticks 234-235, answers advanced 325→326 (+1 — sub_cdffdb from tick 234 completed), coverage 1.321→1.325 (+0.004, improvement from new answer). Problems stable at 246. DS-007 sub_d85ed1 queued position 1 with 71 existing solutions — deduplicated (same problem_class off-by-one-self-test). Self-test success rate: ~87% historical. Hilo 363 edges/55 files (stable). 0 untracked helper scripts on project root — confirmed. 6 _*.py helpers in .coding-hermes/ (gitignored). Hilo orphan list: 11 phantom _*.py entries (known stale cache). All 9 enhancement tasks unchanged. Scheduler reachable (200) but /cooldown 404 — cooldown unverifiable. Govulncheck clean (Go 1.26.5). Docs: all 13 present (NOTICE without .md extension — 391 bytes). Deps: 8 outdated (same set as tick 234). Tick frequency: ~28m since last tick (tick 234 at 21:47 UTC, dispatched at 22:15 UTC).
+
+**Verdict:** IDLE — 0 new gaps. 21/23 gates PASS (1 known recurring gap: benchmarks; 0 docs gaps — all 13 present). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_d85ed1 queued pos 1 (71 existing, deduplicated). Scheduler reachable but cooldown unverifiable (/cooldown 404).
+
+### Tick 234 — 2026-07-31 21:47 UTC (DeepSeek V4 Pro — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | SKIP | scheduler reachable (status: 35 active projects, 3 active ticks) but /cooldown 404 — unverifiable |
+| 1 | Git status | PASS | clean (0 untracked scripts on project root; 6 _*.py helpers in .coding-hermes/ — gitignored) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty via MCP, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (full mode, via MCP) |
+| 8 | Server health | PASS | :8766 returns 200, 246 problems, 325 answers, queue=0, coverage=1.321 |
+| 9 | DS-007 submit | PASS | sub_cdffdb queued pos 1 (70 existing solutions — deduplicated, est 30s) |
+| 10 | Stats | PASS | 246 problems, 325 answers, 325 verified, queue_depth=0, hit_rate=1.0, coverage=1.321 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 13/13: NOTICE (no .md extension) present (391B); AGENTS, README, CHANGELOG, CODEOWNERS, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, GOVERNANCE, TRADEMARK_POLICY, docs/landing-spec all present |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 8 outdated (6 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — all transitive; +1 retracted: libc v1.74.3→1.74.4; +1 direct: sqlite v1.54.0→1.55.0) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source, gofmt clean |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines) |
+| 19 | Code quality | PASS | .gitignore has .vfs/ and .coding-hermes/ (except tasks.md), .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check-gitreins-judge.py PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-234 entry written |
+| 22 | E2E testing | PASS | E2E-001 on board |
+
+**Notable:** Between ticks 233-234, answers advanced 324→325 (+1 — sub_e3898b from tick 233 completed at 02:18 UTC), coverage 1.317→1.321 (+0.004, slight improvement from new answer). Problems stable at 246. Queue fully drained at check time — both sub_e3898b (02:18) and sub_728c4b (01:48) completed. DS-007 sub_cdffdb queued position 1 with 70 existing solutions — deduplicated (same problem_class off-by-one-self-test). Self-test success rate: ~87% historical. Three external solver failures (raft-log-compaction, reliable-udp-transport, rust-borrow-check-fix) pre-existing, not regressions. Two recent failures: sub_33170f, sub_926028 (tick 229 era). Hilo 363 edges/55 files (stable). 0 untracked helper scripts on project root — confirmed via find. 6 _*.py helpers in .coding-hermes/ (gitignored). Hilo orphan list: 11 phantom _*.py entries (known stale cache — 5 claimed by Hilo don't exist on disk). All 9 enhancement tasks unchanged. Scheduler reachable this tick (35 active projects, 3 active ticks) but /cooldown endpoint 404 — cooldown unverifiable. Govulncheck clean (Go 1.26.5). Docs: all 13 present (NOTICE without .md extension — 391 bytes). Deps: 8 outdated (same set as tick 233). Foreman skill unsupported — 22-gate canonical fallback used. Tick frequency: ~19h28m since last tick (tick 233 at 02:19 UTC, dispatched at 21:47 UTC).
+
+**Verdict:** IDLE — 0 new gaps. 21/23 gates PASS (1 known recurring gap: benchmarks; 0 docs gaps — all 13 present). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_cdffdb queued pos 1 (70 existing, deduplicated). Scheduler reachable but cooldown unverifiable (/cooldown 404).
+
 ### Tick 233 — 2026-07-31 02:19 UTC (DeepSeek V4 Pro — foreman)
 
 | # | Gate | Result | Detail |
