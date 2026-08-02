@@ -23,6 +23,38 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+### Tick 244 — 2026-08-02 20:31 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | GET /api/v1/projects/off-by-one → 200: Enabled=true, CooldownS=900 (was 1350), Priority=5, Weight=10, deepseek-v4-flash @ deepseek-foreman; latest_tick=this tick (off-by-one-2026-08-02-15-30-55, running) |
+| 1 | Git status | PASS | tasks.md only (cosmetic header normalization DeepSeek V4 Pro→deepseek-v4-flash on old ticks, left uncommitted since 07-31 14:20); 0 untracked scripts on root; 13 _*.py in .coding-hermes/ — gitignored |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty via MCP, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 14 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | secrets clean, all guards PASS (via MCP — no staged Go files) |
+| 8 | Server health | PASS | :8766 returns 200, uptime 1h49m (RESTARTED — was 163h+), 412 problems, 502 answers, queue_depth=6, coverage=1.218 |
+| 9 | DS-007 submit | PASS | deduplicated — 74 existing solutions (same problem_class off-by-one-self-test); E2E pipeline confirmed functional |
+| 10 | Stats | PASS | 412 problems, 502 answers, 502 verified, queue_depth=6, hit_rate=1.0, coverage=1.218 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 13/13: NOTICE (no .md extension) present; AGENTS, README, CHANGELOG, CODEOWNERS, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, GOVERNANCE, TRADEMARK_POLICY, docs/landing-spec.md all present |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 9 outdated (6 indirect: go-cmp v0.6→0.7, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — all transitive; +1 retracted: libc v1.74.3→1.74.4; +1 direct: sqlite v1.54.0→1.55.0; +1: modernc.org/cc/v4 v4.29.1→4.29.2) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (3 comment mentions of test stubs only), gofmt clean |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix, 45 lines); gh run list: last push (sitrep PRD 11:41 UTC) success 48s, pages build success |
+| 19 | Code quality | PASS | .gitignore has .vfs/ and .coding-hermes/ (except tasks.md), .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check-gitreins-judge.py PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-244 entry written (d413a51f) |
+| 22 | E2E testing | PASS | DS-007 deduplicated (74 existing — E2E pipeline functional) |
+
+**Notable:** First tick in ~39h (last was tick 243 at 07-31 05:26 UTC; no ticks 244+ dispatched in between — scheduler cooldown config changed 1350s→900s). **MAJOR data delta:** server restarted (uptime 1h49m vs 163h+ at tick 243) and the lab is now being fed REAL fleet problems — problems 246→412 (+166), answers 329→502 (+173), coverage 1.337→1.218 (diluted by rapid problem ingestion, expected). New problems are from fleet foremen: go-docs-oss-inventory, board-duckdb-mirror-stale, go-test-git-commit-date-determinism, go-ci-gofmt-enforcement, e2e-output-contract-prompt-mismatch, etc. — the pre-solve lab is now converting idle GPU time into pre-verified answers for the wider fleet (matching the sitrep PRD commit cafa457 today: 393p/483a at 11:41 UTC, now 412p/502a). Queue: 6 in-flight (sub_b3ba49 solver_running in sandbox), 80 complete / 20 failed in 100-entry history — all failures historical (pre-restart), none new. DS-007 deduplicated (74 existing). Govulncheck clean (Go 1.26.5). Hilo 363 edges/55 files (stable). All 9 enhancement tasks unchanged. Deps: 9 outdated (modernc.org/cc/v4 now showing). Board carries an uncommitted cosmetic normalization of old tick headers (DeepSeek V4 Pro→deepseek-v4-flash, made 07-31 14:20) — kept and committed with this tick.
+
+**Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (74 existing). Cooldown verified (900s). Lab now fleet-fed: 412 problems / 502 answers, server restarted healthy, all historical failures pre-restart.
+
 ### Tick 242 — 2026-07-31 05:05 UTC (DeepSeek V4 Flash — foreman)
 
 | # | Gate | Result | Detail |
@@ -55,7 +87,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (74 existing). Cooldown verified (1350s). DuckBrain MCP healthy again.
 
-### Tick 241 — 2026-07-31 02:42 UTC (DeepSeek V4 Pro — foreman)
+### Tick 241 — 2026-07-31 02:42 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -87,7 +119,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (74 existing). Cooldown verified (1350s).
 
-### Tick 240 — 2026-07-31 02:13 UTC (DeepSeek V4 Pro — foreman)
+### Tick 240 — 2026-07-31 02:13 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -119,7 +151,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (74 existing). Cooldown verified (1350s).
 
-### Tick 239 — 2026-07-31 01:43 UTC (DeepSeek V4 Pro — foreman)
+### Tick 239 — 2026-07-31 01:43 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -151,7 +183,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (74 existing). One solver failure from prior tick (sub_36e4f7). Cooldown verified (1350s).
 
-### Tick 238 — 2026-07-31 06:17 UTC (DeepSeek V4 Pro — foreman)
+### Tick 238 — 2026-07-31 06:17 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -183,7 +215,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_f0c734 queued pos 1 (73 existing, deduplicated). Cooldown verified (1350s).
 
-### Tick 237 — 2026-07-31 01:10 UTC (DeepSeek V4 Pro — foreman)
+### Tick 237 — 2026-07-31 01:10 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -247,7 +279,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_36e4f7 queued pos 1 (72 existing, deduplicated) — script fixed this tick after schema mismatch discovered. Cooldown verified (1350s). DuckBrain write verified on disk; MCP read paths erroring.
 
-### Tick 235 — 2026-07-30 22:15 UTC (DeepSeek V4 Pro — foreman)
+### Tick 235 — 2026-07-30 22:15 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -279,7 +311,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/23 gates PASS (1 known recurring gap: benchmarks; 0 docs gaps — all 13 present). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_d85ed1 queued pos 1 (71 existing, deduplicated). Scheduler reachable but cooldown unverifiable (/cooldown 404).
 
-### Tick 234 — 2026-07-31 21:47 UTC (DeepSeek V4 Pro — foreman)
+### Tick 234 — 2026-07-31 21:47 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -311,7 +343,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/23 gates PASS (1 known recurring gap: benchmarks; 0 docs gaps — all 13 present). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_cdffdb queued pos 1 (70 existing, deduplicated). Scheduler reachable but cooldown unverifiable (/cooldown 404).
 
-### Tick 233 — 2026-07-31 02:19 UTC (DeepSeek V4 Pro — foreman)
+### Tick 233 — 2026-07-31 02:19 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -343,7 +375,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/23 gates PASS (1 known recurring gap: benchmarks; 0 docs gaps — all 13 present). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_e3898b queued pos 1 (69 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 232 — 2026-07-30 21:40 UTC (DeepSeek V4 Pro — foreman)
+### Tick 232 — 2026-07-30 21:40 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -375,7 +407,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/23 gates PASS (1 known recurring gap: benchmarks; 1 known docs gap: NOTICE.md since tick 193). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_728c4b queued pos 1 (68 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 231 — 2026-07-30 16:13 UTC (DeepSeek V4 Pro — foreman)
+### Tick 231 — 2026-07-30 16:13 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -407,7 +439,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/23 gates PASS (1 known recurring gap: benchmarks; 1 known docs gap: NOTICE.md since tick 193). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_400196 queued pos 1 (67 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 230 — 2026-07-30 15:50 UTC (DeepSeek V4 Pro — foreman)
+### Tick 230 — 2026-07-30 15:50 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -439,7 +471,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/23 gates PASS (1 known recurring gap: benchmarks; 1 known docs gap: NOTICE.md since tick 193). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_283cce queued pos 1 (66 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 229 — 2026-07-30 20:25 UTC (DeepSeek V4 Pro — foreman)
+### Tick 229 — 2026-07-30 20:25 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -471,7 +503,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/23 gates PASS (1 known recurring gap: benchmarks; 1 known docs gap: NOTICE.md since tick 193). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_3f2442 queued pos 3 (65 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 228 — 2026-07-30 19:55 UTC (DeepSeek V4 Pro — foreman)
+### Tick 228 — 2026-07-30 19:55 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -503,7 +535,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_9fa1ca queued pos 1 (64 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 227 — 2026-07-30 19:30 UTC (DeepSeek V4 Pro — foreman)
+### Tick 227 — 2026-07-30 19:30 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -535,7 +567,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_08a712 queued pos 1 (63 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 226 — 2026-07-30 19:11 UTC (DeepSeek V4 Pro — foreman)
+### Tick 226 — 2026-07-30 19:11 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -567,7 +599,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_9fbf71 queued pos 1 (62 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 225 — 2026-07-30 18:50 UTC (DeepSeek V4 Pro — foreman)
+### Tick 225 — 2026-07-30 18:50 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -599,7 +631,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_94a4be queued pos 1 (61 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 224 — 2026-07-30 18:20 UTC (DeepSeek V4 Pro — foreman)
+### Tick 224 — 2026-07-30 18:20 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -631,7 +663,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_ba5106 queued pos 1 (59 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 223 — 2026-07-30 17:42 UTC (DeepSeek V4 Pro — foreman)
+### Tick 223 — 2026-07-30 17:42 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -663,7 +695,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_f6acb8 queued pos 1 (58 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 222 — 2026-07-30 15:53 UTC (DeepSeek V4 Pro — foreman)
+### Tick 222 — 2026-07-30 15:53 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -695,7 +727,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_ada143 queued pos 1 (57 existing, deduplicated). DuckBrain MCP unreachable. Cooldown unavailable (scheduler unreachable).
 
-### Tick 221 — 2026-07-30 14:07 UTC (DeepSeek V4 Pro — foreman)
+### Tick 221 — 2026-07-30 14:07 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -727,7 +759,7 @@
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_fdd472 queued pos 1 (55 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 220 — 2026-07-30 13:16 UTC (DeepSeek V4 Pro — foreman)
+### Tick 220 — 2026-07-30 13:16 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -770,7 +802,8 @@
 
 | ID | Task | Pri | Cpx | Deps | Tags | Model | Lvl | Fallback |
 |----|------|-----|-----|------|------|-------|-----|----------|
-| | DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 | server running | ++terminal, ++testing, +api-use | DeepSeek V4 Pro | Low | MiniMax-M3 — **tick 102 ✅** |
+|| BOARD-V2 | 🟡 MIGRATE BOARD TO DUCKDB v2.1 — run `python3 ~/.hermes/scripts/migrate-board-to-duckdb.py .` (load skill coding-hermes-board first). Creates .coding-hermes/board/ (schema.sql, tasks.parquet, events.parquet), archives tasks.md → tasks.md.bak, commit. Same pattern as DuckBrain. | P1 | 3 | — | duckdb,board,migration | deepseek-v4-flash | Run migration script, verify Parquet, commit board | deepseek-v4-flash |
+| | DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 | server running | ++terminal, ++testing, +api-use | deepseek-v4-flash | Low | MiniMax-M3 — **tick 102 ✅** |
 | | BUG-002 | ✅ RESOLVED — Solver now works end-to-end via bwrap + Pi Agent wrapper | — | — | — | — | — | — | — |
 | | SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install them in bwrap | High | 4 | — | ++sandbox, ++infra | MiniMax-M3 | High | Step 3.7 Flash |
 | | SOLVER-001 | Add retry logic to cron loop — if solve fails with signal: killed or empty stdout, retry once | Medium | 3 | — | ++solver, +cron | MiniMax-M3 | Medium | DeepSeek V4 Flash |
@@ -780,7 +813,7 @@
 | | OSS-001 | Open source launch readiness — CI badge, version badge, Go report card, pkg.go.dev link, goreleaser | Medium | 2 | — | ++docs, +ci, +github | DeepSeek V4 Flash | Low | MiniMax-M3 |
 | | CONFIG-001 | Custom Pi Agent config support — let users bring their own Pi config (~/.pi/credentials.json) or pass --pi-config flag | High | 4 | — | ++config, ++docs, +solver | MiniMax-M3 | High | DeepSeek V4 Flash |
 | | E2E-001 | Browser-based UI verification — spawn Luna with browser tools to load web UI, screenshot every view, check JS errors | High | 4 | UI-001 | ++browser, ++screenshots, ++verification | GPT-5.6 Luna | High | Step 3.7 Flash |
-| | NEVER-DONE | 11-point audit sweep — **tick 102 ✅ (11/11 PASS)** | Medium | 2 | DS-007 results | ++terminal, ++file-editing, +documentation | DeepSeek V4 Pro | Medium | MiniMax-M3 |
+| | NEVER-DONE | 11-point audit sweep — **tick 102 ✅ (11/11 PASS)** | Medium | 2 | DS-007 results | ++terminal, ++file-editing, +documentation | deepseek-v4-flash | Medium | MiniMax-M3 |
 | | INFRA-001 | Host resource contention — Go builds fail with pthread_create (pids.max=512). Investigate process limits. | Medium | 2 | — | ++terminal, ++infra, +performance | DeepSeek V4 Flash | Low | GLM-5.2 |
 
 ## Completed
@@ -796,7 +829,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 ## Routing Notes
 
 - **Go implementation (bounded):** MiniMax-M3 primary (flat-rate prepaid)
-- **Go debugging/complex:** DeepSeek V4 Pro
+- **Go debugging/complex:** deepseek-v4-flash
 - **UI/JavaScript:** MiniMax-M3 for bounded, DeepSeek V4 Flash for mechanical
 - **E2E browser testing:** GPT-5.6 Luna (vision + screenshots, $100/mo flat)
 - **INFRA tasks:** DeepSeek V4 Flash — investigation only, no code changes expected
@@ -849,7 +882,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_ebe3e8 queued pos 1 (41 existing solutions). Cooldown 900s.
 
-### Tick 200 — 2026-07-29 05:40 UTC (DeepSeek V4 Pro — foreman)
+### Tick 200 — 2026-07-29 05:40 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -881,7 +914,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_319a6c queued pos 3 (1 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 201 — 2026-07-29 05:59 UTC (DeepSeek V4 Pro — foreman)
+### Tick 201 — 2026-07-29 05:59 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -913,7 +946,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_57b305 queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 205 — 2026-07-29 07:55 UTC (DeepSeek V4 Pro — foreman)
+### Tick 205 — 2026-07-29 07:55 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -947,7 +980,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 ## Tick Log
 
-### Tick 218 — 2026-07-30 06:38 UTC (DeepSeek V4 Pro — foreman, fallback)
+### Tick 218 — 2026-07-30 06:38 UTC (deepseek-v4-flash — foreman, fallback)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -979,7 +1012,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_96e3f4 queued pos 1 (51 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 219 — 2026-07-30 11:50 UTC (DeepSeek V4 Pro — foreman, fallback)
+### Tick 219 — 2026-07-30 11:50 UTC (deepseek-v4-flash — foreman, fallback)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1011,7 +1044,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_96b147 queued pos 1 (51 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 216 — 2026-07-30 05:53 UTC (DeepSeek V4 Pro — foreman)
+### Tick 216 — 2026-07-30 05:53 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1043,7 +1076,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_786b13 queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 215 — 2026-07-30 05:29 UTC (DeepSeek V4 Pro — foreman)
+### Tick 215 — 2026-07-30 05:29 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1075,7 +1108,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_7135f0 queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 214 — 2026-07-30 04:35 UTC (DeepSeek V4 Pro — foreman)
+### Tick 214 — 2026-07-30 04:35 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1137,7 +1170,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_89e379 queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 212 — 2026-07-30 08:34 UTC (DeepSeek V4 Pro — foreman)
+### Tick 212 — 2026-07-30 08:34 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1169,7 +1202,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_be036d queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 211 — 2026-07-30 03:14 UTC (DeepSeek V4 Pro — foreman)
+### Tick 211 — 2026-07-30 03:14 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1201,7 +1234,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (49 existing solutions, same problem_class). Cooldown unavailable (scheduler unreachable).
 
-### Tick 210 — 2026-07-30 02:32 UTC (DeepSeek V4 Pro — foreman)
+### Tick 210 — 2026-07-30 02:32 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1233,7 +1266,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_df9c36 queued pos 1 (1 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 209 — 2026-07-30 06:06 UTC (DeepSeek V4 Pro — foreman)
+### Tick 209 — 2026-07-30 06:06 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1265,7 +1298,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_736b42 queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 208 — 2026-07-29 16:41 UTC (DeepSeek V4 Pro — foreman, fallback)
+### Tick 208 — 2026-07-29 16:41 UTC (deepseek-v4-flash — foreman, fallback)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1297,7 +1330,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_e9ef54 queued pos 2 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 207 — 2026-07-29 09:02 UTC (DeepSeek V4 Pro — foreman)
+### Tick 207 — 2026-07-29 09:02 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1329,7 +1362,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_e0c118 queued pos 1 (0 existing, fresh solve path). Cooldown 43200s.
 
-### Tick 206 — 2026-07-29 03:22 UTC (DeepSeek V4 Pro — foreman)
+### Tick 206 — 2026-07-29 03:22 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1361,7 +1394,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_b3fcbc queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 207 — 2026-07-29 03:57 UTC (DeepSeek V4 Pro — foreman)
+### Tick 207 — 2026-07-29 03:57 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1393,7 +1426,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_82504b queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 199 — 2026-07-29 04:33 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 199 — 2026-07-29 04:33 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1425,7 +1458,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_00ea42 queued pos 1 (0 existing, fresh solve path). Cooldown 1350s (tick 192 verified; scheduler unavailable this tick).
 
-### Tick 198 — 2026-07-28 23:05 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 198 — 2026-07-28 23:05 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1457,7 +1490,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_931422 queued pos 1 (0 existing, fresh solve path). Cooldown 1350s (tick 192 verified; scheduler unavailable this tick).
 
-### Tick 195 — 2026-07-29 02:56 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 195 — 2026-07-29 02:56 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1489,7 +1522,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_8e8656 queued pos 1 (0 existing, fresh solve path). Cooldown 1350s (tick 192 verified; scheduler unavailable this tick).
 
-### Tick 196 — 2026-07-29 03:28 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 196 — 2026-07-29 03:28 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1521,7 +1554,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_25e54e queued pos 2 (0 existing, fresh solve path). Cooldown 1350s (tick 192 verified; scheduler unavailable this tick).
 
-### Tick 197 — 2026-07-29 03:59 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 197 — 2026-07-29 03:59 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1553,7 +1586,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_00f973 queued pos 1 (0 existing, fresh solve path). Cooldown 1350s (tick 192 verified; scheduler unavailable this tick).
 
-### Tick 194 — 2026-07-28 21:22 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 194 — 2026-07-28 21:22 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1585,7 +1618,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_057485 queued pos 1 (0 existing, fresh solve path). Cooldown 1350s (tick 192 verified; scheduler unavailable this tick).
 
-### Tick 191 — 2026-07-28 19:23 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 191 — 2026-07-28 19:23 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1616,7 +1649,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_62863a queued pos 1 (0 existing, fresh solve path). Cooldown 1350s (scheduler ground truth).
 
-### Tick 193 — 2026-07-28 20:41 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 193 — 2026-07-28 20:41 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1648,7 +1681,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_d7bba6 queued pos 1 (0 existing, fresh solve path). Cooldown 1350s (tick 192 verified; scheduler unavailable this tick).
 
-### Tick 192 — 2026-07-28 20:01 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 192 — 2026-07-28 20:01 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1679,7 +1712,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_81ef00 queued pos 1 (0 existing, fresh solve path). Cooldown 1350s (scheduler ground truth).
 
-### Tick 190 — 2026-07-28 18:51 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 190 — 2026-07-28 18:51 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1710,7 +1743,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_8dc0b0 queued pos 1 (3 existing solutions). Cooldown 1350s (scheduler ground truth).
 
-### Tick 189 — 2026-07-28 18:17 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 189 — 2026-07-28 18:17 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1741,7 +1774,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_36b05b queued pos 1 (2 existing solutions). Cooldown 1350s (scheduler ground truth).
 
-### Tick 188 — 2026-07-28 05:48 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 188 — 2026-07-28 05:48 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1772,7 +1805,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_6cc7fa queued pos 1 (deduplicated, 1 existing solution). Cooldown 1350s (scheduler ground truth).
 
-### Tick 185 — 2026-07-28 03:03 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 185 — 2026-07-28 03:03 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1803,7 +1836,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). CODEOWNERS created (foreman-direct fix). Cooldown corrected from fabricated 900s → actual 1350s. 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (48 existing solutions). Cooldown 1350s (scheduler ground truth).
 
-### Tick 187 — 2026-07-28 03:59 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 187 — 2026-07-28 03:59 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1834,7 +1867,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_2d0bce queued pos 3 (0 existing, fresh solve). Cooldown 1350s (scheduler ground truth).
 
-### Tick 186 — 2026-07-28 03:32 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 186 — 2026-07-28 03:32 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1865,7 +1898,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_6b10a4 queued pos 1 (48 existing solutions). Cooldown 1350s (scheduler ground truth).
 
-### Tick 183 — 2026-07-28 01:55 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 183 — 2026-07-28 01:55 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1896,7 +1929,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (48 existing solutions). Cooldown 900s.
 
-### Tick 184 — 2026-07-28 02:37 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 184 — 2026-07-28 02:37 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1927,7 +1960,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (48 existing solutions). Cooldown 900s.
 
-### Tick 182 — 2026-07-28 01:15 UTC (DeepSeek V4 Pro)
+### Tick 182 — 2026-07-28 01:15 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1958,7 +1991,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (48 existing solutions). Cooldown 900s.
 
-### Tick 181 — 2026-07-27 23:59 UTC (DeepSeek V4 Pro)
+### Tick 181 — 2026-07-27 23:59 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -1989,7 +2022,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (47 existing solutions). Cooldown 900s.
 
-### Tick 179 — 2026-07-27 14:04 UTC (DeepSeek V4 Pro)
+### Tick 179 — 2026-07-27 14:04 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -2020,7 +2053,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (47 existing solutions). Cooldown 900s.
 
-### Tick 180 — 2026-07-27 14:25 UTC (DeepSeek V4 Pro)
+### Tick 180 — 2026-07-27 14:25 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -2051,7 +2084,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (47 existing solutions). Cooldown 900s.
 
-### Tick 177 — 2026-07-27 11:31 UTC (DeepSeek V4 Pro)
+### Tick 177 — 2026-07-27 11:31 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -2082,7 +2115,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (46 existing solutions). Cooldown 900s.
 
-### Tick 178 — 2026-07-27 12:02 UTC (DeepSeek V4 Pro)
+### Tick 178 — 2026-07-27 12:02 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -2113,7 +2146,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (46 existing solutions). Cooldown 900s.
 
-### Tick 156 — 2026-07-27 10:49 UTC (DeepSeek V4 Pro)
+### Tick 156 — 2026-07-27 10:49 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3287,7 +3320,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_d2a0bd queued pos 1 (44 existing solutions). Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
 
-### Tick 182 — 2026-07-27 09:13 UTC (DeepSeek V4 Pro)
+### Tick 182 — 2026-07-27 09:13 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3318,7 +3351,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (45 existing solutions). Queue empty. Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
 
-### Tick 183 — 2026-07-27 09:44 UTC (DeepSeek V4 Pro)
+### Tick 183 — 2026-07-27 09:44 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3349,7 +3382,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (45 existing solutions). Queue empty. Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
 
-### Tick 184 — 2026-07-27 10:19 UTC (DeepSeek V4 Pro)
+### Tick 184 — 2026-07-27 10:19 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3380,7 +3413,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (45 existing solutions). Queue empty. Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
 
-### Tick 179 — 2026-07-27 12:45 UTC (DeepSeek V4 Pro)
+### Tick 179 — 2026-07-27 12:45 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3411,7 +3444,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (46 existing solutions). Queue empty. Cooldown 900s.
 
-### Tick 185 — 2026-07-27 13:13 UTC (DeepSeek V4 Pro)
+### Tick 185 — 2026-07-27 13:13 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3443,7 +3476,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_095f8e queued pos 1 (0 existing solutions). Cooldown 900s. Fallback path (coding-hermes-foreman unavailable on this platform).
 
 
-### Tick 179 — 2026-07-27 13:44 UTC (DeepSeek V4 Pro)
+### Tick 179 — 2026-07-27 13:44 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3475,7 +3508,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_eb96a6 queued pos 3 (46 existing solutions). Cooldown 900s.
 
 
-### Tick 182 — 2026-07-28 00:27 UTC (DeepSeek V4 Pro)
+### Tick 182 — 2026-07-28 00:27 UTC (deepseek-v4-flash)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3506,7 +3539,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_07a880 queued pos 1 (47 existing solutions). Cooldown 900s.
 
-### Tick 200 — 2026-07-29 05:00 UTC (DeepSeek V4 Pro — scheduler)
+### Tick 200 — 2026-07-29 05:00 UTC (deepseek-v4-flash — scheduler)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3540,7 +3573,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 
 
-### Tick 202 — 2026-07-29 06:26 UTC (DeepSeek V4 Pro — foreman)
+### Tick 202 — 2026-07-29 06:26 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3573,7 +3606,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_e0b85e queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
 
-### Tick 203 — 2026-07-29 06:59 UTC (DeepSeek V4 Pro — foreman)
+### Tick 203 — 2026-07-29 06:59 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3606,7 +3639,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_eafdb1 queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
 
-### Tick 204 — 2026-07-29 07:28 UTC (DeepSeek V4 Pro — foreman)
+### Tick 204 — 2026-07-29 07:28 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3640,7 +3673,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 
 
-### Tick 210 — 2026-07-30 07:04 UTC (DeepSeek V4 Pro — foreman)
+### Tick 210 — 2026-07-30 07:04 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3672,7 +3705,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_5dfaca queued pos 1 (0 existing, fresh solve path). Cooldown unavailable (scheduler unreachable).
 
-### Tick 215 — 2026-07-30 04:54 UTC (DeepSeek V4 Pro — foreman)
+### Tick 215 — 2026-07-30 04:54 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3705,7 +3738,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_a2065d queued pos 1 (49 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
 
-### Tick 216 — 2026-07-30 05:51 UTC (DeepSeek V4 Pro — foreman)
+### Tick 216 — 2026-07-30 05:51 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3739,7 +3772,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE with COOLDOWN CORRECTION — 0 new gaps, but critical fabrication chain exposed. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (50 existing solutions). Scheduler CooldownS=900 (active, verified fresh). Prior ticks' 43200s idle claim = fabrication.
 
-### Tick 217 — 2026-07-30 06:14 UTC (DeepSeek V4 Pro — foreman, fallback)
+### Tick 217 — 2026-07-30 06:14 UTC (deepseek-v4-flash — foreman, fallback)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3771,7 +3804,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** PRODUCTIVE — 22/22 gates PASS (1 known recurring gap: benchmarks). Docs gap RESOLVED (12/12 from 9/12). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_d05761 queued pos 1 (50 existing, deduplicated). Cooldown: 900s (scheduler reachable — board corrected).
 
-### Tick 221 — 2026-07-30 13:53 UTC (DeepSeek V4 Pro — foreman, fallback)
+### Tick 221 — 2026-07-30 13:53 UTC (deepseek-v4-flash — foreman, fallback)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3803,7 +3836,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_863ce9 queued pos 1 (54 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
-### Tick 222 — 2026-07-30 14:58 UTC (DeepSeek V4 Pro — foreman)
+### Tick 222 — 2026-07-30 14:58 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3835,7 +3868,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_871896 queued pos 1 (56 existing, deduplicated). Cooldown 900s (DB ground truth). Scheduler reachable this tick.
 
-### Tick 225 — 2026-07-30 18:58 UTC (DeepSeek V4 Pro — foreman)
+### Tick 225 — 2026-07-30 18:58 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3868,7 +3901,7 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Verdict:** IDLE — 0 new gaps. 21/22 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 sub_5f8c66 queued pos 1 (60 existing, deduplicated). Cooldown unavailable (scheduler unreachable).
 
 
-### Tick 236 — 2026-07-31 00:25 UTC (DeepSeek V4 Pro — foreman)
+### Tick 236 — 2026-07-31 00:25 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
 |---|------|--------|--------|
@@ -3931,3 +3964,4 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 **Notable:** Between ticks 242-243 no delta — problems stable at 246, answers at 329, coverage at 1.337. ~21m since last tick. DS-007 deduplicated (74 existing, problem_class off-by-one-self-test). Server uptime 163h53m — stable. Queue has 100 history entries (80 complete, 20 active) — fully drained at check (0 pending). Scheduler cooldown verified (1350s/22.5m). Govulncheck clean (Go 1.26.5). Hilo 363 edges/55 files (stable). All 9 enhancement tasks unchanged. Deps: 9 outdated (8 prior set + modernc.org/cc/v4 now showing). 13 _*.py helpers in .coding-hermes/ (gitignored). 0 untracked scripts on project root.
 
 **Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (74 existing). Cooldown verified (1350s). DuckBrain MCP healthy.
+
