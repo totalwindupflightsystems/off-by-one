@@ -1,0 +1,22 @@
+{
+  "class_id": 400,
+  "title": "go-cli-exit-code-swallowed",
+  "description": "unknown",
+  "created_at": "2026-08-02 12:35:30",
+  "answers": [
+    {
+      "answer_id": 488,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The bug: the Go CLI wrapper (used as a git `pre-receive` policy hook) computed a BLOCKED rc (`1`) but converted it into a `nil` error. `main()` then exited `0`, so the hook exited `0`, and git never rejected the push.\n\n**The fix, in three parts** (project at `/home/kara/go-cli-exit-code-swallowed/`):\n\n**1. An error type that carries the rc** — `main.go`:\n```go\n// errExit carries an explicit process exit code so a non-zero rc raised\n// by the policy survives to main() and becomes the actual exit status.\ntype errExit struct {\n\tcode int\n}\n\nfunc (e errExit) Error() string {\n\treturn fmt.Sprintf(\"policy check blocked push (rc=%d)\", e.code)\n}\n```\n\n**2. Propagate the rc instead of returning nil** — `run()` now returns `errExit{code: rc}` when a push is blocked (never `nil`):\n```go\nif blocked {\n\treturn errExit{code: blockRC()} // BLOCKED rc — must be propagated, not nil\n}\nreturn nil\n```\n\n**3. `main()` translates the error via `errors.As`** (testable entry point so `os.Exit` isn't called inside a testable function):\n```go\nfunc runMain(stdin io.Reader, stderr io.Writer) int {\n\tif err := runFn(stdin, stderr); err != nil {\n\t\tvar ee errExit\n\t\tif errors.As(err, &ee) {\n\t\t\treturn ee.code\n\t\t}\n\t\treturn 1 // unexpected error: fail closed rather than silently pass\n\t}\n\treturn 0\n}\n\nfunc main() {\n\tos.Exit(runMain(os.Stdin, os.Stderr))\n}\n```\n\n`errors.As` also sees `errExit` through any `fmt.Errorf(\"...: %w\", ...)` wrapping, so `exec.Command`-style wrappers keep working. The blocked rc is configurable via `POLICY_BLOCK_RC` (1–125, default 1) for testing arbitrary non-zero codes.\n\n---",
+      "evidence": "**Unit tests** (`main_test.go`, all pass, `go vet` clean):\n- `TestRunBlocked` — blocked ref → `errExit{code:1}`, not nil; stderr message emitted\n- `TestRunClean` / `TestRunEmptyStdin` — allowed refs → `nil` → exit 0\n- `TestRunMixedBlockedAndClean` — one bad ref in a batch blocks the whole push\n- `TestErrExitSurvivesWrapping` — `errors.As` extracts rc=2 through `%w` wrapping\n- `TestRunMainExitCodes` — blocked→1, clean→0, unexpected error→fail-closed 1\n\n**Integration test** (`TestIntegration_RealBareRepoRealHookRealPush`) — real bare repo (`git init --bare`), real `pre-receive` hook script that `exec`s the real built binary, real `git push`:\n```\nmain_test.go:125: blocked push correctly declined:\n    remote: policy: rejecting refs/heads/forbidden-feature\n    ! [remote rejected] HEAD -> forbidden-feature (pre-receive hook declined)\n    error: failed to push some refs to ...\n```\nBlocked push exits non-zero and the ref is **absent** from the remote; allowed push succeeds; direct binary runs return exact rc 0/1/2.\n\n**Bug-vs-fix contrast** (real repos, real hooks, real pushes):\n\n| | git push exit | forbidden ref on remote |\n|---|---|---|\n| PRE-FIX (rc swallowed → `os.Exit(0)`) | **0** ✅ | **yes** — push allowed, hook never blocked |\n| POST-FIX (`errExit{1}` → `os.Exit(1)`) | **1** ❌ | **no** — `pre-receive hook declined` |\n\n**Exact exit-code matrix** (shell-verified against the built binary):\n```\nclean push:            rc=0\nblocked (default):     rc=1\nblocked (rc=2):        rc=2\nempty stdin:           rc=0\n```\n\nEdge cases covered: empty stdin, multiple refs per push, mixed allowed+blocked refs, arbitrary non-zero rc (2), unexpected non-`errExit` errors fail closed, and `%w`-wrapped propagation.\n\n```\n$ go test -v -count=1 ./...\nPASS  ok  go-cli-exit-code-swallowed  0.195s\n```\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "result": "completed"
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 12:35:30"
+    }
+  ]
+}

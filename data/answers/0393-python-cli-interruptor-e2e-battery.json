@@ -1,0 +1,25 @@
+{
+  "class_id": 393,
+  "title": "python-cli-interruptor-e2e-battery",
+  "description": "python-cli-interruptor-e2e-battery",
+  "created_at": "2026-08-02 10:55:00",
+  "answers": [
+    {
+      "answer_id": 481,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The concrete, verified defect in this battery is the `last_tick` board-write: the duckdb header declares `last_tick TIMESTAMP`, but the write path binds a bare integer tick. DuckDB rejects that at bind time:\n\n```\nduckdb.ConversionException: Conversion Error: Unimplemented type for cast (INTEGER -> TIMESTAMP)\n```\n\n**The fix: pass a `datetime`, not an int.** Because the container's duckdb session timezone is `America/Bogota` (UTC−5), the naive-UTC construction is the only portable, byte-exact pattern — verified below. Both `datetime.utcfromtimestamp()` (deprecated on Python 3.14) and `to_timestamp()` / aware datetimes are timezone traps.\n\n```python\n# board_write.py — fixed pattern (tj52_board_write.py successor)\nimport datetime as dt\nimport duckdb\n\ndef last_tick_dt(tick: int) -> dt.datetime:\n    \"\"\"tick -> naive UTC datetime for a TIMESTAMP column (portable, no deprecation).\"\"\"\n    # classic equivalent: dt.datetime.utcfromtimestamp(tick) — deprecated on 3.12+\n    return dt.datetime.fromtimestamp(tick, dt.timezone.utc).replace(tzinfo=None)\n\ndef write_board(db_path: str, verdict_rows: list[dict]) -> int:\n    \"\"\"rows come from interruptor_bridge.py JSON protocol:\n       [{\"verdict\": \"allow|block|sandbox-modify|parse-error\", \"tick\": 57}, ...]\"\"\"\n    con = duckdb.connect(db_path)\n    con.execute(\n        \"CREATE TABLE IF NOT EXISTS board (\"\n        \" run_id VARCHAR, verdict VARCHAR, tick BIGINT, last_tick TIMESTAMP)\"\n    )\n    prepared = [\n        (r.get(\"run_id\"), r[\"verdict\"], r[\"tick\"], last_tick_dt(r[\"tick\"]))\n        for r in verdict_rows\n    ]\n    con.executemany(\"INSERT INTO board VALUES (?,?,?,?)\", prepared)\n    con.close()\n    return len(prepared)\n```\n\nTwo footguns surfaced during verification, worth documenting in the helper:\n\n1. **Aware datetimes** (`dt.datetime.now(dt.timezone.utc)`, `+02:00` offsets) are silently converted to the *session* timezone by duckdb before storage — `12:30+02:00` stored as `05:30` here. Always pass **naive UTC** datetimes.\n2. **`to_timestamp(tick)` in SQL is also session-TZ dependent** (`to_timestamp(58)` stored `1969-12-31 19:00:58`). If you prefer the SQL side, pin UTC explicitly: `to_timestamp(tick)::TIMESTAMP WITH TIME ZONE AT TIME ZONE 'UTC'`.",
+      "evidence": "The referenced battery artifacts (`interruptor_bridge.py`, `/tmp/tj47_e2e_verdicts.py`, `/tmp/tj52_board_write.py`, the duckdb board, the project) **do not exist in this sandbox** — `find /` and `/tmp` inspection came back empty. So the full 23-verdict engine run, CLI block-box/modify/version checks, and the 227/32 pytest suite cannot be re-executed here. Rather than fabricate, I reproduced and verified the described core defect directly.\n\nSetup: installed duckdb 1.5.5 in `/tmp/venv-duckdb` (system Python is PEP-668 managed, Python 3.14.4). Verification harness: `/tmp/verify_timestamp_fix.py` (+ `/tmp/verify_timestamp_fix.duckdb`), survives in /tmp per the battery convention.\n\nRun: `8 passed, 0 failed` (exit 0), with checks:\n\n| # | Check | Result |\n|---|-------|--------|\n| 1 | int → TIMESTAMP raises ConversionError (bug reproduced) | PASS |\n| 2 | naive-UTC datetime binds and round-trips exactly | PASS |\n| 3 | timezone-aware UTC datetime works | PASS |\n| 4 | microsecond precision preserved (`10:53:04.426123`) | PASS |\n| 5 | `NULL` last_tick accepted | PASS |\n| 6 | bulk `executemany` of 23 rows (battery-sized batch) | PASS |\n| 7 | `information_schema` confirms column type `TIMESTAMP` | PASS |\n| 8 | JSON-lines verdict protocol smoke (allow/block/sandbox-modify/parse-error) | PASS |\n\nEdge cases tested: naive vs aware datetimes, local-TZ skew (UTC−5 `America/Bogota`), `to_timestamp()` SQL form, deprecated `utcfromtimestamp` vs modern replacement, NULLs, and sub-second fidelity.\n\n**Honest scope note:** the full E2E battery, CLI checks, and 227-pytest suite are not runnable in this environment — only the duckdb `last_tick` fix is verified end-to-end. If the battery scripts were present, the 23-verdict engine run and pytest suite would additionally be re-executed; I did not claim those numbers.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-cli-interruptor-e2e-battery",
+        "result": "passed",
+        "scope": "duckdb last_tick TIMESTAMP fix verified (8/8); full 23-verdict battery + 227 pytest not runnable: project artifacts absent from sandbox",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 10:55:13"
+    }
+  ]
+}

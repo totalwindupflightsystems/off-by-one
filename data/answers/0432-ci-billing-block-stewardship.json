@@ -1,0 +1,24 @@
+{
+  "class_id": 432,
+  "title": "ci-billing-block-stewardship",
+  "description": "ci-billing-block-stewardship",
+  "created_at": "2026-08-02 23:31:47",
+  "answers": [
+    {
+      "answer_id": 527,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** CI-BILLING-002 is a GitHub spending-limit hard stop, not a code failure. Its signature is unambiguous: every run created after the 07:41Z Aug 2 cutover completes `failure` within 4–10s with **zero steps** — the billing check fires before the runner pool instantiates a single job. Stewardship under this condition must not chase phantom CI failures; it must (a) confirm the signature, (b) prove the pending fixes locally so CI-RESTORE-003 can stay `in_progress` with verified code, (c) record the audit event, and (d) respect the two hard constraints: **no worker spawn** (human-blocked) and **no scheduler PUT** (`CooldownS=7200` pinned in `fleet.toml`).\n\n**The fix set** (commit 6c92811, verified locally in `/home/kara/ci-billing-stewardship/`):\n\n**1. Windows cross-compile + docker SARIF perms** — `main.go` resolves artifact paths with `path/filepath` (windows-safe) and writes the SARIF envelope 0644 with an explicit `os.Chmod`, which is the real fix: `os.WriteFile` never changes the mode of an already-existing file, so a stale 0600 root-owned artifact from a container step would otherwise survive and break `actions/upload-artifact` / `codeql-upload`:\n\n```go\nfunc writeSarif(out, ver string) error {\n\tout, err := filepath.Abs(out) // windows-cross-compile: no path.Join quirks\n\tif err != nil { return err }\n\tif err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil { return err }\n\treport := SarifReport{Version: \"2.1.0\", Runs: []Run{{Tool: Tool{Driver: Driver{Name: \"ci-billing-guard\", SemanticVersion: ver}}}}}\n\tdata, _ := json.MarshalIndent(report, \"\", \"  \")\n\tif err := os.WriteFile(out, append(data, '\\n'), 0o644); err != nil { return err }\n\treturn os.Chmod(out, 0o644) // docker-sarif-perms: enforce on stale artifacts\n}\n```\n\n**2. Local gate suite** — `scripts/guard.sh` (build / vet / gofmt / `GOOS=windows GOARCH=amd64` cross-compile / sarif mode `=644`), exits 0 only on full PASS:\n\n```bash\nGOOS=windows GOARCH=amd64 go build -o /dev/null ./...   # 6c92811 cross-compile\ngo run . \"$ART/results.sarif\" >/dev/null\nMODE=$(stat -c '%a' \"$ART/results.sarif\")               # must be 644\n[ \"$FAIL\" -eq 0 ]\n```\n\n**3. Steward tick** — `steward/tick81.sh` implements the policy in order: billing-signature check via `gh run list` (live jq path behind `GH_TOKEN`; fixture path when unauthenticated), local gates, restore-ticket stays `in_progress` only when gates PASS, worker spawn **refused** even under `SPAWN_WORKER=true`, scheduler **never PUT** (`sed`-extracted `CooldownS=7200` recorded as `skipped`), then appends to `board/audit.jsonl` and pushes:\n\n```bash\naudit \"scheduler-put\" \"skipped\" \"CooldownS=$(sed -n 's/^CooldownS *= *\\([0-9]*\\).*/\\1/p' fleet.toml) pinned\"\n```",
+      "evidence": "Ran for real in the sandbox (Go 1.26, gh 2.46 — `gh` unauthenticated here, so the live API path is proven against the exact `gh run list --jq` expression on a fixture matching the documented profile):\n\n| Check | Result |\n|---|---|\n| `go build` / `go vet` / `gofmt -l` | PASS (clean) |\n| `GOOS=windows GOARCH=amd64 go build` (6c92811) | PASS |\n| SARIF artifact mode | `644` (PASS) |\n| `go test ./...` | **4/4 PASS** (perms; stale-0600-overwrite restore; windows-style path; deep-dir creation) |\n| `steward/tick81.sh` exit | 0, full 5-event audit appended, `restore-ticket: in_progress, locally-verified` |\n\n**Edge cases tested:**\n- **Stale 0600 artifact** (`TestSarifOverwriteRestoresPerms`): WriteFile alone leaves 0600; the explicit chmod restores 0644 and the envelope parses as valid SARIF 2.1.0.\n- **Forced spawn** (`SPAWN_WORKER=true`): audited `blocked-human`, refused — no worker started.\n- **Failing gate** (injected compile break in a throwaway copy): `local-gates: fail`, ticket stays `in_progress` but `NOT verified`, tick exits 1 — the steward never certifies unverified fixes.\n- **Scheduler immutability**: `fleet.toml` byte-identical before/after; tick only reads it (`CooldownS=7200`, `MaxWorkers=1` preserved, no PUT).\n- **Billing signature**: live jq detected 2 failing runs from the fixture (≥1 → confirmed); sandbox path recorded `fixture:4-10s,0-steps,failure` without fabricating a live result.\n- **Tick idempotency/re-runnability**: three consecutive runs append clean JSONL without clobbering prior audit events.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "ci-billing-block-stewardship",
+        "result": "passed",
+        "tests": 4
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 23:31:47"
+    }
+  ]
+}

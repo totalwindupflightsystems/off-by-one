@@ -1,0 +1,24 @@
+{
+  "class_id": 109,
+  "title": "err-circuit-breaker-pattern",
+  "description": "err-circuit-breaker-pattern",
+  "created_at": "2026-07-25 00:54:57",
+  "answers": [
+    {
+      "answer_id": 115,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "### Circuit Breaker Pattern in Go\n\n**File: `/home/kara/circuitbreaker.go`**\n\nThe implementation covers the three-state finite state machine:\n\n```\nCLOSED  ──(consecutive failures >= FailureThreshold)──▶  OPEN\nOPEN    ──(timeout elapsed)───────────────────────────▶  HALF_OPEN\nHALF_OPEN ──(consecutive successes >= SuccessThreshold)──▶ CLOSED\nHALF_OPEN ──(any failure)──────────────────────────────▶ OPEN\n```\n\n**Key design decisions:**\n\n1. **Lock-free state reads** — `state` uses `atomic.Int32` so `Execute()` can check the state without acquiring the mutex on the fast path (CLOSED state).\n\n2. **Concurrent-safe semaphore for HALF_OPEN** — `halfOpenSem` is an `atomic.Pointer[chan struct{}]` to avoid data races between `Execute` (reading the channel) and `transitionToHalfOpen` (replacing the channel).\n\n3. **Double-checked locking in `transitionToHalfOpen`** — multiple goroutines may see the timeout has elapsed and race to transition. Under the mutex, we re-check both the state and the timeout, so only one goroutine wins.\n\n4. **Metrics via atomics** — `totalRequests`, `successfulRequests`, `failedRequests`, `rejectedRequests` use `atomic.Uint64` for lock-free high-throughput counting. Consecutive counters require the mutex since they interact with state transitions.\n\n**Usage example:**\n\n```go\ncb, _ := New(Config{\n    FailureThreshold: 5,\n    SuccessThreshold: 2,\n    Timeout:          30 * time.Second,\n})\n\nerr := cb.Execute(func() error {\n    // Your unreliable operation here\n    return callExternalService()\n})\nif errors.Is(err, ErrCircuitOpen) {\n    // Fail fast — circuit is open\n    return fallback()\n}\n```\n\n---",
+      "evidence": "All **17 tests pass** with **zero data races** (verified with `go test -race`):\n\n| Test | What it covers |\n|------|----------------|\n| `TestClosedToOpenOnFailures` | Consecutive failures trip CLOSED→OPEN |\n| `TestOpenRejectsRequests` | OPEN returns `ErrCircuitOpen` immediately |\n| `TestHalfOpenToClosedOnSuccesses` | Successes in HALF_OPEN→CLOSED at threshold |\n| `TestHalfOpenFailureTripsToOpen` | Any failure in HALF_OPEN→OPEN |\n| `TestInvalidConfig` | Zero/negative thresholds rejected |\n| `TestDefaultConfigIsValid` | Default config is valid |\n| `TestMetricsCounters` | Total/success/fail/rejected counts correct |\n| `TestMetricsRejectedRequests` | Rejected count increments on OPEN |\n| `TestConcurrentAccess` | 100 concurrent goroutines — no deadlock |\n| `TestHalfOpenConcurrencyLimit` | At most `HalfOpenMaxRequests` concurrent in HALF_OPEN |\n| `TestSuccessResetsFailureCountInClosed` | A success between failures resets the counter |\n| `TestTimeoutBeforeHalfOpen` | OPEN stays open until timeout, then allows test |\n| `TestMultipleGoroutinesRaceToHalfOpen` | 20 goroutines racing to transition — no corruption |\n| `TestNilOperation` | Returns error, doesn't panic |\n| `TestStateString` | All states map to correct strings |\n| `TestExecuteReturnsOperationError` | Original error propagated to caller |\n| `TestDefaultConfig` | Default config creates CLOSED breaker |\n\n**Edge cases explicitly tested:**\n- Request rejected while circuit is OPEN before timeout\n- Request rejected when HALF_OPEN semaphore is full (`ErrTooManyRequests`)\n- Success between failures in CLOSED resets the consecutive failure count (prevents false tripping)\n- Multiple goroutines racing to transition from OPEN→HALF_OPEN — only one wins, no double transition\n- Nil operation returns error instead of panicking\n- High concurrency (100 goroutines) with mixed success/failure — no deadlock or data corruption\n- Invalid configurations (zero/negative thresholds) are rejected at construction time\n\n---",
+      "signatures": {
+        "model": "claude-sonnet-4-20250514",
+        "problem_class": "err-circuit-breaker-pattern",
+        "result": "passed",
+        "tests": 17
+      },
+      "status": "verified",
+      "created_at": "2026-07-25 00:54:57"
+    }
+  ]
+}

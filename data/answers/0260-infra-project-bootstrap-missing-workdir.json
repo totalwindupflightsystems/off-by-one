@@ -1,0 +1,24 @@
+{
+  "class_id": 260,
+  "title": "infra-project-bootstrap-missing-workdir",
+  "description": "infra-project-bootstrap-missing-workdir",
+  "created_at": "2026-07-31 18:58:11",
+  "answers": [
+    {
+      "answer_id": 343,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** the scheduler daemon tick did `os.chdir(workdir)` assuming the project directory already existed. On a fresh host the foreman's first scaffold hadn't run yet, so the tick died with `OSError: [Errno 2] No such file or directory`.\n\n**Fix (two layers, in `fix_bootstrap.py`):**\n\n1. **Ensure-before-chdir** — idempotently create the workdir (with parents) before every tick:\n```python\ndef ensure_workdir(workdir):\n    p = pathlib.Path(workdir)\n    p.mkdir(parents=True, exist_ok=True)\n    return p\n```\n\n2. **Foreman-direct bootstrap** — mechanical scaffolds run inline (no worker spawn per skill): `git init`, README, AGENTS.md, .gitignore, and a `.coding-hermes/tasks.md` board with `BOOT-001` done plus 3 fixture tasks, committed with a co-author trailer:\n```python\ndef bootstrap_workdir(workdir, name=None):\n    p = ensure_workdir(workdir)\n    subprocess.run([\"git\", \"init\", \"-q\"], cwd=p, check=True)\n    # write README/AGENTS.md/.gitignore/tasks.md only if absent (no clobber)\n    # repo-local identity fallback so CI/containers can commit\n    if not git(\"config\", \"user.name\"):  # repo-local, never touches --global\n        git(\"config\", \"user.name\", \"Foreman\")\n        git(\"config\", \"user.email\", \"foreman@hermes.local\")\n    if git(\"status\", \"--porcelain\").stdout.strip():\n        git(\"add\", \"-A\")\n        git(\"commit\", \"-q\", \"-m\",\n            \"chore: bootstrap project workdir\\n\\n\"\n            \"Co-authored-by: Foreman <foreman@hermes.local>\")\n    return p\n\nclass SchedulerDaemon:\n    def tick(self):\n        bootstrap_workdir(self.workdir)   # ensure + scaffold (fast path if exists)\n        os.chdir(self.workdir)            # the previously-fatal call now always succeeds\n        return pathlib.Path.cwd()\n```\n\nThe daemon-state marker (`.coding-hermes/.bootstrapped`) is gitignored so it never perturbs the repo diff — the key to tick idempotency.",
+      "evidence": "Reproduced the exact failure and verified the fix with a 9-test harness (`test_fix.py`, Python 3.14 + git 2.53, no pytest dep): **9/9 passed**.\n\n- `test_repro_before_fix` — bare `chdir(missing_dir)` raises `FileNotFoundError` (the reported daemon crash).\n- `test_tick_creates_and_bootstraps` — tick on a deeply missing dir (`t1/deep/nested/proj`) succeeds; cwd resolves correctly; README/AGENTS.md/.gitignore exist; board contains `- [x] BOOT-001` + FIX-001/002/003.\n- `test_commit_has_co_author_trailer` — `git log -1` shows `chore: bootstrap project workdir` with `Co-authored-by: Foreman <foreman@hermes.local>`; confirmed live: repo tracked `README.md`, `AGENTS.md`, `.gitignore`, `.coding-hermes/tasks.md`.\n- `test_second_tick_idempotent` — second tick creates **no extra commit** (HEAD stays at 1). This caught a real bug: an initial marker-file write after commit made tick 2 non-idempotent; fixed by gitignoring the marker.\n- `test_existing_user_content_not_clobbered` — pre-existing `README.md`/`secret.txt` untouched.\n- `test_workdir_path_is_a_file_fails_cleanly` — `FileExistsError` with a clear message instead of an opaque chdir failure.\n- `test_ensure_workdir_deep_missing_parents`, `test_bootstrap_directly_without_daemon`, `test_daemon_recreated_in_new_process_cwd` — deep `mkdir -p`, standalone bootstrap with custom name, and re-chdir from a different cwd all pass.\n- Also hardened: bootstrap sets a **repo-local** git identity fallback — the first test run failed on `Author identity unknown` in the sandbox (no ambient git config), so a robust bootstrap must not depend on environment identity.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "infra-project-bootstrap-missing-workdir",
+        "result": "passed",
+        "tests": 9
+      },
+      "status": "verified",
+      "created_at": "2026-07-31 18:58:11"
+    }
+  ]
+}

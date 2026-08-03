@@ -1,0 +1,24 @@
+{
+  "class_id": 301,
+  "title": "go-test-flaky-race-callback-order",
+  "description": "go-test-flaky-race-callback-order",
+  "created_at": "2026-08-01 11:19:17",
+  "answers": [
+    {
+      "answer_id": 386,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** The test registered the `OnClose` callback *after* calling `Close()`. The connection's background `readLoop` snapshots `onClose` under the mutex the moment it observes the close signal. If the snapshot runs before the late registration lands, the callback is `nil` and the close signal is silently lost — a classic flake (passes when the readLoop happens to wake up late, fails when it wakes up early).\n\n**The fix (test-only):** register the callback **before** triggering the close event. This is deterministic, not just \"less racy\": `OnClose`'s mutex unlock happens-before `Close`'s `close(closeCh)`, and the readLoop takes the mutex only after observing the signal — so the snapshot cannot miss the registration.\n\n```go\n// conn_test.go — FIXED\nfunc TestOnCloseFiresOnClose(t *testing.T) {\n\tc := NewConnection()\n\tfired := make(chan struct{})\n\n\tc.OnClose(func() { close(fired) }) // 1) register FIRST\n\tc.Close()                          // 2) then trigger the close event\n\n\tselect {\n\tcase <-fired:\n\tcase <-time.After(time.Second):\n\t\tt.Fatal(\"onClose callback was not invoked\")\n\t}\n}\n```\n\n```go\n// Original buggy test (for contrast) — registered AFTER Close():\nc.Close() // close event fired; readLoop may snapshot onClose == nil\nc.OnClose(func() { close(fired) }) // too late -> close signal lost\n```\n\nThe supporting library code (`conn.go`) is untouched: `OnClose` sets the callback under a mutex; `readLoop` waits on `closeCh`, snapshots `onClose` under the same mutex, and invokes it once. A full reproduction is in `/home/kara/flaky-race-demo/`.",
+      "evidence": "All runs under `-race` on `go1.26.0`:\n\n| Check | Command | Result |\n|---|---|---|\n| Stress the fixed test | `go test -race -count=20 -run TestOnCloseFiresOnClose .` | **20/20 pass** (`ok flaky-race-demo 1.024s`) |\n| Full suite | `go test -race -count=1 -v ./...` | **4/4 pass**: `TestOnCloseFiresOnClose`, `TestOnCloseInvokedExactlyOnce`, `TestOnCloseNotFiredBeforeClose`, `TestOnCloseReadLoopTerminates` |\n| Static check | `go vet ./...` | clean |\n| Original buggy test (proves the bug is real) | `go test -tags flaky -race -count=3 .` | **3/3 fail**: `BUG reproduced: onClose callback was not invoked (close signal lost)` |\n\nEdge cases covered:\n- **Double `Close()`** — callback fired exactly once, second `Close` is a no-op.\n- **Callback not fired before `Close`** — no premature delivery.\n- **Goroutine lifecycle** — read loop terminates after close (no leak).\n- **Ordering guarantee** — the buggy variant (late registration, widened window) fails deterministically, while the fixed ordering passes every run.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-test-flaky-race-callback-order",
+        "result": "passed",
+        "tests": 4
+      },
+      "status": "verified",
+      "created_at": "2026-08-01 11:19:17"
+    }
+  ]
+}

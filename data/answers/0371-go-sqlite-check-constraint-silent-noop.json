@@ -1,0 +1,24 @@
+{
+  "class_id": 371,
+  "title": "go-sqlite-check-constraint-silent-noop",
+  "description": "go-sqlite-check-constraint-silent-noop",
+  "created_at": "2026-08-02 05:15:13",
+  "answers": [
+    {
+      "answer_id": 459,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The daemon's `ticks` table carries a CHECK constraint that rejects any `outcome` outside `('ok','failed')`, while `status` is restricted to `('pending','timeout','done')`:\n\n```sql\nCREATE TABLE ticks (\n    id         INTEGER PRIMARY KEY,\n    status     TEXT NOT NULL CHECK (status IN ('pending','timeout','done')),\n    outcome    TEXT CHECK (outcome IN ('ok','failed')),\n    created_at INTEGER NOT NULL,\n    deadline   INTEGER NOT NULL\n);\n```\n\n**Bug 1 (silent no-op):** `reapZombies` wrote `outcome='zombie_reaped'` on every UPDATE. SQLite rejected each one (`CHECK constraint failed: outcome IN ('ok','failed')`), and because the daemon swallowed errors, reaping silently no-oped for its whole lifetime. Fix: drop the outcome assignment — `status='timeout'` only, matching the `cleanDanglingOnStartup` pattern.\n\n**Bug 2 (pool deadlock, exposed once Bug 1 was fixed):** the UPDATE ran inside the `rows.Next()` loop while the SELECT rows were still open. With the daemon's single-connection SQLite pool (`SetMaxOpenConns(1)`), the only connection is held by the open rows, so `Exec` blocks forever waiting for a free connection. Fix: collect the zombie IDs first, `rows.Close()`, then update.\n\n```go\n// cleanDanglingOnStartup — the reference pattern: status only, no outcome.\nfunc cleanDanglingOnStartup(ctx context.Context, db *sql.DB, now time.Time) (int64, error) {\n\tres, err := db.ExecContext(ctx,\n\t\t`UPDATE ticks SET status = 'timeout'\n\t\t WHERE status = 'pending' AND deadline < ?`, now.Unix())\n\tif err != nil {\n\t\treturn 0, err\n\t}\n\treturn res.RowsAffected()\n}\n\nfunc reapZombies(ctx context.Context, db *sql.DB, now time.Time) (int64, error) {\n\trows, err := db.QueryContext(ctx,\n\t\t`SELECT id FROM ticks WHERE status = 'pending' AND deadline < ?`, now.Unix())\n\tif err != nil {\n\t\treturn 0, err\n\t}\n\n\t// Collect zombie IDs while the SELECT rows are open...\n\tvar ids []int64\n\tfor rows.Next() {\n\t\tvar id int64\n\t\tif err := rows.Scan(&id); err != nil {\n\t\t\trows.Close()\n\t\t\treturn 0, err\n\t\t}\n\t\tids = append(ids, id)\n\t}\n\tif err := rows.Err(); err != nil {\n\t\trows.Close()\n\t\treturn 0, err\n\t}\n\trows.Close() // ...then release the only connection BEFORE writing, or Exec blocks forever\n\n\t// status='timeout' only. No outcome write: 'zombie_reaped' violates the\n\t// ticks CHECK constraint, which silently rejected every old UPDATE.\n\tfor _, id := range ids {\n\t\tif _, err := db.ExecContext(ctx,\n\t\t\t`UPDATE ticks SET status = 'timeout'\n\t\t\t WHERE id = ? AND status = 'pending'`, id); err != nil {\n\t\t\treturn 0, fmt.Errorf(\"reap tick %d: %w\", id, err)\n\t\t}\n\t}\n\treturn int64(len(ids)), nil\n}\n```\n\nKey points: no `outcome` column write (bug 1), and the `rows.Close()` before any `Exec` on the single-connection pool (bug 2). The `AND status = 'pending'` guard keeps reaping idempotent.",
+      "evidence": "Reconstructed as a runnable module at `/home/kara/zreap` (Go 1.26, `modernc.org/sqlite`, daemon config `SetMaxOpenConns(1)`). The regression test wraps every reaping call in a 5-second deadlock guard so the second bug fails fast instead of hanging the suite.\n\n- **Fixed code:** `go vet` clean, `gofmt` clean, **4/4 tests pass**:\n  - `TestReapZombies` — 2 zombie ticks reaped to `status='timeout'`, `outcome` left `NULL`; future-pending and `done`/`ok` rows untouched.\n  - `TestReapZombiesIdempotent` — second reap reaps 0, row unchanged.\n  - `TestCleanDanglingOnStartup` — reference pattern still works.\n  - `TestCheckConstraintExists` — proves the mechanism: inserting `outcome='zombie_reaped'` fails with `CHECK constraint failed: outcome IN ('ok','failed') (275)`.\n- **Temporary revert (old code restored):** the same regression test **fails** with `deadlock: operation did not complete within 5s` — the UPDATE-inside-open-rows deadlock. Isolating Bug 1 (old UPDATE with rows already closed, no deadlock in the way) additionally shows the silent no-op mechanism: the UPDATE is rejected by the CHECK constraint with error `275`. Then the fix was restored and the suite re-passed.\n- **Edge cases:** deadline-boundary ticks (past vs. future), terminal `done` rows never rewritten, empty zombie sets, repeated runs (idempotency), single-connection pool under load.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-sqlite-check-constraint-silent-noop",
+        "result": "passed",
+        "tests": 4
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 05:15:13"
+    }
+  ]
+}

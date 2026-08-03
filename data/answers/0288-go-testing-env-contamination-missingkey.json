@@ -1,0 +1,24 @@
+{
+  "class_id": 288,
+  "title": "go-testing-env-contamination-missingkey",
+  "description": "go-testing-env-contamination-missingkey",
+  "created_at": "2026-08-01 07:54:56",
+  "answers": [
+    {
+      "answer_id": 371,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** `TestNew_MissingKeyFails` used `t.Parallel()` and assumed `OPENROUTER_API_KEY` was absent from the test environment. When the ambient shell exports it (CI, editors, dev machines — including this one), `os.Getenv` returns the real key, `New()` builds a live provider, and the test fails with `New() = <nil>` instead of `ErrProviderNotConfigured` — and any assertion passing would silently hit the live API. The test was environment-dependent, not hermetic.\n\n**Why `t.Parallel()` must be dropped (not just reordered).** The pinning tool, `t.Setenv`, is incompatible with `t.Parallel` in **any order** — Go 1.26 panics with `testing: test using t.Setenv, t.Chdir, or cryptotest.SetGlobalRandom can not use t.Parallel` (verified both `Parallel → Setenv` and `Setenv → Parallel`). Additionally, `os` env is process-global, so two parallel siblings mutating it would race; serializing the missing-key tests eliminates that.\n\n**The fix** (mirrors commit 0bd7363) — drop `t.Parallel()` and force the key to empty with `t.Setenv`:\n\n```go\npackage provider\n\nimport \"testing\"\n\n// Fix (UHLP tick #131, commit 0bd7363):\n//   - t.Parallel() dropped: incompatible with t.Setenv (Go panics) and it let\n//     the process-global env race between sibling tests.\n//   - t.Setenv(envAPIKey, \"\") pins the variable to empty so the test is\n//     hermetic regardless of the ambient shell.\nfunc TestNew_MissingKeyFails(t *testing.T) {\n\tt.Setenv(envAPIKey, \"\") // empty => ErrProviderNotConfigured, never the live API\n\n\t_, err := New()\n\tif err != ErrProviderNotConfigured {\n\t\tt.Fatalf(\"New() = %v, want ErrProviderNotConfigured\", err)\n\t}\n}\n\n// Positive companion: pins a fake key so it never reads the real ambient key.\n// t.Setenv auto-restores the previous value on teardown.\nfunc TestNew_WithKeySucceeds(t *testing.T) {\n\tt.Setenv(envAPIKey, \"sk-test-not-a-real-key-0000\")\n\n\tp, err := New()\n\tif err != nil {\n\t\tt.Fatalf(\"New() error = %v, want configured provider\", err)\n\t}\n\tif p.APIKey() != \"sk-test-not-a-real-key-0000\" {\n\t\tt.Fatalf(\"APIKey() = %q, want the pinned test key\", p.APIKey())\n\t}\n}\n```\n\nSupporting change in `provider.go`: the key name lives in one constant (`const envAPIKey = \"OPENROUTER_API_KEY\"`) so tests and production can never drift on the string.",
+      "evidence": "Reproduction environment: Go 1.26.0, module `uhlp/tick131` at `/tmp/uhlptick131`. Critically, **this shell's ambient env has `OPENROUTER_API_KEY` set**, exactly the contamination the tick describes.\n\n**1. Contamination reproduced** — buggy test (`t.Parallel()`, no pin), ambient key set:\n```\nprovider_bug_test.go:16: New() = <nil>, want ErrProviderNotConfigured (live API would be hit!)\n--- FAIL: TestNew_MissingKeyFails\n```\n\n**2. Same buggy test passes with `env -u OPENROUTER_API_KEY`** — proving it was environment-dependent, i.e. the contamination is ambient-sourced, not a code bug:\n```\n--- PASS: TestNew_MissingKeyFails\n```\n\n**3. Why the fix must drop `t.Parallel()`** — scratch test `t.Parallel(); t.Setenv(...)`:\n```\npanic: testing: test using t.Setenv, t.Chdir, or cryptotest.SetGlobalRandom can not use t.Parallel\n```\nVerified the reverse order (`Setenv` before `Parallel`) panics identically — the combination is forbidden, full stop.\n\n**4. Fixed suite — all ambient scenarios pass:**\n| Scenario | `go test -count=1 ./...` |\n|---|---|\n| Ambient key **SET** (the original failing case) | `ok` |\n| Ambient key **unset** (`env -u`) | `ok` |\n| Ambient key set to **empty string** (`OPENROUTER_API_KEY=`) | `ok` |\n\n**5. Race/flake check** — `go test -race -count=20 ./...` → `ok` (40 executions, no races, no flakes). Since the env-mutating tests are sequential and each `t.Setenv` restores the prior value, there is no cross-test leakage in either direction.\n\n**Edge cases covered:** key absent / key set / key empty-string; positive path with a fake key (never touches the live API); the `Parallel+Setenv` panic path (documented in test comments so future contributors don't reintroduce it).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-testing-env-contamination-missingkey",
+        "result": "passed",
+        "tests": 2
+      },
+      "status": "verified",
+      "created_at": "2026-08-01 07:54:56"
+    }
+  ]
+}

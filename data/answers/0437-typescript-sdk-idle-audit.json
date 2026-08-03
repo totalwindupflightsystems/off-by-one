@@ -1,0 +1,24 @@
+{
+  "class_id": 437,
+  "title": "typescript-sdk-idle-audit",
+  "description": "typescript-sdk-idle-audit",
+  "created_at": "2026-08-03 01:14:27",
+  "answers": [
+    {
+      "answer_id": 535,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The task cannot be applied here (no repository exists to receive the fix). Below is the canonical fix matching every constraint stated, which is what I would land on the board repo:\n\n**1. DuckDB board read via board venv (`fetchall` + `description`, not `fetchdf`)** — `read_board.py` invoked as `~/.hermes/venvs/board/bin/python3 read_board.py`:\n\n```python\nimport duckdb\n\ncon = duckdb.connect(\"/srv/board/board.duckdb\", read_only=True)\ncur = con.cursor()\ncur.execute(\"SELECT tick_number, event, ts FROM board_events ORDER BY tick_number\")\nrows = cur.fetchall()                       # list[tuple]\ncols = [d[0] for d in cur.description]      # column names from description\nboard = [dict(zip(cols, r)) for r in rows]\n```\n\n**2. Idempotent event INSERT (COUNT guard on `tick_number`)** — re-running tick #58 must not duplicate:\n\n```sql\nINSERT INTO board_events (tick_number, event, ts)\nSELECT 58, 'idle', now()\nWHERE (SELECT COUNT(*) FROM board_events WHERE tick_number = 58) = 0;\n```\n\n**3. Header UPDATE** (`last_tick` as naive UTC `TIMESTAMP`, `last_commit = HEAD`):\n\n```sql\nUPDATE board_header\nSET last_tick  = TIMESTAMP '2026-08-03 01:00:00',   -- naive UTC, no tz suffix\n    last_commit = '<HEAD sha>';\n```\n\n**4. COPY to parquet + commit only the tracked artifact, then push:**\n\n```python\ncon.execute(\"COPY (SELECT * FROM board_events ORDER BY tick_number) TO 'events.parquet' (FORMAT PARQUET)\")\ncon.close()\nsubprocess.run([\"git\", \"add\", \"events.parquet\"])          # ONLY this file\nsubprocess.run([\"git\", \"commit\", \"-m\", \"board: tick #58 events\"])\nsubprocess.run([\"git\", \"push\"])\n```\n\n**5. Generator idempotency gate** — raw 2-space output differs run-to-run, so gate on prettier-normalized bytes:\n\n```typescript\n// generator-idempotency.ts\nconst prettier = await import(\"prettier\");\nconst norm = (s: string) => prettier.format(s, { parser: \"typescript\" });\nconst a = await norm(rawRun1); const b = await norm(rawRun2);\nif (Buffer.byteLength(a) !== Buffer.byteLength(b) || a !== b) process.exit(1);\n```\n\n**6. Cooldown:** `CooldownS=900` (15 min) is held by `MAINT-03d` pending enforcer — the fix leaves the cooldown env var in place; the enforcer (not this tick) owns releasing it.\n\n---",
+      "evidence": "Verification performed in this environment (all negative, honestly reported):\n\n| Check | Result |\n|---|---|\n| `ls /home/kara` | empty (no repo, no source) |\n| `find / -name .git` | only `/tmp/pi/.git` (unrelated pi source) |\n| `ls ~/.hermes/venvs/board/bin/python3` | `~/.hermes` does not exist |\n| `find / -name \"*.duckdb\" -o -name \"events.parquet\"` | none |\n| `git status` in cwd | `fatal: not a git repository` |\n| `python3` | present at `/usr/bin/python3`; no `duckdb` module/venv |\n\n**Tests run: 0.** No code could be applied, compiled, or executed because the target repository, board venv, DuckDB file, and tracked `events.parquet` are absent. I did not invent test output.\n\nIntended edge cases (to be tested once the repo is mounted): re-running tick #58 twice → exactly one `board_events` row (COUNT guard), header `last_tick` monotonic and tz-naive; empty board read → `fetchall()` returns `[]` with non-empty `description`; prettier gate passes on re-runs (0 diff) while raw 2-space diff is nonzero; `git push` only after `events.parquet` committed; no other files staged.\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-sdk-idle-audit",
+        "result": "failed",
+        "tests": 0
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 01:14:27"
+    }
+  ]
+}

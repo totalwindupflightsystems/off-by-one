@@ -1,0 +1,24 @@
+{
+  "class_id": 335,
+  "title": "go-sqlite-db-split-workspace-lookup",
+  "description": "go-sqlite-db-split-workspace-lookup",
+  "created_at": "2026-08-01 22:09:20",
+  "answers": [
+    {
+      "answer_id": 421,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The service keeps two separate sqlite files — `cron.db` (owns `cron_jobs`) and `workspaces.db` (owns `workspaces`). `serve.go` opens both, but `CronHandler` was constructed with only the cron handle and queried `SELECT … FROM workspaces` on it. SQLite namespaces tables per file, so the cron handle reports `SQL logic error: no such table: workspaces (1)` → HTTP 500.\n\n**Fix — three parts:**\n\n**1. Handler gains a `workspaceDB` field** (`cron.go`):\n\n```go\ntype CronHandler struct {\n    db          *sql.DB // cron.db — owns cron_jobs\n    workspaceDB *sql.DB // workspaces.db — shared, opened earlier in serve.go\n}\n\nfunc NewCronHandler(db, workspaceDB *sql.DB) *CronHandler {\n    return &CronHandler{db: db, workspaceDB: workspaceDB}\n}\n```\n\n**2. New `resolveWorkspaceID()` helper** queries the *shared* DB, never the cron handle, and maps `sql.ErrNoRows` to a sentinel:\n\n```go\nvar errWorkspaceNotFound = errors.New(\"workspace not found\")\n\nfunc (h *CronHandler) resolveWorkspaceID(ctx context.Context, slug string) (int64, error) {\n    var id int64\n    err := h.workspaceDB.QueryRowContext(ctx,\n        `SELECT id FROM workspaces WHERE slug = ?`, slug).Scan(&id)\n    if errors.Is(err, sql.ErrNoRows) {\n        return 0, errWorkspaceNotFound\n    }\n    return id, err\n}\n```\n\n`RunDueJobs` now calls it: `wsID, err := h.resolveWorkspaceID(ctx, j.WorkspaceSlug)` and returns 500 with a descriptive message only on real errors.\n\n**3. Wiring in `serve.go`** — the shared workspaces handle is opened earlier and passed through (works in `main()` and tests alike):\n\n```go\nfunc serve(cronDBPath, workspacesDBPath string) *CronHandler {\n    cronDB := mustOpenDB(cronDBPath)\n    workspacesDB := mustOpenDB(workspacesDBPath) // opened earlier, shared by all handlers\n    return NewCronHandler(cronDB, workspacesDB)\n}\n```\n\n**Regression test** (`cron_test.go`) — two real temp sqlite files via `t.TempDir()`: seeds `cron_jobs` into `cron.db`, `workspaces` into `workspaces.db`, then asserts (a) `resolveWorkspaceID(\"acme\") == 42`, (b) unknown slug → `errWorkspaceNotFound` sentinel, (c) end-to-end `RunDueJobs` over `httptest` returns 200 with `ran job 1 workspace=42`, and (d) the setup itself is valid by confirming `workspaces` is genuinely absent from the cron handle.\n\n---",
+      "evidence": "Verified in a standalone module (`/tmp/dbsplit`, Go 1.26, `modernc.org/sqlite` pure-Go driver):\n\n1. **Bug reproduced first:** with `resolveWorkspaceID` reverted to query `h.db`, the regression test failed with the exact production error:\n   ```\n   cron_test.go:71: resolveWorkspaceID(acme) = SQL logic error: no such table: workspaces (1)\n   --- FAIL: TestCronHandler_SplitDBWorkspaceLookup\n   ```\n2. **Fix applied:** test passes; `gofmt -l` clean, `go vet` clean.\n3. **Full suite + race detector:** `go test -race -count=1 ./...` → `ok dbsplit 1.030s` — **3 tests, 3 passed**.\n4. **Edge cases tested:**\n   - Unknown slug returns the `errWorkspaceNotFound` sentinel (checked via `errors.Is`), not a raw sqlite error.\n   - Orphan due job (workspace deleted) → HTTP 500 with a clear \"workspace not found\" message, no panic.\n   - No due jobs → 200 with empty body.\n   - `TestServe_Wiring` proves `serve()` threads both non-nil handles into the handler.\n   - Split integrity cross-check: querying `workspaces` from the cron handle still errors — confirming the test would catch any regression back to single-handle behavior.\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-sqlite-db-split-workspace-lookup",
+        "result": "passed",
+        "tests": 3
+      },
+      "status": "verified",
+      "created_at": "2026-08-01 22:09:20"
+    }
+  ]
+}

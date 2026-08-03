@@ -1,0 +1,24 @@
+{
+  "class_id": 149,
+  "title": "garbled-circuit-evaluator",
+  "description": "garbled-circuit-evaluator",
+  "created_at": "2026-07-26 00:22:30",
+  "answers": [
+    {
+      "answer_id": 168,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "The implementation is in `/home/kara/garbled-circuit-evaluator.js` — a `GarbledCircuitEvaluator` class with a single public method `evaluate(circuit, inputLabels)`.\n\n### Core design\n\n**Wire labels**: Each wire has two 128-bit random labels (`label0` for bit 0, `label1` for bit 1). The evaluator knows exactly one label per input wire (obtained via oblivious transfer in the full protocol).\n\n**Garbled table encryption** (used by the garbler; the evaluator only decrypts):\n\n| Gate type | Rows | Key derivation | Content per row |\n|-----------|------|----------------|-----------------|\n| NOT (1 in) | 2 | `SHA-256(inputLabel)` | `(outputLabel XOR mask) \\|\\| checksum` |\n| AND/XOR (2 in) | 4 | `SHA-256(labelA \\|\\| labelB)` | `(outputLabel XOR mask) \\|\\| checksum` |\n\nWhere `mask = key[0:16]` and `checksum = key[16:20]`.\n\n**Evaluation** (the evaluator's job):\n1. For each gate in topological order, the evaluator has one label per input wire.\n2. They derive the 20-byte key stream via `SHA-256(knownLabelA || knownLabelB)`.\n3. They XOR the first 16 bytes (mask) with the entry's label portion.\n4. They compare the entry's last 4 bytes against the derived checksum.\n5. A match → the XOR result is the correct output label.\n6. Both label orderings `(A||B)` and `(B||A)` are tried for robustness.\n7. At the end, output labels are compared against the circuit's `outputs[{label0, label1}]` pairs to produce plaintext bits.\n\n**Performance**: The 5000-gate chain evaluates in well under a second. The algorithm is `O(gates * table_rows)` with a single SHA-256 per row attempt.\n\n### Key code (evaluator class)\n\n```javascript\nclass GarbledCircuitEvaluator {\n  evaluate(circuit, inputLabels) {\n    const labels = new Map(\n      Object.entries(inputLabels).map(([k, v]) => [Number(k), v])\n    );\n\n    for (const gate of circuit.gates) {\n      if (gate.type === 'NOT') this._evaluateNOT(gate, labels);\n      else this._evaluate2InputGate(gate, labels);\n    }\n\n    return circuit.outputs.map((out) => {\n      const label = labels.get(out.wireId);\n      if (label.equals(out.label0)) return 0;\n      if (label.equals(out.label1)) return 1;\n      throw new Error(`Unknown output label for wire ${out.wireId}`);\n    });\n  }\n\n  _evaluate2InputGate(gate, labels) {\n    const labelA = labels.get(gate.inputs[0]);\n    const labelB = labels.get(gate.inputs[1]);\n    for (const entry of gate.table) {\n      let r = this._decrypt2(entry, labelA, labelB);\n      if (r) { labels.set(gate.output, r); return; }\n      r = this._decrypt2(entry, labelB, labelA);\n      if (r) { labels.set(gate.output, r); return; }\n    }\n    throw new Error(`Cannot decrypt gate output wire ${gate.output}`);\n  }\n\n  _decrypt2(entry, l1, l2) {\n    const hash = crypto.createHash('sha256')\n      .update(Buffer.concat([l1, l2])).digest();\n    const mask = hash.subarray(0, 16);\n    const expected = hash.subarray(16, 20);\n    const actual = entry.subarray(16, 20);\n    if (!actual.equals(expected)) return null;\n    return this._xor(entry.subarray(0, 16), mask);\n  }\n}\n```\n\n---",
+      "evidence": "**33 tests pass, 0 fail** covering:\n\n| Test | Cases | What it verifies |\n|------|-------|-----------------|\n| Single NOT | 2 | `NOT(0)=1`, `NOT(1)=0` |\n| Single AND | 4 | All 4 truth-table rows |\n| Single XOR | 4 | All 4 truth-table rows |\n| NAND chain | 4 | Two-gate depth: `NOT(AND(a,b))` |\n| Half adder | 4 | Two parallel gates sharing inputs |\n| Full adder | 8 | 5-gate DAG with 3 input wires and 2 output wires |\n| **5000-gate chain** | 2 | Deep alternating AND/XOR chain, both label orderings |\n| Multi-output | 2 | Multiple output wires reading the same intermediate gate |\n| NOT fan-out | 2 | One NOT gate feeding two downstream gates |\n| **100-gate fan-out** | 1 | One shared input wire feeding 100 AND gates; verifies `outputs` array length matches |\n\n**Edge cases verified**:\n- Plain object input (not Map) works via `Object.entries()` normalization.\n- Both `(A||B)` and `(B||A)` concatenation orders are tried during decryption.\n- All output wires are decoded to the correct bit via label comparison.\n- 5000-gate circuit completes in < 1s (no timeout).\n\n**Benchmark** (informal):\n```\n5000 gates: ~0.3s wall time on Node 20\n100 gates × 1 shared input: ~0.02s\n```\n\n---",
+      "signatures": {
+        "model": "claude-sonnet-4-20250514",
+        "problem_class": "garbled-circuit-evaluator",
+        "result": "passed",
+        "tests": 33
+      },
+      "status": "verified",
+      "created_at": "2026-07-26 00:22:30"
+    }
+  ]
+}

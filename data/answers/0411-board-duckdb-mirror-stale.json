@@ -1,0 +1,24 @@
+{
+  "class_id": 411,
+  "title": "board-duckdb-mirror-stale",
+  "description": "board-duckdb-mirror-stale",
+  "created_at": "2026-08-02 20:15:44",
+  "answers": [
+    {
+      "answer_id": 501,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The per-tick mirror step was executed with the *system* interpreter (`/usr/bin/python3`), which lacks the `duckdb` module (PEP-668 managed system Python). The step silently no-opped, so `board.db` froze at tick 52 while the authoritative `events.jsonl` advanced to tick 56.\n\n**The fix — three pieces** (deployed under `~/.hermes`):\n\n**1. `board/board_resync.py`** (shebang pins the venv interpreter) — full resync that trusts JSONL, never the mirror:\n\n```python\n# Detect staleness: mirror max(id)/count vs authoritative JSONL\njsonl_count, jsonl_max_id = jsonl_line_count(events_path)\nbefore = board_state(db_path, ...)\nstale = (before[\"count\"] != jsonl_count or before[\"max_id\"] != jsonl_max_id)\n\n# Full resync — rebuild the events table straight from the authoritative source\ncon = duckdb.connect(str(db_path))\nwith con.cursor() as tx:\n    tx.execute(\"BEGIN TRANSACTION\")\n    tx.execute(\n        f'CREATE OR REPLACE TABLE \"{events_table}\" AS '\n        f\"SELECT * FROM read_json_auto('{events_path}', \"\n        f\"format='newline_delimited', union_by_name=true)\"   # schema evolution safe\n    )\n    # Update board header\n    tx.execute('INSERT OR REPLACE INTO board_header (key, value) VALUES '\n               \"('max_id', ?), ('count', ?), ('last_tick', ?), ('synced_at', ?)\",\n               [jsonl_max_id, jsonl_count, tick, now])\n    tx.execute(\"COMMIT\")\n\n# Verify: max(id) must equal JSONL line count (dense 1..N invariant)\nafter = board_state(db_path, ...)\nassert after[\"count\"] == jsonl_count and after[\"max_id\"] == jsonl_max_id\nassert jsonl_max_id == jsonl_count\n# exits non-zero on any mismatch so the crier escalates instead of accepting a stale mirror\n```\n\nKey properties: atomic (single transaction), idempotent (fresh mirror → cheap no-op), loud failures (exit 2 no-duckdb / 3 bad JSONL / 4 missing log / 5 verify mismatch), `--dry-run` for safe inspection, and `COALESCE(MAX(id),0)` with a missing-column guard so the empty-log case verifies as `max(id)==count==0`.\n\n**2. `board/board-mirror`** — shell wrapper that *always* dispatches to the venv and fails loudly if it's missing, so the tick loop can never silently fall back to system python3 again:\n\n```bash\nVENV_PY=\"${HERMES_HOME}/venvs/board/bin/python3\"   # has duckdb\nexec \"${VENV_PY}\" \"${SCRIPT}\" \"$@\"                 # system python3 is never used\n```\n\n**3. `crier/tick56_resync.sh`** — the tick-56 action: wrapper + explicit paths + `--tick 56`, forwarding args (`\"$@\"`) so `--dry-run` works through it.",
+      "evidence": "Recreated the incident in this sandbox: venv `~/.hermes/venvs/board/bin/python3` with duckdb 1.5.5, authoritative `events.jsonl` with 56 events (ticks 1–56, dense ids), and a stale `board.db` frozen at tick 52. Nine-test suite, **9/9 passed**:\n\n| # | Test | Result |\n|---|------|--------|\n| T1 | System python3 → `FATAL: duckdb not importable`, exit 2 (root cause reproduced) | PASS |\n| T2 | Tick-56 action: detects stale (52 vs 56), full resync, `verify_ok=True`, exit 0 | PASS |\n| T3 | Independent check: `count=56, MAX(id)=56`, header `max_id=56/count=56`, content identical to JSONL (56/56 rows) | PASS |\n| T4 | Idempotency: re-run on fresh mirror → \"mirror is fresh — no-op\", exit 0 | PASS |\n| T5 | Schema evolution: tick 57 adds new `region` key → survives resync (`union_by_name=true`) | PASS |\n| T6 | Corrupt JSONL line → exit 3, mirror untouched (authoritative never silently truncated) | PASS |\n| T7 | Empty JSONL → board emptied, `max(id)==count==0`, header zeroed, exit 0 | PASS |\n| T8 | `--dry-run` through wrapper writes nothing (board.db mtime unchanged) | PASS |\n| T9 | Resync after dry-run restores the mirror | PASS |\n\nEdge cases explicitly covered: missing `id` column on empty tables (initial implementation falsely failed verification — found by T7 and fixed with a DESCRIBE guard), and argument passthrough through the wrapper (T8 caught that `tick56_resync.sh` dropped `\"$@\"`). Timestamps round-trip as DuckDB `TIMESTAMP` (richer type than the JSONL strings; content-equivalent after normalization).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "board-duckdb-mirror-stale",
+        "result": "passed",
+        "tests": 9
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 20:15:44"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "class_id": 38,
+  "title": "go-lru-cache-ttl",
+  "description": "go-lru-cache-ttl",
+  "created_at": "2026-07-24 12:29:28",
+  "answers": [
+    {
+      "answer_id": 44,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "**File: `/home/kara/lru.go`**\n\nThe implementation uses three core data structures for O(1) operations:\n\n- **`map[string]*list.Element`** — O(1) key lookups\n- **`container/list`** (doubly-linked list) — O(1) LRU reordering (move-to-front, remove-back)\n- **`sync.RWMutex`** — thread safety; `Lock()` for writes, `RLock()` for `Len()`\n\nKey design decisions:\n\n| Concern | Approach |\n|---|---|\n| **O(1) Get** | Map lookup → move list element to front |\n| **O(1) Put** | Map insert + list push-front; evict list back if at capacity |\n| **TTL expiration** | Each entry stores `expires time.Time`. On `Get`, the stale entry is removed lazily. A background `reaper` goroutine (runs every TTL/2) sweeps expired entries. |\n| **Eviction policy** | \"LRU first, then expired\": When at capacity, `evictLocked` removes the back of the list (LRU). Expired entries are removed lazily by the reaper. |\n| **Zero TTL** | No expiration, no reaper goroutine started. |\n\n```go\n// Core Get logic — O(1)\nfunc (c *Cache) Get(key string) (interface{}, bool) {\n    c.mu.Lock()\n    defer c.mu.Unlock()\n    elem, ok := c.items[key]\n    if !ok {\n        return nil, false\n    }\n    ent := elem.Value.(*entry)\n    if c.ttl > 0 && time.Now().After(ent.expires) {\n        delete(c.items, key)\n        c.lru.Remove(elem)\n        return nil, false\n    }\n    c.lru.MoveToFront(elem)\n    return ent.value, true\n}\n\n// Core Put logic — O(1)\nfunc (c *Cache) Put(key string, value interface{}) {\n    c.mu.Lock()\n    defer c.mu.Unlock()\n    if elem, ok := c.items[key]; ok {\n        ent := elem.Value.(*entry)\n        ent.value = value\n        if c.ttl > 0 {\n            ent.expires = time.Now().Add(c.ttl)\n        }\n        c.lru.MoveToFront(elem)\n        return\n    }\n    if c.lru.Len() >= c.capacity {\n        c.evictLocked()\n    }\n    ent := &entry{key: key, value: value}\n    if c.ttl > 0 {\n        ent.expires = time.Now().Add(c.ttl)\n    }\n    elem := c.lru.PushFront(ent)\n    c.items[key] = elem\n}\n```\n\n**File: `/home/kara/lru_test.go`** — 14 test functions covering all cases.\n\n---",
+      "evidence": "All 14 tests pass (2.3s) and the race detector reports no data races:\n\n```\n=== RUN   TestBasicGetPut          — PASS\n=== RUN   TestGetNonExistent       — PASS\n=== RUN   TestEviction             — PASS\n=== RUN   TestLRUOrder             — PASS\n=== RUN   TestUpdate               — PASS\n=== RUN   TestTTLExpiration        — PASS  (1.10s)\n=== RUN   TestTTLWithZero          — PASS\n=== RUN   TestTTLPartialExpiration — PASS  (1.10s)\n=== RUN   TestConcurrentAccess     — PASS  (50 writers + 50 readers)\n=== RUN   TestConcurrentGetPutOnSameKey — PASS  (100 goroutines, same key)\n=== RUN   TestEvictionOrderLRUBeforeExpired — PASS\n=== RUN   TestLen                  — PASS\n=== RUN   TestDefaultCapacity      — PASS\n=== RUN   TestPutAfterEviction     — PASS\nok  lrucache  2.308s\nok  lrucache  3.319s  (race detector)\n```\n\nEdge cases tested:\n1. **Non-existent key** → `(nil, false)`\n2. **Eviction at capacity** → LRU entry removed, new entry stays\n3. **LRU reordering on Get** → accessed key becomes MRU, correct LRU evicted next\n4. **Update refreshes position** → updated key is MRU, old LRU evicted next\n5. **TTL expiration** → item inaccessible after TTL elapses\n6. **Zero TTL** → items persist indefinitely\n7. **Partial expiration** → only expired items removed, fresh ones survive\n8. **Concurrent reads/writes** → 50 writers + 50 readers, no races, capacity respected\n9. **Same-key contention** → 100 goroutines on one key\n10. **Default capacity** → `New(-1, 0)` defaults to 100\n11. **Put after eviction** → eviction makes room, subsequent puts work\n\n---",
+      "signatures": {
+        "model": "",
+        "problem_class": "go-lru-cache-ttl",
+        "result": "passed",
+        "tests": 14
+      },
+      "status": "verified",
+      "created_at": "2026-07-24 12:29:29"
+    }
+  ]
+}

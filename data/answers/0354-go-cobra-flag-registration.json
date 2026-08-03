@@ -1,0 +1,24 @@
+{
+  "class_id": 354,
+  "title": "go-cobra-flag-registration",
+  "description": "go-cobra-flag-registration",
+  "created_at": "2026-08-02 02:41:35",
+  "answers": [
+    {
+      "answer_id": 442,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `cobra.Command.Commands()` returns subcommands **sorted alphabetically by name**, not in the order you called `AddCommand`. So `cmd.Commands()[1]` is the second subcommand *alphabetically* — and `cmd.Commands()[1].Flags().String(...)` registers the flag on whatever command happens to sit at that index. If subcommand names ever change, get reordered, or a new one is added, flags silently migrate to a different command.\n\n**The fix:** keep a variable reference to the subcommand at creation time and register flags on that reference. Never index `cmd.Commands()`.\n\n```go\npackage main\n\nimport \"github.com/spf13/cobra\"\n\n// BAD — breaks the moment subcommand order/names change:\nfunc badRoot() *cobra.Command {\n\troot := &cobra.Command{Use: \"app\"}\n\troot.AddCommand(&cobra.Command{Use: \"zebra\", Run: func(c *cobra.Command, a []string) {}})\n\troot.AddCommand(&cobra.Command{Use: \"apple\", Run: func(c *cobra.Command, a []string) {}})\n\n\t// Compiles, but lands on \"zebra\" (alphabetically 2nd), NOT \"apple\" (2nd defined)\n\troot.Commands()[1].Flags().String(\"bug-flag\", \"\", \"mislocated\")\n\treturn root\n}\n\n// GOOD — variable reference + explicit AddCommand:\nfunc goodRoot() *cobra.Command {\n\troot := &cobra.Command{Use: \"app\"}\n\n\tcreateCmd := &cobra.Command{Use: \"create\", Run: func(c *cobra.Command, a []string) {}}\n\troot.AddCommand(createCmd) // register first, then wire flags\n\tcreateCmd.Flags().String(\"name\", \"\", \"the file name\")\n\n\t// safe even though more commands get added later\n\troot.AddCommand(&cobra.Command{Use: \"zebra\", Run: func(c *cobra.Command, a []string) {}})\n\treturn root\n}\n```\n\nKey points:\n- Declare the `*cobra.Command` variable, `AddCommand` it, then call `.Flags()` on the variable — order of those three lines is irrelevant to correctness.\n- The same trap applies to `cmd.Commands()` for help text, aliases, or any per-subcommand wiring: resolve subcommands by `Find([]string{...})` or by variable reference, never by positional index.",
+      "evidence": "Verified empirically with cobra v1.8.1 on Go 1.26.0 (`/tmp/cobra-demo`):\n\n**Reproduction (bug path):**\n```\nCommand order: [apple create zebra ]          # sorted alphabetically, not insertion order\nbug: 'app apple --help' contains bug-flag?  false\nbug: 'app zebra --help' contains bug-flag?  true   # flag landed on the WRONG command\nfix: 'app create --help' contains name?     true    # variable-reference fix works\n```\n\n**Automated tests — 3 passed** (`go test -v ./...`):\n\n| Test | Edge case covered | Result |\n|---|---|---|\n| `TestCommandsIndexIsSorted` | Confirms `Commands()[0]` is `alpha` when `zeta` was added first — index ≠ insertion order | PASS |\n| `TestFixWorksRegardlessOfOrder` | Fix holds when subcommands are added in any order: `[create,zebra]`, `[zebra,create]`, `[apple,create,zebra]` | PASS |\n| `TestFlagParseOnWrongCommand` | Runtime parse `app apple --bug-flag x` errors with unknown-flag because the flag leaked onto `zebra` — a silent misbehavior, not just a help-text nit | PASS |\n\nAdditional edge cases reasoned about: renaming a subcommand or inserting a new one before it would silently relocate flags under the index-based approach (no compile error, no runtime error — pure data corruption), whereas the variable-reference approach is immune because the reference never changes.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cobra-flag-registration",
+        "result": "passed",
+        "tests": 3
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 02:41:35"
+    }
+  ]
+}

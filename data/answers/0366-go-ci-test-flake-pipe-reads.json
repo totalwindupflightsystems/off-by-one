@@ -1,0 +1,24 @@
+{
+  "class_id": 366,
+  "title": "go-ci-test-flake-pipe-reads",
+  "description": "go-ci-test-flake-pipe-reads",
+  "created_at": "2026-08-02 04:15:30",
+  "answers": [
+    {
+      "answer_id": 454,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "### Fix 1 — MCP stdio pipe reads (`TestMCP_ListTools`)\n\n**Root cause:** the test did `stdout.Read(buf)` (raw, fixed-size) after `time.Sleep(...)`. JSON-RPC responses are newline-delimited; when the server answers eagerly, two responses land in the pipe together, so read #1 returns *both*, and read #2 blocks until the context kills the child (EOF at 10s) — a CI-only timing flake.\n\n**Fix:** one shared `bufio.Reader` for the process lifetime (it buffers, so coalesced pipe data is split back into lines), a pump goroutine feeding a channel, and a context-aware `readMCPResponse` that can never block past the deadline:\n\n```go\ntype mcpClient struct {\n\tctx   context.Context\n\tstdin io.WriteCloser\n\tlines chan []byte\n\terrs  chan error\n}\n\n// One shared bufio.Reader for the whole process lifetime.\nfunc newMCPClient(ctx context.Context, proc *exec.Cmd) (*mcpClient, error) {\n\tstdin, _ := proc.StdinPipe()\n\tstdout, _ := proc.StdoutPipe()\n\tproc.Start()\n\tc := &mcpClient{ctx: ctx, stdin: stdin, lines: make(chan []byte, 16), errs: make(chan error, 1)}\n\tgo c.pump(bufio.NewReader(stdout)) // shared reader\n\treturn c, nil\n}\n\n// pump reads newline-delimited JSON lines off the shared bufio.Reader.\nfunc (c *mcpClient) pump(r *bufio.Reader) {\n\tfor {\n\t\tline, err := r.ReadBytes('\\n')\n\t\tif len(line) > 0 {\n\t\t\tc.lines <- line\n\t\t}\n\t\tif err != nil {\n\t\t\tc.errs <- err\n\t\t\treturn\n\t\t}\n\t}\n}\n\n// readMCPResponse is ctx-aware: a hung child can never block the test.\nfunc (c *mcpClient) readMCPResponse() ([]byte, error) {\n\tselect {\n\tcase <-c.ctx.Done():\n\t\treturn nil, fmt.Errorf(\"read MCP response: %w\", c.ctx.Err())\n\tcase line := <-c.lines:\n\t\treturn bytes.TrimSpace(line), nil\n\tcase err := <-c.errs:\n\t\treturn nil, fmt.Errorf(\"read MCP response: %w\", err)\n\t}\n}\n```\n\nThe test then sends both requests eagerly and reads both responses — each arrives in ~1ms instead of blocking for 10s.\n\n### Fix 2 — `TestPathTraversalAttack` helper\n\n**Root cause:** the helper used `filepath.Clean`, which resolves separators with host-OS rules — on Windows `\\` becomes a separator and output uses `\\`, so the `/`-based `TrimPrefix`/split logic broke and test outcomes varied per CI runner. The parameter was also named `path`, shadowing the `path` package.\n\n**Fix:** use `path.Clean` (always `/`, deterministic on every OS) and rename the parameter:\n\n```go\nimport \"path\"\n\n// p, not path: the old name shadowed the path package, forcing filepath.\nfunc cleanTraversal(p string) string {\n\treturn strings.TrimPrefix(path.Clean(\"/\"+p), \"/\")\n}\n```\n\n`path.Clean` collapses `a/../../etc/passwd` → `etc/passwd` (no `..` segment survives); backslash inputs stay opaque single segments (visible to the caller, never silently reinterpreted), identically on every OS.\n\n---",
+      "evidence": "Reproduction project at `/home/kara/mcptest` (fake MCP stdio server + client + tests).\n\n**1. The flake, reproduced deterministically** (`go test -tags flake`, original buggy reads):\n\n```\nflake_repro_test.go:67: first read got 291 bytes (both responses may have coalesced here)\nflake_repro_test.go:52: read: EOF\n--- FAIL: TestMCP_ListTools_Flaky (3.00s)\n```\nExactly the described failure: both responses coalesced into read #1; read #2 blocked until the ctx kill produced EOF.\n\n**2. The fix, verified stable** — `go test -race -count=20 .` → `ok mcptest`, **20/20 passes**:\n- `TestMCP_ListTools`: two eager requests, coalesced responses read in **1.1–2.5ms** (not 10s); response JSON parsed, tool name asserted.\n- `TestPathTraversalAttack` (8 sub-cases): `../../etc/passwd`→`etc/passwd`, `a/../../etc/passwd`→`etc/passwd`, `/etc/passwd`→`etc/passwd`, `safe/dir/../file.txt`→`safe/file.txt`, `././safe/./file.txt`→`safe/file.txt`, `..\\..\\etc\\passwd` and mixed-separator inputs kept byte-identical (opaque, deterministic).\n- `TestCleanTraversalIsOSIndependent`: emulated old helper on Windows → `etc\\passwd` (backslash separators, `/`-split sees one segment) vs fixed `path.Clean` → `a\\..\\..\\etc\\passwd` — proving the old outcome was a function of `runtime.GOOS`.\n\nEdge cases covered: request pipelining (responses coalescing mid-flight), backslash-only and mixed-separator traversal inputs, absolute-path attempts, dot segments, empty/hung-child behavior (ctx-aware read can't deadlock).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-ci-test-flake-pipe-reads",
+        "result": "passed",
+        "tests": 3
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 04:15:31"
+    }
+  ]
+}

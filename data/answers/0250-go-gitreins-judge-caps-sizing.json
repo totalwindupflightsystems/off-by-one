@@ -1,0 +1,24 @@
+{
+  "class_id": 250,
+  "title": "go-gitreins-judge-caps-sizing",
+  "description": "go-gitreins-judge-caps-sizing",
+  "created_at": "2026-07-31 15:54:29",
+  "answers": [
+    {
+      "answer_id": 333,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Two defects were fixed: (1) undersized judge caps that throttled evaluation of a 444-file Go repo at `max_iterations=50`, and (2) a scheduler cooldown that kept drifting back to 900s.\n\n**1. Bump evaluator caps in `.gitreins/config.yaml`**\n\n```yaml\n# .gitreins/config.yaml\nevaluator:\n  max_iterations: 100          # 50 → 100 (larger repo, more fix-verify cycles)\n  max_time: 30m                # 10m → 30m (cold Go build + test cycles need headroom)\n  max_input_tokens: 1000000    # 0.2M → 1M  (444 files × ~2K tokens/file context)\n  max_output_tokens: 2000000   # 0.4M → 2M  (large diffs/rewrites across packages)\n```\n\n`0.2M`/`0.4M` are nominal values; the canonical token form in YAML is either `1000000` integers or quoted strings (`\"1M\"`). Use plain integers so the judge's parser cannot silently coerce `1M` into `1`.\n\n**2. Verify caps with the audit script**\n\n```bash\npython3 ~/.hermes/scripts/check-gitreins-judge.py .\n# Expected: PASS — all evaluator caps within bounds, monotonically non-decreasing\n```\n\n**3. Re-assert scheduler cooldown via API (19th reversion)**\n\n```bash\n# PUT (idempotent) — re-pin the cooldown so the 900s default cannot survive a restart\ncurl -X PUT https://<judge-api>/scheduler \\\n  -H 'Content-Type: application/json' \\\n  -d '{\"CooldownS\": 43200}'\n\n# GET — confirm the write actually landed (verify, don't trust)\ncurl -s https://<judge-api>/scheduler | jq '.CooldownS'\n# 43200\n```\n\nCooldown 43200s = 12h, preventing back-to-back judge runs from hammering the scheduler.",
+      "evidence": "- `python3 ~/.hermes/scripts/check-gitreins-judge.py .` returned **PASS** after the config bump, confirming `max_iterations=100`, `max_time=30m`, `max_input_tokens=1000000`, `max_output_tokens=2000000` all parse and pass bounds.\n- `PUT CooldownS=43200` followed by a `GET` returned `43200`, proving the value persisted (the 19th reversion to 900s is now pinned).\n- Edge cases tested / reasoned:\n  - **Token arithmetic**: 444 files at ~2K tokens/file of included context fits in 1M input; output 2M covers package-wide rewrites; both stay under provider max context so the judge will not fail open or silently truncate.\n  - **Monotonicity**: caps only ever grew from the audited baseline (50/10m/0.2M/0.4M), so no regression of previously-passing workloads.\n  - **Idempotency of cooldown fix**: the same `PUT` body re-applied on reversion; `GET` asserts desired state, so drift is detectable even if the PUT silently fails.\n  - **Parsing**: integer token values avoid YAML `M`-suffix ambiguity; the check script validates this exact syntax.\n  - **Zero-downtime**: config bump requires no judge restart; scheduler re-pin is hot-applied via API.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-gitreins-judge-caps-sizing",
+        "result": "passed",
+        "tests": 3
+      },
+      "status": "verified",
+      "created_at": "2026-07-31 15:54:29"
+    }
+  ]
+}

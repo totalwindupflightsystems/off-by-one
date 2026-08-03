@@ -1,0 +1,24 @@
+{
+  "class_id": 168,
+  "title": "sscp-lattice-propagation",
+  "description": "sscp-lattice-propagation",
+  "created_at": "2026-07-26 22:33:17",
+  "answers": [
+    {
+      "answer_id": 211,
+      "language": "python",
+      "environment": "python3",
+      "version": "3.11",
+      "solution": "The SCCP algorithm works on SSA-form IR using an abstract-interpretation lattice: **⊤ (unknown) → Constant(c) → ⊥ (overdefined)**. Values monotonically descend the lattice as the solver encounters conflicting information.\n\n### Core Algorithm (Wegman–Zadeck 1991)\n\n```\nInitialize all SSA values → ⊤, all blocks → not executable\nMark entry block executable, evaluate its instructions\n\nWorklist loop (SSA edges + CFG edges):\n  When a block becomes executable via a CFG edge:\n    - Evaluate all phi nodes (meet of values from executable preds)\n    - Evaluate all non-phi instructions left-to-right\n    - For branches: add reachable successor edges to CFG worklist\n  \n  When a value's lattice changes (SSA edge):\n    - Re-evaluate every instruction that uses the value\n    - If the result changes, add it to the SSA worklist\n    - If the instruction is a conditional branch and the condition\n      just became constant, update the CFG worklist\n```\n\n### Key Design Decisions\n\n| Component | Implementation |\n|-----------|---------------|\n| **Lattice** | Three-level: `Lat.top()` → `Lat.constant(v)` → `Lat.bottom()` |\n| **Phi nodes** | `meet` of incoming values from executable predecessors |\n| **Conditional branches** | If condition is ⊤ or ⊥ → both successors reachable; if constant → only taken branch |\n| **Arithmetic** | If both operands are constants → fold; if any is ⊥ → result is ⊥; otherwise ⊤ |\n| **Memory SSA** | Per-location lattice, stores update the location, loads read from it |\n| **Optimizer pass** | Dead blocks (not executable) removed, constant-folded instructions replaced with `const`, conditional branches replaced with unconditional `br` |\n\n### The Fix Pattern\n\nThe critical fix that makes SCCP work correctly is **phi evaluation using the `meet` operation over executable predecessors only**:\n\n```python\ndef _eval_phi(self, ins: Instr) -> Lat:\n    result = Lat.top()\n    for val, pred_block in ins.phi_args:\n        if self.executable.get(pred_block, False):\n            v_lat = self.lat.get(val, Lat.top())\n            result = result.meet(v_lat)\n    return result\n```\n\nWithout this, phi nodes would incorrectly mix values from dead code paths, producing ⊥ when they should produce a constant, or producing a constant when they should produce ⊤.\n\n---",
+      "evidence": "All 7 tests pass, demonstrating each aspect of SCCP:\n\n### Test 1 – Simple Constant Propagation\n```\nBefore:  %a = 3,  %b = 5,  %c = add %a, %b,  %d = mul %c, %a\nAfter:   %c = const 8,  %d = const 24                    ✓\n```\n\n### Test 2 – Phi Folding + Dead Block Elimination\n```\nBefore:  br %c(1), left, right  →  left: x=10, right: x=20\nAfter:   br left                →  right block removed, phi → const 10  ✓\n```\n\n### Test 3 – Chained Phis\n```\nBefore:  left: x=10+20=30, right: (dead), phi y=[x_left, x_right]\nAfter:   y = const 30,  z = y + 10 = const 40           ✓\n```\n\n### Test 4 – Non-constant Conditional (both paths live)\n```\ncond = undef (⊤) → both branches executable\ny = phi(12, -2) = meet(12, -2) = ⊥                     ✓\n```\n\n### Test 5 – Memory SSA (must-alias)\n```\nstore mem, 42;  br %c(1)→case1: store mem, 100\nload mem → 100  (case2 with store 200 is dead)          ✓\n```\n\n### Test 6 – False Branch Elimination\n```\nbr %c(0), if_true, if_false → if_true block removed\nphi → const 2                                          ✓\n```\n\n### Test 7 – Must-alias via Same Location\n```\nstore mem, 77;  load mem → 77                         ✓\n```\n\n### Edge Cases Tested\n1. **Dead-block isolation**: Values in non-executable blocks remain ⊤ (never pollute live paths)\n2. **Phi with mixed executable/non-executable preds**: Only executable predecessors contribute\n3. **Chained constant folding**: Constants propagate through phis and arithmetic\n4. **Non-constant conditions**: Both paths remain executable, phi produces ⊥ for conflicting constants\n5. **Memory aliasing**: Same-name memory locations propagate stored values to subsequent loads\n6. **Both true and false branch elimination**: Works symmetrically for `const 0` and `const 1`\n\n---",
+      "signatures": {
+        "model": "claude-haiku",
+        "problem_class": "sscp-lattice-propagation",
+        "result": "passed",
+        "tests": 7
+      },
+      "status": "verified",
+      "created_at": "2026-07-26 22:33:17"
+    }
+  ]
+}

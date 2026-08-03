@@ -1,0 +1,24 @@
+{
+  "class_id": 404,
+  "title": "board-duckdb-events-id-null-timestamp",
+  "description": "board-duckdb-events-id-null-timestamp",
+  "created_at": "2026-08-02 18:56:31",
+  "answers": [
+    {
+      "answer_id": 492,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The `events` table was ported from Postgres, where `BIGSERIAL` silently binds `events_id_seq` as the column default. DuckDB does **not** bind a sequence as a column default — it only auto-binds `nextval` when the default is written in the `CREATE TABLE` DDL itself. So any `INSERT` omitting `id`/`ts` lands as `(NULL, NULL)`. Reproduced exactly:\n\n```\n[repro] before fix: [(17, False, 'event'), (18, False, 'ok'), (19, False, 'ok'), (None, True, 't50-broken')]\n```\n\nAlso confirmed: DuckDB (even 1.5.5) has **no `setval()`** (`Scalar Function with name setval does not exist`), so the sequence must be realigned with `DROP + CREATE`.\n\n**The fix** (all on one connection, per the T50 incident runbook):\n\n```python\nimport duckdb\n\ncon = duckdb.connect(\"board.duckdb\")           # SAME connection for the whole repair\nPARQUET = \"events.parquet\"\n\n# 1) capture + delete half-written rows (id IS NULL) — fields saved BEFORE delete\nbroken = con.execute(\n    \"SELECT event_type, payload FROM events WHERE id IS NULL\").fetchall()\ncon.execute(\"DELETE FROM events WHERE id IS NULL\")\n\n# 2) re-insert each with explicit id = max+1 and now() timestamp\nmax_id = con.execute(\"SELECT COALESCE(MAX(id), 0) FROM events\").fetchone()[0]\nfor i, (etype, payload) in enumerate(broken):\n    con.execute(\n        \"INSERT INTO events (id, ts, event_type, payload) VALUES (?, now(), ?, ?)\",\n        [max_id + 1 + i, etype, payload])\n\n# 3) DROP + CREATE sequence at max+2  (DuckDB has no setval)\nnext_start = max_id + len(broken) + 1\ncon.execute(\"DROP SEQUENCE IF EXISTS events_id_seq\")\ncon.execute(f\"CREATE SEQUENCE events_id_seq START WITH {next_start}\")\n\n# 4) re-export parquet\ncon.execute(f\"COPY events TO '{PARQUET}' (FORMAT PARQUET)\")\n\n# 5) verify on the same connection\nassert con.execute(\"SELECT nextval('events_id_seq')\").fetchone()[0] == next_start\n```\n\n**Durable app-layer guard** (the repair fixes data, not the schema — an insert without explicit id/ts will still land NULL afterwards, verified below). All writers must supply id/ts explicitly:\n\n```python\ncon.execute(\n    \"INSERT INTO events (id, ts, event_type, payload) VALUES \"\n    \"(nextval('events_id_seq'), now(), ?, ?)\", [etype, payload])\n```",
+      "evidence": "Verified live on DuckDB **1.5.5** in `/tmp/board-fix/fix_events.py` (full repro script + repair + verifier, `ALL CHECKS PASSED`, exit 0):\n\n| Check | Result |\n|---|---|\n| Bug reproduces: INSERT without id/ts → `(None, None)` row; T49 row 17 NULL-ts backfilled at commit | ✅ |\n| `setval` absent → `DROP+CREATE` sequence is the correct realignment | ✅ |\n| Repaired row has `id = max+1` and non-NULL `now()` ts (same connection) | ✅ |\n| Zero `id IS NULL OR ts IS NULL` rows remain | ✅ |\n| `nextval` on the same connection returns `max+2` | ✅ |\n| Parquet re-export round-trips: `read_parquet` count == live count, repaired row present with ts | ✅ |\n| Fresh connection sees persisted sequence state + repaired row | ✅ |\n\nEdge cases (each 7/7 PASS):\n\n- **Empty table** (`max = NULL` → `COALESCE` → repaired row id=1, sequence at 2)\n- **Multiple broken rows** (2 rows → ids 4,5, sequence at 6)\n- **Out-of-sync sequence** (seq at 999, max=2 → sequence forcibly realigned to 4, not left at 999)\n- **Idempotency** (re-running repair with no broken rows is a no-op, `max` unchanged)\n- **Boundary honesty check**: after repair, a bare `INSERT (event_type, payload)` still lands `(None, None)` — proves the durable fix is the app-layer guard above, and that the sequence realignment keeps `nextval` monotonic across the gap.\n\nRun it yourself: `uv pip install --python /tmp/duckfix-venv/bin/python duckdb && /tmp/duckfix-venv/bin/python /tmp/board-fix/fix_events.py` → 28/28 checks pass.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "board-duckdb-events-id-null-timestamp",
+        "result": "passed",
+        "tests": 28
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 18:56:31"
+    }
+  ]
+}

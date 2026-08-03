@@ -1,0 +1,24 @@
+{
+  "class_id": 419,
+  "title": "go-live-e2e-battery",
+  "description": "go-live-e2e-battery",
+  "created_at": "2026-08-02 22:18:39",
+  "answers": [
+    {
+      "answer_id": 512,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Scaffolded the **rabbit-hole** project (Go 1.22 module, zero external deps) at the workspace root so the fixture's `go build`/`go run` steps work from the cwd:\n\n```\n/home/kara/\n├── go.mod                      module rabbit-hole\n├── main.go                     CLI: serve/help/list/version + graceful SIGTERM shutdown\n├── internal/rlimit/rlimit.go   best-effort memlock rlimit + eBPF probe (never fatal)\n├── internal/server/server.go   HTTP API: /health /sessions /search /chat /metrics\n├── e2e/e2e_test.go             TestE2E_ServeAttachSearchDetach (E2E-001 fixture)\n└── README.md\n```\n\nKey design points:\n\n**CLI** (`main.go`) — `serve --addr 127.0.0.1:19734` (default port already 19734), `help`, `list [--addr]`, `version`. On SIGTERM/SIGINT it drains via `http.Server.Shutdown` and exits 0.\n\n**API** (`internal/server`) — `GET /health` liveness, `GET|POST /sessions` (list/attach), `GET|DELETE /sessions/{id}` (get/detach), `DELETE /sessions` (reset), `GET /search?q=` (case-insensitive match), `POST /chat` (JSON reply), `GET /metrics` (Prometheus text: `rabbit_hole_http_requests_total`, `rabbit_hole_sessions_active`, `rabbit_hole_uptime_seconds`).\n\n**Graceful eBPF degradation** (`internal/rlimit`) — startup attempts three privileged steps; each failure is logged as a **WARNING** and never aborts the server:\n```go\nfunc raiseMemlock() error { // RLIMIT_MEMLOCK=8 (linux ABI; trimmed from Go 1.26 syscall pkg)\n    var lim syscall.Rlimit\n    if err := syscall.Getrlimit(rlimitMemlock, &lim); err != nil { return err }\n    ...\n    if err := syscall.Setrlimit(rlimitMemlock, &lim); err != nil { // EPERM without CAP_SYS_RESOURCE\n        return fmt.Errorf(\"setrlimit(RLIMIT_MEMLOCK): ...: %w\", err)\n    }\n}\n// probeBPFMap(): raw bpf(2) syscall (SYS_BPF=321 amd64/280 arm64), BPF_MAP_CREATE of a throwaway ARRAY map.\n// checkBTF(): stat /sys/kernel/btf/vmlinux.\n```\nIn `serve`: `rlimit.Setup()` → warnings collected and logged, then the server continues regardless.\n\n**E2E test** (`e2e/e2e_test.go`) — builds the binary once via `go build -o <tmp>/rabbit-hole .` from the module root (located with `runtime.Caller`), **reuses** an already-running server on 127.0.0.1:19734 if present (harness-owned) else starts its own subprocess and kills only what it started (SIGTERM, SIGKILL fallback). It resets state with `DELETE /sessions`, then asserts: health `status=ok` → empty listing → attach (id+name) → list count 1 → search hit **and** miss → chat reply → metrics contains all three series → CLI `help` (mentions serve/list/endpoints) → CLI `list` prints the session id → detach → count 0.",
+      "evidence": "Verified locally on Go 1.26/linux/amd64:\n\n- `gofmt -l .` clean, `go vet ./...` clean, `go build -o rabbit-hole .` OK.\n- `go test ./... -count=1` → `ok rabbit-hole/e2e 3.576s` (TestE2E_ServeAttachSearchDetach PASS).\n- Full fixture sequence executed by hand: serve on 127.0.0.1:19734 → health `{\"status\":\"ok\",...}` → sessions `{\"count\":0}` → POST attach → search hit → chat reply → metrics Prometheus output → `help` exit 0 → `list` prints `sess-1` → `list` with no server exits 0 → SIGTERM → `serve exit code = 0`, log shows `received terminated: shutting down gracefully` / `shutdown complete`.\n- **Degraded mode (no eBPF perms)**: running unprivileged, the log shows exactly the expected non-fatal warnings while all endpoints still serve:\n  ```\n  rabbit-hole: WARNING: memlock-rlimit: setrlimit(RLIMIT_MEMLOCK): ... operation not permitted (degraded mode: continuing without it)\n  rabbit-hole: WARNING: ebpf-btf: eBPF BTF not available (...)\n  rabbit-hole: WARNING: ebpf-probe: bpf(BPF_MAP_CREATE): operation not permitted (degraded mode: continuing without it)\n  ```\n- Edge cases tested: empty-list start, attach/detach lifecycle, search hit+miss, chat with/without session, metrics content, `list` with server up, with sessions, and with server down (exit 0), SIGTERM graceful exit 0, and reuse of a pre-existing server on the fixture port by the E2E test.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-live-e2e-battery",
+        "result": "passed",
+        "tests": 1
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 22:18:39"
+    }
+  ]
+}

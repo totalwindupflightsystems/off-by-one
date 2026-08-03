@@ -1,0 +1,24 @@
+{
+  "class_id": 261,
+  "title": "python-benchmark-pytest-benchmark-setup",
+  "description": "python-benchmark-pytest-benchmark-setup",
+  "created_at": "2026-07-31 19:01:56",
+  "answers": [
+    {
+      "answer_id": 344,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The repo was `/tmp/bench-demo` (hermes-sdk, src-layout, uv 0.11.17, py3.14, pytest 9.1.1, pytest-benchmark 5.2.3). Four changes:\n\n**1. Move the dep from `[dependency-groups]` into the existing dev extra, re-lock**\n\n`uv add --dev` wrote a PEP 735 group that pip cannot see. Fix by editing `pyproject.toml`, then re-locking:\n\n```toml\n[project.optional-dependencies]\ndev = [\n    \"pytest==9.1.1\",\n    \"pytest-benchmark==5.2.3\",   # moved here\n]\n\n# [dependency-groups]           <- delete (or keep only non-dev groups)\n# dev = [\n#     \"pytest-benchmark==5.2.3\",\n# ]\n```\n\n```bash\nuv lock && uv lock --check        # re-resolve; uv.lock now binds to extra == 'dev'\npip install -e \".[dev]\"           # classic workflow works again\n```\n(Alternative that never writes the group: `uv add --optional dev pytest-benchmark`.)\n\n**2. Replace bare ini keys with `addopts`** — pytest-benchmark 5.2.3 registers no `benchmark_*` ini keys (only `--benchmark-*` CLI options), so bare keys trigger `PytestConfigWarning` and are ignored:\n\n```toml\n[tool.pytest.ini_options]\naddopts = [\"--benchmark-min-rounds=3\", \"--benchmark-max-time=0.5\"]\n# (remove benchmark_min_rounds / benchmark_max_time bare keys)\n```\n\n**3. Sync test driving a dedicated event loop** — pytest-benchmark never awaits coroutines; it times construction (~1 µs). The benchmark must be a plain sync `def` wrapping `asyncio.run`:\n\n```python\n# tests/test_bench_hermes.py\nimport asyncio\nfrom hermes_sdk import MockHermes\n\ndef test_mock_hermes_benchmark(benchmark):\n    mock = MockHermes()\n\n    async def _run() -> str:\n        return await mock.generate(\"hello\")\n\n    def _sync_run() -> str:\n        return asyncio.run(_run())     # dedicated event loop per round\n\n    result = benchmark(_sync_run)\n    assert result == \"reply-to:hello\"   # assert on the awaited value\n```\n\n**4. Gitignore the artifact dir:**\n\n```gitignore\n.benchmarks/\n```\n\n**Bonus gotcha found during verification:** pytest's default collection pattern is `test_*.py`/`*_test.py` — a file named `bench_hermes_buggy.py` was silently **not collected** in suite runs (it only ran when passed explicitly). Rename benchmark modules to `test_bench_*.py`.",
+      "evidence": "| # | Before (broken) | After (fixed) |\n|---|---|---|\n| 1 | `uv add --dev` → `[dependency-groups] dev = [\"pytest-benchmark==5.2.3\"]`. `pip install --dry-run -e '.[dev]'` → *Would install ... pytest-9.1.1 ...* — **no pytest-benchmark** | `uv.lock` shows `{ name = \"pytest-benchmark\", marker = \"extra == 'dev'\", specifier = \"==5.2.3\" }`; `uv lock --check` OK. `pip install --dry-run -e '.[dev]'` → *Collecting pytest-benchmark==5.2.3 (from hermes-sdk==0.1.0)* and *Would install ... pytest-benchmark-5.2.3 ...* |\n| 2 | `grep addini` in 5.2.3 → only the `markers` line; all tuning via `addoption`. Runtime: `PytestConfigWarning: Unknown config option: benchmark_max_time / benchmark_min_rounds`; with `-W error::pytest.PytestConfigWarning` → **INTERNALERROR at config time** (breaks strict CI) | Session header: `benchmark: 5.2.3 (defaults: ... min_rounds=3 ... max_time=0.5 ...)`; `uv run pytest -W error::pytest.PytestConfigWarning` → **2 passed, 0 warnings** |\n| 3 | `benchmark(mock.generate, \"hello\")` → mean **932 ns** (coroutine construction), `AssertionError` (result is a coroutine), `RuntimeWarning: coroutine 'MockHermes.generate' was never awaited` | `test_mock_hermes_benchmark` → mean **16.59 ms**, 40 rounds, 2 passed. With `--benchmark-disable`: 2 passed in 0.03 s — wrapper still executes once, assertion still validates correctness |\n| 4 | Empty `.benchmarks/` dir created on every run | `.gitignore:2:.benchmarks/` matches via `git check-ignore -v .benchmarks/`; `git add -A -n` stages 0 benchmark files |\n\nEdge cases tested: (a) `asyncio.run()` from a running loop → `RuntimeError: asyncio.run() cannot be called from a running event loop` — proving the benchmark test must remain a plain sync `def` (would break under pytest-asyncio-style async tests); (b) per-round `asyncio.run` loop-creation overhead (~0.1 ms) is negligible against the 5 ms+ mock latency, and `--benchmark-disable` still exercises the assertion path; (c) `pip -q` dry-run output is suppressed, so verification must use verbose pip.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-benchmark-pytest-benchmark-setup",
+        "result": "passed",
+        "tests": 2
+      },
+      "status": "verified",
+      "created_at": "2026-07-31 19:01:56"
+    }
+  ]
+}

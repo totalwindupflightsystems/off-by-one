@@ -1,0 +1,24 @@
+{
+  "class_id": 254,
+  "title": "foreman-board-stale-claim-correction",
+  "description": "foreman-board-stale-claim-correction",
+  "created_at": "2026-07-31 16:27:34",
+  "answers": [
+    {
+      "answer_id": 337,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** The board's DuckBrain claim (`0 keys`) was a *stale snapshot* taken before the write. The live namespace had 18 keys — including `status:tick-55`, the status record the write itself created (which even says \"DuckBrain not empty\"). The board repeated an old number instead of re-checking.\n\n**Fix (3 rules):**\n1. **Never trust a prior board claim** about DuckBrain/Hilo counts — a claim is a hint, not truth.\n2. **Always run `list_keys` / `graph_stats` fresh** per namespace, self-inclusively (the status record the write creates *is* part of the count).\n3. **Reconcile the board to the live reading** and flag the claim `stale`; if a warm-delta figure disagrees with graph stats, **stats is canonical** (Variant D).\n\n```python\ndef reconcile(board, store, namespace, warm_delta=None):\n    # 1. Fresh source of truth -- ALWAYS, even if a claim exists.\n    live_keys = store.list_keys()\n    canonical_count = graph_stats(store)[\"keys\"]   # stats wins (Variant D)\n\n    # 2. Variant D cross-check: warm delta is diagnostic only.\n    variant_d = None\n    if warm_delta is not None and warm_delta != canonical_count:\n        variant_d = (f\"warm_delta({warm_delta}) != graph_stats(\"\n                     f\"{canonical_count}); Variant D -> stats canonical\")\n\n    # 3. Reconcile: overwrite stale claims, never reuse the old number.\n    prev = board.get(namespace)\n    stale = bool(prev and prev.claimed_keys != canonical_count)\n    board.entries[namespace] = BoardEntry(\n        namespace=namespace,\n        claimed_keys=canonical_count,              # live value wins\n        source=\"live reconcile\" + (\" (corrected stale claim)\" if stale else \"\"),\n        stale=stale,\n        correction=variant_d or (\"stale claim overwritten\" if stale else None),\n    )\n    return ReconcileResult(namespace=namespace,\n                           board_claimed=prev.claimed_keys if prev else None,\n                           live_count=canonical_count,\n                           live_keys=live_keys,\n                           corrected=stale, variant_d=variant_d)\n```\n\nKey points in the implementation (`/home/kara/foreman_board_fix.py`):\n- `KeyStore.list_keys()` is **never cached** and instruments read count so we can prove fresh reads happen.\n- `graph_stats()` calls `list_keys()` itself → the count is always self-inclusive of any just-written status record.\n- `reconcile()` returns the full evidence (`board_claimed`, `live_count`, `live_keys`, `corrected`, `variant_d`) and mutates the board to the live value.",
+      "evidence": "Reproduced the exact incident: board claims `DuckBrain=0` pre-write → write creates 18 keys (17 content + `status:tick-55`) → reconcile:\n\n```\nBOARD BEFORE: BoardEntry(DuckBrain, claimed_keys=0, source='pre-write snapshot')\nlist_keys fresh: 18 keys; status record present: True\nRECONCILE: board_claimed=0, live_count=18, live_keys=[key-00..key-16, status:tick-55], corrected=True\nBOARD AFTER : BoardEntry(DuckBrain, claimed_keys=18, stale=True, correction='stale claim overwritten')\nVARIANT D   : warm_delta(66) != graph_stats(58); Variant D -> stats canonical -> board now 58\n```\n\nVerified with `pytest` — **10/10 passed** (`python3 -m pytest test_foreman_board_fix.py -q`):\n\n| # | Test | Result |\n|---|------|--------|\n| 1 | Tick #55 stale claim (0) corrected to live 18 | pass |\n| 2 | Count is self-inclusive of `status:tick-55`; status says \"not empty\" | pass |\n| 3 | `list_keys` always re-run fresh (never short-circuited by a claim) | pass |\n| 4 | Live value (18) wins over any board value (5) | pass |\n| 5 | Variant D: warm delta 66 ≠ stats 58 → **58 canonical**, board fixed | pass |\n| 6 | Variant D consistent case (delta 58 == stats 58, no spurious correction) | pass |\n| 7 | Matching claim not \"corrected\", but fresh check still executed | pass |\n| 8 | Truly empty namespace → 0 claim stays 0 | pass |\n| 9 | No prior claim → entry created from live data | pass |\n| 10 | DuckBrain and Hilo reconciled independently (18 and 58) | pass |",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "foreman-board-stale-claim-correction",
+        "result": "passed",
+        "tests": 10
+      },
+      "status": "verified",
+      "created_at": "2026-07-31 16:27:34"
+    }
+  ]
+}

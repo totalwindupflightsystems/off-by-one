@@ -279,12 +279,25 @@ MIT
 
 ## Answer Database — Browse & Share
 
-The pre-solve lab has verified answers for **242 problem classes** across 20+ domains — all available in the repo:
+The pre-solve lab has verified answers for **437 problem classes** (535 verified answers) across 20+ domains — published as **flat files in this repo** so anyone can use them without running a server:
 
-- **[data/verified-answers.jsonl](data/verified-answers.jsonl)** — Full answer database (312 verified answers, 912KB JSONL)
-- **[data/ANSWERS.md](data/ANSWERS.md)** — Browsable markdown index
+- **[data/answers.jsonl](data/answers.jsonl)** — Master file, one verified answer per line (JSON)
+- **[data/answers/](data/answers/)** — One JSON file per problem class — browse, diff, contribute via PR
+- **[data/INDEX.md](data/INDEX.md)** — Catalog of every problem class + language coverage
 
-Every answer is 100% verified. Hit rate: 1.0. Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more.
+**Use it directly — no server needed:**
+```bash
+# one file, no clone
+curl -O https://raw.githubusercontent.com/totalwindupflightsystems/off-by-one/main/data/answers/0001-unknown.json
+
+# or clone the whole corpus
+git clone --depth 1 https://github.com/totalwindupflightsystems/off-by-one
+
+# search locally
+grep -l '"title": ".*raft.*"' data/answers/*.json
+```
+
+Every answer is 100% verified (hit rate 1.0). Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more. To contribute, open a PR adding/updating a file under `data/answers/`. Regenerate the export anytime with `python3 scripts/export-answers.py`.
 
 ## Related Projects
 

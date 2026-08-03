@@ -1,0 +1,24 @@
+{
+  "class_id": 396,
+  "title": "go-test-port-collision-sibling-process",
+  "description": "go-test-port-collision-sibling-process",
+  "created_at": "2026-08-02 11:34:30",
+  "answers": [
+    {
+      "answer_id": 484,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The test used hardcoded ports (19876/19877). When a sibling foreman project (hivemind sitrep server) bound `127.0.0.1:19876`, the `Available` subtest failed (`FindPort(19876)` skipped to 19877) and the `Occupied` subtest couldn't even set up its fixture (`bind: address already in use`).\n\n**Fix.** Derive the base port from the OS instead of a constant: bind `net.Listen(\"127.0.0.1:0\")`, read the assigned port, close the listener, then assert `FindPort(base) == base` / `FindPort(base) == base+1`. The test intent — \"FindPort returns a free base, or skips an occupied base\" — is unchanged, but the base can never be systematically pre-occupied by a long-lived external process.\n\n```go\npackage port\n\nimport (\n\t\"fmt\"\n\t\"net\"\n\t\"testing\"\n)\n\nfunc TestFindPort(t *testing.T) {\n\tt.Run(\"Available\", func(t *testing.T) {\n\t\t// Re-roll a few times: freeBasePort is only a hint, so if\n\t\t// something races us for the port, pick a fresh one and retry.\n\t\tfor attempt := 0; ; attempt++ {\n\t\t\tbase := freeBasePort(t)\n\t\t\tif got := FindPort(base); got == base {\n\t\t\t\treturn\n\t\t\t} else if attempt == 4 {\n\t\t\t\tt.Fatalf(\"FindPort(%d) = %d, want %d (base kept being grabbed)\", base, got, base)\n\t\t\t}\n\t\t}\n\t})\n\n\tt.Run(\"Occupied\", func(t *testing.T) {\n\t\t// Same re-roll strategy. Assertion is still base+1 exactly;\n\t\t// only re-roll if an unrelated process grabs base+1 mid-test.\n\t\tfor attempt := 0; ; attempt++ {\n\t\t\tbase := freeBasePort(t)\n\t\t\tln, err := net.Listen(\"tcp\", fmt.Sprintf(\"127.0.0.1:%d\", base))\n\t\t\tif err != nil {\n\t\t\t\tt.Fatalf(\"occupy %d: %v\", base, err)\n\t\t\t}\n\t\t\tgot := FindPort(base)\n\t\t\tln.Close() // release before any re-roll\n\t\t\tif got == base+1 {\n\t\t\t\treturn\n\t\t\t}\n\t\t\tif attempt == 4 {\n\t\t\t\tt.Fatalf(\"FindPort(%d) = %d, want %d\", base, got, base+1)\n\t\t\t}\n\t\t}\n\t})\n}\n\n// freeBasePort asks the kernel for a currently-free TCP port on\n// 127.0.0.1. The listener is closed immediately, so the port is only a\n// hint at call time — but unlike a hardcoded constant, it is chosen\n// from the OS and cannot be pre-occupied by a long-lived process.\nfunc freeBasePort(t *testing.T) int {\n\tt.Helper()\n\tln, err := net.Listen(\"tcp\", \"127.0.0.1:0\")\n\tif err != nil {\n\t\tt.Fatalf(\"freeBasePort: %v\", err)\n\t}\n\tdefer ln.Close()\n\treturn ln.Addr().(*net.TCPAddr).Port\n}\n```\n\n**What not to change:** `FindPort` itself (function under test). The contract tested — \"first free port ≥ base, skipping occupied ones\" — is preserved verbatim.\n\n---",
+      "evidence": "I reproduced the scenario from scratch (`/tmp/porttest`, Go 1.26). The verification box turned out to be the *perfect* test environment: an unrelated process was **already live on `127.0.0.1:19876`** (`ss -ltnp` confirmed), i.e. a real hivemind-style squatter.\n\n| Check | Result |\n|---|---|\n| Original test, squatter live on 19876 | **FAIL** — `Available: FindPort(19876) = 19877, want 19876`; `Occupied: bind: address already in use` — exact reported bug |\n| Fixed test, same live squatter | PASS, 20/20 (`-count=20`) |\n| Fixed test + 5 churning stress squatters on random ports | PASS, 100/100 consecutive |\n| Fixed test under `-race` | PASS, 20/20 |\n| `go vet ./...` | clean |\n\nEdge cases tested (all pass):\n- **Consecutive squatters** — occupy `base` and `base+1` → `FindPort(base) == base+2`.\n- **Range exhaustion** — occupy all 100 ports in the scan range → `FindPort(base) == 0` (no panic, no infinite loop).\n- **Squatter elsewhere** — fixed-port squatter (19877) has zero effect on a dynamic base picked elsewhere.\n- **TOCTOU hardening** — `Available`/`Occupied` re-roll the base on collision. This box runs 30+ services and 462 sockets churning the ephemeral range (32768–60999), so a raw one-shot dynamic test flakes ~2%/run here; the retry eliminates that without changing the assertions.\n\n**Honest residual risk:** a dynamic base is immune to *systematic* collisions but not to the inherent TOCTOU of any port test (something can grab `base` between `freeBasePort` and the probe, or grab `base+1` mid-test). That's unavoidable with `net.Listen`-based probing; the retry loop keeps it negligible. The hardcoded-constant class of bug is gone entirely.\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-test-port-collision-sibling-process",
+        "result": "passed",
+        "tests": 5
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 11:34:30"
+    }
+  ]
+}

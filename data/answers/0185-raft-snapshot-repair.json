@@ -1,0 +1,24 @@
+{
+  "class_id": 185,
+  "title": "raft-snapshot-repair",
+  "description": "raft-snapshot-repair",
+  "created_at": "2026-07-28 02:59:15",
+  "answers": [
+    {
+      "answer_id": 235,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "The implementation provides a complete Raft snapshot installation handler in `raft_snapshot.go` (457 lines) with 17 tests in `raft_snapshot_test.go` (945 lines). The core design addresses all edge cases:\n\n**Snapshot Assembly** — Each leader's snapshot transfer is tracked independently via a `snapshotAssembly` struct keyed by `leaderID`. Chunks are stored in a `map[uint64][]byte` keyed by chunk index, enabling out-of-order delivery and natural deduplication (duplicate chunks overwrite with the same data, which is idempotent).\n\n**Atomic Log Truncation & State Machine Update** — When all chunks are received, the handler:\n1. Reassembles snapshot data by concatenating chunks in order\n2. Decodes the state machine from the snapshot\n3. **Atomically** (under a single mutex lock) truncates the log, installs the snapshot metadata, replaces the state machine, and advances commit/last-applied indices\n\n**Log Conflict Resolution** — The log is truncated at the snapshot boundary. Entries strictly *after* `lastIncludedIndex` are preserved only if the entry at `lastIncludedIndex` matches the snapshot's term (indicating consistency). Conflicting entries are discarded, letting the leader re-replicate them.\n\n**Edge case handling:**\n- Stale snapshots (older than current snapshot) → return success (already caught up)\n- Stale leader terms → reject with current term\n- Zero chunk count → reject immediately\n- Interrupted transfers → assembly state persists; retransmission from leader resets the assembly (different `LastIncludedIndex` triggers fresh state)\n- Multiple concurrent leaders → each leader's transfer is tracked separately by `leaderID`\n\n```go\n// Core handler signature — the heart of the solution\nfunc (rn *RaftNode) HandleInstallSnapshot(req *InstallSnapshotRequest) *InstallSnapshotResponse {\n    rn.mu.Lock()\n    defer rn.mu.Unlock()\n    // 1. Term check\n    // 2. Stale snapshot check  \n    // 3. Zero chunk count rejection\n    // 4. Assembly management (get or create per leader)\n    // 5. Chunk storage (idempotent)\n    // 6. Wait for all chunks\n    // 7. Reassemble and decode\n    // 8. Atomic: truncate log + install snapshot + replace state machine\n}\n```\n\n---",
+      "evidence": "**All 17 tests pass** with race detector enabled:\n\n| Test | What it covers |\n|------|---------------|\n| `TestBasicSnapshotInstall` | Single-chunk snapshot, verifies metadata, state machine, commit/lastApplied indices |\n| `TestChunkedSnapshotInstall` | Out-of-order chunk delivery across 4+ chunks |\n| `TestDuplicateChunks` | 3 full passes of duplicate chunk sends — verifies idempotency |\n| `TestLogConflictResolution` | Snapshot at (3,1) where log entry at (3,1) matches → keeps entries after index 3 |\n| `TestLogConflictNoMatch` | Snapshot at (3,3) where log has entry at (2,2) — no match → discards conflicting entries |\n| `TestStaleSnapshotRejection` | Newer snapshot installed → older snapshot returns success (already ahead) |\n| `TestInterruptedTransferResume` | Only 2 of 4 chunks sent → no snapshot; retransmit all 4 → snapshot installed |\n| `TestSendSnapshot` | End-to-end leader → follower via `SendSnapshot` with `sendFn` |\n| `TestOutOfOrderWithDuplicates` | Chaotic order: 3,1,1,0,2,0,3 — never sends final chunk → snapshot NOT installed (correct) |\n| `TestMultipleLeadersSnapshot` | Two leaders simultaneously sending different snapshots |\n| `TestEmptyStateMachineSnapshot` | `map[string]string{}` encoded and installed correctly |\n| `TestSnapshotAtLogBoundary` | Snapshot at the exact last log entry index |\n| `TestZeroChunkCount` | `ChunkCount=0` rejected with `Success=false` |\n| `TestStaleLeaderTerm` | Leader term 5 < follower term 10 → rejected with term=10 |\n| `TestInterleavedSnapshotsFromDifferentLeaders` | Leaders 10 and 20 interleave chunks; leader 10 completes first |\n| `TestConcurrentSnapshotOperations` | 5 goroutines send snapshots concurrently — no races or deadlocks |\n| `TestLogPreservationAfterSnapshot` | Entries after snapshot point preserved only if term matches |\n\n**Benchmark**: `BenchmarkChunkedSnapshotInstall` completes in ~11.5µs per operation.\n\n**Race detector**: Clean — no data races detected across all concurrent tests.\n\n---",
+      "signatures": {
+        "model": "claude-sonnet-4-20250514",
+        "problem_class": "raft-snapshot-repair",
+        "result": "passed",
+        "tests": 17
+      },
+      "status": "verified",
+      "created_at": "2026-07-28 02:59:15"
+    }
+  ]
+}

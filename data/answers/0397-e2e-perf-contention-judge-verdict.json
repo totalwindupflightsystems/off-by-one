@@ -1,0 +1,24 @@
+{
+  "class_id": 397,
+  "title": "e2e-perf-contention-judge-verdict",
+  "description": "e2e-perf-contention-judge-verdict",
+  "created_at": "2026-08-02 11:38:20",
+  "answers": [
+    {
+      "answer_id": 485,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The root cause of the false FAILs was measurement contamination, not code: the judge decided p95 against a 25ms gate while the shared host was peaking (gitleaks 1048% CPU, 58 chrome procs, loadavg 16–23/16 cores). The fix is a **contention-aware judge** that (1) classifies each measurement window as *fair* vs *contaminated* from host telemetry, (2) refuses to emit PASS/FAIL from a contaminated window (returns `INCONCLUSIVE` → re-run in a fair window), (3) keeps the 25ms gate **immutable** — a relaxed gate is rejected as a criterion mismatch (the failed 40ms experiment), and (4) writes contention evidence to `review_notes`.\n\nFiles: `fix/perf_judge.py` (judge) and `fix/test_perf_judge.py` (verification).\n\n**Immutable criterion + mismatch guard** (`perf_judge.py`):\n```python\nPERF_GATE_MS: float = 25.0          # p95 latency must be strictly < 25ms\nSPEC_REF: str = \"SPEC-12 s4\"\nALLOWED_GATE_MS: float = 25.0       # any other value => criterion mismatch\n...\nif abs(args.gate_ms - ALLOWED_GATE_MS) > 1e-9:\n    return 3  # CONFIG_ERROR: \"gate 40ms violates SPEC-12 s4 criterion (25ms);\n              # relaxation rejected — re-run in a fair window instead\"\n```\n\n**Fair-window telemetry** (per iteration, `classify_sample`):\n```python\nfair = (\n    load_ratio < policy.fair_load_max            # loadavg1/ncpu < 0.7\n    and foreign_peak < policy.fair_foreign_cpu_max  # no single foreign hog ≥200% CPU\n    and chrome <= policy.fair_chrome_max         # no chrome storm (≤40 procs)\n)\n```\n\n**Verdict logic** (`verdict`): if `fair_fraction < 0.8` or fewer than 10 fair samples, the window is contaminated → `INCONCLUSIVE` with the evidence payload and an explicit \"re-run in a fair window; do not relax the 25ms gate\" instruction. Otherwise p95 is computed **only over fair samples** and compared to the 25ms gate → `PASS`/`FAIL`. A genuine regression (p95 41ms in a fair window) still FAILs.\n\n**Evidence trail** (`write_review_notes`) — every verdict writes `review_notes/<build>.md` including peak loadavg/core, peak foreign CPU%, peak chrome procs, contaminated-sample count, p95 in the fair window, and the immutable-criterion note.",
+      "evidence": "Verified with `python3 test_perf_judge.py` — **7 test groups, 18 checks, all passing**, plus a live CLI run on this shared host:\n\n| # | Scenario | Result |\n|---|----------|--------|\n| 1 | Fair window, 16.8ms p95 (reproduces RR-VFX-06 good build) | **PASS** at 25ms gate |\n| 2 | Fleet load: gitleaks 1048% CPU, 58 chrome, loadavg 22/16 cores, p95 33–66ms | **INCONCLUSIVE** — evidence captured hog 1048%, chrome 58, load ratio 1.38; **no code FAIL emitted** |\n| 3 | Same build re-run in fair window | **PASS** (the resolution path; gate still 25ms) |\n| 4 | Attempt to relax gate to 40ms | **CONFIG_ERROR** (rc=3, criterion mismatch vs SPEC-12 s4) |\n| 5 | Genuine regression, p95 41ms in a fair window | **FAIL** (still caught — contention guard doesn't mask real regressions) |\n| 6 | review_notes content | contains gitleaks 1048%, chrome 58, 25ms gate, verdict |\n| 7 | CLI end-to-end with real smoke subprocess | PASS (rc=0), notes written |\n\nLive run on this host: the judge classified the window as contaminated (load ratio 0.86 > 0.7) and returned `INCONCLUSIVE` with rc=2 — refusing to pass or fail a 16.8ms build from a dirty window, even though the same binary measures clean elsewhere. Edge cases covered: empty/corrupt smoke output → `ERROR` (rc=3); contaminated window with p95 under gate → still `INCONCLUSIVE` (never a false PASS); p95 computed via nearest-rank over fair samples only.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "e2e-perf-contention-judge-verdict",
+        "result": "passed",
+        "tests": 18
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 11:38:21"
+    }
+  ]
+}

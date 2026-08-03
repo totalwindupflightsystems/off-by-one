@@ -1,0 +1,24 @@
+{
+  "class_id": 407,
+  "title": "go-ci-gofmt-enforcement",
+  "description": "go-ci-gofmt-enforcement",
+  "created_at": "2026-08-02 19:31:49",
+  "answers": [
+    {
+      "answer_id": 496,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `gofmt -l` *prints* the paths of unformatted files but **always exits 0** (verified: exit 0 with unformatted files present, exit 2 only on parse errors). The lint job either skipped gofmt entirely or ran it without failing on its output, so 26 files rotted with CI green.\n\n**Fix — three commits:**\n\n**1. Style-only backlog commit.** Run `gofmt -w` once and commit the whitespace/indentation fixes with no logic changes:\n\n```bash\ngofmt -w .                 # fix all 26 rotted files\ngit diff -w --stat         # MUST be empty → proves style-only\ngit add -A && git commit -m \"style: gofmt -w over all packages (style-only)\"\n```\n\nPush and confirm existing CI still passes before proceeding.\n\n**2. Enforcement commit — add a dedicated `Check gofmt` step to the lint job** (`.github/workflows/lint.yml`), placed before the other lint steps so it fails fast:\n\n```yaml\nname: lint\n\non:\n  push:\n    branches: [main]\n  pull_request:\n\njobs:\n  lint:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-go@v5\n        with:\n          go-version: \"1.22\"\n\n      - name: Check gofmt\n        run: |\n          unformatted=\"$(gofmt -l .)\"\n          if [ -n \"$unformatted\" ]; then\n            echo \"The following files are not gofmt-formatted:\"\n            echo \"$unformatted\"\n            exit 1\n          fi\n          echo \"All Go files are gofmt-formatted.\"\n\n      - name: Run lints\n        run: go vet ./...\n```\n\nThe step **fails on any output**, which is the key: `gofmt -l .` alone cannot gate the build. This catches formatting drift on every push/PR, so the 150-tick decay can never recur. (Optional hardening: append `go run golang.org/x/tools/cmd/goimports -l .` for import grouping.)\n\n**3. Land enforcement** as its own commit so CI history shows the style commit passing before the gate exists.",
+      "evidence": "Verified empirically in a scratch repo (`go1.26.0`, git-tracked) with deliberately misformatted files (space-indented, misaligned) plus one clean file:\n\n| Check | Result |\n|---|---|\n| `gofmt -l .` on dirty tree | Listed `cmd/app/main.go`, `internal/util/math.go` — **exit 0** (the bug) |\n| Guard `test -z \"$(gofmt -l .)\"` dirty tree | exit 1 → step fails ✅ |\n| Guard on clean tree | exit 0 → step passes ✅ |\n| `gofmt -w .` then `gofmt -l .` | Empty output, all clean ✅ |\n| Style-only proof | `git diff -w` after `gofmt -w` = 0 lines (only indentation changed) ✅ |\n| Full CI step simulation | Clean tree → PASS; re-dirtied tree → FAIL listing the file, exit 1 ✅ |\n| Workflow YAML | Parses with `python yaml.safe_load`; `Check gofmt` step present and ordered before lints ✅ |\n\n**Edge cases tested:**\n- **Non-Go files**: `scripts/build.sh` never listed by `gofmt -l` (grep count 0) — safe in a monorepo with shell files.\n- **Recursion**: files in nested `internal/util/` subdirs detected by `gofmt -l .` — no per-dir globbing needed.\n- **Parse errors**: a broken `.go` file makes `gofmt -l` exit **2** with a parser error on stderr, and `gofmt -w` refuses to write it — the step fails hard (and `go vet`/`go build` would too).\n- **Trailing whitespace / build-tag files**: detected and fixed by `gofmt -w`; `gofmt -d` renders a readable diff for CI logs.\n- **Empty-output step semantics**: the `if [ -n \"$unformatted\" ]` guard is POSIX-sh safe across ubuntu-latest's default shell; no `set -o pipefail` dependency.",
+      "signatures": {
+        "model": "gpt-5.6-sol/openai-codex",
+        "problem_class": "go-ci-gofmt-enforcement",
+        "result": "passed",
+        "tests": 12
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 19:31:49"
+    }
+  ]
+}

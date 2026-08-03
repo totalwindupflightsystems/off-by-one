@@ -1,0 +1,24 @@
+{
+  "class_id": 225,
+  "title": "differential-privacy-fl-v3",
+  "description": "differential-privacy-fl-v3",
+  "created_at": "2026-07-29 19:41:00",
+  "answers": [
+    {
+      "answer_id": 282,
+      "language": "python",
+      "environment": "python3",
+      "version": "3.11",
+      "solution": "The implementation is in two files:\n\n**`dp_fl.py`** — Core library with two classes:\n\n### `MomentsAccountant`\nAccumulates Renyi log-moments across rounds and converts to `(ε, δ)`-DP.\n\n**Log-moment bound** (subsampled Gaussian mechanism):\n```\nlog_moment(λ) ≤ log(1 + q² · λ·(λ-1)/2 · H)\n```\nwhere `H = min(4·(exp(1/z²)−1), exp(λ·(λ-1)/(2·z²)))` and `z = noise_multiplier`.\n\n**Final ε computation:**\n```\nε(δ) = min_λ  ( Σ log_moment(λ) + log(1/δ) ) / (λ−1)\n```\n\n### `DPFederatedAggregator`\n- **Clipping**: scales each client gradient row so `||g||₂ ≤ clip_norm` (handles 1-D and 2-D inputs)\n- **Aggregation**: averages clipped gradients\n- **Noise calibration**: adds `𝒩(0, (z·C/m)²)` where `m = |clients|`\n- **Frequency tracking**: tracks per-client observations, sets `effective_q = max(nominal_q, max_observed_freq/rounds)` — this ensures that a client appearing every round (or dropping out) never causes under-accounting\n- **Privacy accounting**: forwards noise multiplier + effective q to the `MomentsAccountant` each round\n\nKey code snippets:\n\n```python\n# --- clipping (handles scalar and vector gradients) ---\ndef clip_gradients(self, gradients: np.ndarray) -> np.ndarray:\n    if gradients.ndim == 1:\n        gradients = gradients.reshape(-1, 1)\n        was_1d = True\n    else:\n        was_1d = False\n    norms = np.linalg.norm(gradients, axis=1, keepdims=True)\n    scales = np.minimum(1.0, self.clip_norm / np.maximum(norms, 1e-12))\n    result = gradients * scales\n    return result.ravel() if was_1d else result\n\n# --- subsampling log-moment with overflow protection ---\n@staticmethod\ndef _subsampled_gaussian_log_moment(lmbda, z, q):\n    if q <= 0.0:   return 0.0\n    if q >= 1.0:   return lmbda / (2.0 * z * z)\n    term_a = 4.0 * math.expm1(1.0 / (z * z))\n    exponent = lmbda * (lmbda - 1.0) / (2.0 * z * z)\n    if exponent < 700.0:\n        inner = min(term_a, math.exp(exponent))\n    else:\n        inner = term_a\n    return math.log1p(q * q * lmbda * (lmbda - 1.0) * 0.5 * inner)\n\n# --- effective sampling probability (handles heterogeneity & dropout) ---\ndef _update_effective_q(self, client_ids):\n    for cid in client_ids:\n        self._client_freq[cid] = self._client_freq.get(cid, 0) + 1\n    total = self._round_count + 1\n    max_rate = max(self._client_freq.values()) / total if total > 0 else ...\n    self._effective_q = max(self.client_sampling_prob, max_rate)\n```\n\n---",
+      "evidence": "All **45 tests pass** (`pytest -v`), covering:\n\n| Category | Tests | What's verified |\n|---|---|---|\n| **MomentsAccountant** | 10 | Basic/subsampled log-moment formula, accumulation, monotonic ε growth, reset, overflow safety, determinism |\n| **DPFederatedAggregator** | 20 | Construction validation, all-edge clipping, noise calibration, round counting, `record_privacy` flag, frequency/dropout tracking, Renyi DP query, PRNG determinism |\n| **Integration** | 3 | 50-round FL simulation with 100 clients, privacy growth monotonicity, low-noise vs high-noise ε ordering |\n| **Edge cases** | 12 | Zero gradients, scalar (1-D) gradients, very many rounds (200) numerical stability, different δ queries, near-zero noise multiplier, shape mismatch rejection |\n\n**Key edge cases validated:**\n\n1. **Overflow prevention**: `exp(λ·(λ-1)/(2z²))` with `λ=63, z=0.1` → exponent ≈ 19,530 (far beyond float64's ~709 limit). Caught by the `< 700.0` guard → falls back to `term_a`.\n\n2. **Scalar gradients**: `np.array([10.0, -5.0])` → 1-D stack → `clip_gradients` reshapes to 2-D internally.\n\n3. **Empty round**: `aggregate_round({})` returns empty array, skips accounting → ε=0.\n\n4. **Dropout**: A client that participates in rounds 0-4 then stops → its frequency 5/15=0.33 is < the persistent client's 15/15=1.0, so `effective_q` correctly stays at 1.0 (bounded by the worst-case frequent participant).\n\n5. **`record_privacy=False`**: No log-moments accumulated → `get_epsilon()` returns 0.0 (perfect privacy).\n\n---",
+      "signatures": {
+        "model": "gpt-4o",
+        "problem_class": "differential-privacy-fl-v3",
+        "result": "passed",
+        "tests": 45
+      },
+      "status": "verified",
+      "created_at": "2026-07-29 19:41:00"
+    }
+  ]
+}

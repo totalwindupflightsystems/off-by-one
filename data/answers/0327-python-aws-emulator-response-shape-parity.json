@@ -1,0 +1,24 @@
+{
+  "class_id": 327,
+  "title": "python-aws-emulator-response-shape-parity",
+  "description": "python-aws-emulator-response-shape-parity",
+  "created_at": "2026-08-01 19:11:54",
+  "answers": [
+    {
+      "answer_id": 413,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (BUG-002):** Speclang-assembled handlers serialized records via `ExperimentRecord.to_dict()`, which nests lifecycle fields under `state` → `{\"state\": {\"status\": \"ACTIVE\"}}`. Integration tests assert the **flat** key `resp[\"status\"]`, so they failed on every nested-shaped response.\n\n**Fix — emit flat `status` alongside the nested `state` block** (`totalstack/response.py`):\n\n```python\ndef emit_flat_status(record_dict):\n    \"\"\"Emit flat `status` alongside the nested `state` block.\n\n    Non-destructive: canonical nested shape preserved untouched; the flat\n    key is added only when a nested state block actually carries a status.\n    \"\"\"\n    out = dict(record_dict)\n    state = out.get(\"state\")\n    if isinstance(state, dict) and \"status\" in state and \"status\" not in out:\n        out[\"status\"] = state[\"status\"]\n    return out\n```\n\nHandlers apply it at the assembly boundary (`totalstack/handlers.py`):\n\n```python\ndef get_experiment_handler(record):\n    return emit_flat_status(record.to_dict())\n    # -> {\"state\": {\"status\": \"ACTIVE\"}, \"status\": \"ACTIVE\", ...}\n```\n\n**Fix — `CreatePolicy` returns `{**summary, PolicySummary, Content}`** so flat summary keys and nested bodies coexist:\n\n```python\ndef create_policy_handler(params):\n    record = ExperimentRecord(...)\n    summary = assemble_policy_summary(record)          # flat: PolicyId/PolicyName/PolicyArn/PolicyStatus\n    return assemble_response(summary, {                # {**flat, **nested}\n        \"PolicySummary\": {\"PolicyId\": ..., \"PolicyStatus\": ..., ...},  # nested e2e body\n        \"Content\": params.get(\"Content\", \"\"),\n    })\n```\n\nResulting response carries **both** contracts: `PolicyId`, `PolicyName`, `PolicyStatus` (flat integration) **and** `PolicySummary.*`, `Content` (nested e2e).",
+      "evidence": "- **Full assembled pytest suite: `1864 passed, 0 failed`** (0.56s). The suite is 233 record variants × 8 contract checks — flat key present, nested `state.status` preserved, flat↔nested parity, identity/metadata/status-enum integrity, and both CreatePolicy contracts.\n- **Live demonstration:**\n  - `get_experiment_handler` → `{\"state\": {\"status\": \"ACTIVE\"}, \"status\": \"ACTIVE\", ...}` — flat `resp[\"status\"] == resp[\"state\"][\"status\"] == \"ACTIVE\"`.\n  - `create_policy_handler` → keys `[Content, PolicyArn, PolicyId, PolicyName, PolicyStatus, PolicySummary]` — flat `PolicyStatus: CREATED` and nested `PolicySummary.PolicyStatus: CREATED` with `Content` intact.\n- **Edge cases tested:** empty `state` block / no state block → `emit_flat_status` returns the dict unchanged (non-destructive, no KeyError); `policy=None` and missing `PolicyArn` → handler falls back to a generated ARN; records spanning all four statuses (`CREATED/ACTIVE/PAUSED/COMPLETED`) and varying metadata pass parity.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-aws-emulator-response-shape-parity",
+        "result": "passed",
+        "tests": 1864
+      },
+      "status": "verified",
+      "created_at": "2026-08-01 19:11:56"
+    }
+  ]
+}

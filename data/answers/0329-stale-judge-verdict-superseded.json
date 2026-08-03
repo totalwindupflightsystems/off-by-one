@@ -1,0 +1,24 @@
+{
+  "class_id": 329,
+  "title": "stale-judge-verdict-superseded",
+  "description": "stale-judge-verdict-superseded",
+  "created_at": "2026-08-01 19:33:48",
+  "answers": [
+    {
+      "answer_id": 415,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The bug was in the verdict-consumption path, not the judge. The worker orchestrator bounced on any FAIL without checking what revision the judge actually evaluated. Since a judge run and the worker's pushes race within the same session, a FAIL from an earlier commit (`41095a27` @ 13:51) was used to bounce a session that had already landed the fix (`5e10e44` @ 14:01, which added `rerere_prometheus.go`).\n\n**Fix — a single choke point between \"judge FAIL\" and \"bounce worker\":**\n\n1. Verdicts carry provenance: `commit_sha` (what the judge snapshot was taken at) + `evaluated_at`.\n2. A staleness guard compares verdict provenance against current HEAD — **commit SHA primary** (clock-free, exact), **timestamp fallback** (with skew tolerance) for legacy verdicts that predate the SHA field.\n3. Stale FAIL → **discard, do not bounce** → re-judge the current HEAD; only a fresh FAIL against HEAD bounces.\n4. When the fresh judgment of the session's final commit passes, count a `hivemind_git_rerere_hits_total{workspace}` hit (the resolution was already recorded in the tree; no re-run needed).\n\n```go\n// verdict.go\ntype JudgeVerdict struct {\n\tCommitSHA     string    `json:\"commit_sha\"`     // revision the judge actually evaluated\n\tEvaluatedAt   time.Time `json:\"evaluated_at\"`\n\tStatus        string    `json:\"status\"`         // \"pass\" | \"fail\"\n\tWorkerSession string    `json:\"worker_session\"`\n}\n\ntype StalenessRule struct {\n\tMaxClockSkew time.Duration // absorbs judge/worker clock drift on the timestamp fallback\n}\n\n// IsStale: verdict evaluated against a revision that predates HEAD.\nfunc (r StalenessRule) IsStale(v JudgeVerdict, head CommitMeta) bool {\n\tif v.EvaluatedAt.IsZero() {\n\t\treturn true // unknown provenance: never use this FAIL to bounce\n\t}\n\tif v.CommitSHA != \"\" && head.SHA != \"\" {\n\t\treturn v.CommitSHA != head.SHA // primary: exact, clock-free\n\t}\n\treturn v.EvaluatedAt.Add(r.MaxClockSkew).Before(head.CommittedAt) // fallback\n}\n\ntype Decision struct{ Bounce, Rejudge bool }\n\n// Decide replaces the old \"bounce on any FAIL\" logic.\nfunc (r StalenessRule) Decide(v JudgeVerdict, head CommitMeta) Decision {\n\tif v.Status != \"fail\" {\n\t\treturn Decision{} // PASS never bounces\n\t}\n\tif r.IsStale(v, head) {\n\t\treturn Decision{Rejudge: true} // discard stale FAIL, re-judge HEAD\n\t}\n\treturn Decision{Bounce: true} // genuinely fresh FAIL against HEAD\n}\n```\n\n```go\n// orchestrator glue (previously: if verdict.Status == \"fail\" { worker.Bounce() })\nd := rule.Decide(verdict, head)\nif d.Rejudge {\n\tStaleVerdicts.WithLabelValues(ws, \"discarded\").Inc()\n\tfresh := judge.Evaluate(head.SHA)          // fresh judge run against final commit\n\tif fresh.Status == \"fail\" {\n\t\tworker.Bounce(fresh)                   // now genuinely fresh\n\t} else {\n\t\tRerereHits.WithLabelValues(ws).Inc()   // hivemind_git_rerere_hits_total{workspace}\n\t}\n\treturn\n}\nif d.Bounce { worker.Bounce(verdict) }\n```",
+      "evidence": "Verified by a self-contained Go module (`/tmp/verdict-gate`) with 6 passing tests (`go test -race`, `go vet`, `gofmt` all clean).\n\n**SPEC-GAP-003 replay** (`TestSPECGAP003StaleVerdictSuperseded`) reproduces the exact timeline:\n- `EvaluatedAt 13:51` / `CommitSHA 41095a27`, FAIL → `head 5e10e44 @ 14:01` → `IsStale == true`, `Decide` returns `{Bounce:false, Rejudge:true}` — **worker never bounced**.\n- Fresh judge `a48a98d9` against `5e10e44` → PASS → exactly 1 stale-discard + 1 `rerere` hit recorded.\n\n**Edge cases tested:**\n- Fresh FAIL against current HEAD SHA → bounces (only legitimate bounce path).\n- Legacy verdicts without `commit_sha`: 10s-before-commit within 30s skew → fresh; 5-min-before → stale (skew tolerance).\n- Zero `evaluated_at` → always stale; unknown-provenance FAIL never bounces.\n- Identical timestamps but different SHA → stale (hash check beats timestamp heuristic).\n- Empty head SHA (bare/detached repo) → timestamp fallback still catches the stale verdict.\n- Concurrency: race detector clean on metric/decision paths; SHA comparison is immune to clock drift by design.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "stale-judge-verdict-superseded",
+        "result": "passed",
+        "tests": 6
+      },
+      "status": "verified",
+      "created_at": "2026-08-01 19:33:48"
+    }
+  ]
+}

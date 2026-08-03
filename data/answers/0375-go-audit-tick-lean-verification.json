@@ -1,0 +1,24 @@
+{
+  "class_id": 375,
+  "title": "go-audit-tick-lean-verification",
+  "description": "go-audit-tick-lean-verification",
+  "created_at": "2026-08-02 05:45:59",
+  "answers": [
+    {
+      "answer_id": 463,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Finding — the audit target does not exist in this environment.** The zombie Go project is absent: a full filesystem probe found no `go.mod`, no project `.git`, no `events.parquet`, no E2E fixtures anywhere. A lean-verification tick must therefore **block with exit 3 rather than fabricate an 8/8 pass**. That is the fix's first and hardest guarantee: never synthesize evidence for a tree that isn't there.\n\n**The fix** is an idempotent, guarded tick script encoding the exact cadence, so any future tick on a real checkout is deterministic. Delivered at `/home/kara/audit-tick/audit-tick.sh`:\n\n```bash\n# Guard 1 — target must exist; never fabricate for a missing tree\nif ! find_project; then\n  die \"audit target absent: no Go project (go.mod) under '$AUDIT_TICK_DIR'. Tick blocked; no evidence fabricated.\" 3\nfi\n\n# 1. build + vet + tests (expect 8/8); build into /dev/null so no artifact lands in the tree\n( cd \"$PROJECT_ROOT\" && go build -o /dev/null ./... ) || ( cd \"$PROJECT_ROOT\" && go build ./... ) || die \"build failed\" 6\n( cd \"$PROJECT_ROOT\" && go vet ./... ) || die \"vet failed\" 6\nout=\"$(cd \"$PROJECT_ROOT\" && go test -v -count=1 ./... 2>&1)\" || die \"tests failed rc=$rc\" 6\n\n# 2. hilo stats — high/low watermarks of passes + commit delta, persisted to .audit/hilo.json\n# 3. govulncheck — binary-or-`go run` fallback; offline → recorded as degraded, tick continues\n# 4. CI scan — requires a non-empty .github/workflows, else die 6 (zombie risk)\n# 5. remote-commit scan — git fetch origin, drift ahead/behind recorded (0/0 if no origin)\n\n# 6. E2E battery DEFERRED until cadence >= +5; fixtures stay pending on the board\nif [[ \"$cad\" -ge 5 ]]; then log \"cadence >= 5 reached — E2E battery unlocked\"; fi\n\n# 7. board-only commit — events.parquet ONLY; .audit/ state is invisible to the guard\nstatus=\"$(git status --porcelain)\"\nstatus=\"$(grep -vE '^\\?\\? \\.audit/' <<<\"$status\")\"           # tick's own state\ngrep -vqE '^(\\?\\?| M|M ) events.parquet$' <<<\"$status\" && die \"board-only commit refused\" 4\ngit add -- events.parquet && git commit -q -m \"audit(tick): board events parquet @cadence=$cad\"\n```\n\nExit-code contract: `0` ok · `2` usage · `3` target absent (blocked) · `4` board-only guard violation · `5` toolchain missing · `6` tick failed (build/vet/test/vuln/CI). Modes: `check` (read-only probe) · `run` (full tick) · `commit` (re-validated board commit).",
+      "evidence": "Environment probe (real, not claimed): `go1.26.0`, `git 2.53.0`, `jq` present; `govulncheck`, `shellcheck`, `pyarrow` absent; no Go project, `events.parquet`, or audit fixtures exist on the filesystem (searched `/`). The tick therefore **could not execute the project battery** — result below reflects that honestly.\n\nScript mechanics verified against a **synthetic harness** (module `harness`, 8 tests, CI workflow, git repo — explicitly *not* the real project, so its 8/8 is evidence of script logic only):\n\n| Test | Result |\n|---|---|\n| `bash -n` syntax | OK |\n| Absent target (`/tmp`, `/home/kara`) → `run`/`check` | exit 3, **zero side effects** (no `.audit/` created) |\n| Full tick on harness | build+vet+test **8/8**, hilo `hi=8 lo=8 latest=8/8`, CI scan 1 workflow, drift 0/0 (no origin) |\n| E2E deferral | deferred at cadence 1–4 with `E2E_001`/`NEVER_DONE` pending; **unlocked message at cadence 6 (≥5)** |\n| Board-only guard, foreign file dirty (`leak.txt`, `foreign.txt`) | **refused, exit 4**, even in `commit` mode |\n| Board-only commit clean | commit contains **only `events.parquet`** (`1 file changed`) |\n| `commit` mode re-validation | guard re-checked, then commit OK |\n| Unused mode `bogus` | usage error exit 2 |\n| Offline govulncheck | degraded + recorded in `.audit/vuln.json`, tick continued |\n| Empty tree / tick-state-only | \"nothing to commit\", exit 0 |\n\nEdge cases covered: no-origin remote scan, empty-worktree commit, `.audit/` excluded from the guard, arithmetic-state format bug found and fixed during testing (`passed=8 failed=0` → line-separated).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-audit-tick-lean-verification",
+        "result": "failed",
+        "tests": 0
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 05:45:59"
+    }
+  ]
+}

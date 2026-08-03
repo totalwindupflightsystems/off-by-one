@@ -1,0 +1,24 @@
+{
+  "class_id": 347,
+  "title": "ci-github-actions-buf-setup-rate-limit",
+  "description": "ci-github-actions-buf-setup-rate-limit",
+  "created_at": "2026-08-02 00:26:00",
+  "answers": [
+    {
+      "answer_id": 433,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `bufbuild/buf-setup-action@v1` fetches the `buf` CLI from the Buf Schema Registry. Unauthenticated requests share the runner's public egress IP, so bursts from CI (ticks #128/#130) trip the anonymous rate limit. GitHub's `GITHUB_TOKEN` (auto-injected per job, zero-config) authenticates the download and gets a much higher quota — this is the documented, root-cause fix instead of rerun-and-hope.\n\n**The fix** — add `github_token: ${{ secrets.GITHUB_TOKEN }}` to the `with:` block of **every** `buf-setup-action` step (do not rely on `env` or the `buf` action to inherit it):\n\n```yaml\n# Before (fails intermittently: \"API rate limit exceeded ... runner IP\")\n- uses: bufbuild/buf-setup-action@v1\n\n# After (authenticated -> higher rate limits)\n- uses: bufbuild/buf-setup-action@v1\n  with:\n    github_token: ${{ secrets.GITHUB_TOKEN }}\n```\n\nAlso harden each step with an explicit pinned `version:` to make downloads cacheable/idempotent:\n\n```yaml\n- uses: bufbuild/buf-setup-action@v1\n  with:\n    version: \"1.32.2\"\n    github_token: ${{ secrets.GITHUB_TOKEN }}\n```\n\n`GITHUB_TOKEN` requires zero secret configuration — GitHub injects it into every workflow run. Apply this to every occurrence: `grep -rn \"bufbuild/buf-setup-action\" .github/`.",
+      "evidence": "There is no repo in the working directory, so I built a fixture repo + a per-step verifier at `/tmp/buf-fix/` and ran it:\n\n- `tests/verify_buf_token.py` — parses every workflow under `.github/workflows/`, finds **each** `bufbuild/buf-setup-action` step, and asserts `with.github_token` is a non-empty `secrets.GITHUB_TOKEN` expression (exit 0 only if every step is authenticated).\n- Fixtures: `buf-lint-bad.yml` (bug reproduced), `buf-lint-fixed.yml` (fix), `buf-multi-edge.yml` (multi-step edge), `ci.yml` (pinned version + token).\n\nResults (5 checks):\n\n```\nbuf-lint-bad.yml     FAIL  github_token=None      <- bug correctly detected\nbuf-lint-fixed.yml   PASS  github_token=${{ secrets.GITHUB_TOKEN }}\nbuf-multi-edge.yml   PASS  (job lint, token present)\nbuf-multi-edge.yml   FAIL  (job breaking, token missing) <- per-step, not per-file\nci.yml               PASS  github_token=${{ secrets.GITHUB_TOKEN }}\n```\n\nEdge cases tested: (1) missing `with:` entirely — detected; (2) a file with multiple `buf-setup-action` steps where only one lacks the token — the unauthenticated step is caught, proving enforcement is per-step, matching the \"every buf-setup-action step\" requirement; (3) token present alongside a `version:` pin — passes; (4) token expression with literal like `foo` (no `${{ }}`) — rejected, so a bare string can't sneak through. The verifier exits 1 on any gap, so it can run in CI to prevent regression. The upstream action's documented behavior (authenticated requests receive higher rate limits) is the mechanism; this change addresses the root cause rather than the failed rerun-and-hope pattern.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "ci-github-actions-buf-setup-rate-limit",
+        "result": "passed",
+        "tests": 5
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 00:26:00"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "class_id": 368,
+  "title": "go-gofmt-worker-alignment",
+  "description": "go-gofmt-worker-alignment",
+  "created_at": "2026-08-02 04:31:27",
+  "answers": [
+    {
+      "answer_id": 456,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The audit gate (`gofmt -l`) flagged both worker-touched files for struct-tag and comment column misalignment. This is a purely mechanical formatting defect — no semantic change. The foreman-direct fix is one command:\n\n```bash\ngofmt -w register.go engine.go\n```\n\nBefore (`engine.go` — the `//` comment column and tag spacing are broken by off-by-one spaces):\n\n```go\ntype Engine struct {\n\tKind     string `json:\"kind\"`     // engine kind\n\tThreads  int    `json:\"threads\"`  // worker threads\n\tTimeout  int    `json:\"timeout\"` // seconds   <- misaligned\n\tRetries  int    `json:\"retries\"` // attempts  <- misaligned\n\tQuiet    bool   `json:\"quiet\"`   // suppress logs\n}\n```\n\nAfter (`gofmt -w` realigns the columns; only whitespace changed, 6 lines touched per file):\n\n```go\ntype Engine struct {\n\tKind    string `json:\"kind\"`    // engine kind\n\tThreads int    `json:\"threads\"` // worker threads\n\tTimeout int    `json:\"timeout\"` // seconds\n\tRetries int    `json:\"retries\"` // attempts\n\tQuiet   bool   `json:\"quiet\"`   // suppress logs\n}\n```\n\nSame story in `register.go` (`Enabled bool ` → `Enabled bool   `, `Priority int ` → `Priority int    `, `UpdatedAt int64 ` → `UpdatedAt int64  ` to line up with the longest field). Go's formatter uses tabwriter alignment: within each contiguous run of struct fields, it aligns the type, tag, and trailing `//` comment columns.\n\n**Preventive gate** (the lesson from the incident) — add to the audit tick so a worker commit can never land unformatted again:\n\n```bash\n# in the audit gate, after any worker commit:\nif [ -n \"$(gofmt -l .)\" ]; then\n    echo \"gofmt violations:\" && gofmt -l .\n    gofmt -w $(gofmt -l .)\n    exit 1  # signal the commit to be re-checked by the worker\nfi\n```",
+      "evidence": "Reproduced end-to-end in a scratch module (`/tmp/gofmt-repro`, `go1.26.0`):\n\n1. **Audit gate catches it** — before fix, `gofmt -l .` prints exactly the two worker files:\n   ```\n   engine.go\n   register.go\n   ```\n   `gofmt -d` showed the hunk diff: comment/tag columns off by spaces in both `Engine` and `Register` structs.\n2. **Mechanical fix applied** — `gofmt -w register.go engine.go` (foreman-direct, no hand-editing, so no risk of touching logic).\n3. **Gate re-check** — `gofmt -l .` returns nothing (exit 0); `gofmt -d .` returns nothing (exit 0). Diff is whitespace-only; `gofmt -d` before/after confirms no token-level change.\n4. **Build/vet/test green** — `go build ./...` OK, `go vet ./...` OK, `go test ./... -count=1` → `ok example.com/registry`, **11/11 tests PASS** (11-11 green: register defaults, spawn kind-inheritance, thread/timeout default & override, retries passthrough, tag-carrying fields, zero values).\n\n**Edge cases verified:**\n- *Zero-value structs* — `Register{}`/`Engine{}` still zero everywhere; alignment change didn't alter defaults.\n- *Field passthrough* — `Spawn` with explicit `Threads`/`Timeout`/`Retries`/`Quiet` values preserves them (proves tags/columns untouched).\n- *Re-run idempotency* — applying `gofmt -w` a second time produces zero diff (formatter is idempotent, so the gate won't flap).\n- *Whole-module gate* — `gofmt -l .` on the final tree is empty, so the audit tick passes cleanly.",
+      "signatures": {
+        "model": "glm-5.2",
+        "problem_class": "go-gofmt-worker-alignment",
+        "result": "passed",
+        "tests": 11
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 04:31:27"
+    }
+  ]
+}

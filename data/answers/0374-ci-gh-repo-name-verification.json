@@ -1,0 +1,24 @@
+{
+  "class_id": 374,
+  "title": "ci-gh-repo-name-verification",
+  "description": "ci-gh-repo-name-verification",
+  "created_at": "2026-08-02 05:40:28",
+  "answers": [
+    {
+      "answer_id": 462,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `foreman signal scan` passed a hardcoded/board-assumed repo (`totalwindupflightsystems/Kobayashi-Maru`) to `gh run list`/`gh issue list`. When the origin moved to `dexdat/Kobayashi-Maru`, `gh` 404s on the stale name and the scan silently returns nothing.\n\n**Fix:** derive the canonical `owner/repo` from `git remote -v` (fetch URL) before every scan, then pass it via `-R <actual>`. Fall back to the assumed name only if there's no fetch remote, with a visible warning instead of a silent 404.\n\n**Core function** (`foreman/lib/gh-repo.sh`):\n\n```bash\ngh_repo_from_remote() {\n  local url=\"\"\n  # 1. Prefer origin's fetch URL; fall back to any fetch remote.\n  url=\"$(git remote -v 2>/dev/null \\\n          | awk '$1 == \"origin\" && $3 == \"(fetch)\" {print $2; exit}' \\\n          || true)\"\n  [[ -z \"$url\" ]] && url=\"$(git remote -v 2>/dev/null \\\n                          | awk '$3 == \"(fetch)\" {print $2; exit}' || true)\"\n  [[ -z \"$url\" ]] && return 1\n\n  local path owner repo\n  if [[ \"$url\" == *\"://\"* ]]; then\n    # URL form:  scheme://host[:port]/owner/repo[.git]\n    [[ \"$url\" =~ ^[a-zA-Z][a-zA-Z0-9+.-]*://[^/]+/([^/]+/[^/]+) ]] || return 1\n    path=\"${BASH_REMATCH[1]}\"\n  else\n    # scp-style: [user@]host:owner/repo[.git]\n    [[ \"$url\" =~ ^([^/@]+@)?[^/:]+:([^/]+/[^/]+) ]] || return 1\n    path=\"${BASH_REMATCH[2]}\"\n  fi\n  path=\"${path%/}\"; path=\"${path%.git}\"\n  owner=\"${path%%/*}\"; repo=\"${path#*/}\"\n  [[ -n \"$owner\" && -n \"$repo\" && \"$repo\" != \"$owner\" ]] || return 1\n  printf '%s/%s\\n' \"$owner\" \"$repo\"\n}\n```\n\n**Fixed scan pattern** (drop-in replacement for the stale hardcode):\n\n```bash\nSIGNAL_REPO=\"$(gh_repo_for_scan totalwindupflightsystems/Kobayashi-Maru)\"  # verifies git remote first\ngh run list  -R \"$SIGNAL_REPO\" --limit 5\ngh issue list -R \"$SIGNAL_REPO\" --limit 5\n```\n\n`gh_repo_for_scan` warns on drift (`repo moved: assumed X, using Y from git remote`), so staleness is visible, and falls back to the assumed name only when no fetch remote exists.",
+      "evidence": "Verified with a **stub `gh` that reproduces the real failure mode** — it prints `HTTP 404: Not Found` and exits 1 unless `-R` matches the actual repo. Test harness: `foreman/tests/run-tests.sh` (18/18 passing, `HARNESS_EXIT=0`), plus a real-git smoke test against `/tmp/pi` (`git remote -v` → `earendil-works/pi`).\n\n**Regression reproduced first** (test 7): `gh run list -R totalwindupflightsystems/Kobayashi-Maru` → rc=1 (404). **Fixed** (tests 8–10): verified repo → rc=0, runs + issues listed.\n\n| Edge case | Result |\n|---|---|\n| `https://github.com/dexdat/Kobayashi-Maru.git` | `dexdat/Kobayashi-Maru` |\n| `git@github.com:dexdat/Kobayashi-Maru.git` (scp-style) | `dexdat/Kobayashi-Maru` |\n| `git://github.com/dexdat/Kobayashi-Maru` (no `.git`) | `dexdat/Kobayashi-Maru` |\n| Trailing slash / extra path (`/tree/main/ci`) | `dexdat/Kobayashi-Maru` |\n| `ssh://git@github.com:2222/...` (port) | `dexdat/Kobayashi-Maru` (port doesn't leak into owner) |\n| Credentials in URL (`https://user:token@host/...`) | `dexdat/Kobayashi-Maru` |\n| Dotted repo name (`dexdat/repo.name.git`) | `dexdat/repo.name` |\n| Remote named `upstream` (not origin) | still picked up |\n| No remote → falls back to assumed repo, warning emitted | rc=0, warning visible |\n| No remote + no assumed → hard failure | rc=1 (caller surfaces it) |\n| Malformed URL | rc=1 |\n\nNotably, during development the harness caught two real bugs in my first attempt (host leaking into owner for `https://`/`git://` URLs; test-stub arg parsing) — both fixed and re-verified.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "ci-gh-repo-name-verification",
+        "result": "passed",
+        "tests": 18
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 05:40:28"
+    }
+  ]
+}

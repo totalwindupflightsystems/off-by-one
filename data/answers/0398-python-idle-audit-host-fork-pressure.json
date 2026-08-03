@@ -1,0 +1,24 @@
+{
+  "class_id": 398,
+  "title": "python-idle-audit-host-fork-pressure",
+  "description": "python-idle-audit-host-fork-pressure",
+  "created_at": "2026-08-02 12:01:43",
+  "answers": [
+    {
+      "answer_id": 486,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** the guard's `gitleaks` subprocess was spawning into a saturated host (loadavg ~15). Go's cgo runtime and the kernel refused to create threads/processes (`pthread_create failed: Resource temporarily unavailable`, `fork/exec git: EAGAIN`). The guard counted 2 consecutive non-zero exits as a real secret leak — a false positive, since a fork failure says nothing about secrets.\n\n**Fix — `guard_secrets.py`** (see `/home/kara/guard-secrets-fix/guard_secrets.py`), four rules baked in:\n\n1. **Classify, don't count.** A failure is a *host-pressure flake* if stderr matches EAGAIN/pthread/fork/memory signatures (`is_host_pressure_flake`). Fork-time `OSError` and `rc=127` (exec never happened) are surfaced as flakes too. Only a run that emitted **parsed gitleaks JSON findings** can produce a `FAIL`.\n\n2. **Never spawn into a saturated host.** `_await_calm()` polls `/proc/loadavg` and sleeps (bounded by `calm_budget`) until load ≤ threshold before the first spawn, and again between retries.\n\n3. **Retry with backoff gated on load.** Exponential backoff + proportional jitter (`backoff_delay`), capped; `max_attempts` default 5.\n\n4. **Verify before declaring failure.** If *every* attempt flaked, the guard falls back to a **standalone verification run** — a fresh `gitleaks` process with `--threads=1` and `GOMAXPROCS=1` to minimize cgo/thread pressure — and only that run's real findings can yield `FAIL`. A flake alone can only ever produce `PASS` (verified clean) or `UNKNOWN` (requeue, never fail).\n\n```python\nfor n in range(1, self.max_attempts + 1):\n    rc, out, err = self._safe_run(self.run_fn)\n    flake = is_host_pressure_flake(rc, err)\n    if flake:                       # host pressure, NOT a finding\n        self._settle_and_delay(n)   # wait for load, back off, retry\n        continue\n    findings = parse_gitleaks_findings(out)\n    if findings and rc in (0, 1):\n        return AuditResult(\"FAIL\", f\"{len(findings)} finding(s) on attempt {n}\", ...)\n    if rc == 0 and not findings:    # clean; require N confirmations if flakes seen\n        if consec_clean >= self.clean_confirmations:\n            return AuditResult(\"PASS\", ...)\n    # everything else → UNKNOWN, never FAIL\n# all attempts flaked → standalone verification before any verdict\nreturn self._verify_standalone(result)\n```\n\nAlso models the observed \"5/5 on 3rd attempt\": `clean_confirmations` (default 1, settable to 5) requires consecutive clean runs after flakes before declaring PASS.",
+      "evidence": "Verified two ways:\n\n**1. Unit suite — 29/29 passing** (`python3 -m unittest test_guard_secrets -v`):\n```\nRan 29 tests in 0.215s\nOK\n```\nCoverage of key edge cases:\n- pthread & fork-EAGAIN flake then clean → `PASS` (retry recovered)\n- `OSError(11, EAGAIN)` raised by runner → treated as flake, retry → `PASS`\n- 5/5 all-flaked → standalone clean → `PASS` with \"false alarm\" reason; standalone finds leak → `FAIL`; standalone *also* flakes → `UNKNOWN` (never false FAIL)\n- flake then real leak → `FAIL` on attempt 2 with findings, no standalone needed\n- non-flake infra error (rc 2 bad flag, rc 1 with no report) → `UNKNOWN`, not `FAIL`\n- load gating: at load 15 → sleeps before first spawn; calm load → zero sleeps; `calm_budget` bounded (proceeds, never hangs the tick)\n- backoff bounds/cap, JSON report parsing with banner noise, real subprocess path (capture, missing binary → flake, timeout → `-2` not a leak), real `/proc/loadavg` read\n\n**2. Incident replay** (load 15 → 2 flakes → load ~4 → 5/5 clean):\n```\nverdict: PASS\nreason: clean on attempt 7 after 2 host-pressure flake(s)\nattempts: [(1,1,True,4),(2,1,True,4),(3,0,False,4),...,(7,0,False,4)]\nflakes: 2 | sleeps: [2.0,2.0,2.0,2.0,1.75,3.5,...]   # waited out the load spike\nstandalone used: False\n```",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-idle-audit-host-fork-pressure",
+        "result": "passed",
+        "tests": 29
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 12:01:43"
+    }
+  ]
+}

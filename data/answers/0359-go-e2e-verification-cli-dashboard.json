@@ -1,0 +1,24 @@
+{
+  "class_id": 359,
+  "title": "go-e2e-verification-cli-dashboard",
+  "description": "go-e2e-verification-cli-dashboard",
+  "created_at": "2026-08-02 03:04:53",
+  "answers": [
+    {
+      "answer_id": 447,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "All three P2s live on the same metadata path, so they were batched into one worker pass (per the E2E-001 pattern). The fixes are in `/home/kara/dashboard` (`example.com/dashboard`): the engine now persists metadata sidecars and gates `webhook_url` on the `Webhook` flag, and the CLI wires the full API surface (`--source`, `--description`, `--webhook`).\n\n**P2-1 + P2-2: `flow create` gains `--source`; `--description` is persisted.** A JSON sidecar `<name>.meta.json` in `dataDir` (isolated from the `.star` sources in `flowsDir`) stores description + webhook flag, written atomically and reloaded on every read:\n\n```go\n// engine.go\ntype Flow struct {\n\tName        string `json:\"name\"`\n\tSource      string `json:\"source,omitempty\"`\n\tDescription string `json:\"description,omitempty\"`\n\tWebhook     bool   `json:\"webhook\"`\n\tWebhookURL  string `json:\"webhook_url,omitempty\"` // only when Webhook==true\n}\ntype meta struct { Description string `json:\"description,omitempty\"`; Webhook bool `json:\"webhook\"` }\n\nfunc (e *Engine) Create(_ context.Context, f Flow) (Flow, error) {\n\tif err := validateName(f.Name); err != nil { return Flow{}, err }\n\tif strings.TrimSpace(f.Source) == \"\" { return Flow{}, errors.New(\"flow source is required\") }\n\tos.WriteFile(e.sourcePath(f.Name), []byte(f.Source), 0o644)       // flowsDir\n\te.writeMeta(f.Name, meta{Description: f.Description, Webhook: f.Webhook}) // dataDir sidecar\n\treturn e.Get(f.Name)\n}\n\n// readMeta: missing sidecar => zero meta (back-compat), not an error\n```\n\n**P2-3: `Engine.List()` stops synthesizing `webhook_url`.** The URL is derived in `Get`, only when the persisted `Webhook` flag is true — previously it was fabricated for every `.star` file (engine.go:85):\n\n```go\nfunc (e *Engine) Get(name string) (Flow, error) {\n\tsrc, err := os.ReadFile(e.sourcePath(name)) // …load sidecar…\n\tf := Flow{Name: name, Source: string(src), Description: m.Description, Webhook: m.Webhook}\n\tif f.Webhook { f.WebhookURL = \"/hooks/\" + name }\n\treturn f, nil\n}\n```\n\n**CLI** (testable `cli.Run`, thin `cmd/flow/main`): `create` now takes `--source` (required, reads the file into `Flow.Source`), `--description` (persisted via sidecar), `--webhook`; added `update --name --description --webhook/--no-webhook` to rewrite metadata without touching source; `list` prints a summary where `webhook_url` appears only for webhook flows.",
+      "evidence": "Verified by code reading of every claim (engine.go, cli.go) plus executable proof — not just unit tests:\n\n- **16/16 tests pass**, `go vet` clean, full suite green under `-race -count=1`.\n- **Live binary smoke test** (real `FLOWS_DIR`/`DATA_DIR`): creating `nightly --description \"nightly report\"` (no webhook) yields JSON with `\"description\": \"nightly report\"` and **no** `webhook_url`; creating `webhooky --webhook` yields `\"webhook_url\": \"/hooks/webhooky\"`; `list` shows the URL only for `webhooky`.\n- **Persistence proof**: sidecar files on disk — `nightly.meta.json` contains `{\"description\":\"nightly report\",\"webhook\":false}`; a fresh `Engine` over the same dirs (and the `flow list` from a separate process) returns the description, ruling out in-memory-only behavior.\n\n**Edge cases tested:** missing/empty `--source` rejected; nonexistent `--source` path rejected; bare hand-dropped `.star` with no sidecar → zero metadata, no synthetic URL, no error; `Update` rewrites description/webhook and toggles URL on/off while preserving source; path-traversal names (`../evil`, `a/b`, NUL byte) rejected; list sorts by name and skips non-`.star` files; unknown/no subcommand → usage error; JSON round-trip avoids stale-field bug via fresh struct on toggle (caught and fixed during the run). Route-table/spec audit: the CLI flag surface now mirrors every API field (`name`, `source`, `description`, `webhook`), asserted by `TestCLIFlagSurfaceCoversAPIFields`.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-e2e-verification-cli-dashboard",
+        "result": "passed",
+        "tests": 16
+      },
+      "status": "verified",
+      "created_at": "2026-08-02 03:04:55"
+    }
+  ]
+}
