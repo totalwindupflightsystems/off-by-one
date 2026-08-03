@@ -1,0 +1,24 @@
+{
+  "class_id": 444,
+  "title": "board-idle-audit-duckdb-header-sync",
+  "description": "board-idle-audit-duckdb-header-sync",
+  "created_at": "2026-08-03 02:15:35",
+  "answers": [
+    {
+      "answer_id": 542,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Root cause: `write_events` committed `board/events.parquet` to git, but the header UPDATE that records `last_commit` was a separate, fragile step — when it was skipped (process killed between `git commit` and the header step), `header.last_commit` silently drifted behind `git HEAD`. The old idle audit never compared them, so tick #69 missed it.\n\n**Fix (two parts in the write script) + one cheap audit check:**\n\n**1. Full-header re-sync in the write script** — rebuild *every* header column from sources of truth (git HEAD, parquet row count) so a skipped UPDATE on a previous run is healed on the next write:\n\n```python\ndef resync_full_header(con, commit):\n    n = int(con.execute(f\"SELECT count(*) FROM read_parquet('{EVENTS_PATH}')\").fetchone()[0])\n    con.execute(\n        \"UPDATE header SET last_commit = ?, landed_at = now(), updated_at = now(),\"\n        \" event_count = ?, events_path = ?, status = 'synced'\"\n        \" WHERE board_id = (SELECT board_id FROM header LIMIT 1)\",\n        [commit, n, EVENTS_PATH])\n```\n\n**2. Own post-commit UPDATE with `now()`** — run immediately after `git commit`, stamping `landed_at = now()` so the audit can *prove the update landed* (not merely that `last_commit` happens to agree):\n\n```python\ndef post_commit_update(con, commit):          # runs right after `git commit`\n    con.execute(\n        \"UPDATE header SET last_commit = ?, landed_at = now(), status = 'synced'\"\n        \" WHERE board_id = (SELECT board_id FROM header LIMIT 1)\", [commit])\n```\n\n**3. Cheap idle audit tick** — the enter-tick check that would have caught tick #69:\n\n```python\ndef enter_tick_check():\n    con = board_lib.connect()\n    db_commit = con.execute(\"SELECT last_commit FROM header\").fetchone()[0]   # 1 row, 1 col\n    head = git(\"log\", \"-1\", \"--format=%h\").stdout.strip()                    # HEAD %h\n    if db_commit != head:\n        return \"DRIFT\", f\"header.last_commit={db_commit} != git HEAD={head} (skipped post-commit header UPDATE)\"\n    landed = con.execute(\"SELECT landed_at FROM header\").fetchone()[0]\n    if landed is None or landed.timestamp() < head_commit_epoch():           # now() proof\n        return \"DRIFT\", \"post-commit UPDATE did not land\"\n    return \"OK\", f\"header synced to {head} (landed_at={landed})\"\n```\n\n**4. Tracked board dir → no `-f`:** in terminal-jail `board/` is not gitignored — `git check-ignore -q board/events.parquet` returns **rc=1** (not ignored), so the write script asserts that and uses a plain `git add board/events.parquet` (never `-f`).\n\nFiles: `/home/kara/board-idle-audit-duckdb-header-sync/` → `board_lib.py`, `write_events.py`, `audit_tick.py`, `test_solution.py`.",
+      "evidence": "`python3 test_solution.py` → **22/22 checks PASS** in a simulated jail (fresh git repo, `board/` with no `.gitignore`):\n\n- **Environment:** `check-ignore board/events.parquet` → rc=1; plain `git add board/events.parquet` succeeds with no `-f` (source scan confirms no `-f` arg).\n- **Healthy write:** `header.last_commit` == `git log -1 --format=%h`; full header re-synced (`event_count` == parquet rows, `events_path`, `status='synced'`, `updated_at`); `landed_at` stamped within 5 s of `now()`; audit OK.\n- **Tick #69 incident reproduced:** write crashes between `git commit` and the header steps → `header=1467dd4 != HEAD=792ed71`. Old audit (never compared `last_commit`) missed it at #69; **new enter-tick check catches it on the next tick** with `\"skipped post-commit header UPDATE\"`.\n- **Healing:** next write re-syncs full header → audit OK; `landed_at >= HEAD commit epoch` (proves the UPDATE with `now()` ran after the commit).\n- **Belt-and-suspenders:** a \"liar\" header with matching `last_commit` but stale `landed_at` is still flagged DRIFT; full re-sync restores it.\n- **Edge cases:** unborn HEAD (no commits) → OK/pending, no crash; missing header row → DRIFT, never false-OK; repair write heals it; repeated ticks stay OK (idempotent).\n- **Cheapness:** enter-tick check (one `SELECT last_commit` + one `git log -1 --format=%h`) measures **~2.6 ms/check**; standalone `audit_tick.py` exits 0 with `header synced to 70616d8`.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "board-idle-audit-duckdb-header-sync",
+        "result": "passed",
+        "tests": 22
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 02:15:35"
+    }
+  ]
+}

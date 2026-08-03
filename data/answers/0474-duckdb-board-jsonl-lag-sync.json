@@ -1,0 +1,24 @@
+{
+  "class_id": 474,
+  "title": "duckdb-board-jsonl-lag-sync",
+  "description": "duckdb-board-jsonl-lag-sync",
+  "created_at": "2026-08-03 06:51:11",
+  "answers": [
+    {
+      "answer_id": 574,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** `board.db` is a cache; `events.jsonl` + `board.jsonl` (git-tracked) are the source of truth. When the DB lagged by non-contiguous events (ids 47 and 51 missing), `board-idle-append.py` derived `next_id = max(id in db) + 1` from the stale DB — which collided with an id already present in `events.jsonl`. Since the JSONL is plain text with **no primary key**, the duplicate id line was written silently.\n\n**Fix: sync FROM JSONL first, then append.** New `board_sync.py` does the three steps from the spec — (1) INSERT missing rows **by id**, (2) UPDATE header from `board.jsonl`, (3) VERIFY count equality — inside one transaction, then `board_idle_append.py` appends with a hard stale-DB guard.\n\n```python\n# board_sync.py — run BEFORE any append (pipeline: sync && append)\ndef sync(db_path, events_path, board_path, dry_run=False):\n    header = load_header(board_path)              # board.jsonl = header truth\n    events, by_id = load_events(events_path)      # events.jsonl = event truth\n    jsonl_sha = events_sha256(events)\n    con = connect(db_path)                        # events(id BIGINT PRIMARY KEY, ...)\n\n    db_before = {r[0] for r in con.execute(\"SELECT id FROM events\").fetchall()}\n    missing = sorted(set(by_id) - db_before)\n\n    if dry_run:\n        print(f\"dry-run: {len(missing)} missing rows: {missing}\"); return\n\n    con.execute(\"BEGIN TRANSACTION\")\n    try:\n        # (1) INSERT missing rows BY ID\n        for eid in missing:\n            row = by_id[eid]\n            con.execute(\"INSERT INTO events (id, ts, payload) VALUES (?, ?, ?::JSON)\",\n                        [row[\"id\"], row.get(\"ts\"), json_canonical(row.get(\"payload\"))])\n        # (2) UPDATE header from board.jsonl\n        set_meta(con, \"event_count\", str(len(events)))\n        set_meta(con, \"latest_id\",    str(max(by_id)))\n        set_meta(con, \"events_sha256\", jsonl_sha)\n        # (3) VERIFY count equality\n        verify(con, events, by_id, header, jsonl_sha)   # raises SyncError on any mismatch\n        con.execute(\"COMMIT\")\n    except BaseException:\n        con.execute(\"ROLLBACK\"); raise\n```\n\nThe verify step enforces four equalities — id sets, per-row content, `len(events.jsonl) == COUNT(events) == header.event_count`, and a sha256 of DB vs JSONL — and aborts with exit 1 on drift.\n\nThe append script's guard prevents the original failure mode even if sync is skipped:\n\n```python\n# board_idle_append.py\nids = jsonl_ids(events_path)\nnext_id = (max(ids) + 1) if ids else 1\ndb_max = con.execute(\"SELECT COALESCE(MAX(id), 0) FROM events\").fetchone()[0]\nif db_max != next_id - 1:\n    raise SystemExit(\"FATAL: board.db is stale — run board_sync.py first. \"\n                     \"Otherwise id %d would be reused/duplicated.\" % next_id)\n```",
+      "evidence": "`python3 tests/test_lag_sync.py` — **12/12 passed** (exit 0):\n\n| Test | Verifies |\n|---|---|\n| `sync_repairs_noncontiguous_lag` | Reported case: DB missing ids 47, 51 → sync INSERTs both by id; counts equal (jsonl=60 db=60 header=60); meta/sha updated |\n| `naive_append_without_sync_would_reuse_existing_id` | Bug reproduced: naive `max(db)+1` on lagging DB wrote a **second id=51 line** into events.jsonl |\n| `sync_then_append_fixes_the_duplicate_bug` | Same stale state + fix → sync restores, append emits id 61, JSONL has 61 unique ids |\n| `append_guard_refuses_stale_db` | Append on stale DB exits 1 and writes nothing |\n| `sync_is_idempotent` | Fully-synced DB → 0 inserts, JSONL untouched, still verifies |\n| `sync_detects_header_count_mismatch` / `sync_detects_content_drift` / `sync_detects_extra_db_rows` | Header count, sha256 payload drift, and orphan DB rows all abort with exit 1 |\n| `sync_rejects_duplicate_ids_in_jsonl` | Dup id line in source-of-truth JSONL → hard error, never silently fixed |\n| `sync_repairs_multiple_gaps_including_edges` | Holes at head/middle/tail (1,2,3,47,51,78,79,80) all restored |\n| `dry_run_reports_without_writing` | `--dry-run` previews `[47, 51]`, modifies nothing |\n\nEnd-to-end smoke test of `pipeline.sh`: stale DB (missing 7, 11) → sync repaired → append produced id 21; final state: 21 JSONL lines, 21 unique ids, DB count 21, header/meta agree.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "duckdb-board-jsonl-lag-sync",
+        "result": "passed",
+        "tests": 12
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 06:51:11"
+    }
+  ]
+}

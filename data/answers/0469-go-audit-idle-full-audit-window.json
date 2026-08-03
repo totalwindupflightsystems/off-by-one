@@ -1,0 +1,24 @@
+{
+  "class_id": 469,
+  "title": "go-audit-idle-full-audit-window",
+  "description": "go-audit-idle-full-audit-window",
+  "created_at": "2026-08-03 05:53:44",
+  "answers": [
+    {
+      "answer_id": 568,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (go-audit-idle-full-audit-window):** the FULL-audit due window was anchored to the *last audit of any kind*. LIGHT verification runs on every non-FULL tick and bumps that anchor, so while the system is idle the window slides forward forever and the FULL audit is **NEVER executed** — the recurring rows stay pending forever and the first tick of the due window (#220 after FULL at #217) never fires.\n\n**Fix:** anchor the window to `lastFullTick` only; LIGHT ticks bump only `lastLightTick`. Window opens at `lastFullTick + fullInterval` and stays open (`>=`), so a missed first tick (downtime/restart) is caught up on the first tick actually executed inside the window.\n\n```go\n// fullDue reports whether the current tick is inside the full-audit window.\nfunc (s *Scheduler) fullDue() bool {\n\tif s.buggy { // PRE-FIX: anchor = last audit of ANY kind; LIGHT ticks slide\n\t\t// the window forever => FULL is NEVER done.\n\t\treturn s.tick-s.lastLightTick >= s.fullInterval\n\t}\n\t// FIX: anchor = last FULL audit only. LIGHT verification never\n\t// postpones the FULL audit.\n\treturn s.tick-s.lastFullTick >= s.fullInterval\n}\n\nfunc (s *Scheduler) Tick() {\n\ts.tick++\n\tif s.fullDue() {\n\t\ts.executions = append(s.executions,\n\t\t\tExecution{Tick: s.tick, Kind: KindFull, Rows: len(s.pending)})\n\t\ts.lastFullTick = s.tick // only FULL moves the window\n\t\treturn\n\t}\n\ts.executions = append(s.executions, Execution{Tick: s.tick, Kind: KindLight})\n\ts.lastLightTick = s.tick\n}\n```\n\nState is seeded from persisted state (`SeedLastFull(217)` also restores the tick counter, since a FULL at #217 implies ticks through #217 were processed).\n\n**Secondary fix (d765c5d, `/namespaces/{id}`):** invalid-numeric id returned 500 on the live pre-fix binary; it's a client error → 400. Also rejects empty/negative/overflow ids — never a 500:\n\n```go\nfunc ParseNamespaceID(path string) (int, error) {\n\tconst prefix = \"/namespaces/\"\n\tif !strings.HasPrefix(path, prefix) { return 0, fmt.Errorf(\"path %q does not match %s{id}\", path, prefix) }\n\tid := strings.TrimPrefix(path, prefix)\n\tif id == \"\" { return 0, fmt.Errorf(\"missing namespace id\") }\n\tn, err := strconv.Atoi(id)\n\tif err != nil { return 0, fmt.Errorf(\"invalid numeric namespace id %q\", id) } // FIX: was 500\n\tif n < 0 { return 0, fmt.Errorf(\"namespace id must be non-negative, got %q\", id) }\n\treturn n, nil\n}\n```\n\n**INFRA-012 (deploy):** d765c5d is verified on scratch but a mid-tick restart marks in-flight ticks as timeout. Deploy at a tick boundary via `TickerGate`: `CloseForDrain()` → wait `Inflight()==0` → restart (window survives via persisted `lastFullTick`) → `Reopen()`.",
+      "evidence": "Module: `/home/kara/auditfix` (Go 1.26, `go vet`/`gofmt` clean, `go test -race` clean). **11/11 gates green:**\n\n| Gate | Check | Result |\n|---|---|---|\n| 01 | FULL at first tick of due window (#220, then #223 after FULL at #217) | ✅ `FULL ticks=[220 223]` |\n| 02 | No FULL before window (#218/#219 LIGHT) | ✅ |\n| 03 | Recurring rows stay pending forever, each FULL covers all 3 | ✅ |\n| 04 | **Regression:** pre-fix anchor over 60 ticks → 0 FULLs (NEVER-DONE); fixed → 20 | ✅ |\n| 05 | Missed window start (restart) → catch-up FULL at first tick | ✅ |\n| 06 | Long-run cadence, spacing exactly `fullInterval` | ✅ |\n| 07 | `/namespaces/abc` → 400 (was 500) | ✅ |\n| 08 | `/namespaces/42` → 200, body `namespace 42` | ✅ |\n| 09 | Table: `12x`, `//`, `-5`, overflow, `12/34`, `other/12` → 4xx, never 500; `0`,`007` → 200 | ✅ |\n| 10 | E2E-001: full battery every ~5 ticks (fulls at 5,10,…,30); pre-fix runs 0 | ✅ |\n| 11 | INFRA-012: close→drain→reopen; in-flight ticks complete, window survives restart | ✅ |\n\nTrace of the ticket scenario (full at #217, interval 3): `#218 LIGHT, #219 LIGHT, #220 FULL(3 rows), #221 LIGHT, #222 LIGHT, #223 FULL(3 rows), #224 LIGHT, #225 LIGHT`.\n\nEdge cases tested: downtime catch-up, interval clamp, negative/empty/overflow ids, E2E-001 cadence, and drain/restart not losing the window or timing out in-flight ticks.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-audit-idle-full-audit-window",
+        "result": "passed",
+        "tests": 11
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 05:53:44"
+    }
+  ]
+}

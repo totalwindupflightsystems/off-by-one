@@ -1,0 +1,24 @@
+{
+  "class_id": 470,
+  "title": "go-cli-e2e-battery",
+  "description": "go-cli-e2e-battery",
+  "created_at": "2026-08-03 06:06:30",
+  "answers": [
+    {
+      "answer_id": 570,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Verdict: zero app gaps.** All 3 battery FAILs were script bugs. The fix is to correct the *battery assertions*, not the CLI. The canonical contract is byte-exact — compare bytes, never grep.\n\nReconstructed repro at `/home/kara/foreman-direct/` (`main.go`, `battery_test.go` 26-case Go battery, `battery.sh`, `artifact-demo.sh`).\n\n**1. Coarse grep on JSON → parse fields exactly.** Compact JSON `{\"tick\":48,\"status\":\"ok\",...}` defeats `grep '\"status\": \"ok\"'`. Fixed with jq (or `encoding/json`):\n```bash\n# BUGGY: echo \"$rep\" | grep -o '\"status\": \"ok\"'\n# FIXED: parse, don't pattern-match\necho \"$rep\" | jq -e '.status == \"ok\" and .tick == 48' >/dev/null   # exit 0 = PASS\n[ \"$(echo \"$rep\" | jq 'keys | length')\" = \"3\" ]                   # schema lock\n[ \"$rep\" = \"$(\"$BIN\" report --tick 48)\" ]                         # deterministic bytes\n```\n\n**2. Wrong DB filename pattern → glob the real contract.** The CLI writes `foreman-<tick>-run.db`; scripts looked for `foreman.db` / `*.sqlite`. Fixed:\n```bash\n\"$BIN\" init --dir \"$TMP\" --tick 48\ndb=$(find \"$TMP\" -maxdepth 1 -name 'foreman-*-run.db' -printf '%f\\n')\nprintf '%s' \"$db\" | grep -Eq '^foreman-[0-9]+-run\\.db$'   # exact pattern\n[ \"$(find \"$TMP\" -maxdepth 1 -type f -name '*.db' | wc -l)\" -eq 1 ]  # no stray artifacts\n```\n\n**3. Empty-body MCP expectation → the contract body is non-empty.** `[ -z \"$mcp\" ]` failed against a correct app. Fixed:\n```bash\nmcp=$(\"$BIN\" mcp)\n[ -n \"$mcp\" ]                                                   # non-empty by contract\necho \"$mcp\" | jq -e '.resource == \"flow\" and .content == \"42\\ntrigger=none\" and .ok == true'\n```\n\n**Canonical flow — byte-exact, verified with `cmp` (never grep):**\n```bash\n\"$BIN\" source > out.txt; printf '42\\ntrigger=none\\n' > exp.txt\ncmp -s out.txt exp.txt && [ \"$(wc -c < out.txt)\" -eq 16 ]\n```",
+      "evidence": "- `go test -v ./...` → **26 PASS, 0 FAIL** (`ok musterflow/foreman-direct`); `go vet` + `gofmt -l` clean.\n- `battery.sh` → **18/18 PASS, rc=0** (canonical byte-exact, report jq schema, db pattern, mcp body).\n- `artifact-demo.sh` → proves the lesson: each buggy assertion **fails** (grep exit 1, `ls foreman.db` exit 2, `[ -z \"$mcp\" ]` exit 1) while the fixed assertion and the app contract pass — i.e., the FAILs were script artifacts.\n- Byte-exact contract: `xxd` of `source` output == `xxd` of `42\\ntrigger=none\\n` (`3432 0a74 7269 6767 6572 3d6e 6f6e 650a`).\n- Edge cases: empty `-trigger=` guards to `none`; whitespace trigger `\" \"` is a *real* trigger (not none); 16-byte exact count, single trailing newline; idempotent double-run; no browser surface (html/script/http absent); report field order + exactly 3 keys; db tick templating (`--tick 7` → `foreman-7-run.db`); `init` writes into an existing dir (pre-creating it is the caller's job — a test assumption, not an app gap); semver `version`.\n- Two self-inflicted test bugs found and fixed the same way: my `TestInitCustomDir` assumed auto-mkdir (fixed the test), and a `battery.sh` \"one file\" count included the script's own temp files (scoped to `*.db`). Both were test-side, matching the lesson.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cli-e2e-battery",
+        "result": "passed",
+        "tests": 26
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 06:06:30"
+    }
+  ]
+}

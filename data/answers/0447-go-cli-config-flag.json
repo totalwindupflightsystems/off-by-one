@@ -1,0 +1,24 @@
+{
+  "class_id": 447,
+  "title": "go-cli-config-flag",
+  "description": "go-cli-config-flag",
+  "created_at": "2026-08-03 02:43:45",
+  "answers": [
+    {
+      "answer_id": 545,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Bug (USABILITY-001):** `main()` hardcoded the config path, so committed alternate configs (e.g. `config.e2e.json`) were unusable, and the load path was untestable.\n\n**Fix (stdlib only):**\n1. `flag.String(\"config\", defaultConfigPath, ...)` — `--config`/`-config` with the original path as default, so no-flag behavior is byte-for-byte unchanged.\n2. Extracted `run(configPath string) error` out of `main` for direct unit testing.\n3. All config-load failures are wrapped with a stable `CONFIG_LOAD_ERROR` marker; `main` prints to stderr and exits 1.\n\n**`main.go`**\n```go\npackage main\n\nimport (\n\t\"flag\"\n\t\"fmt\"\n\t\"os\"\n)\n\n// defaultConfigPath is the original hardcoded config path. Keeping it as the\n// flag default means deployments that never passed --config behave identically,\n// while committed alternate configs become usable.\nconst defaultConfigPath = \"config.json\"\n\nfunc main() {\n\tconfigPath := flag.String(\"config\", defaultConfigPath,\n\t\t\"path to the JSON config file (default: \"+defaultConfigPath+\")\")\n\tflag.Parse()\n\n\tif err := run(*configPath); err != nil {\n\t\tfmt.Fprintln(os.Stderr, err)\n\t\tos.Exit(1)\n\t}\n}\n```\n\n**`config.go` (marker + validation)**\n```go\nconst ErrConfigLoad = \"CONFIG_LOAD_ERROR\"\n\nfunc loadConfig(path string) (Config, error) {\n\tb, err := os.ReadFile(path)\n\tif err != nil {\n\t\treturn Config{}, fmt.Errorf(\"%s: %w\", ErrConfigLoad, err)\n\t}\n\tcfg := defaultConfig() // {Port:8080, Host:\"127.0.0.1\", HealthPath:\"/health\"}\n\tif err := json.Unmarshal(b, &cfg); err != nil {\n\t\treturn Config{}, fmt.Errorf(\"%s: %w\", ErrConfigLoad, err)\n\t}\n\tif cfg.Port < 1 || cfg.Port > 65535 {\n\t\treturn Config{}, fmt.Errorf(\"%s: invalid port %d in %s\", ErrConfigLoad, cfg.Port, path)\n\t}\n\t// ...empty Host/HealthPath fall back to defaults...\n\treturn cfg, nil\n}\n```\n\n**`server.go` (extracted `run`)**\n```go\n// run loads config at configPath and serves HTTP until SIGINT/SIGTERM.\n// Extracted from main so tests can drive it directly (e.g. error path).\nfunc run(configPath string) error {\n\tcfg, err := loadConfig(configPath)\n\tif err != nil {\n\t\treturn err\n\t}\n\tsrv := &http.Server{Addr: fmt.Sprintf(\"%s:%d\", cfg.Host, cfg.Port), Handler: newHandler(cfg)}\n\terrCh := make(chan error, 1)\n\tgo func() { errCh <- srv.ListenAndServe() }()\n\tlog.Printf(\"listening on %s (config: %s)\", srv.Addr, configPath)\n\n\tstop := make(chan os.Signal, 1)\n\tsignal.Notify(stop, os.Interrupt, syscall.SIGTERM)\n\tselect {\n\tcase err := <-errCh:\n\t\tif err == http.ErrServerClosed {\n\t\t\treturn nil\n\t\t}\n\t\treturn fmt.Errorf(\"server error: %w\", err)\n\tcase <-stop:\n\t\tctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)\n\t\tdefer cancel()\n\t\treturn srv.Shutdown(ctx)\n\t}\n}\n```\n\n**Committed configs** — `config.json` (default, port 8080) and `config.e2e.json` (port 9080), both with `health_path: \"/health\"`.",
+      "evidence": "Project at `/tmp/gocliflag`, built with `go build -o app .`, verified live:\n\n| # | Invocation | Result |\n|---|---|---|\n| 1 | `./app -config config.e2e.json` → `curl http://127.0.0.1:9080/health` | **HTTP 200, body `ok`** (`listening on 127.0.0.1:9080 (config: config.e2e.json)`) |\n| 2 | `./app -config missing.json` | **exit=1**, stderr: `CONFIG_LOAD_ERROR: open missing.json: no such file or directory` |\n| 3 | `./app` (no flag) → `curl .../health` | **HTTP 200 `ok`** — loads default `config.json`; behavior identical to pre-fix default |\n\nUnit tests: `go vet ./...` clean; `go test ./...` → **ok, 8/8 PASS** covering: default-field fallback, e2e config parse, missing file → marker, malformed JSON → marker, invalid port → marker, `run(missing)` returns marker error, `/health` returns 200 via httptest, custom `health_path` honored.\n\nEdge cases tested live/unit:\n- Empty config file (`-config /dev/null`) → exit 1, `CONFIG_LOAD_ERROR: unexpected end of JSON input`\n- Both `-config` and `--config` accepted (stdlib flag handles both)\n- Invalid port (70000) and malformed JSON → `CONFIG_LOAD_ERROR`, exit 1\n- Graceful shutdown on SIGTERM (no dangling listeners; confirmed port released)\n- Note: in this sandbox, ports 8080/18080 are occupied by unrelated harness services, so invocation 3 was live-verified on a free port via a temporary default config; the committed default `config.json` remains port 8080, canonical and unchanged.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cli-config-flag",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 02:43:45"
+    }
+  ]
+}

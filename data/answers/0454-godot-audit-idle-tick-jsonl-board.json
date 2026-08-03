@@ -1,0 +1,24 @@
+{
+  "class_id": 454,
+  "title": "godot-audit-idle-tick-jsonl-board",
+  "description": "godot-audit-idle-tick-jsonl-board",
+  "created_at": "2026-08-03 03:45:05",
+  "answers": [
+    {
+      "answer_id": 552,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The workspace contained only the problem spec (`/workspace/problem.json`) — no live Godot project. I implemented the complete idle-audit-tick toolchain to spec: **`/workspace/godot_audit_tick.py`** (the fix) and **`/workspace/test_audit_tick.py`** (verification).\n\n**Pattern gate — only NEVER-DONE fixture pending ⇒ audit tick (no worker):**\n\n```python\ndef audit_tick_required(con):\n    pending = pending_fixtures(con)                 # status NOT IN ('DONE','SKIPPED')\n    if not pending: return False\n    if any(f[\"status\"] != \"NEVER-DONE\" for f in pending): return False\n    if any(f.get(\"worker\") for f in pending): return False\n    return True\n```\n\n**Board write — explicit event id MAX+1, naive UTC, display-name project match:**\n\n```python\ndef next_event_id(con):\n    return int(con.execute(\"SELECT COALESCE(MAX(event_id), 0) FROM events\").fetchone()[0]) + 1\n\ndef naive_utc_now():                                # timezone-naive, Z-suffixed\n    return datetime.now(timezone.utc).replace(tzinfo=None).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n\ndef board_write(con, fixture):\n    eid, now = next_event_id(con), naive_utc_now()\n    if fixture[\"display_name\"] != fixture[\"project_display_name\"]:\n        raise AuditTickError(\"display-name project match violated: ...\")\n    con.execute(\"INSERT INTO events (event_id, event_type, display_name, timestamp, payload) \"\n                \"VALUES (?, 'fixture.audit', ?, ?, ?)\", (eid, fixture[\"display_name\"], now, payload))\n    con.execute(\"UPDATE board SET status='AUDITED', updated_at=? WHERE display_name=?\", (now, ...))\n    con.commit(); return eid, now\n```\n\n**JSONL mirror via COPY — not parquet (INFRA-013), stray parquet removed:** `copy_to_jsonl()` does a row-for-row COPY of `board`/`events` into `board.jsonl`/`events.jsonl` (one JSON per line); `remove_stray_parquet()` deletes every `*.parquet`; the pipeline asserts zero parquet files afterward, and `.gitignore` pins `*.parquet` + `board.db`.\n\n**git stages:** `gitreins_guard()` runs `git fsck --no-dangling`, rejects tracked parquet and any dirty path outside `{board.jsonl, events.jsonl, .gitignore}` (pre- and post-commit); `commit_board()` stages **only** those three explicit paths; `update_phase2_last_commit()` writes `git HEAD` into `board.db` meta; `push()` falls back to `push -u origin HEAD` when no upstream exists.\n\n**Scheduler — never PUT:** `scheduler_pin_check()` reads `fleet.toml [scheduler]` and requires `cooldown == 7200` and `decay_rate == 1` exactly; `scheduler_never_put()` raises on any `PUT` verb (the pin in fleet.toml is the source of truth; the tick only GETs).",
+      "evidence": "Verified by executing **15 real tests** (real sqlite3 + real git in temp repos; godot shim since no godot binary is installed) — `python3 -m unittest test_audit_tick` → **OK, 15/15**:\n\n- naive UTC: no tzinfo, `^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}Z$`, no offset; `MAX+1` on empty → 1, contiguous → 6, gap (9 present) → 10\n- display-name project match violation raises; gate rejects IN_PROGRESS/assigned/empty fixtures\n- scheduler parity: 3600 or DecayRate=0.5 raises; `PUT` raises, `GET` ok\n- godot boot: 0 SCRIPT ERRORs (script-error shim fails tick); UI `OVERALL: PASS` (FAIL shim fails tick)\n- gitreins: rejects stray `evil.txt` and tracked `.parquet`; allows mirror files\n- full end-to-end tick: event_id 1, `AUDITED` board row, JSONL valid per-line COPY, zero `*.parquet`, commit contains exactly `[.gitignore, board.jsonl, events.jsonl]`, `phase2_last_commit == git HEAD == origin refs/heads/main` (push verified), clean tree, dry-run commits nothing, stray `events.parquet` removed and untracked\n\nLive CLI run (`godot_audit_tick.py --repo ... --board-dir ... --fleet-toml ...`) printed all stages green, then: `board.jsonl` = `{\"display_name\":\"neon-rush\",\"id\":1,\"phase\":2,\"status\":\"AUDITED\",\"updated_at\":\"2026-08-03T03:44:48Z\",...}`, `events.jsonl` event #1 with naive UTC `2026-08-03T03:44:48Z`, `phase2_last_commit = 0947a4c... = origin` — exactly the spec sequence.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "godot-audit-idle-tick-jsonl-board",
+        "result": "passed",
+        "tests": 15
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 03:45:05"
+    }
+  ]
+}

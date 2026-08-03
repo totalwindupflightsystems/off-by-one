@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**437 problem classes · 535 verified answers** · exported 2026-08-03 01:27 UTC
+**476 problem classes · 577 verified answers** · exported 2026-08-03 07:28 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -10,6 +10,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 388 | typescript-barrel-split-large-file | 5 | go |
 | 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
+| 314 | python-idle-audit | 4 | go |
 | 313 | python-audit-idle-maintenance | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 21 | foreman-tick82-e2e | 2 | go |
@@ -19,11 +20,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 206 | off-by-one-self-test-2026-07-29-tick200 | 2 | go |
 | 229 | off-by-one-self-test-2026-07-30-tick210 | 2 | go |
 | 247 | cron-double-fire-detection | 2 | go |
-| 314 | python-idle-audit | 2 | go |
 | 334 | go-verification-double-fire | 2 | go |
 | 337 | h3-sdk-idle-audit-tick | 2 | go |
 | 383 | go-websocket-e2e-live-battery | 2 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
+| 455 | static-html-idle-tick | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 3 | shell-say-hello-test | 1 | go |
@@ -443,3 +444,41 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 435 | python-idle-audit-never-done | 1 | go |
 | 436 | python-gitreins-judge-tier1-test-timeout | 1 | go |
 | 437 | typescript-sdk-idle-audit | 1 | go |
+| 438 | go-scheduler-board-light-audit | 1 | go |
+| 439 | python-template-dependency-pin | 1 | go |
+| 440 | ci-go-test-per-package-timeout-edge | 1 | go |
+| 441 | go-ci-billing-block-steward-tick | 1 | go |
+| 442 | infra-vitest-zombie-cleanup | 1 | go |
+| 443 | go-cli-cwd-relative-default-path | 1 | go |
+| 444 | board-idle-audit-duckdb-header-sync | 1 | go |
+| 445 | python-foreman-task-already-implemented | 1 | go |
+| 446 | go-http-status-mapping-notfound | 1 | go |
+| 447 | go-cli-config-flag | 1 | go |
+| 448 | go-cli-path-resolution-both-layouts | 1 | go |
+| 449 | raft-log-repair-divergent-peers | 1 | python |
+| 450 | aes-cbc-bitflip-role-forge | 1 | js |
+| 451 | go-board-migration-dashless-ids | 1 | go |
+| 452 | go-ed25519-signed-request-e2e | 1 | go |
+| 453 | board-duckdb-migration-parser-drop | 1 | go |
+| 454 | godot-audit-idle-tick-jsonl-board | 1 | go |
+| 456 | go-yaml-ralph-loop-config-validation | 1 | go |
+| 457 | go-e2e-live-server-battery | 1 | go |
+| 458 | cli-warn-mode-silent-passthrough | 1 | go |
+| 459 | e2e-playwright-vitest-stack-run | 1 | go |
+| 460 | typescript-barrel-split-class-factory-full-parity | 1 | go |
+| 461 | go-spec-audit-verification | 1 | go |
+| 462 | go-e2e-api-battery | 1 | go |
+| 463 | typescript-barrel-split-large-class | 1 | go |
+| 464 | go-router-double-prefix-nesting | 1 | go |
+| 465 | go-sandbox-pool-never-created | 1 | go |
+| 466 | go-prompt-state-backend-mismatch | 1 | go |
+| 467 | typescript-e2e-fixture-port-shadow | 1 | go |
+| 468 | python-gitreins-judge-env-contention | 1 | go |
+| 469 | go-audit-idle-full-audit-window | 1 | go |
+| 470 | go-cli-e2e-battery | 1 | go |
+| 471 | go-git-hooks-index-env-leak | 1 | go |
+| 472 | go-ci-billing-block-stewardship | 1 | go |
+| 473 | typescript-barrel-split-provider-side-effect | 1 | go |
+| 474 | duckdb-board-jsonl-lag-sync | 1 | go |
+| 475 | typescript-vitest-coverage-tooling | 1 | go |
+| 476 | python-gitleaks-config-regex | 1 | go |
