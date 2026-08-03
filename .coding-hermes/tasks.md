@@ -23,6 +23,38 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+### Tick 248 — 2026-08-03 13:15 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | GET /api/v1/projects/off-by-one → 200: Enabled=true, CooldownS=900, Priority=5, Weight=10, DecayRate=1 (via check_scheduler_project.py) |
+| 1 | Git status | PASS | clean (0 untracked; 13 _*.py in .coding-hermes/ — gitignored) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty via MCP, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 14 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 369 edges, 56 files (stable vs tick 247) |
+| 7 | GitReins guard | PASS | full mode: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0 — no WAL false positive this tick) |
+| 8 | Server health | PASS | :8766 returns 200, uptime 18h31m (no restart since ~18:42 Aug 2; systemd off-by-one.service), 507 problems, 610 answers, queue_depth=6, coverage=1.203 |
+| 9 | DS-007 submit | PASS | 409 deduplicated — 74 existing solutions (E2E submit path healthy) |
+| 10 | Stats | PASS | 507 problems, 610 answers, 610 verified, queue_depth=6, hit_rate=1.0, coverage=1.203 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 13/13: NOTICE + CODEOWNERS (both no .md ext) present; AGENTS, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, GOVERNANCE, TRADEMARK_POLICY, docs/landing-spec.md all present |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 10 outdated (same set: go-cmp v0.6→0.7, pprof, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — transitive; libc v1.74.3→1.74.4 retracted; sqlite v1.54.0→1.55.0 direct; cc/v4 v4.29.1→4.29.2) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source (3 comment-only "stub" mentions in cron/loop.go + pkg/api/yaml.go), gofmt clean |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | gh run list: last 6 runs ALL success (tick-247 CI 47s, pages 44s, data sync 47s, pages 44s, tick-246 CI 39s, pages 43s) — no new issues |
+| 19 | Code quality | PASS | .gitignore has .vfs/, .coding-hermes/ (tasks.md negation), *.db-wal; .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check-gitreins-judge.py PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: /tick/248 (992c6ce7) + /project/off-by-one/status (b98f1f15) written |
+| 22 | E2E testing | PASS | DS-007 submit → 409 dedup (74 existing — E2E pipeline functional); queue 100 entries (81 complete, 19 failed, 0 pending, 0 in_progress); govulncheck clean |
+
+**Notable:** Lab keeps growing fleet-fed: problems 491→507 (+16), answers 593→610 (+17), coverage 1.208→1.203 (-0.005 mild dilution) since tick 247 (~3h). Server uptime 18h31m — no restart since ~18:42 Aug 2 (systemd off-by-one.service). Queue: 0 pending, 0 in_progress — sub_2999b3 (tick 247's in-flight entry) has left the last-100 window; newest entry in window is sub_5252a1 (failed 03:51 — tick 246's 300s bwrap-cap timeout, historical). All 19 failures pre-existing (07-30/31 era + sub_5252a1); zero new failures since tick 247. Note: /api/v1/stats queue_depth=6 while the 100-entry window shows 0 active — queue_depth counts DB-wide non-complete submissions, not just the window; fluctuates 3-6 across ticks, not a regression. DS-007 this tick returned proper 409 (74 existing solutions) — dedup path confirmed healthy. Dispatch off-by-one-2026-08-03-08-09-50 ran as header 13:15 UTC (scheduler name is local-time; header is actual run time). Hilo 369/56 stable. Govulncheck clean (Go 1.26.5). Deps: same 10 outdated. CI green on all runs. Remote in sync (0 unpushed, 0 fetched). 9 enhancement tasks unchanged (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001) + NEVER-DONE/E2E-001 fixtures intact at matrix (line ~898). specs/AGENTS.md context-injection false positive this tick (file does not exist on disk; tree clean).
+
+**Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board. DS-007 dedup confirmed (74 existing). Cooldown verified (900s). Watch item unchanged: ~50% fleet submissions time out at the 300s bwrap cap — tuning candidate (raise DefaultBwrapTimeout), not a defect. Lab healthy: 507 problems / 610 answers, server up 18h31m.
+
 ### Tick 247 — 2026-08-03 10:17 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
