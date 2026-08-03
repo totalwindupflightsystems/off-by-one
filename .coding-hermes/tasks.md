@@ -23,6 +23,38 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+### Tick 245 — 2026-08-03 00:45 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | GET /api/v1/projects/off-by-one → 200: Enabled=true, CooldownS=900, Priority=5, Weight=10, deepseek-v4-flash @ deepseek-foreman (via check_scheduler_project.py) |
+| 1 | Git status | PASS | clean (0 untracked scripts on root; 13 _*.py in .coding-hermes/ — gitignored) |
+| 2 | GitReins dual-source | PASS | 0 pending (tasks.yaml: empty via MCP, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 14 packages ok (3 expected no-test: cmd/off-by-one, sql/schema, web) |
+| 6 | Hilo graph | PASS | 363 edges, 55 files (stable) |
+| 7 | GitReins guard | PASS | all Go guards PASS (no staged files); secrets finding is a pre-existing false positive on gitignored runtime artifact off-by-one.db-wal (SPDX text `sk-linking-protocols-exception` matches sk-api-key rule, 21 hits) — never committed |
+| 8 | Server health | PASS | :8766 returns 200, uptime 5h56m, 436 problems, 533 answers, queue_depth=13, coverage=1.222 |
+| 9 | DS-007 submit | PASS | deduplicated — 74 existing solutions (same problem_class off-by-one-self-test); E2E pipeline confirmed functional |
+| 10 | Stats | PASS | 436 problems, 533 answers, 533 verified, queue_depth=14, hit_rate=1.0, coverage=1.222 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 13/13: NOTICE (no .md extension) present; AGENTS, README, CHANGELOG, CODEOWNERS, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, GOVERNANCE, TRADEMARK_POLICY, docs/landing-spec.md all present |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 10 outdated (7 indirect: go-cmp v0.6→0.7, pprof, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — all transitive; +1 retracted: libc v1.74.3→1.74.4; +1 direct: sqlite v1.54.0→1.55.0; +1: modernc.org/cc/v4 v4.29.1→4.29.2) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source, gofmt clean |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | .github/workflows/ci.yml (Go 1.25+1.26 matrix); gh run list: last push (Tick 244, 20:37 UTC) success 44s, pages build success |
+| 19 | Code quality | PASS | .gitignore has .vfs/, .coding-hermes/, *.db-wal; .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, config.yaml verified |
+| 21 | DuckBrain | PASS | off-by-one ns: tick-245 entry written (54ae4c32) |
+| 22 | E2E testing | PASS | DS-007 deduplicated (74 existing — E2E pipeline functional); queue 100 entries (80 complete, 20 historical failures, all pre-restart) |
+
+**Notable:** Between ticks 244-245, lab data kept growing fleet-fed: problems 412→436 (+24), answers 502→533 (+31), coverage 1.218→1.222 (+0.004, recovering as answer volume catches up with problem ingestion). Server uptime 5h56m (same restart as tick 244 noted — started ~18:49 UTC; no new restarts). Queue: 13-14 in-flight fleet submissions, 0 pending self-test items; all 20 failed history entries pre-restart (historical, not regressions). DS-007 deduplicated (74 existing, problem_class off-by-one-self-test). **GitReins guard finding (new this tick):** full-mode `gitreins guard` flags `off-by-one.db-wal` (gitignored SQLite write-ahead log, runtime artifact) — SPDX license text `sk-linking-protocols-exception` (21 occurrences in WAL from ingested problem content) matches gitleaks rule `sk-api-key`. Marked "(pre-existing)" by GitReins; file never committed (*.db-wal gitignored); no staged files → all commit-relevant guards PASS. Hilo 363 edges/55 files (stable). All 9 enhancement tasks unchanged. Deps: 10 outdated (pprof + cc/v4 newly visible as transitive). Govulncheck clean. CI green on last push. 0 untracked scripts on root. Cooldown 900s confirmed.
+
+**Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (74 existing). Cooldown verified (900s). Lab healthy: 436 problems / 533 answers, server up 5h56m, all failures historical.
+
 ### Tick 244 — 2026-08-02 20:31 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
