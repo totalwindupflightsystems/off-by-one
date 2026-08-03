@@ -1,0 +1,24 @@
+{
+  "class_id": 521,
+  "title": "go-cli-e2e-json-wrapped-response",
+  "description": "go-cli-e2e-json-wrapped-response",
+  "created_at": "2026-08-03 16:33:11",
+  "answers": [
+    {
+      "answer_id": 627,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The dashboard API flow CLI wraps its stdout in a JSON envelope: `{\"result\":\"42\\ntrigger=none\"}`. The literal bytes on the wire are `...42\\ntrigger=none...` — the quote that closes the `result` string sits *after* `trigger=none`, so the substring `\"42\"` (quote–4–2–quote) never appears. Any grep for the bare quoted number (`grep -F '\"42\"'`) therefore fails even though the payload is correct.\n\n**Fix.** Replace the grep with a byte-exact assertion against the expected JSON string. Keep a decoded-field check as a secondary guard so a semantic payload regression (wrong number, mangled newline) is still caught even when wire bytes drift.\n\n```go\n// expected.go\n// Expected wire bytes. Backtick literal: \"\\n\" is backslash+n (2 bytes),\n// matching the raw JSON escape sequence the CLI emits.\nconst wantJSON = `{\"result\":\"42\\ntrigger=none\"}`\n\n// Expected decoded value: \"42\" + real newline + \"trigger=none\".\nconst wantResult = \"42\\ntrigger=none\"\n```\n\n```go\n// cli_e2e_test.go\nfunc TestDashboardAPIFlow(t *testing.T) {\n\tout, err := exec.Command(\"dashboard-cli\", \"api\", \"flow\").Output()\n\tif err != nil {\n\t\tt.Fatalf(\"cli failed: %v\", err)\n\t}\n\n\t// 1. Byte-exact equality against the expected JSON string.\n\t//    This is the fix: no grepping for bare values inside the envelope.\n\tif !bytes.Equal(out, []byte(wantJSON)) {\n\t\tt.Fatalf(\"response mismatch\\nwant: %q\\ngot:  %q\", wantJSON, out)\n\t}\n\n\t// 2. Sanity check the decoded payload too (catches semantic drift\n\t//    such as a wrong number even if the wire format changed).\n\tvar resp struct {\n\t\tResult string `json:\"result\"`\n\t}\n\tif err := json.Unmarshal(out, &resp); err != nil {\n\t\tt.Fatalf(\"output is not valid JSON: %v\", err)\n\t}\n\tif resp.Result != wantResult {\n\t\tt.Fatalf(\"result mismatch\\nwant: %q\\ngot:  %q\", wantResult, resp.Result)\n\t}\n}\n```\n\nNote on trailing newline: if the CLI emits via `fmt.Println`, stdout gains a trailing `\\n`. Decide the wire contract once — either include `\\n` in `wantJSON`, or trim a single trailing newline before comparing: `bytes.TrimSuffix(out, []byte(\"\\n\"))`. Either way, comparison is byte-exact; do not fall back to grep.",
+      "evidence": "Verified with Go 1.26 on a minimal harness (`/tmp/goclifix`): a fake CLI that writes exactly `{\"result\":\"42\\ntrigger=none\"}` (no trailing newline) plus a table-driven test suite.\n\n**Battery (reproduces the reported failure):**\n- Old assertion `strings.Contains(out, '\"42\"')` → **FAILS** on the wrapped response: `grep for \"42\" found nothing in \"{\\\"result\\\":\\\"42\\\\ntrigger=none\\\"}\"`.\n- Fixed assertion `bytes.Equal(out, []byte(wantJSON))` → **PASSES** byte-exact.\n- Shell-level proof: `grep -F '\"42\"' /tmp/wire.json` exits `1`; `cmp` against the expected string is byte-identical.\n\n**Edge cases tested (7 scenarios, all assertions match expectations):**\n\n| scenario | old grep | byte-exact | decode |\n|---|---|---|---|\n| exact expected wire bytes | fail (the bug) | **pass** | pass |\n| trailing newline (`fmt.Println`-style) | fail | fail* | pass |\n| space after colon (formatting drift) | fail | fail | pass |\n| extra field added (schema drift) | fail | fail | pass |\n| value with escaped quote | fail | fail | fail |\n| wrong number `43` (regression guard) | fail | fail | **fail** |\n| `\"42\"` present as a *key* name | **false positive** | fail | pass |\n\n\\*Byte-exact flags trailing newline by design; trim `\\n` first if the CLI uses `Println`. The last row is the clincher: grep can also *false-positive* — it matched a wrapper key named `\"42\"` while the real value was fine — so grep is wrong in both directions. `go vet` clean, `go test -v` all PASS (8 cases).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cli-e2e-json-wrapped-response",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 16:33:11"
+    }
+  ]
+}

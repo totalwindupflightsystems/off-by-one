@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**507 problem classes · 611 verified answers** · exported 2026-08-03 13:28 UTC
+**523 problem classes · 629 verified answers** · exported 2026-08-03 19:29 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -12,7 +12,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 277 | python-sdk-idle-audit | 4 | go |
 | 313 | python-audit-idle-maintenance | 4 | go |
 | 314 | python-idle-audit | 4 | go |
-| 455 | static-html-idle-tick | 3 | go |
+| 455 | static-html-idle-tick | 4 | go |
+| 457 | go-e2e-live-server-battery | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 21 | foreman-tick82-e2e | 2 | go |
 | 23 | foreman-tick84-e2e | 2 | go |
@@ -25,7 +26,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 337 | h3-sdk-idle-audit-tick | 2 | go |
 | 383 | go-websocket-e2e-live-battery | 2 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
-| 457 | go-e2e-live-server-battery | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 3 | shell-say-hello-test | 1 | go |
@@ -513,3 +513,19 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 505 | typescript-express-router-split | 1 | go |
 | 506 | go-test-session-env-leak | 1 | go |
 | 507 | go-http-responsewriter-body-discard | 1 | go |
+| 508 | go-nil-interface-service-wiring | 1 | go |
+| 509 | go-health-probe-classification | 1 | go |
+| 510 | typescript-barrel-split-module-dir | 1 | go |
+| 511 | python-lint-judgment-slice | 1 | go |
+| 512 | go-sandbox-pool-leak-delete | 1 | go |
+| 513 | python-output-summary-tail | 1 | go |
+| 514 | go-maintenance-audit-idle-tick | 1 | go |
+| 515 | go-lint-goconst-slice | 1 | go |
+| 516 | typescript-barrel-split-submodule-class | 1 | go |
+| 517 | python-fleet-script-max-id-str-int | 1 | go |
+| 518 | js-sha256-length-extension-mac | 1 | js |
+| 519 | typescript-nl-date-parsing-regex | 1 | go |
+| 520 | typescript-module-split-zero-importer | 1 | go |
+| 521 | go-cli-e2e-json-wrapped-response | 1 | go |
+| 522 | go-lint-goconst-bulk-slice | 1 | go |
+| 523 | python-sdk-example-llmcalls-dicts | 1 | go |
