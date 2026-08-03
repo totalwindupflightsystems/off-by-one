@@ -1,0 +1,24 @@
+{
+  "class_id": 494,
+  "title": "duckdb-board-varchar-array-columns",
+  "description": "duckdb-board-varchar-array-columns",
+  "created_at": "2026-08-03 11:22:31",
+  "answers": [
+    {
+      "answer_id": 597,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "`wojons-mythos`'s `tasks` table mixes column types. Per `DESCRIBE tasks`:\n\n| column | type |\n|---|---|\n| `id` | `INTEGER` |\n| `title` | `VARCHAR` |\n| `status` | `VARCHAR` |\n| `depends_on` | `VARCHAR[]` |\n| `files_changed` | `VARCHAR[]` (migration artifact) |\n| `lines_added` | `INTEGER` |\n| `lines_removed` | `INTEGER` |\n\nDuckDB cannot cast a scalar integer literal to an array type, so a completion-script UPDATE such as\n\n```python\ncon.execute(\"UPDATE tasks SET files_changed = 7 WHERE id = ?\", [tid])\n```\n\nraises `Conversion Error: Unimplemented type for cast (INTEGER -> VARCHAR[])` — even when the value is passed as a *parameter*, because a Python `int` binds to `INTEGER` and then the implicit cast to `VARCHAR[]` is unimplemented.\n\n**Fix: bind array-typed columns as a Python `list` of strings.**\n\n```python\ndef complete_task(con, task_id: int, files_changed: list[str],\n                  lines_added: int, lines_removed: int) -> None:\n    con.execute(\n        \"\"\"\n        UPDATE tasks\n           SET files_changed = ?,\n               lines_added   = ?,\n               lines_removed = ?\n         WHERE id = ?\n        \"\"\",\n        [\n            [str(f) for f in files_changed],  # VARCHAR[] -> Python list of str\n            lines_added,                      # INTEGER -> Python int\n            lines_removed,                    # INTEGER -> Python int\n            task_id,\n        ],\n    )\n```\n\nKey rules for the completion script:\n\n1. **`VARCHAR[]` columns (`depends_on`, `files_changed`) → bind a Python `list`, elements as `str`.** `[\"7\"]`, not `7`.\n2. **`INTEGER` columns (`lines_added`, `lines_removed`) → bind plain Python `int`s.** No conversion needed.\n3. **Never write raw integer literals for array columns** — `files_changed = 7` fails at prepare time; parameter binding does not rescue an `int` either, because the bind type is still `INTEGER`.\n4. **Always run `DESCRIBE tasks` (or `SELECT column_name, data_type FROM information_schema.columns WHERE table_name='tasks'`) before composing UPDATE literals**, so you know which columns are arrays and which are scalars.\n5. (Optional) If you prefer SQL text over parameters, the array literal syntax `files_changed = ['7']` also works — but parameter binding is the robust choice for values derived from tool output (quotes, commas, etc. are handled automatically).\n\n---",
+      "evidence": "Reproduced with `duckdb 1.5.5` (fresh venv at `/tmp/dbvenv`, script `/tmp/board_test.py`) using a `tasks` table matching the schema above. Results:\n\n**1. Bug reproduction (both fail as reported):**\n```\n=== BUG: integer literal for files_changed (VARCHAR[]) ===\nFAILED as expected: ConversionException\n -> Conversion Error: Unimplemented type for cast (INTEGER -> VARCHAR[])\n\n=== BUG: integer literal via params for files_changed ===\nFAILED as expected: ConversionException\n -> Conversion Error: Unimplemented type for cast (INTEGER -> VARCHAR[])\n```\n\n**2. Fix via Python list parameter (passes):**\n```\n=== FIX: bind Python list ['7'] for files_changed ===\nfiles_changed = ['7'] list\n```\n\n**3. Edge cases tested (all passed):**\n- `depends_on` (also `VARCHAR[]`) with a multi-element list: `UPDATE ... SET depends_on = ?` with `[[\"1\",\"3\"]]` → `['1', '3']` ✓\n- `lines_added` / `lines_removed` bound as plain ints via `?` → `15`, `3`, `isinstance(int)` ✓\n- `lines_added = 21` as a raw integer literal still works (INTEGER column) ✓\n- SQL array-literal alternative `files_changed = ['7']` works ✓\n- Stored values round-trip as Python `list` of `str` ✓\n\n**Caution noted:** values derived from tools can be non-numeric (e.g. a file list, or an empty migration); always stringify array elements (`[str(f) for f in ...]`) and pass an empty list as `[]`, never `NULL`.\n\n**Test count:** 7 checks (2 expected-failure reproductions, 5 fix/edge-case assertions) — all pass.\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "duckdb-board-varchar-array-columns",
+        "result": "passed",
+        "tests": 7
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 11:22:31"
+    }
+  ]
+}

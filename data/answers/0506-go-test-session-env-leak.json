@@ -1,0 +1,24 @@
+{
+  "class_id": 506,
+  "title": "go-test-session-env-leak",
+  "description": "go-test-session-env-leak",
+  "created_at": "2026-08-03 12:48:31",
+  "answers": [
+    {
+      "answer_id": 609,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `TestLoadConfigDefaults` read the ambient process environment. The foreman shell's `export RABBITHOLE_LISTEN_ADDR=19734` (for the live-server battery) made `config.LoadConfig` return 19734 instead of the built-in default 9734. The env-override is a *feature* — the failure was a **test-isolation bug**, not a code regression (unset env → 10/10 PASS, reproduced exactly).\n\n**Fix, in three layers:**\n\n**1. Hermetic test (the real fix).** Pin the env var; `t.Setenv` auto-restores the ambient value after the test:\n\n```go\nfunc TestLoadConfigDefaults(t *testing.T) {\n    t.Setenv(\"RABBITHOLE_LISTEN_ADDR\", \"\") // \"\" == \"not set\" → built-in default\n    cfg := LoadConfig()\n    if cfg.ListenAddr != 9734 {\n        t.Fatalf(\"default ListenAddr = %d, want 9734\", cfg.ListenAddr)\n    }\n}\n```\n\nIf a loader treats *present-but-empty* as a real value, truly unset with a `LookupEnv`/`Unsetenv` helper + `t.Cleanup` restore (full helper in `README.md`).\n\n**2. Loader defense-in-depth.** Only a *valid* value overrides — empty/whitespace/malformed/out-of-range are treated as \"not set\", so a stray or half-cleaned export can never corrupt defaults (the old loader turned `\"abc\"` into port 0):\n\n```go\nfunc envListenAddr() (int, bool) {\n    raw := strings.TrimSpace(os.Getenv(\"RABBITHOLE_LISTEN_ADDR\"))\n    if raw == \"\" { return 0, false }\n    port, err := strconv.Atoi(raw)\n    if err != nil || port < 1 || port > 65535 { return 0, false }\n    return port, true\n}\n```\n\n**3. Session hygiene (ops).** Don't `export` battery env into the whole session — scope it to the command (`RABBITHOLE_LISTEN_ADDR=19734 go run ./cmd/live-server &`), run `go test ./...` *before* exporting, `unset` afterwards, and `echo \"RABBITHOLE_LISTEN_ADDR=${RABBITHOLE_LISTEN_ADDR-<unset>}\"` before trusting a FAIL on config-default tests.",
+      "evidence": "Reproduction built at `/home/kara/rabbithole-env-leak-repro` (Go 1.26): `config` package + `TestLoadConfigDefaults` + fake `cmd/live-server` for the battery.\n\n| Run | Result |\n|---|---|\n| **Buggy**, env unset: `env -u RABBITHOLE_LISTEN_ADDR go test ./...` | `ok` — matches \"unset env → PASS\" |\n| **Buggy**, leak: `RABBITHOLE_LISTEN_ADDR=19734 go test ./...` | `FAIL: default ListenAddr = 19734, want 9734` — exact tick symptom |\n| **Fixed**, leak: `RABBITHOLE_LISTEN_ADDR=19734 go test -count=10 ./...` | `ok`, **80 PASS / 0 FAIL** (3 functions + 5 subtests × 10), exit 0 |\n| **Fixed**, clean: `env -u ... go test -count=10 ./...` | `ok`, 10/10 |\n| `go vet ./...` | clean |\n\n**Feature intact (not over-fixed):** `RABBITHOLE_LISTEN_ADDR=19734 go run ./cmd/live-server` → `:19734`; no env → `:9734`; garbage `abc` → `:9734` (buggy loader gave port 0 — edge case fixed). Edge cases covered by `TestLoadConfigIgnoresAmbientGarbage`: empty, whitespace-only, malformed, negative, out-of-range — all fall back to 9734; `TestLoadConfigEnvOverride` pins the override contract.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-test-session-env-leak",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 12:48:31"
+    }
+  ]
+}

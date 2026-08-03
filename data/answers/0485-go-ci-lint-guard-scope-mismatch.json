@@ -1,0 +1,24 @@
+{
+  "class_id": 485,
+  "title": "go-ci-lint-guard-scope-mismatch",
+  "description": "go-ci-lint-guard-scope-mismatch",
+  "created_at": "2026-08-03 09:18:09",
+  "answers": [
+    {
+      "answer_id": 586,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause — guard scope ≠ CI scope.** The gitreins pre-commit guard lints only **staged non-test files** (`golangci-lint run <staged .go files>`, `_test.go` excluded), while CI runs the **full module** (`golangci-lint run ./...`). Worse, a file-scoped run is fundamentally unreliable: it can't typecheck same-package helpers and can't power package-level linters (`unparam` needs all call sites; `noctx`/`prealloc` need the package graph). Tick 55's worker test file slipped through the guard and surfaced 6 issues in CI: **errcheck ×2, noctx ×2, prealloc, unparam**.\n\n**Process fix (foreman-direct):** after any worker adds test files, the foreman runs the full scan locally before push and applies lint fixes directly (no worker round-trip):\n\n```bash\n# after any worker adds/changes test files — required pre-push step\ncd \"$REPO\" && golangci-lint run ./...    # must be 0 issues before push\n```\n\n**The 6 code fixes** (worker file `internal/server/server_test.go`):\n\n| # | Linter | Before | After |\n|---|--------|--------|-------|\n| 1 | errcheck | `defer resp.Body.Close()` | `defer func(){ if err := resp.Body.Close(); err != nil { t.Errorf(\"close body: %v\", err) } }()` |\n| 2 | errcheck | `fmt.Fprintf(w, \"extra\")` | `_, _ = fmt.Fprintf(w, \"extra\")` |\n| 3 | noctx | `http.Get(srv.URL + \"/health\")` | `req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+\"/health\", nil)` then `http.DefaultClient.Do(req)` |\n| 4 | noctx | `http.NewRequest(http.MethodGet, url, nil)` | `http.NewRequestWithContext(ctx, http.MethodGet, url, nil)` |\n| 5 | prealloc | `var paths []string; for _, p := range endpoints { paths = append(paths, \"GET \"+p) }` | `paths := make([]string, 0, len(endpoints))` + same loop |\n| 6 | unparam | `func startServer(t *testing.T, port int)` (port unused) | `func startServer(t *testing.T)`; call site `startServer(t, 8080)` → `startServer(t)` |\n\nThe noctx fix requires a context (`ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second); defer cancel()`).",
+      "evidence": "Reproduced end-to-end in `/tmp/tick55` with **golangci-lint v2.12.2** (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`, verified `golangci-lint version` → `v2.12.2 built with go1.26.0`), committed as two commits (`b9b46f4` worker file, `306d9e3` fixes):\n\n1. **Guard on broken commit** (`./.gitreins/pre-commit-guard.sh`, staged non-test only): `0 issues`, exit 0 → matches \"passed gitreins pre-commit guard\".\n2. **CI full run on broken commit** (`golangci-lint run ./...`): exit 1, exactly the reported set:\n   ```\n   errcheck: 2   (resp.Body.Close, fmt.Fprintf)\n   noctx: 2      (http.Get, http.NewRequest)\n   prealloc: 1   (append loop, \"Consider preallocating paths with capacity len(endpoints)\")\n   unparam: 1    (\"startServer - port is unused\")\n   ```\n3. **Edge case — file-scoped guard variant** (lint the changed test file alone): fails with `undefined: New (typecheck)` because same-package helpers aren't loaded — proving narrow scopes are unreliable.\n4. **Edge case — package-dir scope** on broken commit: same 6 issues as full run.\n5. **After fixes:** `golangci-lint run ./...` → `0 issues`, exit 0; `go test ./...` → `ok`; `go vet ./...` → clean; `gofmt -l .` → empty; guard still passes. (Repro loop tweaked so `prealloc` fires without staticcheck S1011 noise, keeping the count exactly 6 as reported.)",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-ci-lint-guard-scope-mismatch",
+        "result": "passed",
+        "tests": 6
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 09:18:09"
+    }
+  ]
+}

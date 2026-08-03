@@ -1,0 +1,24 @@
+{
+  "class_id": 507,
+  "title": "go-http-responsewriter-body-discard",
+  "description": "go-http-responsewriter-body-discard",
+  "created_at": "2026-08-03 12:53:57",
+  "answers": [
+    {
+      "answer_id": 610,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `spaResponseWriter.Write()` discarded the body for *every* status, so `GET /` sent `Content-Length: 660` with zero bytes — curl aborted with `(18) end of response with 660 bytes missing`.\n\n**Fix** (`/home/kara/go-http-responsewriter-body-discard/spa.go`): forward 200/3xx headers+bodies untouched; suppress only status `>= 400`; add a `wroteHeader` guard; and defer the header until the fallback decides (so an error status can be replaced by `index.html` with 200 instead of leaking the error page):\n\n```go\ntype spaResponseWriter struct {\n\thttp.ResponseWriter\n\tstatus      int  // first status recorded\n\twroteHeader bool // WriteHeader called on wrapper (guard)\n\tflushed     bool // recorded status forwarded to underlying writer\n}\n\nfunc (w *spaResponseWriter) WriteHeader(status int) {\n\tif w.wroteHeader { // net/http semantics: only the first call counts\n\t\treturn\n\t}\n\tw.status = status\n\tw.wroteHeader = true\n\t// Defer forwarding: an error status may still be replaced by index.html.\n}\n\nfunc (w *spaResponseWriter) Write(p []byte) (int, error) {\n\tif !w.wroteHeader {\n\t\tw.WriteHeader(http.StatusOK) // bare Write implies 200\n\t}\n\tif w.status >= http.StatusBadRequest {\n\t\treturn len(p), nil // suppress only >=400; report full length (no short write)\n\t}\n\tw.forwardHeader()\n\treturn w.ResponseWriter.Write(p) // 200/3xx body forwarded verbatim\n}\n\nfunc (w *spaResponseWriter) forwardHeader() {\n\tif w.flushed { return }\n\tw.flushed = true\n\tw.ResponseWriter.WriteHeader(w.status)\n}\n```\n\nFallback handler — after the file server runs, 200/3xx are flushed as-is; error statuses are replaced by `index.html` (or surfaced if it's missing):\n\n```go\nfunc Fallback(staticDir, indexFile string) http.Handler {\n\tfileServer := http.FileServer(http.Dir(staticDir))\n\tindexPath := filepath.Join(staticDir, indexFile)\n\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n\t\trw := &spaResponseWriter{ResponseWriter: w}\n\t\tfileServer.ServeHTTP(rw, r)\n\n\t\tif rw.status < http.StatusBadRequest {\n\t\t\trw.forwardHeader() // 200/3xx: body already forwarded; header too (covers body-less 301)\n\t\t\treturn\n\t\t}\n\t\tif _, err := os.Stat(indexPath); err != nil {\n\t\t\thttp.Error(w, http.StatusText(rw.status), rw.status) // no silent empty 200\n\t\t\treturn\n\t\t}\n\t\thttp.ServeFile(w, r, indexPath) // SPA shell, status 200\n\t})\n}\n```\n\nRegression test (`spa_test.go`, `TestRootBodyNotEmpty`): asserts root returns 200, `len(body) > 100`, `res.ContentLength == len(body)`, and the body is byte-identical to `index.html`.",
+      "evidence": "Verified two ways — unit tests + live curl E2E against freshly built binaries (the \"rebuild the stale demo\" step is real: the first E2E attempt hit a racy backgrounding failure and required a rebuild/rerun to validate, exactly how the bug slipped through).\n\n**Before fix** (buggy binary, live curl): `status=200 downloaded=0`, `curl: (18) end of response with 660 bytes missing` — the reported Content-Length-with-zero-bytes symptom reproduced.\n\n**After fix** (live curl against fresh build):\n\n| Request | Result |\n|---|---|\n| `GET /` | 200, `Content-Length: 660`, **660 bytes received**, `cmp` identical to index.html, >100 ✓ |\n| `GET /settings` (client route) | 200, 660 bytes = index.html (fallback works) |\n| `GET /app.js` / `/assets/readme.txt` | 200, verbatim assets, correct Content-Type |\n| `GET /sub` (real dir, no slash) | **301 forwarded** (3xx path) → `-L` gets `sub/index.html` 200/19 |\n| missing `index.html` (empty dir) | 404 \"Not Found\" (10 bytes) — errors aren't swallowed into empty 200s |\n\n**`go test` — 8/8 PASS** (gofmt/vet clean), covering: root body regression; client-route fallback ×3 paths; real-asset passthrough; 301 redirect forwarding; missing-index error surfacing; wrapper unit (200 body forwarded, 302 body forwarded, 404 body suppressed with full-length `n`/nil-err and deferred header); `wroteHeader` guard (302 then 418 → 302 wins, header written once); bare `Write` defaults to 200.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-http-responsewriter-body-discard",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 12:53:57"
+    }
+  ]
+}

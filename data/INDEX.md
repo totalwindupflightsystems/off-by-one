@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**476 problem classes · 577 verified answers** · exported 2026-08-03 07:28 UTC
+**507 problem classes · 611 verified answers** · exported 2026-08-03 13:28 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -10,8 +10,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 388 | typescript-barrel-split-large-file | 5 | go |
 | 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
+| 313 | python-audit-idle-maintenance | 4 | go |
 | 314 | python-idle-audit | 4 | go |
-| 313 | python-audit-idle-maintenance | 3 | go |
+| 455 | static-html-idle-tick | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 21 | foreman-tick82-e2e | 2 | go |
 | 23 | foreman-tick84-e2e | 2 | go |
@@ -24,7 +25,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 337 | h3-sdk-idle-audit-tick | 2 | go |
 | 383 | go-websocket-e2e-live-battery | 2 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
-| 455 | static-html-idle-tick | 2 | go |
+| 457 | go-e2e-live-server-battery | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 3 | shell-say-hello-test | 1 | go |
@@ -462,7 +463,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 453 | board-duckdb-migration-parser-drop | 1 | go |
 | 454 | godot-audit-idle-tick-jsonl-board | 1 | go |
 | 456 | go-yaml-ralph-loop-config-validation | 1 | go |
-| 457 | go-e2e-live-server-battery | 1 | go |
 | 458 | cli-warn-mode-silent-passthrough | 1 | go |
 | 459 | e2e-playwright-vitest-stack-run | 1 | go |
 | 460 | typescript-barrel-split-class-factory-full-parity | 1 | go |
@@ -482,3 +482,34 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 474 | duckdb-board-jsonl-lag-sync | 1 | go |
 | 475 | typescript-vitest-coverage-tooling | 1 | go |
 | 476 | python-gitleaks-config-regex | 1 | go |
+| 477 | python-security-pattern-gap-own-pgroup-kill | 1 | go |
+| 478 | typescript-barrel-split-file-lock | 1 | go |
+| 479 | go-idle-audit-gates | 1 | go |
+| 480 | go-sqlite-migration-schema-drift | 1 | go |
+| 481 | go-idle-audit | 1 | go |
+| 482 | typescript-e2e-fixture-run | 1 | go |
+| 483 | typescript-barrel-split-provider-llm | 1 | go |
+| 484 | go-nostr-kind0-bridge | 1 | go |
+| 485 | go-ci-lint-guard-scope-mismatch | 1 | go |
+| 486 | go-fleet-idle-tick-light-audit | 1 | go |
+| 487 | go-golangci-lint-slice-regression | 1 | go |
+| 488 | go-test-timing-boundary-flake | 1 | go |
+| 489 | python-security-rule-adversarial-vectors | 1 | go |
+| 490 | python-pytest-root-package-import | 1 | go |
+| 491 | go-idle-audit-clean-tick | 1 | go |
+| 492 | typescript-barrel-split-services | 1 | go |
+| 493 | go-cli-shellout-path-docs | 1 | go |
+| 494 | duckdb-board-varchar-array-columns | 1 | go |
+| 495 | python-subprocess-env-git-index-leak | 1 | go |
+| 496 | git-hygiene-untracked-deliverables | 1 | go |
+| 497 | docker-compose-network-detachment | 1 | go |
+| 498 | typescript-e2e-fixture-battery | 1 | go |
+| 499 | go-e2e-sandbox-pool-leak | 1 | go |
+| 500 | typescript-barrel-split-file-scope-judge | 1 | go |
+| 501 | python-packaging-hatchling-gitignore-wheel | 1 | go |
+| 502 | go-idle-audit-battery | 1 | go |
+| 503 | board-duckdb-parquet-idle-audit-append | 1 | go |
+| 504 | sql-rls-security-definer-bypass | 1 | go |
+| 505 | typescript-express-router-split | 1 | go |
+| 506 | go-test-session-env-leak | 1 | go |
+| 507 | go-http-responsewriter-body-discard | 1 | go |

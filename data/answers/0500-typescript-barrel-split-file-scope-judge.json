@@ -1,0 +1,24 @@
+{
+  "class_id": 500,
+  "title": "typescript-barrel-split-file-scope-judge",
+  "description": "typescript-barrel-split-file-scope-judge",
+  "created_at": "2026-08-03 12:04:34",
+  "answers": [
+    {
+      "answer_id": 603,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (LF-038, commit `91615fa5`):** the gitreins judge was configured with `evaluator.file_scope: changed`, which computes the set of files the evaluating LLM may read from the diff of the worker's commit. In this run, the task was created **after** the worker commit had already landed, so the diff against the task baseline was empty → the allowed-file set was **empty**. The LLM was permitted to read nothing, so it could not see the split barrel files it was asked to judge; it reported \"split files did not exist\" — a false FAIL caused by the evaluator's own file-scoping, not by the worker's output.\n\n**Fix:** change the evaluator file scope from `changed` to `full` in `.gitreins/config.yaml` so the judge can read all repository files regardless of commit/task timing:\n\n```yaml\n# .gitreins/config.yaml\nevaluator:\n  file_scope: full        # was: changed\n  # optional hardening so this class of failure is never silent again:\n  require_nonempty_file_scope: true   # fail the judge loudly if the computed allowed-file set is empty\n```\n\nAfter the fix the task was re-run and completed with **8/8 PASS** (commit `d2ee936d`).\n\n**Why `changed` broke here:** `file_scope: changed` derives the readable file set from a git diff. That only yields the right set when the task pre-exists the worker commit (task → branch → commit). The task-created-after-commit flow (commit `91615fa5` → task created) leaves no diff to compute, so the scope degenerates to `∅`. `full` is the correct, timing-independent scope for this pipeline.\n\n**When to use each:**\n\n| Scope | Correct use |\n|---|---|\n| `changed` | Task exists *before* the worker commit; you want to restrict the LLM to the touched files |\n| `full` | Tasks are created *after* worker commits (this repo), or the judge must read barrel/index/split files adjacent to the diff to reason about them |",
+      "evidence": "1. **False FAIL reproduced (commit `91615fa5`):** with `file_scope: changed` and a task created after the worker commit, the computed allowed-file set was empty. The judge's LLM could read zero files; it consequently fabricated the claim that the split barrel files did not exist → 8/8 FAIL.\n2. **Fix applied:** `.gitreins/config.yaml` changed `evaluator.file_scope` from `changed` to `full`.\n3. **Verification:** re-ran the task end-to-end → task completed with **8/8 PASS** (commit `d2ee936d`). The same worker output that previously failed now passes, confirming the failure was evaluator scoping, not worker content.\n4. **Edge cases tested/considered:**\n   - **Empty-scope guard:** added `require_nonempty_file_scope` check so any future re-occurrence (task/commit ordering regression, weird merge bases) fails loudly with a diagnostic instead of silently feeding the LLM an empty file set.\n   - **Timing independence:** `full` scope works for both task-before-commit and task-after-commit orderings (superset of `changed`).\n   - **Regression on other judges:** verified no other judge in the pipeline relied on restrictive `changed` scope as a security boundary; `full` only widens read access inside the already-checked-out repo, it does not relax worker execution or write scopes.\n   - **Performance:** full-repo scope is acceptable here (small TypeScript barrel repo); for large monorepos a baseline-commit-diff scope would be the performance-tuned alternative, noted for future work.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-barrel-split-file-scope-judge",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 12:04:34"
+    }
+  ]
+}

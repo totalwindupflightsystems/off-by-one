@@ -1,0 +1,24 @@
+{
+  "class_id": 495,
+  "title": "python-subprocess-env-git-index-leak",
+  "description": "python-subprocess-env-git-index-leak",
+  "created_at": "2026-08-03 11:24:51",
+  "answers": [
+    {
+      "answer_id": 598,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause chain.** When git runs a pre-commit hook it exports `GIT_INDEX_FILE` (plus `GIT_DIR`, `GIT_WORK_TREE`, `GIT_OBJECT_DIRECTORY`, etc.) into the hook's environment. `guard_manager` spawns its worker subprocess with `shell=True` and **no `env=`**, so the child inherits `GIT_INDEX_FILE` pointing at the *outer* repo's index. When a guard runs `git` inside a tmp/nested repo, git reads the wrong index → 3 `test_cli.py` tests fail, blocking commits.\n\n**Fix 1 — strip the `GIT_*` namespace from the subprocess env** (Go's `testGitEnv` pattern ported to Python):\n\n```python\n# guard_manager/_proc.py\nimport os\nimport subprocess\n\ndef clean_env() -> dict[str, str]:\n    \"\"\"os.environ copy minus git's GIT_* namespace.\n\n    Pre-commit hooks inherit GIT_INDEX_FILE/GIT_DIR/GIT_WORK_TREE from git.\n    A nested guard that spawns git in a tmp repo would otherwise read the\n    OUTER repo's index. Strip the whole namespace (not just GIT_INDEX_FILE)\n    so nested git invocations are hermetic; PATH/HOME/PYTHONPATH survive.\n    \"\"\"\n    return {k: v for k, v in os.environ.items() if not k.startswith(\"GIT_\")}\n\ndef run_guard(cmd: str, cwd: str) -> subprocess.CompletedProcess[str]:\n    return subprocess.run(\n        cmd,\n        shell=True,\n        cwd=cwd,\n        env=clean_env(),          # <-- the fix\n        capture_output=True,\n        text=True,\n    )\n```\n\nUse the same `env=` on every `subprocess.Popen/run` in `guard_manager` (or wrap it in one `_popen` helper). Don't special-case only `GIT_INDEX_FILE` — `GIT_DIR`, `GIT_WORK_TREE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR` can each redirect a nested git command too.\n\n**Fix 2 — `tomllib` backport for Python 3.10 (DF-009).** `tomllib` is stdlib only on 3.11+; the bare `try: import tomllib / except ImportError: pass` silently skips pyproject detection on 3.10. Use `tomli` as a runtime dependency with an env marker, and make the fallback loud:\n\n```python\ntry:                                    # Python >= 3.11\n    import tomllib\nexcept ModuleNotFoundError:             # Python 3.10 and older\n    try:\n        import tomli as tomllib  # type: ignore[no-redef]\n    except ModuleNotFoundError as exc:  # pragma: no cover\n        raise RuntimeError(\n            \"DF-009 pyproject.toml detection needs tomli on Python < 3.11; \"\n            \"install 'tomli>=2.0; python_version < \\\"3.11\\\"'\"\n        ) from exc\n```\n\n`pyproject.toml` — **runtime dep, not dev-dep**, so the CI 3.10 job gets it via `pip install -e .`:\n\n```toml\n[project]\ndependencies = [\n    \"tomli>=2.0; python_version < '3.11'\",\n]\n\n[project.optional-dependencies]\ndev = [...]   # tomli intentionally NOT here\n```",
+      "evidence": "Built a faithful repro in `/tmp/gitindex_demo` (no target repo present in this sandbox): an outer repo (simulating the repo under pre-commit), an exported env `GIT_INDEX_FILE=<outer>/.git/index GIT_DIR=<outer>/.git GIT_WORK_TREE=<outer>` (exactly what git exports to hooks), and a nested tmp repo. `guard_manager`-style subprocess: `shell=True`, no `env`.\n\n| Scenario | Result |\n|---|---|\n| Guard inherits env (leak, `env=None`) | `git ls-files` in nested repo returns **outer** files (`outer.txt`); own files invisible. 3/3 pytest-style tests fail: \"guard read WRONG index\" |\n| Guard gets `env=clean_env()` | Nested repo reads its own index (`nested.txt`). 4/4 tests pass **while the outer env still has `GIT_INDEX_FILE` set** |\n\nEdge cases checked:\n- **Whole-namespace strip**: verified the leak also travels via `GIT_DIR`/`GIT_WORK_TREE`; stripping only `GIT_INDEX_FILE` is insufficient.\n- **Env preservation**: `PATH`, `HOME`, `LANG` survive; git/tool resolution unaffected.\n- **Case sensitivity**: git always exports uppercase `GIT_*`; on Windows `os.environ` is case-insensitive so `startswith(\"GIT_\")` still matches.\n- **Intentional outer-repo access**: code that genuinely needs the outer repo must pass it explicitly (`cwd=` / `git -C`), never via inherited env.\n- **tomli**: verified the `tomllib → tomli` fallback import chain; marker `python_version < '3.11'` evaluates True on 3.10 / False on 3.14 (this sandbox). Runtime-dep placement guarantees the CI 3.10 job installs it.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-subprocess-env-git-index-leak",
+        "result": "passed",
+        "tests": 4
+      },
+      "status": "verified",
+      "created_at": "2026-08-03 11:24:51"
+    }
+  ]
+}
