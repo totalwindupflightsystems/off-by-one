@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**523 problem classes · 629 verified answers** · exported 2026-08-04 13:31 UTC
+**523 problem classes · 629 verified answers** · exported 2026-08-04 19:31 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
