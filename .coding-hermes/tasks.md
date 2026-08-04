@@ -23,6 +23,38 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+### Tick 250 — 2026-08-03 21:01 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | GET /api/v1/projects/off-by-one → 200: Enabled=true, CooldownS=900, Priority=5, Weight=10, DecayRate=1 (via check_scheduler_project.py) |
+| 1 | Git status | PASS | clean; HEAD=07f46ec (data: sync answer corpus — 1 file, 01:29 local auto-sync); 0 unpushed, 0 fetched |
+| 2 | GitReins dual-source | PASS | 0 tasks (tasks.yaml empty via CLI, board + GitReins consistent) |
+| 3 | go build | PASS | clean |
+| 4 | go vet | PASS | clean |
+| 5 | go test | PASS | 11 packages ok + 3 expected no-test (cmd/off-by-one, sql/schema, web) — -short -p 1 -count=1 |
+| 6 | Hilo graph | PASS | not re-run — no Go changes since tick 248 (commits since: 2 data-syncs + tick 249 board chore, export JSON/md/jsonl only); stable at 369 edges, 56 files |
+| 7 | GitReins guard | PASS | full mode: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0, 34s) |
+| 8 | Server health | PASS | :8766 returns 200, uptime 31h24m (no restart since ~18:42 Aug 2; systemd off-by-one.service), 523 problems, 629 answers, queue_depth=2 |
+| 9 | DS-007 submit | PASS | 409 deduplicated — 74 existing solutions (E2E submit path healthy) |
+| 10 | Stats | PASS | 523 problems, 629 answers, 629 verified, queue_depth=2→3, hit_rate=1.0, coverage=1.2027 |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | Specs | PASS | specs/system-spec.md (766L), specs/ui-spec.md (789L) |
+| 13 | Docs | PASS | 13/13: NOTICE + CODEOWNERS (both no .md ext) present; AGENTS, README, CHANGELOG, CODE_OF_CONDUCT, CONTRIBUTING, LICENSE, SECURITY, SUPPORT, GOVERNANCE, TRADEMARK_POLICY, docs/landing-spec.md all present |
+| 14 | Test gaps | PASS | 3 expected (cmd/off-by-one, sql/schema, web — no test files) |
+| 15 | Deps | PASS | 10 outdated (same set: go-cmp v0.6→0.7, pprof, demangle, isatty v0.0.23→0.0.24, goldmark v1.4.13→1.8.5, x/exp, x/telemetry — transitive; libc v1.74.3→1.74.4 retracted; sqlite v1.54.0→1.56.0 direct; cc/v4 v4.29.1→4.29.2) |
+| 16 | Pitfalls | PASS | 0 stubs, 0 TODOs/FIXMEs in source, gofmt clean |
+| 17 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 18 | CI | PASS | gh run list (totalwindupflightsystems/off-by-one): last 6 ALL success (data sync 47s, pages 37s, tick-249 CI 40s, pages 46s, data sync 54s, pages 35s) — 01:29 sync green |
+| 19 | Code quality | PASS | .gitignore has .vfs/, .coding-hermes/ (tasks.md negation), *.db-wal; .env blocked with !.env.example |
+| 20 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M, check-gitreins-judge.py PASS |
+| 21 | DuckBrain | PASS | off-by-one ns: /tick/250 (893c79ed) + /project/off-by-one/status (7dd0b8f5) written |
+| 22 | E2E testing | PASS | DS-007 submit → 409 dedup (74 existing — E2E pipeline functional); queue 100 entries (77 complete, 23 active-not-done, 0 pending, 0 in_progress); govulncheck clean |
+
+**Notable:** Lab steady: problems 523 (0 change), answers 629 (0 change), coverage 1.203 stable since tick 249 (~1.5h). Server uptime 31h24m — no restart since ~18:42 Aug 2 (systemd off-by-one.service). Queue: 0 pending, 0 in_progress; 8 new window entries since tick 249, ALL fleet submissions from other foremen's classes — go-e2e-live-server-battery x3 (sub_6473b3 failed 20:46, sub_ce6fac failed 23:05, sub_f8fec9 failed 23:30; sub_f3d761 completed 15:14 earlier — class works intermittently), python-audit-idle-maintenance x4 (sub_88a1c8 00:19, sub_60e4e8 00:50, sub_f00d52 01:14, sub_9f5d08 01:55), go-lint-goconst-bulk-slice x1 (sub_bb5984 19:57). Same known 300s bwrap-cap pattern (DefaultBwrapTimeout in internal/sandbox/bwrap.go:60) — watch item, not a defect; zero new off-by-one-self-test failures (sub_5252a1 remains historical). DS-007 returned proper 409 (74 existing) — dedup path confirmed healthy. Two data auto-sync commits since tick 249 (24e6975e 20 files 19:28, 07f46ec 1 file 01:29) — export files only, no Go source; both pushed, HEAD=origin/master. Hilo not re-run (stable 369/56 — no Go changes). Govulncheck clean (Go 1.26.5). Deps: same 10 outdated (sqlite target drifted v1.55.0→v1.56.0, still minor). CI green on all runs incl. 01:29 sync. 9 enhancement tasks unchanged (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001) + NEVER-DONE/E2E-001 fixtures intact at matrix (line ~953).
+
+**Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board. DS-007 dedup confirmed (74 existing). Cooldown verified (900s). Watch item unchanged: ~50% fleet submissions time out at the 300s bwrap cap — tuning candidate (raise DefaultBwrapTimeout), not a defect. Lab healthy: 523 problems / 629 answers, server up 31h24m.
+
 ### Tick 249 — 2026-08-03 19:30 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
