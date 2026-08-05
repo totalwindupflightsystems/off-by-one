@@ -23,6 +23,28 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+### Tick 256 — 2026-08-05 16:48 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | GET /api/v1/projects/off-by-one → 200: Enabled=true, CooldownS=900, Priority=5, Weight=10 (check_scheduler_project.py) |
+| 1 | Git status | PASS | HEAD=8d244f8 (SBOX-002 worker commit, unpushed at tick start), clean tree; .gitreins/tasks.yaml empty (no judge record for SBOX-002) |
+| 2 | SBOX-002 stewardship | PASS | Worker output reviewed file-by-file: internal/sandbox/tools.go (163L resolver — exec.LookPath, isPathCovered prefix dedup vs DefaultReadOnlyPaths, degrade-gracefully contract, git/python3-venv special cases), queue.go ALTER TABLE migration, handlers.go required_tools plumb, bsandbox_runner WithRequiredTools → ExtraReadOnlyPaths, piagent.go problem.json; 4 test files (tools_test 157L, handlers_test, bwrap_test, piagent_test) |
+| 3 | go build / vet | PASS | go build clean, go vet clean |
+| 4 | go test | PASS | 11 packages ok + 3 expected no-test (cmd/off-by-one, sql/schema, web) — -short -p 1 -count=1 |
+| 5 | GitReins guard | PASS | full mode: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0) |
+| 6 | GitReins judge | PASS | task SBOX-002 created (absent from tasks.yaml) with 5 ACs → tier1 PASS + tier2 PASS, verdict 785a7854. ⚠️ First run INCOMPLETE: input token cap 0.2M exceeded (211k used) → .gitreins/config.yaml max_input_tokens bumped 0.2M→1M, re-ran clean |
+| 7 | Server health | PASS | :8766 200, uptime 70h+ (Aug 2 binary — SBOX-002 NOT deployed: live submit probe with required_tools → 400 `unknown field "required_tools"`; restart blocked: sudo no-new-privileges in cron). Solver LIVE: bwrap sandbox active (sub_253c14 solving 11:44), completes confirmed post-rebuild |
+| 8 | DS-007 submit | PASS | deduplicated — existing_solutions=75 (was 74: sub_69a746 from tick 255 COMPLETED 14:50:09, 3m45s — first full solve since the Aug 4 pi-agent wipe) |
+| 9 | Stats | PASS | 527 problems / 634 answers / 634 verified, queue_depth=5, hit_rate=1.0, coverage=1.203 (+3p/+4a vs tick 255 — solver pipeline healed) |
+| 10 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 11 | CI | PASS | gh run list: last 5 ALL success (tick-255 board commit 14:47 + pages, 13:33 sync + pages, tick-254 10:13) |
+| 12 | Board format | PASS | validate-board-format.py → PASS, 0 issues |
+| 13 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+
+**Notable:** STEWARDSHIP tick — SBOX-002 (custom sandbox provisioning, dispatched tick 255) completed the full pipeline: worker commit 8d244f8 reviewed, guard PASS, judge PASS (5/5 ACs, verdict 785a7854 — gitreins task record created retroactively since tasks.yaml was empty), code pushed to origin/master. **Deployment pending:** the :8766 server still runs the Aug 2 binary — required_tools probe → 400 unknown field; restart requires privileged access (sudo blocked: no-new-privileges). Systemd unit runs as user kara; a privileged tick or Bane can restart to activate the feature. **Solver pipeline confirmed healed end-to-end:** sub_69a746 (tick 255 DS-007) completed 14:50:09 after 3m45s — first complete since the Aug 4 /tmp/pi wipe; stats advanced 523→527 problems / 629→634 answers; live bwrap solve observed in flight (sub_253c14). Queue: sub_72dd44 (16:21) failed at exactly 300s — known bwrap-cap fleet pattern, not a regression; board-foreman-idle-audit instant-fails are fleet submission artifacts. Judge config fix: max_input_tokens 0.2M→1M (repo is a large monorepo; 0.2M is insufficient for tier2 evaluation context).
+
+**Verdict:** WORKING — SBOX-002 stewarded, guarded, judged (5/5) and pushed; deployment pending privileged restart. 12/13 gates PASS (benchmarks recurring GAP). Lab healthy: 527 problems / 634 answers, solver active, queue_depth=5. 8 enhancement tasks remain (SOLVER-001/002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001 + NEVER-DONE fixture).
 
 ### Tick 255 — 2026-08-05 14:46 UTC (deepseek-v4-flash — foreman)
 
@@ -53,7 +75,6 @@
 | OB1-GAP-001 | README line 282 claims "437 problem classes (535 verified answers)" but the live corpus is 523 problems / 629 answers (data/INDEX.md correct). Fix: update README line 282 to live stats or link /api/v1/stats. PASS: curl http://localhost:8766/api/v1/stats shows total_problems=523 AND README no longer says 437. | P2 | 1 | — | docs | deepseek-v4-flash @ deepseek-foreman | docs-vs-reality drift | GLM-5.2 |
 | OB1-GAP-002 | Board verdicts reference 9 enhancement tasks (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001) every tick but NO matrix rows exist for them — the board self-references undefined work; PMs/contributors cannot discover what they require. Fix: add the 9 matrix rows with descriptions+priorities+models, or remove stale references from verdicts. PASS: grep -c '^| SBOX\|^| SOLVER\|^| UI-\|^| PERF\|^| OSS\|^| CONFIG\|^| E2E\|^| INFRA' .coding-hermes/tasks.md >= 9 matching task rows. | P1 | 2 | — | board | deepseek-v4-flash @ deepseek-foreman | board contract broken | GLM-5.2 |
 | OB1-GAP-003 | README documents POST /api/v1/export and /api/v1/import as functional (lines 103-104) but both return HTTP 501 Not Implemented — distribution/collaboration features inaccessible via documented API. Fix: implement handlers or mark endpoints "planned" in README. PASS: curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8766/api/v1/export returns 200 (or README no longer lists export/import as functional). | P1 | 2 | — | api, docs | deepseek-v4-flash @ deepseek-foreman | documented API stub | GLM-5.2 |
-| SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install/mount them in bwrap before solving. Currently sandbox has only bash+coreutils. | P1 | 4 | SBOX-001 | sandbox, infra | deepseek-v4-flash @ deepseek-foreman | sandbox provisioning | GLM-5.2 |
 | SOLVER-001 | Add retry logic to cron loop — if solve fails with `signal: killed` or empty stdout, retry once. Raft consensus succeeded on 2nd attempt at 3m4s; TCP proxy passed after timeout bump. | P2 | 3 | — | solver, cron | deepseek-v4-flash @ deepseek-foreman | solver retry logic | GLM-5.2 |
 | SOLVER-002 | B-tree kill investigation — `go-concurrent-btree` crashes Pi Agent instantly (empty stdout, same-second kill). Not timeout. Suspect token overflow from large problem description. Test with smaller prompt. | P2 | 3 | — | debug, solver | deepseek-v4-flash @ deepseek-foreman | B-tree kill investigation | GLM-5.2 |
 | UI-001 | LaTeX + Markdown answer rendering — spectral theorem answers contain LaTeX ($\lambda$, $\langle$, etc.) that renders as raw text. Add MathJax/KaTeX to web UI for math notation, and upgrade the minimal markdown renderer (search.js, explore.js, chat.js) to handle full Markdown with syntax highlighting. | P1 | 3 | — | ui, javascript | deepseek-v4-flash @ deepseek-foreman | LaTeX/markdown rendering | GLM-5.2 |
@@ -71,6 +92,7 @@
 | OB1-GAP-001 | README stale corpus stats (437/535 → live 523/629) | P2 | 1 | DONE — README line 282 now 523/629 + links /api/v1/stats; curl stats shows total_problems=523 |
 | OB1-GAP-002 | Phantom enhancement-task rows (board self-references undefined work) | P1 | 2 | DONE — 9 rows restored (SBOX-002, SOLVER-001/002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001) + NEVER-DONE fixture; grep count = 9 (criterion ≥9) |
 | OB1-GAP-003 | README documents export/import as functional but 501 (handlers exist; config-gated) | P1 | 2 | DONE — README now documents config-gated behavior (enabled via -export-dir/-import-dir; 501 when unconfigured); handlers were already implemented |
+| SBOX-002 | Custom sandbox provisioning — required_tools declared in submit, resolved and ro-mounted into bwrap | P1 | 4 | DONE (tick 256, 8d244f8) — guard PASS + judge PASS 5/5 ACs (verdict 785a7854); tools.go resolver, queue migration, handlers/piagent wiring, 4 test files; DEPLOYMENT PENDING (server restart needs privileged access) |
 
 ### Tick 254 — 2026-08-05 05:20 UTC (deepseek-v4-flash — foreman)
 
@@ -1162,7 +1184,7 @@
 || BOARD-V2 | 🟡 MIGRATE BOARD TO DUCKDB v2.1 — run `python3 ~/.hermes/scripts/migrate-board-to-duckdb.py .` (load skill coding-hermes-board first). Creates .coding-hermes/board/ (schema.sql, tasks.parquet, events.parquet), archives tasks.md → tasks.md.bak, commit. Same pattern as DuckBrain. | P1 | 3 | — | duckdb,board,migration | deepseek-v4-flash | Run migration script, verify Parquet, commit board | deepseek-v4-flash |
 | | DS-007 | Continuous self-dogfood E2E (per tick) | High | 3 | server running | ++terminal, ++testing, +api-use | deepseek-v4-flash | Low | MiniMax-M3 — **tick 102 ✅** |
 | | BUG-002 | ✅ RESOLVED — Solver now works end-to-end via bwrap + Pi Agent wrapper | — | — | — | — | — | — | — |
-| | SBOX-002 | Custom sandbox provisioning — let problems declare required tools (git, parallel, jq, python3-venv) and auto-install them in bwrap | High | 4 | — | ++sandbox, ++infra | MiniMax-M3 | High | Step 3.7 Flash |
+| SBOX-002 | ✅ DONE (tick 256, 8d244f8, judge 785a7854) — Custom sandbox provisioning: required_tools in submit → resolver → ro-mounts. Deploy pending (restart needs privileged access) | — | — | — | — | — | — | — |
 | | SOLVER-001 | Add retry logic to cron loop — if solve fails with signal: killed or empty stdout, retry once | Medium | 3 | — | ++solver, +cron | MiniMax-M3 | Medium | DeepSeek V4 Flash |
 | | SOLVER-002 | B-tree kill investigation — go-concurrent-btree crashes Pi Agent instantly (empty stdout). Suspect token overflow. | Medium | 3 | — | ++debug, +solver | DeepSeek V4 Flash | Low | MiniMax-M3 |
 | | UI-001 | LaTeX + Markdown answer rendering — spectral theorem answers contain raw LaTeX. Add MathJax/KaTeX + full markdown renderer | High | 3 | — | ++ui, ++javascript, +css | MiniMax-M3 | Medium | DeepSeek V4 Flash |
