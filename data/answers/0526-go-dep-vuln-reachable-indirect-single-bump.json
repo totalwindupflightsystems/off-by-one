@@ -1,0 +1,24 @@
+{
+  "class_id": 526,
+  "title": "go-dep-vuln-reachable-indirect-single-bump",
+  "description": "go-dep-vuln-reachable-indirect-single-bump",
+  "created_at": "2026-08-05 16:38:39",
+  "answers": [
+    {
+      "answer_id": 633,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Vulnerability.** GO-2026-5970 (CVE-2026-56852) — *\"Infinite loop on invalid input in golang.org/x/text\"* — affects `golang.org/x/text/unicode/norm` (affected symbols: `norm.Iter.Init/Next`, `norm.Form.{Bytes,String,Span,Transform,Append*,…}`, `nextComposed`, `normReader.Read`, `normWriter.Write`). Introduced in v0.0.0, **fixed in v0.39.0**. Root cause (from the fix CL 794100, verified by source diff v0.38.0→v0.39.0): invalid runes returned `Properties{size: 0}`, and `Iter`'s `doNormDecomposed` advanced with `i.p += int(i.info.size)` → `i.p += 0` → infinite loop; `nextComposed`'s `sz = 1` workaround only covered the fast path. The fix marks invalid runes `Properties{flags: 0x80, size: 1}` via `compInfo`, adds `isInvalid()`, and replaces every `info.size == 0` check.\n\n**Reachability (confirmed with govulncheck v1.6.0, Go 1.26):** the app's `app.New` → `pgxpool.NewWithConfig` → `pgconn` SCRAM auth (`pgconn/auth_scram.go` imports `golang.org/x/text/secure/precis`) → `precis` imports `unicode/norm`. govulncheck emitted the exact traces: `app.New calls pgxpool.NewWithConfig, which eventually calls norm.Form.Properties/Span/Transform`.\n\n**Fix (the only change: 2 files — `go.mod`, `go.sum`):**\n\n```bash\ngo get golang.org/x/text@v0.39.0\ngo mod tidy\n```\n\n```diff\n# go.mod\n-\tgolang.org/x/text v0.38.0\n+\tgolang.org/x/text v0.39.0 // indirect\n```\n```diff\n# go.sum\n- golang.org/x/text v0.38.0 h1:sXmwo9DwP3OK9EZ7PqAdaooSGozfl/3a6/xJcbzPRhE=\n- golang.org/x/text v0.38.0/go.mod h1:YXZt3QhHUKYT53r2lLKFIVi6Ao1jdzrTR/KQ09qyxF4=\n+ golang.org/x/text v0.39.0 h1:UbZz4pLOvn600D6Oh6GGEI6VAmndrEBLv8/6BEXzyus=\n+ golang.org/x/text v0.39.0/go.mod h1:3UwRclnC2g0TU9x8PZiyfOajCd1zaUNHF9cvqcQZ+ZM=\n```\n\nNo source code changes needed — the dependency is indirect (`// indirect` retained), so zero design decisions → foreman-direct per Exception-2.",
+      "evidence": "Reproduced the full scenario end-to-end in a scratch module (`example.com/app`, pgx v5.10.0, x/text pinned at the vulnerable version) and verified every claim:\n\n| Check | v0.38.0 (pre-fix) | v0.39.0 (post-fix) |\n|---|---|---|\n| `govulncheck ./...` — GO-2026-5970 | **1 hit, reachable** (traces via `pgxpool.NewWithConfig → norm.Form.*`) | **0 hits** |\n| `govulncheck` — `golang.org/x/text` module | 1 hit | **0 hits** |\n| Non-stdlib findings | 1 | **0** (all 11 remaining are stdlib go1.26: crypto/tls, crypto/x509, net, os, net/url → separate INFRA task, exactly as the scenario notes) |\n| `go build ./...` | — | OK |\n| `go vet ./...` | — | OK |\n| `go test ./...` (full suite + guard) | guard FAILS | **PASS** |\n\n**Regression guard added (guards the exact CVE):** uses the upstream reproducer from the fix CL (`\"\\xf3\\xcc\\x80\"` = illegal rune + combining grave) driven through the actually-hanging API, `Iter.Init` + `Iter.Next`, across all four forms with a 10 s timeout:\n\n```go\nfunc TestNormIterNoInfiniteLoopOnInvalidUTF8(t *testing.T) {\n    for _, in := range []string{\"\\xf3\\xcc\\x80\", \"\\xf3\\xcc\\x80\\xe9\"} {\n        for _, f := range []norm.Form{norm.NFC, norm.NFKC, norm.NFD, norm.NFKD} {\n            done := make(chan struct{})\n            go func() {\n                defer close(done)\n                var it norm.Iter\n                it.Init(f, []byte(in))\n                for !it.Done() { it.Next() }\n            }()\n            select {\n            case <-done:\n            case <-time.After(10 * time.Second):\n                t.Fatalf(\"norm.Iter.Next hung (input %q, form %d): GO-2026-5970\", in, int(f))\n            }\n        }\n    }\n}\n```\n\n**Edge cases tested:** (1) guard against **v0.38.0 → FAILS** (Iter.Next hung 10 s on NFC/NFKC, `\\xf3\\xcc\\x80`; the test framework killed it — proving both the vulnerability and that the guard catches it); (2) guard against **v0.39.0 → PASS in 3 ms** (NFC/NFKC/NFD/NFKD, both inputs, `Form.Bytes/String/Transform/Span/QuickSpan/Reader/Writer` + `Iter` all terminate); (3) upstream regression test data (`AppendTest{left:\"\", right:\"\\xf3\\xcc\\x80\"}`) matches the fix exactly; (4) `go mod tidy` kept `// indirect` marker and cleaned go.sum; (5) harness sequencing per scenario: gitreins task created **after** fix, **before** commit, so the judge evaluates the working-tree diff (avoids post-commit empty-diff false negative); judge **PASS 3/3 first run**.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-dep-vuln-reachable-indirect-single-bump",
+        "result": "passed",
+        "tests": 3
+      },
+      "status": "verified",
+      "created_at": "2026-08-05 16:38:39"
+    }
+  ]
+}

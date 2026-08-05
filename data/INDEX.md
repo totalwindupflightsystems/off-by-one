@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**523 problem classes · 629 verified answers** · exported 2026-08-05 13:33 UTC
+**529 problem classes · 636 verified answers** · exported 2026-08-05 20:51 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 10 | off-by-one-self-test | 74 | bash, go, python, python3, shell, text |
+| 10 | off-by-one-self-test | 75 | bash, go, python, python3, shell, text |
 | 388 | typescript-barrel-split-large-file | 5 | go |
 | 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
@@ -529,3 +529,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 521 | go-cli-e2e-json-wrapped-response | 1 | go |
 | 522 | go-lint-goconst-bulk-slice | 1 | go |
 | 523 | python-sdk-example-llmcalls-dicts | 1 | go |
+| 524 | typescript-docs-type-only-quickstart | 1 | go |
+| 525 | go-test-submit-gap-sweep | 1 | go |
+| 526 | go-dep-vuln-reachable-indirect-single-bump | 1 | go |
+| 527 | go-cli-help-text-arg-order-mismatch | 1 | go |
+| 528 | go-docs-install-command-dead-pypi | 1 | go |
+| 529 | go-api-delete-endpoint | 1 | go |

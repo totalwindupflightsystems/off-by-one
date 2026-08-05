@@ -1,0 +1,24 @@
+{
+  "class_id": 529,
+  "title": "go-api-delete-endpoint",
+  "description": "go-api-delete-endpoint",
+  "created_at": "2026-08-05 17:55:27",
+  "answers": [
+    {
+      "answer_id": 636,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The DB primitive already existed (`DeleteProject` = `UpdateProject` with `Enabled=false`), so the task was pure API wiring: add a `DELETE` case to the `handleProjectByID` router and implement the handler with the correct status-code ordering.\n\n**1. Route the method in `handleProjectByID`:**\n\n```go\nfunc (s *Server) handleProjectByID(w http.ResponseWriter, r *http.Request) {\n\tname := r.PathValue(\"name\")\n\tswitch r.Method {\n\tcase http.MethodGet:\n\t\ts.getProject(w, r, name)\n\tcase http.MethodDelete:\n\t\ts.deleteProject(w, r, name)\n\tdefault:\n\t\thttp.Error(w, \"method not allowed\", http.StatusMethodNotAllowed)\n\t}\n}\n```\n\n**2. New `deleteProject` handler — checks must run in this order:**\n\n```go\nfunc (s *Server) deleteProject(w http.ResponseWriter, r *http.Request, name string) {\n\t// 1) confirm=true checked FIRST -> 400 (before any lookup)\n\tif r.URL.Query().Get(\"confirm\") != \"true\" {\n\t\thttp.Error(w, `{\"error\":\"confirm=true query param required\"}`, http.StatusBadRequest)\n\t\treturn\n\t}\n\n\t// 2) resolve project -> 404 via strings.Contains(not found)\n\tproj, err := s.db.GetProject(name)\n\tif err != nil {\n\t\tif strings.Contains(err.Error(), \"not found\") {\n\t\t\thttp.Error(w, `{\"error\":\"project not found\"}`, http.StatusNotFound)\n\t\t\treturn\n\t\t}\n\t\thttp.Error(w, `{\"error\":\"internal error\"}`, http.StatusInternalServerError)\n\t\treturn\n\t}\n\n\t// 3) enabled-project guard -> 409 (already soft-deleted)\n\tif !proj.Enabled {\n\t\thttp.Error(w, `{\"error\":\"project already disabled\"}`, http.StatusConflict)\n\t\treturn\n\t}\n\n\t// 4) soft-delete via the pre-existing primitive\n\tif err := s.db.DeleteProject(name); err != nil {\n\t\thttp.Error(w, `{\"error\":\"internal error\"}`, http.StatusInternalServerError)\n\t\treturn\n\t}\n\tw.WriteHeader(http.StatusOK)\n}\n```\n\n**3. Docs/spec updates (no behavior change):**\n- Inline `openapiSpec` byte literal: added `delete` operation under `/api/v1/projects/{name}` with `confirm` query param (`required: true`), 200/400/404/409 responses.\n- S06 spec file: mirrored the same DELETE entry.\n- `AGENTS.md`: added the sqlite3 fallback note (`DeleteProject` maps to an `UPDATE ... SET enabled = false`, so it works on both the mock and sqlite3 backends).\n\n`DELETE` is idempotent-but-guarded: first call returns 200 and flips `Enabled=false`; the second call hits the 409 guard. GET subsequently returns 404 because disabled projects are filtered from read paths.",
+      "evidence": "Verified on a scratch daemon: fresh DB, alternate port (e.g. `:18080`) so the dev instance stayed untouched. Full curl battery:\n\n| Request | Expected | Result |\n|---|---|---|\n| `curl -X DELETE :18080/api/v1/projects/foo` (no `confirm`) | 400 | ✅ 400 |\n| `curl -X DELETE :18080/api/v1/projects/foo?confirm=true` (enabled) | 200 | ✅ 200 |\n| `curl -X DELETE :18080/api/v1/projects/foo?confirm=true` (repeat) | 409 | ✅ 409 |\n| `curl -X DELETE :18080/api/v1/projects/nope?confirm=true` (missing) | 404 | ✅ 404 |\n\nEdge cases also confirmed:\n- `confirm=false` / `confirm=1` → 400 (strict `\"true\"` match, checked before DB access — a bad `confirm` on a nonexistent project still yields 400, not 404).\n- After a successful delete, `GET /api/v1/projects/foo` returns 404 (soft-delete hides disabled projects from reads).\n- Non-DELETE methods on the same path still route to their existing handlers; unknown methods get 405.\n- `go vet`/`go build` clean; openapiSpec byte literal re-validated (balanced braces, no JSON parse drift) since it's a raw `[]byte` constant.\n\nJudge: 7/7.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-api-delete-endpoint",
+        "result": "passed",
+        "tests": 7
+      },
+      "status": "verified",
+      "created_at": "2026-08-05 17:55:27"
+    }
+  ]
+}
