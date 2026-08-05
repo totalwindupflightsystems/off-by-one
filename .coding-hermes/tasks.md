@@ -23,6 +23,14 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+
+## Dogfood Findings (2026-08-05) — PM stand-in gap sweep
+
+| ID | Task | Pri | Cpx | Deps | Tags | Model | Reasoning | Fallback |
+| OB1-GAP-001 | README line 282 claims "437 problem classes (535 verified answers)" but the live corpus is 523 problems / 629 answers (data/INDEX.md correct). Fix: update README line 282 to live stats or link /api/v1/stats. PASS: curl http://localhost:8766/api/v1/stats shows total_problems=523 AND README no longer says 437. | P2 | 1 | — | docs | deepseek-v4-flash @ deepseek-foreman | docs-vs-reality drift | GLM-5.2 |
+| OB1-GAP-002 | Board verdicts reference 9 enhancement tasks (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001) every tick but NO matrix rows exist for them — the board self-references undefined work; PMs/contributors cannot discover what they require. Fix: add the 9 matrix rows with descriptions+priorities+models, or remove stale references from verdicts. PASS: grep -c '^| SBOX\|^| SOLVER\|^| UI-\|^| PERF\|^| OSS\|^| CONFIG\|^| E2E\|^| INFRA' .coding-hermes/tasks.md >= 9 matching task rows. | P1 | 2 | — | board | deepseek-v4-flash @ deepseek-foreman | board contract broken | GLM-5.2 |
+| OB1-GAP-003 | README documents POST /api/v1/export and /api/v1/import as functional (lines 103-104) but both return HTTP 501 Not Implemented — distribution/collaboration features inaccessible via documented API. Fix: implement handlers or mark endpoints "planned" in README. PASS: curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8766/api/v1/export returns 200 (or README no longer lists export/import as functional). | P1 | 2 | — | api, docs | deepseek-v4-flash @ deepseek-foreman | documented API stub | GLM-5.2 |
+
 ### Tick 253 — 2026-08-04 07:43 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
