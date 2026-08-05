@@ -100,8 +100,8 @@ Base URL: `http://localhost:8766`
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/v1/export` | Export verified answers to a git repo |
-| `POST` | `/api/v1/import` | Import answers from a git repo |
+| `POST` | `/api/v1/export` | Export verified answers to a git repo — enabled when `-export-dir` / `OFF_BY_ONE_EXPORT_DIR` is set; returns 501 when unconfigured |
+| `POST` | `/api/v1/import` | Import answers from a git repo — enabled when `-import-dir` / `OFF_BY_ONE_IMPORT_DIR` is set; returns 501 when unconfigured |
 
 ### System
 
@@ -156,8 +156,8 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
 | `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
 | `OFF_BY_ONE_LOAD_THRESHOLD` | No | `2.0` | System load threshold for idle detection |
 | `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `5m` | Per-solve timeout |
-| `OFF_BY_ONE_EXPORT_DIR` | No | temp dir | Working directory for git export |
-| `OFF_BY_ONE_IMPORT_DIR` | No | temp dir | Working directory for git import |
+| `OFF_BY_ONE_EXPORT_DIR` | No | *(disabled)* | Working directory for git export clones — empty disables `POST /api/v1/export` (501) |
+| `OFF_BY_ONE_IMPORT_DIR` | No | *(disabled)* | Working directory for git import clones — empty disables `POST /api/v1/import` (501) |
 
 ### Command-Line Flags
 
@@ -170,6 +170,8 @@ go run ./cmd/off-by-one --help
 | `--port` | HTTP server port |
 | `--db` | SQLite database path |
 | `--bwrap` | Bubblewrap binary path |
+| `--export-dir` | Working directory for git export clones (empty = `POST /api/v1/export` disabled, 501) |
+| `--import-dir` | Working directory for git import clones (empty = `POST /api/v1/import` disabled, 501) |
 | `--version` | Print version and exit |
 
 ## Development
@@ -279,7 +281,7 @@ MIT
 
 ## Answer Database — Browse & Share
 
-The pre-solve lab has verified answers for **437 problem classes** (535 verified answers) across 20+ domains — published as **flat files in this repo** so anyone can use them without running a server:
+The pre-solve lab has verified answers for **523 problem classes** (629 verified answers) across 20+ domains — published as **flat files in this repo** so anyone can use them without running a server (live counts: `GET /api/v1/stats`):
 
 - **[data/answers.jsonl](data/answers.jsonl)** — Master file, one verified answer per line (JSON)
 - **[data/answers/](data/answers/)** — One JSON file per problem class — browse, diff, contribute via PR
