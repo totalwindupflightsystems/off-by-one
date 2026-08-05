@@ -24,6 +24,29 @@
 -->
 
 
+### Tick 255 — 2026-08-05 14:46 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | GET /api/v1/projects/off-by-one → 200: Enabled=true, CooldownS=900, Priority=5, Weight=10, DecayRate=1 (check_scheduler_project.py) |
+| 1 | Git status | PASS | clean at tick start; HEAD=277d872 (data sync, pushed); SBOX-002 worker has in-flight uncommitted edits (steward) — no board/repo conflicts |
+| 2 | Build / vet / test | PASS | go build OK, go vet OK, 11 packages ok + 3 expected no-test (cmd/off-by-one, sql/schema, web) — -short -p 1 -count=1 |
+| 3 | GitReins guard | PASS | full mode on clean baseline: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0) |
+| 4 | Server health | PASS | :8766 returns 200, uptime 67h49m (no restart since ~18:42 Aug 2), 523 problems, 629 answers, queue_depth=2 |
+| 5 | DS-007 E2E | FIXED | pre-fix sub_310802 queued then instant-failed 14:36 (ERR_INVALID_PACKAGE_CONFIG); post-rebuild sub_69a746 queued pos 3 → in_progress/solver_running 14:46 — first solve to run past instant-fail since Aug 3 |
+| 6 | Pi-agent root cause | FOUND+FIXED | /tmp/pi wiped Aug 4 04:16 local — 26,448 files truncated to 0 bytes (all package.json, dist/*.js incl. coding-agent/dist/cli.js, node_modules manifests); journal: `Error: Invalid package config /tmp/pi/package.json` (Node ERR_INVALID_PACKAGE_CONFIG); rebuilt per pi-agent-rebuild recipe — clone + npm install --ignore-scripts + npm run build (~50s with cache; upstream now @earendil-works/pi-coding-agent@0.83.0, --print flag verified) |
+| 7 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 8 | Deps / vulns | PASS | 10 outdated (same set: go-cmp, pprof, demangle, isatty, goldmark, x/exp, x/telemetry — transitive; libc retracted; sqlite direct; cc/v4) — govulncheck clean |
+| 9 | CI | PASS | gh run list (totalwindupflightsystems/off-by-one): last 6 ALL success (13:33 sync push CI 45s + pages, 10:13 tick-254 CI + pages, 07:32 sync) |
+| 10 | Board format | PASS | validate-board-format.py → PASS, 0 issues; GitReins dual-source: tasks.yaml empty, consistent |
+| 11 | GitReins judge | PASS | evaluator deepseek-v4-flash @ deepseek-foreman, caps 50/10m/0.2M/0.4M (config verified) |
+| 12 | DuckBrain | PASS | off-by-one ns: /project/off-by-one/status (tick 255) + /project/off-by-one/pitfalls/pi-agent-wipe-2026-08-05 written |
+| 13 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+
+**Notable:** WORKING tick — two threads. **(1) SBOX-002 dispatched** per tick 254 verdict (FIFO): custom sandbox provisioning (problems declare required tools → bwrap mounts them ro). Worker GLM-5.2 @ zai-glm (bucket verified), in flight ~20 min; edits seen: internal/api/handlers.go (+RequiredTools in submit), handlers_test.go, ingest/queue.go, sandbox/bwrap_test.go (TestBuildBwrapArgs_ExtraReadOnlyPaths), solver/bsandbox_runner.go. Next tick stewards → guard → judge → commit. **(2) Solve-pipeline outage root-caused + FIXED:** the lab's solver had been 100% failing since Aug 4 ~17:30 UTC — zero completes since sub_06c92d (Aug 3 06:02). Queue-window forensics: 73 complete / 26 failed / 1 pending; **18 of 26 failures are instant-fail (started_at==completed_at)** — the pi-agent crash class, previously attributed to the 300s bwrap cap on self-test entries (wrong: tick 254's sub_b34a98 was instant, not 300s). journalctl -u off-by-one showed `ERR_INVALID_PACKAGE_CONFIG /tmp/pi/package.json` from Aug 4 12:30 local onward. /tmp/pi (Pi Agent install) was wiped Aug 4 04:16 local — 26,448 files truncated to 0 bytes incl. all package.jsons, dist JS, node_modules manifests; node_modules/.pi/dist dirs survived. Wipe was a ONE-OFF (no snoopy trace at Aug 5 04:16; systemd-tmpfiles-clean runs 13:57 not 04:16; host disk 98% full — 52G free — plausible cleanup-script trigger, cause otherwise undetermined). Fix: full rebuild per the pi-agent-rebuild recipe — NO server restart needed (bwrap mounts /tmp/pi ro per-solve, wrapper re-read per exec). Verified: root+package package.json valid, `/home/kara/.local/bin/pi-agent --help` → `--problem-file required` (documented criterion), and **live proof: sub_69a746 in_progress (solver_running) at 14:46 — first solve to survive past the instant-fail point since the wipe** (completion pending at tick write). 5 new window failures since tick 254: sub_b34a98 (tick 254's own DS-007, instant-fail) + sub_11bab0/sub_9116a0/sub_5a197c/sub_11c43c (board-foreman-idle-audit fleet class, all instant-fail — all pre-rebuild). Dispatch-name note: tick named off-by-one-2026-08-05-09-22-33 (host-local time) vs actual run 14:46 UTC — consistent with the tick 244/247 skew pattern; header = actual run time. Newest window completes: sub_06c92d (Aug 3 06:02) — will update next tick with post-fix completes.
+
+**Verdict:** WORKING — solver pipeline root-caused + rebuilt with live verification in flight (sub_69a746), SBOX-002 worker in flight for next-tick stewardship. 12/13 gates PASS (benchmarks recurring GAP). 9 enhancement tasks unchanged (SBOX-002 now actively worked). Lab: 523 problems / 629 answers, server up 67h49m.
+
 ## Dogfood Findings (2026-08-05) — PM stand-in gap sweep
 
 | ID | Task | Pri | Cpx | Deps | Tags | Model | Reasoning | Fallback |
