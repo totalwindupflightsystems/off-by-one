@@ -128,6 +128,21 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
   }'
 ```
 
+#### Request Fields
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `problem_class` | string | Yes | Problem identifier (slugified) |
+| `environment` | string | No | Runtime environment (e.g. `docker`, `linux`) |
+| `language` | string | No | Programming language (e.g. `go`, `python`) |
+| `version` | string | No | Toolchain version |
+| `description` | string | No | Human-readable problem description |
+| `error_message` | string | No | Error text from the failing run |
+| `stack_trace` | string | No | Stack trace or log excerpt |
+| `context` | object | No | Additional key-value context |
+| `cadence` | string | Yes | One of: `pre-phase`, `end-of-day`, `post-debug` |
+| `required_tools` | string[] | No | Tool names the sandbox should provision (e.g. `["jq", "parallel"]`); resolved on the host and mounted read-only when available |
+
 ### Example: Discover an Answer
 
 ```bash

@@ -58,15 +58,16 @@ type Queue struct {
 // from the JSON request body; we keep the two types separate so the API
 // can do its own field validation before constructing a Submission.
 type Submission struct {
-	ProblemClass string         `json:"problem_class"`
-	Environment  string         `json:"environment"`
-	Language     string         `json:"language"`
-	Version      string         `json:"version"`
-	Description  string         `json:"description"`
-	ErrorMessage string         `json:"error_message"`
-	StackTrace   string         `json:"stack_trace"`
-	Context      map[string]any `json:"context"`
-	Cadence      string         `json:"cadence"`
+	ProblemClass  string         `json:"problem_class"`
+	Environment   string         `json:"environment"`
+	Language      string         `json:"language"`
+	Version       string         `json:"version"`
+	Description   string         `json:"description"`
+	ErrorMessage  string         `json:"error_message"`
+	StackTrace    string         `json:"stack_trace"`
+	Context       map[string]any `json:"context"`
+	Cadence       string         `json:"cadence"`
+	RequiredTools []string       `json:"required_tools,omitempty"`
 }
 
 // Entry is a row in queue_entries, with the JSON context unmarshalled.
@@ -85,6 +86,7 @@ type Entry struct {
 	Status         string         `json:"status"`
 	Stage          string         `json:"stage"`
 	ResultAnswerID sql.NullInt64  `json:"result_answer_id,omitempty"`
+	RequiredTools  []string       `json:"required_tools,omitempty"`
 	// CreatedAt/StartedAt/CompletedAt are stored as strings because
 	// modernc.org/sqlite returns TEXT timestamps as strings — scanning
 	// directly into time.Time fails with "unsupported Scan, storing
@@ -110,6 +112,14 @@ type Entry struct {
 func Open(store *graph.Store) (*Queue, error) {
 	if err := store.ApplyExtra(schemasql.QueueSchema); err != nil {
 		return nil, fmt.Errorf("apply queue schema: %w", err)
+	}
+	// Migrate existing databases: add required_tools column if missing
+	// (CREATE TABLE IF NOT EXISTS does not alter an existing table).
+	if err := store.ApplyExtra(`ALTER TABLE queue_entries ADD COLUMN required_tools TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		// Column may already exist on upgraded databases — ignore.
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return nil, fmt.Errorf("migrate queue schema: %w", err)
+		}
 	}
 	return &Queue{store: store, db: store.DB()}, nil
 }
@@ -171,15 +181,24 @@ func (q *Queue) Submit(ctx context.Context, sub Submission) (string, *Entry, err
 		return "", nil, fmt.Errorf("marshal context: %w", err)
 	}
 
+	toolsJSON := "[]"
+	if len(sub.RequiredTools) > 0 {
+		b, err := json.Marshal(sub.RequiredTools)
+		if err != nil {
+			return "", nil, fmt.Errorf("marshal required_tools: %w", err)
+		}
+		toolsJSON = string(b)
+	}
+
 	id := graph.NewID("sub")
 	res, err := q.db.ExecContext(ctx, `
 		INSERT INTO queue_entries
 		  (id, problem_class, environment, language, version, description,
-		   error_message, stack_trace, context_json, cadence, priority, status, stage)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, id, sub.ProblemClass, sub.Environment, sub.Language, sub.Version,
 		sub.Description, sub.ErrorMessage, sub.StackTrace, string(ctxJSON),
-		sub.Cadence, priority, StatusPending, "queued")
+		toolsJSON, sub.Cadence, priority, StatusPending, "queued")
 	if err != nil {
 		return "", nil, fmt.Errorf("insert queue entry: %w", err)
 	}
@@ -230,7 +249,7 @@ func computePriority(cadence string, recurrence int) float64 {
 func (q *Queue) findPendingDuplicate(ctx context.Context, sub Submission) (*Entry, error) {
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
-		       error_message, stack_trace, context_json, cadence, priority, status, stage,
+		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
 		       result_answer_id, created_at, started_at, completed_at
 		FROM queue_entries
 		WHERE problem_class = ?
@@ -281,7 +300,7 @@ func (q *Queue) classRecurrence(ctx context.Context, problemClass string) (int, 
 func (q *Queue) Get(ctx context.Context, id string) (*Entry, error) {
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
-		       error_message, stack_trace, context_json, cadence, priority, status, stage,
+		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
 		       result_answer_id, created_at, started_at, completed_at
 		FROM queue_entries WHERE id = ?`, id)
 	return scanEntry(row)
@@ -298,7 +317,7 @@ func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]E
 	}
 	qry := `
 		SELECT id, problem_class, environment, language, version, description,
-		       error_message, stack_trace, context_json, cadence, priority, status, stage,
+		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
 		       result_answer_id, created_at, started_at, completed_at
 		FROM queue_entries`
 	args := []any{}
@@ -393,7 +412,7 @@ func (q *Queue) Dequeue(ctx context.Context) (*Entry, error) {
 func (q *Queue) pickPending(ctx context.Context) (*Entry, error) {
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
-		       error_message, stack_trace, context_json, cadence, priority, status, stage,
+		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
 		       result_answer_id, created_at, started_at, completed_at
 		FROM queue_entries
 		WHERE status = 'pending'
@@ -452,9 +471,10 @@ type rowScanner interface {
 func scanEntry(row rowScanner) (*Entry, error) {
 	var e Entry
 	var ctxJSON string
+	var toolsJSON string
 	if err := row.Scan(
 		&e.ID, &e.ProblemClass, &e.Environment, &e.Language, &e.Version,
-		&e.Description, &e.ErrorMessage, &e.StackTrace, &ctxJSON,
+		&e.Description, &e.ErrorMessage, &e.StackTrace, &ctxJSON, &toolsJSON,
 		&e.Cadence, &e.Priority, &e.Status, &e.Stage,
 		&e.ResultAnswerID, &e.CreatedAt, &e.StartedAt, &e.CompletedAt,
 	); err != nil {
@@ -468,6 +488,9 @@ func scanEntry(row rowScanner) (*Entry, error) {
 	}
 	if e.Context == nil {
 		e.Context = map[string]any{}
+	}
+	if toolsJSON != "" && toolsJSON != "[]" {
+		_ = json.Unmarshal([]byte(toolsJSON), &e.RequiredTools)
 	}
 	return &e, nil
 }

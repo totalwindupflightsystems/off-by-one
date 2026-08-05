@@ -27,15 +27,16 @@ import (
 // schema. Context is decoded as raw JSON so we don't pin the
 // structure — the queue's Submission.Context is map[string]any.
 type submitProblemRequest struct {
-	ProblemClass string         `json:"problem_class"`
-	Environment  string         `json:"environment"`
-	Language     string         `json:"language"`
-	Version      string         `json:"version"`
-	Description  string         `json:"description"`
-	ErrorMessage string         `json:"error_message"`
-	StackTrace   string         `json:"stack_trace"`
-	Context      map[string]any `json:"context"`
-	Cadence      string         `json:"cadence"`
+	ProblemClass  string         `json:"problem_class"`
+	Environment   string         `json:"environment"`
+	Language      string         `json:"language"`
+	Version       string         `json:"version"`
+	Description   string         `json:"description"`
+	ErrorMessage  string         `json:"error_message"`
+	StackTrace    string         `json:"stack_trace"`
+	Context       map[string]any `json:"context"`
+	Cadence       string         `json:"cadence"`
+	RequiredTools []string       `json:"required_tools,omitempty"`
 }
 
 // submitProblemResponse mirrors SubmitProblemResponse in the spec.
@@ -245,15 +246,16 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sub := ingest.Submission{
-		ProblemClass: slug,
-		Environment:  req.Environment,
-		Language:     req.Language,
-		Version:      req.Version,
-		Description:  req.Description,
-		ErrorMessage: req.ErrorMessage,
-		StackTrace:   req.StackTrace,
-		Context:      req.Context,
-		Cadence:      req.Cadence,
+		ProblemClass:  slug,
+		Environment:   req.Environment,
+		Language:      req.Language,
+		Version:       req.Version,
+		Description:   req.Description,
+		ErrorMessage:  req.ErrorMessage,
+		StackTrace:    req.StackTrace,
+		Context:       req.Context,
+		Cadence:       req.Cadence,
+		RequiredTools: req.RequiredTools,
 	}
 	id, existing, err := s.Queue.Submit(r.Context(), sub)
 	if err != nil {

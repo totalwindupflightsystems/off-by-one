@@ -547,6 +547,16 @@ Off-by-One Server
 
 Pi Agent receives the problem as structured JSON, investigates, attempts fixes, and writes the solution. The server monitors the sandbox process and enforces the 5-minute timeout.
 
+### 6.5 Tool Provisioning
+
+Problems may declare tools they need inside the sandbox via the `required_tools` field (a JSON array of tool names like `["jq", "parallel", "python3-venv"]`). At sandbox creation time, each declared tool is resolved on the host:
+
+- **Standard binaries** (`jq`, `parallel`, etc.) — resolved via `exec.LookPath` and mounted read-only at their host path.
+- **git** — already in `DefaultReadOnlyPaths` (`/usr/bin/git` + `/usr/lib/git-core`); deduplicated so no duplicate `--ro-bind` entry is emitted.
+- **python3-venv** — the `python3` binary plus `/usr/lib/python3*/venv` support directories.
+
+**Degrade-gracefully contract:** a tool that cannot be resolved on the host (e.g. `jq` not installed) NEVER fails the solve. The resolver logs a warning via `slog` and the solve proceeds without that tool — Pi Agent may still produce a useful answer with whatever tools are available. Paths already covered by `DefaultReadOnlyPaths` (e.g. `/usr/bin/git` is under `/usr`) are skipped to avoid redundant bind mounts.
+
 ---
 
 ## 7. Graph Discovery Engine

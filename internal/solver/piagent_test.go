@@ -102,7 +102,7 @@ EOF
 exit 0
 `
 
-func (r *fakeRunner) Create(ctx context.Context, id string) (Handle, error) {
+func (r *fakeRunner) Create(ctx context.Context, id string, opts ...CreateOption) (Handle, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	root, err := os.MkdirTemp(r.piAgentDir, "ws-*"+id+"-*")
@@ -319,6 +319,54 @@ func TestExecutor_Solve_NilEntry(t *testing.T) {
 	}
 }
 
+// TestExecutor_Solve_RequiredToolsInProblemJSON verifies that
+// required_tools from the queue entry are written into problem.json
+// (AC2 — SBOX-002). Uses the recordingRunner fake and reads back
+// the problem.json from the workspace.
+func TestExecutor_Solve_RequiredToolsInProblemJSON(t *testing.T) {
+	rec := &recordingRunner{root: t.TempDir()}
+	store, err := graph.OpenShared(fmt.Sprintf("test-solver-tools-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("graph.OpenShared: %v", err)
+	}
+	defer store.Close()
+	ex := NewExecutor(Config{
+		PiAgentPath: "/bin/true",
+		Model:       "deepseek-v4-flash",
+		APIKey:      "sk-test",
+		Timeout:     5 * time.Second,
+	}, rec, store)
+
+	entry := sampleEntry("sub-tools")
+	entry.RequiredTools = []string{"jq", "parallel"}
+
+	_, err = ex.Solve(context.Background(), entry)
+	if err != nil {
+		t.Fatalf("Solve: %v", err)
+	}
+
+	// The recordingRunner captures problem.json content in
+	// rec.lastProblem (the workspace is destroyed by Solve's defer).
+	rec.mu.Lock()
+	problemData := rec.lastProblem
+	rec.mu.Unlock()
+	if len(problemData) == 0 {
+		t.Fatal("problem.json was not captured by recordingRunner")
+	}
+	var prob struct {
+		RequiredTools []string `json:"required_tools"`
+	}
+	if err := json.Unmarshal(problemData, &prob); err != nil {
+		t.Fatalf("unmarshal problem.json: %v", err)
+	}
+	if len(prob.RequiredTools) != 2 {
+		t.Fatalf("required_tools = %v, want 2 items", prob.RequiredTools)
+	}
+	if prob.RequiredTools[0] != "jq" || prob.RequiredTools[1] != "parallel" {
+		t.Errorf("required_tools = %v, want [jq parallel]", prob.RequiredTools)
+	}
+}
+
 func TestExecutor_Solve_ExecFailure(t *testing.T) {
 	// Custom runner whose handle.Exec returns a fixed error.
 	// We bypass the fakeRunner entirely so we don't need a
@@ -353,7 +401,7 @@ type failingHandle struct {
 	root string
 }
 
-func (r *failingRunner) Create(ctx context.Context, id string) (Handle, error) {
+func (r *failingRunner) Create(ctx context.Context, id string, opts ...CreateOption) (Handle, error) {
 	root, err := os.MkdirTemp(r.root, "fail-*"+id+"-*")
 	if err != nil {
 		return nil, err
@@ -408,7 +456,7 @@ type noWriteRunner struct {
 	root string
 }
 
-func (r *noWriteRunner) Create(ctx context.Context, id string) (Handle, error) {
+func (r *noWriteRunner) Create(ctx context.Context, id string, opts ...CreateOption) (Handle, error) {
 	root, err := os.MkdirTemp(r.root, "nowrite-*"+id+"-*")
 	if err != nil {
 		return nil, err
@@ -647,24 +695,26 @@ func TestExecutor_Solve_PropagatesAPIVars(t *testing.T) {
 // call. It uses a real filesystem so the test exercises the full
 // Solve flow.
 type recordingRunner struct {
-	mu         sync.Mutex
-	root       string
-	lastHandle *recordingHandle
+	mu          sync.Mutex
+	root        string
+	lastHandle  *recordingHandle
+	lastProblem []byte // captures problem.json content for inspection
 }
 
 type recordingHandle struct {
 	root    string
 	lastEnv []string
 	mu      *sync.Mutex
+	problem *[]byte // pointer to runner.lastProblem for capture
 }
 
-func (r *recordingRunner) Create(ctx context.Context, id string) (Handle, error) {
+func (r *recordingRunner) Create(ctx context.Context, id string, opts ...CreateOption) (Handle, error) {
 	root, err := os.MkdirTemp(r.root, "rec-*"+id+"-*")
 	if err != nil {
 		return nil, err
 	}
 	r.mu.Lock()
-	r.lastHandle = &recordingHandle{root: root, mu: &r.mu}
+	r.lastHandle = &recordingHandle{root: root, mu: &r.mu, problem: &r.lastProblem}
 	h := r.lastHandle
 	r.mu.Unlock()
 	return h, nil
@@ -674,6 +724,13 @@ func (h *recordingHandle) WriteFile(relPath string, data []byte) error {
 	full := filepath.Join(h.root, relPath)
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return err
+	}
+	// Capture problem.json content before it hits the (later-destroyed)
+	// workspace so tests can inspect it after Solve returns.
+	if relPath == "problem.json" {
+		h.mu.Lock()
+		*h.problem = append([]byte{}, data...)
+		h.mu.Unlock()
 	}
 	return os.WriteFile(full, data, 0o644)
 }
@@ -729,6 +786,28 @@ func TestExecutor_Solve_Concurrent(t *testing.T) {
 	}
 }
 
+// TestWithRequiredTools verifies that the CreateOption correctly
+// populates the createConfig (AC3 wiring — SBOX-002).
+func TestWithRequiredTools(t *testing.T) {
+	tools := []string{"jq", "parallel"}
+	cfg := resolveCreateOptions([]CreateOption{WithRequiredTools(tools)})
+	if len(cfg.requiredTools) != 2 {
+		t.Fatalf("requiredTools = %v, want 2 items", cfg.requiredTools)
+	}
+	if cfg.requiredTools[0] != "jq" || cfg.requiredTools[1] != "parallel" {
+		t.Errorf("requiredTools = %v, want [jq parallel]", cfg.requiredTools)
+	}
+}
+
+// TestWithRequiredTools_Empty verifies that no options yields an
+// empty createConfig.
+func TestWithRequiredTools_Empty(t *testing.T) {
+	cfg := resolveCreateOptions(nil)
+	if len(cfg.requiredTools) != 0 {
+		t.Errorf("requiredTools = %v, want empty", cfg.requiredTools)
+	}
+}
+
 func TestExecutor_Solve_ContextCanceled(t *testing.T) {
 	// A runner whose Exec blocks on a channel, then unblocks
 	// when the context is cancelled.
@@ -772,7 +851,7 @@ type blockingHandle struct {
 	unblock chan struct{}
 }
 
-func (r *blockingRunner) Create(ctx context.Context, id string) (Handle, error) {
+func (r *blockingRunner) Create(ctx context.Context, id string, opts ...CreateOption) (Handle, error) {
 	root, err := os.MkdirTemp(r.root, "block-*"+id+"-*")
 	if err != nil {
 		return nil, err

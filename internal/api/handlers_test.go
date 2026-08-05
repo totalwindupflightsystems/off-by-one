@@ -230,6 +230,65 @@ func TestSubmit_MissingProblemClass(t *testing.T) {
 	}
 }
 
+// TestSubmit_RequiredTools verifies that the submit endpoint stores
+// required_tools in the queue entry (AC1 — SBOX-002).
+func TestSubmit_RequiredTools(t *testing.T) {
+	s, _, q := newTestServer(t)
+	body := submitProblemRequest{
+		ProblemClass:  "jq-parsing-error",
+		Environment:   "linux",
+		Language:      "bash",
+		Cadence:       ingest.CadencePrePhase,
+		RequiredTools: []string{"jq", "parallel"},
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+	}
+	var resp submitProblemResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Status != "queued" {
+		t.Errorf("status = %q, want queued", resp.Status)
+	}
+	// Verify the queue entry carries the required_tools.
+	entry, err := q.Get(context.Background(), resp.SubmissionID)
+	if err != nil {
+		t.Fatalf("queue.Get: %v", err)
+	}
+	if len(entry.RequiredTools) != 2 {
+		t.Fatalf("RequiredTools = %v, want 2 items", entry.RequiredTools)
+	}
+	if entry.RequiredTools[0] != "jq" || entry.RequiredTools[1] != "parallel" {
+		t.Errorf("RequiredTools = %v, want [jq parallel]", entry.RequiredTools)
+	}
+}
+
+// TestSubmit_RequiredTools_Empty verifies that omitting required_tools
+// produces an empty (not nil) slice in the entry — the column has a
+// DEFAULT '[]'.
+func TestSubmit_RequiredTools_Empty(t *testing.T) {
+	s, _, q := newTestServer(t)
+	body := submitProblemRequest{
+		ProblemClass: "no-tools-needed",
+		Cadence:      ingest.CadencePrePhase,
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var resp submitProblemResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	entry, err := q.Get(context.Background(), resp.SubmissionID)
+	if err != nil {
+		t.Fatalf("queue.Get: %v", err)
+	}
+	if len(entry.RequiredTools) != 0 {
+		t.Errorf("RequiredTools = %v, want empty", entry.RequiredTools)
+	}
+}
+
 func TestSubmit_InvalidJSON(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	req := httptest.NewRequest("POST", "/api/v1/problems/submit", strings.NewReader("not json"))

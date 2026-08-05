@@ -3,6 +3,7 @@ package solver
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
 )
@@ -22,9 +23,24 @@ func NewBSandboxRunner(exec *sandbox.Executor) *BSandboxRunner {
 }
 
 // Create allocates a bwrap sandbox. The id becomes the workspace
-// directory suffix.
-func (r *BSandboxRunner) Create(ctx context.Context, id string) (Handle, error) {
-	s, err := r.exec.Create(ctx, id, sandbox.Config{})
+// directory suffix. Per-solve options (e.g. WithRequiredTools) are
+// applied to configure the sandbox's read-only mounts.
+func (r *BSandboxRunner) Create(ctx context.Context, id string, opts ...CreateOption) (Handle, error) {
+	oc := resolveCreateOptions(opts)
+
+	cfg := sandbox.Config{}
+	if len(oc.requiredTools) > 0 {
+		resolved, missing := sandbox.ResolveTools(oc.requiredTools, sandbox.DefaultReadOnlyPaths)
+		if len(missing) > 0 {
+			slog.Warn("sandbox: could not resolve declared tools on host; solve will proceed without them",
+				"missing_tools", missing)
+		}
+		if len(resolved) > 0 {
+			cfg.ExtraReadOnlyPaths = resolved
+		}
+	}
+
+	s, err := r.exec.Create(ctx, id, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("bwrap create: %w", err)
 	}

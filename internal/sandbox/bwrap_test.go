@@ -337,6 +337,26 @@ func TestBuildBwrapArgs_DefaultReadOnlyPaths(t *testing.T) {
 	}
 }
 
+// TestBuildBwrapArgs_ExtraReadOnlyPaths verifies that ExtraReadOnlyPaths
+// produce --ro-bind entries alongside the default set (SBOX-002).
+func TestBuildBwrapArgs_ExtraReadOnlyPaths(t *testing.T) {
+	workDir := "/tmp/work"
+	extras := []string{"/opt/jq", "/usr/local/bin/parallel"}
+	args := buildBwrapArgs(DefaultReadOnlyPaths, extras, workDir)
+	for _, want := range extras {
+		bound := false
+		for i, a := range args {
+			if a == "--ro-bind" && i+2 < len(args) && args[i+1] == want && args[i+2] == want {
+				bound = true
+				break
+			}
+		}
+		if !bound {
+			t.Errorf("--ro-bind %s %s not found in args: %v", want, want, args)
+		}
+	}
+}
+
 // TestSandbox_Run_GitAvailable drives a real bwrap sandbox and
 // confirms `git --version` succeeds — the end-to-end check for
 // SBOX-001. Skipped if bwrap or git isn't installed.

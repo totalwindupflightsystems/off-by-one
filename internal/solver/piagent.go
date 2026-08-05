@@ -72,14 +72,15 @@ func ResolveConfig(cfg Config) Config {
 // Problem is the structured input the solver hands to Pi Agent.
 // Field tags match the JSON shape written to problem.json.
 type Problem struct {
-	ProblemClass string         `json:"problem_class"`
-	Environment  string         `json:"environment"`
-	Language     string         `json:"language"`
-	Version      string         `json:"version"`
-	Description  string         `json:"description"`
-	ErrorMessage string         `json:"error_message"`
-	StackTrace   string         `json:"stack_trace"`
-	Context      map[string]any `json:"context"`
+	ProblemClass  string         `json:"problem_class"`
+	Environment   string         `json:"environment"`
+	Language      string         `json:"language"`
+	Version       string         `json:"version"`
+	Description   string         `json:"description"`
+	ErrorMessage  string         `json:"error_message"`
+	StackTrace    string         `json:"stack_trace"`
+	Context       map[string]any `json:"context"`
+	RequiredTools []string       `json:"required_tools,omitempty"`
 }
 
 // Solution is the structured output Pi Agent produces. Pi Agent
@@ -120,7 +121,9 @@ var ErrEvidenceMissing = errors.New("solver: evidence.md missing after solve")
 // Runner abstracts the sandbox so the solver can be unit-tested
 // without a real bwrap binary. The contract:
 //
-//   - Create returns a Handle whose workspace is empty.
+//   - Create returns a Handle whose workspace is empty. Per-solve
+//     options (e.g. required tools) may be passed as variadic
+//     CreateOption values.
 //   - WriteFile writes data to relPath inside the workspace.
 //   - Exec runs cmd with the given env and returns combined
 //     stdout+stderr in Output. A non-zero exit becomes an error
@@ -128,7 +131,35 @@ var ErrEvidenceMissing = errors.New("solver: evidence.md missing after solve")
 //   - ReadFile returns the contents of relPath or an error.
 //   - Destroy releases all resources.
 type Runner interface {
-	Create(ctx context.Context, id string) (Handle, error)
+	Create(ctx context.Context, id string, opts ...CreateOption) (Handle, error)
+}
+
+// CreateOption configures per-sandbox behaviour at Create time.
+type CreateOption func(*createConfig)
+
+// createConfig holds the resolved options for a single Create call.
+type createConfig struct {
+	requiredTools []string
+}
+
+// WithRequiredTools declares tools that must be available inside the
+// sandbox workspace. The concrete runner (BSandboxRunner) resolves
+// each tool name to host paths and mounts them read-only; test fakes
+// may ignore the option entirely.
+func WithRequiredTools(tools []string) CreateOption {
+	return func(c *createConfig) {
+		c.requiredTools = tools
+	}
+}
+
+// resolveCreateOptions applies all opts to a fresh createConfig and
+// returns the result. Used by concrete Runner implementations.
+func resolveCreateOptions(opts []CreateOption) createConfig {
+	var cfg createConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg
 }
 
 // Handle is one running sandbox instance. The solver writes the
@@ -178,7 +209,7 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 		return nil, errors.New("solver: nil queue entry")
 	}
 
-	handle, err := e.runner.Create(ctx, sub.ID)
+	handle, err := e.runner.Create(ctx, sub.ID, WithRequiredTools(sub.RequiredTools))
 	if err != nil {
 		return nil, fmt.Errorf("create sandbox: %w", err)
 	}
@@ -187,14 +218,15 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 	// Translate the queue entry into the structured problem that
 	// pi-agent understands.
 	problem := Problem{
-		ProblemClass: sub.ProblemClass,
-		Environment:  sub.Environment,
-		Language:     sub.Language,
-		Version:      sub.Version,
-		Description:  sub.Description,
-		ErrorMessage: sub.ErrorMessage,
-		StackTrace:   sub.StackTrace,
-		Context:      sub.Context,
+		ProblemClass:  sub.ProblemClass,
+		Environment:   sub.Environment,
+		Language:      sub.Language,
+		Version:       sub.Version,
+		Description:   sub.Description,
+		ErrorMessage:  sub.ErrorMessage,
+		StackTrace:    sub.StackTrace,
+		Context:       sub.Context,
+		RequiredTools: sub.RequiredTools,
 	}
 	problemBytes, err := json.MarshalIndent(problem, "", "  ")
 	if err != nil {
