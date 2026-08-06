@@ -23,6 +23,28 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+
+### Tick 257 — 2026-08-06 19:45 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | GET /api/v1/projects/off-by-one → 200: Enabled=true, CooldownS=900, Priority=5, Weight=10; latest_tick.id = off-by-one-2026-08-06-14-43-06 (this tick, no duplicate) |
+| 1 | Git status | PASS | HEAD=004df84 (data: sync answer corpus — 9 files changed, ob1-answer-sync 20:51Z Aug 5), clean tree, 0 ahead / 0 behind origin/master |
+| 2 | Build / vet / gofmt | PASS | go build clean, go vet clean, gofmt -l . empty |
+| 3 | go test | PASS | 11 packages ok + 3 expected no-test (cmd/off-by-one, sql/schema, web) — -short -p 1 -count=1 |
+| 4 | GitReins guard | PASS | full mode: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0) |
+| 5 | Server health | PASS | :8766 200, uptime 97h1m (Aug 2 binary — SBOX-002 STILL not deployed; live probe unneeded, restart still blocked: sudo no-new-privileges in cron) |
+| 6 | DS-007 submit | PASS | deduplicated — existing_solutions=75 (healthy dedup path, nothing queued) |
+| 7 | Stats | PASS | 532 problems / 639 answers / 639 verified, queue_depth=4, hit_rate=1.0, coverage=1.201 (+5p/+5a vs tick 256 — solver pipeline continuing to complete) |
+| 8 | Queue window | PASS | 100-entry window: 74 complete / 26 failed; ZERO entries with completed_at ≥ tick-256 cutoff (16:48Z Aug 5) — no new failures since last tick; sub_253c14 aged out of window |
+| 9 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 10 | CI | PASS | gh run list: last 5 ALL success (data sync 20:51Z + pages, tick-256 16:51Z + pages, tick-255 14:47Z) |
+| 11 | Board format | PASS | validate-board-format.py → PASS, 0 issues; .gitreins/tasks.yaml empty (18 lines, no judge records) |
+| 12 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+
+**Notable:** IDLE audit tick — no worker in flight, no code changes, no new queue activity since tick 256 (solver pipeline steady: stats +5 problems / +5 answers, queue_depth 4, DS-007 dedup 409 at 75 existing solutions). **SBOX-002 deployment STILL pending:** server uptime 97h1m (Aug 2 binary); feature activation requires a privileged restart (`systemctl restart off-by-one` + rebuild) — sudo blocked in cron (no-new-privileges), flagging again for Bane or a privileged tick. Fleet-fed ingest continues to grow the corpus (532 problems). Benchmarks remain the sole recurring GAP (0 `func Benchmark` in cmd/ internal/).
+
+**Verdict:** IDLE — 12/13 gates PASS (benchmarks recurring GAP). Lab healthy: 532 problems / 639 answers / 639 verified, queue_depth=4, hit_rate=1.0, coverage=1.201. 8 enhancement tasks remain parked (SOLVER-001/002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001 + NEVER-DONE fixture).
 ### Tick 256 — 2026-08-05 16:48 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
