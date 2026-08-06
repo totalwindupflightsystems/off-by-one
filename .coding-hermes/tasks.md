@@ -23,6 +23,34 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+
+
+### Tick 260 — 2026-08-06 23:15 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | check_scheduler_project.py → Enabled=true, CooldownS=900, DecayRate=1, Priority=5, Weight=10, LastTickStarted=null; no duplicate fire (prior commit = tick 259 docs chore 5387356) |
+| 1 | Git status | PASS | HEAD=5387356 (docs: Tick 259), clean tree, 0 ahead / 0 behind origin/master |
+| 2 | Build / vet / gofmt | PASS | go build clean, go vet clean, gofmt -l cmd/ internal/ pkg/ sql/ empty |
+| 3 | go test | PASS | 11 packages ok + 3 expected no-test (cmd/off-by-one, sql/schema, web) — -short -p 1 -count=1 |
+| 4 | GitReins guard | PASS | full mode 4/4: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0, 68s) |
+| 5 | Server health | PASS | :8766 200, uptime 100h29m (Aug 2 binary — SBOX-002 STILL not deployed; restart still blocked: sudo no-new-privileges in cron) |
+| 6 | DS-007 submit #1 | FAIL→FIXED | sub_73c01b queued pos 4 (existing_solutions=75) then INSTANT-FAILED 23:13:06 — journal: `bwrap: Can't find source path /tmp/pi: No such file or directory` — first local solve failure since tick 255's rebuild |
+| 7 | /tmp/pi root cause | FOUND+REBUILT | pi-agent install dir DELETED between 14:49-15:06 local (19:49-20:06Z) — 2nd unexplained loss after Aug 4 truncation wipe; 84 bwrap failures since; last complete before: sub_1e96a6 19:49Z (answer 640). Disk 64% (640G free — NOT the Aug 4 98% trigger), tmpfiles-clean ran 13:57 local (BEFORE window), /tmp not tmpfs, no crontab/script found touching pi. Rebuilt per pi-agent-rebuild recipe (~27s; upstream now @earendil-works/pi-coding-agent@0.84.0; NO server restart needed — bwrap ro-mounts per-solve) |
+| 8 | DS-007 submit #2 | PASS | post-rebuild sub_3852f5 queued pos 3 → **COMPLETE 23:17:44 in 38s** — first complete solve since sub_1e96a6 19:49Z; solver pipeline healed end-to-end |
+| 9 | Stats | PASS | 533 problems / 640 answers / 640 verified, queue_depth=4, hit_rate=1.0, coverage=1.2008 (identical to tick 259 pre-fix) |
+| 10 | Queue window | PASS | 100-entry window: 74 complete / 26 failed; ZERO entries with completed_at ≥ 22:03Z cutoff besides sub_162c4c (21:10Z — PRE-DOCUMENTED tick 259 but RECLASSIFIED: same missing-/tmp/pi class; tick 259's "journal clean" was a wrong-signature grep) + sub_73c01b (this tick, pre-fix instant-fail) |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | CI | ANOMALY (improving) | githubstatus indicator STILL major (Partial System Outage, 23:1x UTC) BUT tick-259 push CI ran GREEN 22:36Z (52s) + pages build SUCCESS 22:06Z — first green CI since Aug 5 20:51Z; outage-era failures (19:45, 20:41 cancelled, 20:59) all pre-recovery; live site serves latest deploy |
+| 13 | Board format | PASS | validate-board-format.py → PASS, 0 issues; 10 matrix rows (9 pending + SBOX-002 completed) |
+| 14 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 15 | Deps | PASS | 11 outdated (same set: go-cmp, pprof, demangle, isatty, goldmark, x/exp, x/telemetry, cc/v4, libc retracted, memory, sqlite direct) — no security-critical |
+| 16 | DuckBrain | PASS | status + pitfalls/pi-agent-second-wipe-2026-08-06 written (HTTP :3000, 201 both) |
+
+**Notable:** WORKING tick — the DS-007 E2E probe caught a LIVE solver outage that had been silently failing for ~3.5h: /tmp/pi (Pi Agent install) was DELETED between 14:49-15:06 local (19:49-20:06Z), causing 84 consecutive `bwrap: Can't find source path /tmp/pi` failures (every queued solve instant-failed). This is the SECOND unexplained pi-agent loss (Aug 4 = 26k-file truncation wipe; Aug 6 = full directory deletion) — different signature than Aug 4 (no ERR_INVALID_PACKAGE_CONFIG), which is why tick 259's "journal clean" claim was wrong: it grepped the Aug-4 signature only and misattributed sub_162c4c (21:10Z instant-fail) as a fleet artifact. Root cause of the deletion is STILL UNKNOWN (disk 64% free — not the Aug 4 trigger; systemd-tmpfiles-clean ran 13:57 local, BEFORE the 14:49-15:06 window; /tmp is not tmpfs; no crontab or ~/.hermes/scripts file references pi). FIXED this tick: rebuilt per pi-agent-rebuild recipe (~27s, upstream @earendil-works/pi-coding-agent@0.84.0, no server restart needed) and verified LIVE: sub_3852f5 COMPLETE 23:17:44 in 38s — first complete since sub_1e96a6 (19:49Z). Stats 533/640 unchanged pre-fix (new answer may land post-tick). **ESCALATION:** 2nd occurrence of unexplained /tmp/pi loss — recommend a no_agent watchdog for /tmp/pi presence (alert+rebuild) and host-level audit of what deletes it between 20:00-20:06Z. GitHub outage continues per statuspage (indicator major) but CI+pages went green on the tick-259 push (22:06/22:36Z) — intermittent recovery, re-verify next tick. SBOX-002 deployment STILL pending (uptime 100h29m; privileged restart required). Benchmarks remain the sole recurring in-repo GAP.
+
+**Verdict:** WORKING — solver outage found, root-caused (2nd /tmp/pi loss, deletion mechanism still unknown), rebuilt, and live-verified (sub_3852f5 complete in 38s). 14/15 gates PASS (1 external ANOMALY improving: GitHub outage; benchmarks recurring GAP). Lab healthy again: 533 problems / 640 answers, solver confirmed solving. 8 enhancement tasks remain parked (SOLVER-001/002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001 + NEVER-DONE fixture).
+
 ### Tick 259 — 2026-08-06 22:03 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
