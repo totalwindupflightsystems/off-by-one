@@ -23,6 +23,27 @@
   NEVER remove the matrix header row or NEVER-DONE / E2E-001 fixtures.
 -->
 
+### Tick 258 — 2026-08-06 21:00 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | GET /api/v1/projects/off-by-one → 200: Enabled=true, CooldownS=900, Priority=5, Weight=10; latest_tick.id = off-by-one-2026-08-06-15-52-18 (this tick, no duplicate) |
+| 1 | Git status | PASS | HEAD=a19f297 (data: sync answer corpus — 6 files changed, 20:41Z Aug 6), clean tree, 0 ahead / 0 behind origin/master |
+| 2 | Build / vet / gofmt | PASS | go build clean, go vet clean, gofmt -l . empty |
+| 3 | go test | PASS | 11 packages ok + 3 expected no-test (cmd/off-by-one, sql/schema, web) — -short -p 1 -count=1 |
+| 4 | GitReins guard | PASS | full mode: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0) |
+| 5 | Server health | PASS | :8766 200, uptime 98h11m (Aug 2 binary — SBOX-002 STILL not deployed; live probe unneeded, restart still blocked: sudo no-new-privileges in cron) |
+| 6 | DS-007 submit | PASS | deduplicated — existing_solutions=75 (healthy dedup path, nothing queued) |
+| 7 | Stats | PASS | 533 problems / 640 answers / 640 verified, queue_depth=2, hit_rate=1.0, coverage=1.201 (+1p/+1a vs tick 257 — solver pipeline steady) |
+| 8 | Queue window | PASS | 100-entry window: 74 complete / 26 failed; ZERO entries with completed_at ≥ tick-257 cutoff (19:45Z Aug 6) — no new activity since last tick; newest completed_at still sub_72dd44 (Aug 5 16:26, known bwrap-cap failure) |
+| 9 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 10 | CI | ANOMALY | **GitHub infra outage (external):** pages build for tick-257 push FAILED 19:45:43Z (`Page build failed.`, run 31127113044); a19f297 push 20:41:12Z created pages build still `building` 17+ min (normal ~40s); CI workflow fired for NEITHER push (workflow active, no path filters — first time since Aug 1 every push skipped CI). githubstatus.com: `major` / Partial System Outage at 20:34Z. NOT repo-caused: pages source = /docs (untouched since Jul 24), failing commit 5f7a20c touched only .coding-hermes/tasks.md. Live site serves last good deploy (Aug 5 20:51, HTTP 200). Re-verify next tick. |
+| 11 | Board format | PASS | validate-board-format.py → PASS, 0 issues; .gitreins/tasks.yaml empty (18 lines, no judge records) |
+| 12 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+
+**Notable:** IDLE audit tick — no worker in flight, no code changes, no new queue activity since tick 257 (stats +1p/+1a, queue_depth 2, DS-007 dedup 409 at 75 existing solutions). **SBOX-002 deployment STILL pending:** server uptime 98h11m (Aug 2 binary); feature activation requires a privileged restart (`systemctl restart off-by-one` + rebuild) — sudo blocked in cron (no-new-privileges), flagging again for Bane or a privileged tick. **NEW EXTERNAL SIGNAL:** GitHub Actions/Pages partial outage (githubstatus.com major, 20:34Z) — one pages build failed and CI skipped two pushes; docs/ untouched since Jul 24 so no repo-side cause; watch next tick, no action available from cron. Benchmarks remain the sole recurring in-repo GAP (0 `func Benchmark` in cmd/ internal/).
+
+**Verdict:** IDLE — 11/13 gates PASS (1 external ANOMALY: GitHub Actions/Pages outage; benchmarks recurring GAP). Lab healthy: 533 problems / 640 answers / 640 verified, queue_depth=2, hit_rate=1.0, coverage=1.201. 8 enhancement tasks remain parked (SOLVER-001/002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001 + NEVER-DONE fixture).
 
 ### Tick 257 — 2026-08-06 19:45 UTC (deepseek-v4-flash — foreman)
 
