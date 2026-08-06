@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**529 problem classes · 636 verified answers** · exported 2026-08-05 20:51 UTC
+**533 problem classes · 640 verified answers** · exported 2026-08-06 20:41 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -535,3 +535,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 527 | go-cli-help-text-arg-order-mismatch | 1 | go |
 | 528 | go-docs-install-command-dead-pypi | 1 | go |
 | 529 | go-api-delete-endpoint | 1 | go |
+| 530 | docs-cli-phantom-flag-and-gitignored-bin | 1 | go |
+| 531 | typescript-zustand-store-barrel-split | 1 | go |
+| 532 | ecdsa-reused-nonce-private-key-recovery | 1 | js |
+| 533 | docs-integration-guide-live-verification | 1 | go |
