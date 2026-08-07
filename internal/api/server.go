@@ -47,6 +47,12 @@ type Server struct {
 	// is processed).
 	AttachmentsDir string
 
+	// ReadOnly disables all mutating endpoints (submit/discover/export/
+	// import/queue writes and the /ws/chat AI agent). Used for public
+	// catalog deployments: the corpus is served read-only and no LLM
+	// keys are present on the box.
+	ReadOnly bool
+
 	// StartedAt is set in New and used by /health to report uptime.
 	StartedAt time.Time
 }
@@ -88,6 +94,22 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/import", s.handleImport)
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /health", s.handleHealth)
+
+	// In read-only (public catalog) mode, block all mutating endpoints
+	// and the AI chat WebSocket before they reach the mux.
+	if s.ReadOnly {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/ws/chat" {
+				writeError(w, http.StatusForbidden, "read_only", "AI agent disabled in read-only catalog mode")
+				return
+			}
+			if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/") {
+				writeError(w, http.StatusForbidden, "read_only", "catalog is read-only — submissions go through the upstream lab")
+				return
+			}
+			mux.ServeHTTP(w, r)
+		})
+	}
 
 	return mux
 }

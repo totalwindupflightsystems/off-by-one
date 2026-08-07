@@ -55,6 +55,7 @@ func main() {
 	cronInterval := flag.Duration("cron-interval", envDuration("OFF_BY_ONE_CRON_INTERVAL", 5*time.Minute), "Cron loop wake interval")
 	loadThreshold := flag.Float64("load-threshold", envFloat("OFF_BY_ONE_LOAD_THRESHOLD", 1.0), "Max loadavg(1) for idle detection (negative = always idle)")
 	skipSandbox := flag.Bool("skip-sandbox", envBool("OFF_BY_ONE_SKIP_SANDBOX", false), "Skip bwrap sandbox (for dev/testing)")
+	readOnly := flag.Bool("readonly", envBool("OFF_BY_ONE_READONLY", false), "Public catalog mode: block all mutating endpoints and the AI chat")
 	exportDir := flag.String("export-dir", envString("OFF_BY_ONE_EXPORT_DIR", ""), "Working directory for git export clones (empty = export disabled)")
 	importDir := flag.String("import-dir", envString("OFF_BY_ONE_IMPORT_DIR", ""), "Working directory for git import clones (empty = import disabled)")
 	showVersion := flag.Bool("version", false, "Print version and exit")
@@ -157,6 +158,7 @@ func main() {
 	apiServer := apihttp.New(store, queue, specBytes)
 	apiServer.ExportLocalDir = *exportDir
 	apiServer.ImportLocalDir = *importDir
+	apiServer.ReadOnly = *readOnly
 	apiHandler := apiServer.Handler()
 
 	// --- 6. WebSocket chat handler ------------------------------------
@@ -179,6 +181,10 @@ func main() {
 			apiHandler.ServeHTTP(w, r)
 			return
 		case r.URL.Path == "/ws/chat":
+			if *readOnly {
+				http.Error(w, "AI agent disabled in read-only catalog mode", http.StatusForbidden)
+				return
+			}
 			chatHandler.ServeHTTP(w, r)
 			return
 		case r.URL.Path == "/openapi.json" || r.URL.Path == "/health":
