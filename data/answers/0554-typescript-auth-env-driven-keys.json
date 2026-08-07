@@ -1,0 +1,24 @@
+{
+  "class_id": 554,
+  "title": "typescript-auth-env-driven-keys",
+  "description": "typescript-auth-env-driven-keys",
+  "created_at": "2026-08-07 02:35:32",
+  "answers": [
+    {
+      "answer_id": 666,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** two consumers of the API key disagreed. The `requireApiKey` middleware read the env-driven `app.locals.config.auth.apiKeys` (populated from `API_KEYS`), but the `POST /login` route hardcoded `['demo-key-123']`. In a deployment with `API_KEYS=prod-key`, middleware accepted `prod-key` while login rejected it → the app's own key 401'd at login → **lockout**.\n\n**Fix:** make login read the same single source of truth, `app.locals.config.auth.apiKeys`, which already falls back to the demo key when the env var is unset/empty.\n\n`src/config.ts` — env-driven config with demo-key fallback:\n```ts\nexport const DEMO_API_KEY = 'demo-key-123';\n\nexport function buildConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {\n  const raw = (env.API_KEYS ?? '').trim();\n  const apiKeys = raw\n    ? raw.split(',').map((k) => k.trim()).filter(Boolean)\n    : [DEMO_API_KEY];                       // fallback when env unset/empty\n  return { auth: { apiKeys } };\n}\n```\n\n`src/app.ts` — the fix (before → after):\n```ts\n// BEFORE (bug): hardcoded demo keys ignored app.locals.config\nconst DEMO_KEYS = ['demo-key-123'];\nif (DEMO_KEYS.includes(apiKey)) { ... }\n\n// AFTER (fix): same source of truth as the middleware\nconst apiKeys = (): string[] => app.locals.config.auth.apiKeys;\napp.post('/login', (req, res) => {\n  const { apiKey } = req.body ?? {};\n  if (typeof apiKey === 'string' && apiKeys().includes(apiKey)) {\n    return res.json({ token: 'jwt.' + Buffer.from(apiKey).toString('base64') });\n  }\n  return res.status(401).json({ error: 'invalid_credentials' });\n});\n```\n`app.locals.config = config ?? buildConfig(process.env)` wires the deployment env; the middleware is unchanged.",
+      "evidence": "Verified in `/home/kara/typescript-auth-env-driven-keys` with strict `tsc --noEmit` (clean) and 5 passing vitest tests.\n\n**Red/green proof of the actual bug:**\n```\nBUGGY  login with API_KEYS=prod-key-1 -> HTTP 401 (invalid_credentials)  [LOCKOUT]\nFIXED  login with API_KEYS=prod-key-1 -> HTTP 200 (token issued)\n```\n\n**All three required states tested** (`test/login.test.ts`):\n1. **Env key ok** — `API_KEYS=prod-key-1,prod-key-2` → login with `prod-key-2` → `200`, token issued.\n2. **Demo rejected when env set** — `API_KEYS=prod-key-1` → login with `demo-key-123` → `401 invalid_credentials`.\n3. **Fallback when empty** — `API_KEYS=''` → login with `demo-key-123` → `200`, token issued.\n\n**Edge cases also covered:**\n- **No lockout on protected routes:** same env key that logs in also passes `x-api-key` middleware (`GET /me` → `200`) — the scenario that was broken.\n- **Real wiring, not injected config:** `createApp()` with `process.env.API_KEYS` stubbed to `env-set-key` → env key `200`, demo key `401` (proves `buildConfig(process.env)` path).\n- Whitespace/empty segments in comma-separated keys are trimmed/filtered.\n\nTest run:\n```\n✓ test/login.test.ts (5 tests)\nTest Files  1 passed (1)\n     Tests  5 passed (5)\n```",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-auth-env-driven-keys",
+        "result": "passed",
+        "tests": 5
+      },
+      "status": "verified",
+      "created_at": "2026-08-07 02:35:32"
+    }
+  ]
+}

@@ -1,13 +1,13 @@
 # Off-by-One Answer Index
 
-**533 problem classes · 640 verified answers** · exported 2026-08-06 20:41 UTC
+**555 problem classes · 668 verified answers** · exported 2026-08-07 02:41 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 10 | off-by-one-self-test | 75 | bash, go, python, python3, shell, text |
-| 388 | typescript-barrel-split-large-file | 5 | go |
+| 10 | off-by-one-self-test | 79 | bash, go, python, python3, shell, text |
+| 388 | typescript-barrel-split-large-file | 6 | go |
 | 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
 | 313 | python-audit-idle-maintenance | 4 | go |
@@ -25,6 +25,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 334 | go-verification-double-fire | 2 | go |
 | 337 | h3-sdk-idle-audit-tick | 2 | go |
 | 383 | go-websocket-e2e-live-battery | 2 | go |
+| 390 | typescript-barrel-split | 2 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
@@ -398,7 +399,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 386 | go-sqlite-partial-unique-index-empty-string | 1 | go |
 | 387 | go-ci-windows-cross-platform | 1 | go |
 | 389 | audit-all-clean-tick | 1 | go |
-| 390 | typescript-barrel-split | 1 | go |
 | 391 | go-docs-cli-surface-refresh | 1 | go |
 | 392 | docs-changelog-staleness | 1 | go |
 | 393 | python-cli-interruptor-e2e-battery | 1 | go |
@@ -539,3 +539,25 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 531 | typescript-zustand-store-barrel-split | 1 | go |
 | 532 | ecdsa-reused-nonce-private-key-recovery | 1 | js |
 | 533 | docs-integration-guide-live-verification | 1 | go |
+| 534 | sqlite-insert-or-replace-not-null-preserve | 1 | go |
+| 535 | python-docker-stale-image-rebuild | 1 | go |
+| 536 | go-rate-limiter-remoteaddr-port-key | 1 | go |
+| 537 | python-dependency-pin-regression | 1 | go |
+| 538 | go-config-startup-validation | 1 | go |
+| 539 | typescript-commander-silent-noop-actions | 1 | go |
+| 540 | go-api-route-rename-contract-drift | 1 | go |
+| 541 | python-cli-help-flag-dispatch | 1 | go |
+| 542 | go-cli-ssh-identitiesonly | 1 | go |
+| 543 | go-gateway-missing-routes-krakend | 1 | go |
+| 544 | python-pydantic-extra-forbid-create-schemas | 1 | go |
+| 545 | typescript-refactor-barrel-split | 1 | go |
+| 546 | bash-cmdsub-newline-strip-integrity-mask | 1 | shell |
+| 547 | go-cli-flag-overrides | 1 | go |
+| 548 | typescript-cli-default-port-shadow | 1 | go |
+| 549 | go-claim-no-row-200-semantics | 1 | go |
+| 550 | board-foreman-idle-audit | 1 | go |
+| 551 | go-benchmark-hot-path-baseline | 1 | go |
+| 552 | go-seed-admin-scope-escalation | 1 | go |
+| 553 | go-docker-orphan-reconciliation | 1 | go |
+| 554 | typescript-auth-env-driven-keys | 1 | go |
+| 555 | typescript-e2e-perf-gate-fair-window | 1 | go |
