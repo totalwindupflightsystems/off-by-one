@@ -1,0 +1,24 @@
+{
+  "class_id": 560,
+  "title": "typescript-error-code-mapping",
+  "description": "typescript-error-code-mapping",
+  "created_at": "2026-08-07 04:00:06",
+  "answers": [
+    {
+      "answer_id": 673,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The SDK harness `errorResponse()` hardcoded `INTERNAL_ERROR` for **every** status code, so a 400 arrived as `INTERNAL_ERROR` instead of the documented `INVALID_REQUEST`. Fix = a union-keyed `STATUS_TO_ERROR_CODE` map + deriving the code from it, plus flipping the test assertion that had codified the bug.\n\n**`src/error-codes.ts`** — the map, keyed by the `HttpStatusCode` union type (exhaustive at compile time):\n\n```ts\nexport type HttpStatusCode = 400 | 404 | 500;\nexport type SdkErrorCode = \"INVALID_REQUEST\" | \"SESSION_NOT_FOUND\" | \"INTERNAL_ERROR\";\n\nexport const STATUS_TO_ERROR_CODE: Record<HttpStatusCode, SdkErrorCode> = {\n\t400: \"INVALID_REQUEST\",\n\t404: \"SESSION_NOT_FOUND\",\n\t500: \"INTERNAL_ERROR\",\n};\nexport const DEFAULT_ERROR_CODE: SdkErrorCode = \"INTERNAL_ERROR\";\n```\n\n**`src/harness.ts`** — the `errorResponse()` fix:\n\n```ts\n// BEFORE (bug): code was hardcoded, so every status returned INTERNAL_ERROR\n//   return { statusCode, body: { error: { code: \"INTERNAL_ERROR\", message } } };\n\n// AFTER (fix): code is derived from the union-keyed map (undefined-safe)\nexport function errorResponse(statusCode: HttpStatusCode, message: string): ErrorResponse {\n\treturn {\n\t\tstatusCode,\n\t\tbody: {\n\t\t\terror: {\n\t\t\t\tcode: STATUS_TO_ERROR_CODE[statusCode] ?? DEFAULT_ERROR_CODE,\n\t\t\t\tmessage,\n\t\t\t},\n\t\t},\n\t};\n}\n```\n\n**`test/error-response.test.ts`** — the flipped assertion (was `INTERNAL_ERROR` for all codes, now asserts the documented mapping):\n\n```ts\nit.each<[HttpStatusCode, SdkErrorCode]>([\n\t[400, \"INVALID_REQUEST\"],\n\t[404, \"SESSION_NOT_FOUND\"],\n\t[500, \"INTERNAL_ERROR\"],\n])(\"maps HTTP %i to %s\", (statusCode, expectedCode) => {\n\tconst response = errorResponse(statusCode, `request failed with ${statusCode}`);\n\texpect(response.statusCode).toBe(statusCode);\n\texpect(response.body.error.code).toBe(expectedCode);\n});\n```",
+      "evidence": "Repo built at `/home/kara/gap-014` (Node 22 + Vitest 3.2.7, `strict` + `noUncheckedIndexedAccess`).\n\n1. **vitest** — `npx vitest run` → **8/8 passed** (map contents, union-exhaustive keys, `errorResponse()` mapping, message passthrough, live HTTP integration incl. echo harness + malformed-JSON 400 edge case).\n2. **typecheck** — `npx tsc --noEmit` → **PASS** (`Record<HttpStatusCode, …>` is undefined-free even under `noUncheckedIndexedAccess`).\n3. **Live curl probe against the echo harness** (`bash scripts/probe.sh`, real HTTP server on 127.0.0.1):\n\n```\necho harness  -> HTTP 200  body: {\"hello\":\"world\"}\n400 invalid request          -> HTTP 400  {\"error\":{\"code\":\"INVALID_REQUEST\",\"message\":\"body must be a JSON object with a string 'cwd'\"}}\n404 missing session          -> HTTP 404  {\"error\":{\"code\":\"SESSION_NOT_FOUND\",\"message\":\"session nope was not found\"}}\n500 forced failure           -> HTTP 500  {\"error\":{\"code\":\"INTERNAL_ERROR\",\"message\":\"kaboom: forced failure\"}}\n```\n\n4. **Edge cases:**\n   - **Bug regression check** — reintroducing the hardcoded `INTERNAL_ERROR` line makes the flipped test suite **fail 4/4** mapping tests (proves the test now guards the fix).\n   - **Union exhaustiveness** — adding `429` to `HttpStatusCode` without a map entry fails `tsc` with `TS2741: Property '429' is missing in type … required in type Record<HttpStatusCode, SdkErrorCode>` (adding a status forces a mapping at compile time).\n   - **Malformed/non-JSON 400 payload** returns `INVALID_REQUEST` over the wire; unknown routes fall back to 404.\n   - Restored final state: 8/8 tests green + typecheck clean.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-error-code-mapping",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-07 04:00:06"
+    }
+  ]
+}

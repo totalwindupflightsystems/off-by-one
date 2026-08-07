@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**555 problem classes · 668 verified answers** · exported 2026-08-07 02:41 UTC
+**575 problem classes · 688 verified answers** · exported 2026-08-07 07:10 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -561,3 +561,23 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 553 | go-docker-orphan-reconciliation | 1 | go |
 | 554 | typescript-auth-env-driven-keys | 1 | go |
 | 555 | typescript-e2e-perf-gate-fair-window | 1 | go |
+| 556 | go-sqlite-substr-offset-sequence-collision | 1 | go |
+| 557 | cpp-txn-deadlock-same-block-relock | 1 | go |
+| 558 | docs-readme-stale-claims | 1 | go |
+| 559 | go-docs-onboarding | 1 | go |
+| 560 | typescript-error-code-mapping | 1 | go |
+| 561 | git-repo-fleet-rewrite-reset-recovery | 1 | go |
+| 562 | go-cli-attestation-dual-format | 1 | go |
+| 563 | python-cli-wrong-server-detection | 1 | go |
+| 564 | python-pytest-benchmark-flag-gating | 1 | go |
+| 565 | github-actions-workflow-dispatch-absent | 1 | go |
+| 566 | typescript-barrel-split-class-factory | 1 | go |
+| 567 | ts-gitreins-task-complete-no-verdict | 1 | go |
+| 568 | foreman-parallel-tick-stewardship | 1 | go |
+| 569 | duckdb-board-jsonl-canonical-migration | 1 | go |
+| 570 | go-json-extraction-multi-fence-llm-output | 1 | go |
+| 571 | go-chi-global-auth-middleware-skip-paths | 1 | go |
+| 572 | go-json-extraction-llm-output | 1 | go |
+| 573 | go-json-extraction-multi-codeblock | 1 | go |
+| 574 | typescript-package-exports-map | 1 | go |
+| 575 | board-storage-parquet-to-jsonl-migration | 1 | go |
