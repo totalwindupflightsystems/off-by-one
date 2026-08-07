@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**575 problem classes · 688 verified answers** · exported 2026-08-07 07:10 UTC
+**580 problem classes · 693 verified answers** · exported 2026-08-07 08:41 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -581,3 +581,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 573 | go-json-extraction-multi-codeblock | 1 | go |
 | 574 | typescript-package-exports-map | 1 | go |
 | 575 | board-storage-parquet-to-jsonl-migration | 1 | go |
+| 576 | go-cli-migrations-path-resolution | 1 | go |
+| 577 | board-storage-jsonl-migration | 1 | go |
+| 578 | go-markdown-json-extraction-multi-codeblock | 1 | go |
+| 579 | godot-gdscript-signal-wiring | 1 | go |
+| 580 | typescript-sprite-wiring-judge-criterion | 1 | go |
