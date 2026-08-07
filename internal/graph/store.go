@@ -518,6 +518,15 @@ type ProblemClassWithCounts struct {
 // are placeholder zeros for now — the cron loop will populate them
 // once the discovery endpoint begins logging hits.
 func (s *Store) ListProblemClassesWithCounts(ctx context.Context, limit, offset int) ([]ProblemClassWithCounts, error) {
+	return s.ListProblemClassesWithCountsFiltered(ctx, "", limit, offset)
+}
+
+// ListProblemClassesWithCountsFiltered is ListProblemClassesWithCounts with
+// an explicit derived-status filter applied in SQL. Filtering in SQL (not in
+// the caller) keeps LIMIT/OFFSET pagination correct. status may be one of
+// ci_passed, verified, pending, failed, or the UI alias "solved" (matches
+// verified OR ci_passed). Empty = no filter.
+func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status string, limit, offset int) ([]ProblemClassWithCounts, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
@@ -541,9 +550,12 @@ func (s *Store) ListProblemClassesWithCounts(ctx context.Context, limit, offset 
 			FROM answer_nodes
 			GROUP BY class_id
 		) ac ON ac.class_id = pc.id
+		WHERE ? = '' OR (CASE WHEN ? = 'solved'
+		                      THEN COALESCE(ac.best_status, 'pending') IN ('verified', 'ci_passed')
+		                      ELSE COALESCE(ac.best_status, 'pending') = ? END)
 		ORDER BY pc.id DESC
 		LIMIT ? OFFSET ?
-	`, limit, offset)
+	`, status, status, status, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list problem_classes with counts: %w", err)
 	}
@@ -559,6 +571,36 @@ func (s *Store) ListProblemClassesWithCounts(ctx context.Context, limit, offset 
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// CountProblemClasses returns the number of problem classes, optionally
+// filtered by derived best answer status (same semantics as
+// ListProblemClassesWithCountsFiltered). Used for accurate pagination
+// totals on /api/v1/problems.
+func (s *Store) CountProblemClasses(ctx context.Context, status string) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM problem_classes pc
+		LEFT JOIN (
+			SELECT class_id,
+			       CASE
+			           WHEN MAX(CASE WHEN status = 'ci_passed' THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
+			           WHEN MAX(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) = 1 THEN 'verified'
+			           WHEN MAX(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) = 1 THEN 'pending'
+			           ELSE 'failed'
+			       END AS best_status
+			FROM answer_nodes
+			GROUP BY class_id
+		) ac ON ac.class_id = pc.id
+		WHERE ? = '' OR (CASE WHEN ? = 'solved'
+		                      THEN COALESCE(ac.best_status, 'pending') IN ('verified', 'ci_passed')
+		                      ELSE COALESCE(ac.best_status, 'pending') = ? END)
+	`, status, status, status).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count problem_classes: %w", err)
+	}
+	return n, nil
 }
 
 // --- Scanning helpers -----------------------------------------------------

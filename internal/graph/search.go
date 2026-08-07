@@ -61,7 +61,9 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 		      WHERE a.class_id = pc.id AND a.lang = ?))
 		  AND (? = '' OR EXISTS (
 		      SELECT 1 FROM answer_nodes a
-		      WHERE a.class_id = pc.id AND a.status = ?))
+		      WHERE a.class_id = pc.id AND (CASE WHEN ? = 'solved'
+		                                         THEN a.status IN ('verified', 'ci_passed')
+		                                         ELSE a.status = ? END)))
 		UNION
 		SELECT pc.id, pc.title, snippet(answer_nodes_fts, 0, '[', ']', '…', 8) AS snip,
 		       rank, a.id AS answer_id
@@ -71,11 +73,13 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 		WHERE answer_nodes_fts MATCH ?
 		  AND (? = '' OR a.env = ?)
 		  AND (? = '' OR a.lang = ?)
-		  AND (? = '' OR a.status = ?)
+		  AND (? = '' OR (CASE WHEN ? = 'solved'
+		                       THEN a.status IN ('verified', 'ci_passed')
+		                       ELSE a.status = ? END))
 		ORDER BY rank
 		LIMIT ? OFFSET ?
-	`, ftsQuery, env, env, lang, lang, status, status,
-		ftsQuery, env, env, lang, lang, status, status,
+	`, ftsQuery, env, env, lang, lang, status, status, status,
+		ftsQuery, env, env, lang, lang, status, status, status,
 		limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("search query: %w", err)
@@ -90,4 +94,50 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 		out = append(out, hit)
 	}
 	return out, rows.Err()
+}
+
+// SearchCount returns the total number of matches for a search query
+// (same filters as Search, ignoring limit/offset). The API uses it to
+// report an accurate total for pagination.
+func (s *Store) SearchCount(ctx context.Context, query, env, lang, status string) (int, error) {
+	if strings.TrimSpace(query) == "" {
+		return 0, nil
+	}
+	ftsQuery := `"` + strings.ReplaceAll(query, `"`, `""`) + `"`
+	var total int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM (
+			SELECT pc.id
+			FROM problem_classes_fts
+			JOIN problem_classes pc ON pc.id = problem_classes_fts.rowid
+			WHERE problem_classes_fts MATCH ?
+			  AND (? = '' OR EXISTS (
+			      SELECT 1 FROM answer_nodes a
+			      WHERE a.class_id = pc.id AND a.env = ?))
+			  AND (? = '' OR EXISTS (
+			      SELECT 1 FROM answer_nodes a
+			      WHERE a.class_id = pc.id AND a.lang = ?))
+			  AND (? = '' OR EXISTS (
+			      SELECT 1 FROM answer_nodes a
+			      WHERE a.class_id = pc.id AND (CASE WHEN ? = 'solved'
+			                                         THEN a.status IN ('verified', 'ci_passed')
+			                                         ELSE a.status = ? END)))
+			UNION
+			SELECT pc.id
+			FROM answer_nodes_fts
+			JOIN answer_nodes a ON a.id = answer_nodes_fts.rowid
+			JOIN problem_classes pc ON pc.id = a.class_id
+			WHERE answer_nodes_fts MATCH ?
+			  AND (? = '' OR a.env = ?)
+			  AND (? = '' OR a.lang = ?)
+			  AND (? = '' OR (CASE WHEN ? = 'solved'
+			                       THEN a.status IN ('verified', 'ci_passed')
+			                       ELSE a.status = ? END))
+		)
+	`, ftsQuery, env, env, lang, lang, status, status, status,
+		ftsQuery, env, env, lang, lang, status, status, status).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("search count: %w", err)
+	}
+	return total, nil
 }

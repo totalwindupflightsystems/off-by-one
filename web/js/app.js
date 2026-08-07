@@ -35,8 +35,14 @@
       catch (e) { console.error('view init failed:', name, e); }
     }
 
-    if (location.hash !== '#' + name) {
-      history.replaceState(null, '', '#' + name);
+    // Keep any existing query params on the hash (e.g. #search?offset=40)
+    // when the target view is already the active one — this preserves
+    // shareable, paginated search URLs.
+    const curHash = location.hash || '';
+    const curView = curHash.split('?')[0].slice(1);
+    const target = curView === name && curHash.indexOf('?') >= 0 ? curHash : '#' + name;
+    if (location.hash !== target) {
+      history.replaceState(null, '', target);
     }
   }
 
@@ -44,8 +50,10 @@
     t.addEventListener('click', () => activateView(t.dataset.view));
   });
 
-  // Open the view named in the URL hash, defaulting to search.
-  const initial = (location.hash || '#search').slice(1);
+  // Open the view named in the URL hash, defaulting to search. The hash may
+  // carry search params (#search?limit=20&offset=40) — strip them for the
+  // view-name comparison.
+  const initial = (location.hash || '#search').slice(1).split('?')[0];
   const valid = Array.from(tabs).some((t) => t.dataset.view === initial);
   activateView(valid ? initial : 'search');
 

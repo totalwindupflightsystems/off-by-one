@@ -70,6 +70,10 @@ func Handler() http.Handler {
 		// (return 404).
 		if _, err := fs.Stat(subFS, clean); err == nil {
 			setContentType(w, clean)
+			// No heuristic caching for assets: the SPA shell is served with
+			// no-cache too, so a deployed binary's new JS/CSS always reaches
+			// browsers instead of stale cache copies.
+			w.Header().Set("Cache-Control", "no-cache")
 			fileServer.ServeHTTP(w, r)
 			return
 		}

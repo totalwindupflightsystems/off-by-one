@@ -397,7 +397,12 @@ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		out := listProblemsResponse{Total: len(hits)}
+		total, err := s.Store.SearchCount(r.Context(), search, env, lang, status)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+			return
+		}
+		out := listProblemsResponse{Total: total}
 		for _, h := range hits {
 			cnt, _ := s.Store.AnswerCount(r.Context(), h.ClassID)
 			out.Problems = append(out.Problems, problemClassWire{
@@ -411,18 +416,18 @@ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.Store.ListProblemClassesWithCounts(r.Context(), limit, offset)
+	rows, err := s.Store.ListProblemClassesWithCountsFiltered(r.Context(), status, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	out := listProblemsResponse{Total: len(rows)}
+	total, err := s.Store.CountProblemClasses(r.Context(), status)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	out := listProblemsResponse{Total: total}
 	for _, p := range rows {
-		// Filter by status if requested (the SQL is status-agnostic
-		// because the join produces a derived best_status per class).
-		if status != "" && p.Status != status {
-			continue
-		}
 		out.Problems = append(out.Problems, problemClassWire{
 			ID:          p.ID,
 			Title:       p.Title,

@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -254,5 +255,58 @@ func TestSearch_LimitClampedToMax(t *testing.T) {
 	}
 	if len(hits) > 20 {
 		t.Errorf("limit=999 returned %d hits, expected ≤ 20", len(hits))
+	}
+}
+
+func TestSearchCount_ReturnsFullTotal(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	for i := 0; i < 3; i++ {
+		cid, _ := s.CreateProblemClass(ctx, fmt.Sprintf("count-class-%d", i), "shared token searchable")
+		if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1", "shared token solution", "", "{}"); err != nil {
+			t.Fatalf("CreateAnswerNode: %v", err)
+		}
+	}
+
+	// Page size 2 → 2 hits, but the total must be 3 (all matches), not the
+	// page length. This is what powers accurate pagination in the UI.
+	hits, err := s.Search(ctx, "shared", "", "", "", 2, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) != 2 {
+		t.Fatalf("page size: got %d hits, want 2", len(hits))
+	}
+	total, err := s.SearchCount(ctx, "shared", "", "", "")
+	if err != nil {
+		t.Fatalf("SearchCount: %v", err)
+	}
+	if total != 3 {
+		t.Errorf("SearchCount = %d, want 3 (full total, not page size)", total)
+	}
+}
+
+func TestCountProblemClasses_MatchesListPagination(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		if _, err := s.CreateProblemClass(ctx, fmt.Sprintf("list-class-%d", i), "d"); err != nil {
+			t.Fatalf("CreateProblemClass: %v", err)
+		}
+	}
+
+	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", 2, 0)
+	if err != nil {
+		t.Fatalf("ListProblemClassesWithCountsFiltered: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("page size: got %d, want 2", len(rows))
+	}
+	n, err := s.CountProblemClasses(ctx, "")
+	if err != nil {
+		t.Fatalf("CountProblemClasses: %v", err)
+	}
+	if n != 5 {
+		t.Errorf("CountProblemClasses = %d, want 5 (full total, not page size)", n)
 	}
 }

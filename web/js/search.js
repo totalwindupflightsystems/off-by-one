@@ -39,7 +39,11 @@
       return;
     }
     state.container = container;
+    readUrlState();
     buildDom(container);
+    var input = container.querySelector('.search-input');
+    if (input) input.value = state.query;
+    registerHashListener();
     // Fire an initial search (empty query → list all problems).
     doSearch();
   };
@@ -59,6 +63,7 @@
     input.setAttribute('aria-label', 'Search');
     input.addEventListener('input', function () {
       state.query = input.value.trim();
+      state.offset = 0; // new query → back to page 1
       clearTimeout(state.debounceTimer);
       state.debounceTimer = setTimeout(doSearch, state.debounceDelay);
     });
@@ -121,7 +126,7 @@
       chip.textContent = opt.label;
       chip.dataset.value = opt.value;
       chip.dataset.key = key;
-      if (i === 0) {
+      if (opt.value === (state[key] || '')) {
         chip.classList.add('active');
       }
       chip.addEventListener('click', function () {
@@ -131,6 +136,7 @@
         });
         chip.classList.add('active');
         state[key] = opt.value;
+        state.offset = 0; // new filter → back to page 1
         doSearch();
       });
       group.appendChild(chip);
@@ -141,13 +147,33 @@
 
   // ---------- Search execution ----------
 
-  function doSearch() {
-    var resultsArea = state.container.querySelector('.search-results');
-    if (!resultsArea) return;
+  // ---------- URL state (shareable #search?q=&env=&limit=&offset=) ----------
 
-    resultsArea.innerHTML = '';
-    resultsArea.appendChild(loadingEl());
+  // Read search state from the URL hash:
+  // #search?q=...&env=...&lang=...&status=...&limit=20&offset=40
+  // A bare #search (no params) resets the view to defaults.
+  function readUrlState() {
+    state.query = '';
+    state.env = '';
+    state.lang = '';
+    state.status = '';
+    state.limit = 20;
+    state.offset = 0;
+    var hash = window.location.hash || '';
+    var qIndex = hash.indexOf('?');
+    if (qIndex === -1) return;
+    var params = new URLSearchParams(hash.slice(qIndex + 1));
+    if (params.has('q')) state.query = params.get('q').trim();
+    if (params.has('env')) state.env = params.get('env');
+    if (params.has('lang')) state.lang = params.get('lang');
+    if (params.has('status')) state.status = params.get('status');
+    var limit = parseInt(params.get('limit'), 10);
+    if (!isNaN(limit) && limit >= 1 && limit <= 100) state.limit = limit;
+    var offset = parseInt(params.get('offset'), 10);
+    if (!isNaN(offset) && offset >= 0) state.offset = offset;
+  }
 
+  function buildParams() {
     var params = new URLSearchParams();
     if (state.query) params.set('q', state.query);
     if (state.env) params.set('env', state.env);
@@ -155,8 +181,56 @@
     if (state.status) params.set('status', state.status);
     params.set('limit', String(state.limit));
     params.set('offset', String(state.offset));
+    return params;
+  }
 
-    var url = '/api/v1/problems?' + params.toString();
+  // Push the current search state into the URL hash (replaceState, so
+  // back/forward still steps through previous pages).
+  function syncUrl() {
+    var target = '#search?' + buildParams().toString();
+    if (window.location.hash !== target) {
+      history.replaceState(null, '', target);
+    }
+  }
+
+  // React to back/forward (or manual hash edits) so the URL stays the
+  // source of truth for the search view.
+  function registerHashListener() {
+    if (window.__ob1SearchHashListener) return;
+    window.__ob1SearchHashListener = true;
+    window.addEventListener('hashchange', function () {
+      var view = (window.location.hash || '').split('?')[0].slice(1);
+      if (view !== 'search') return;
+      var prev = JSON.stringify([state.query, state.env, state.lang, state.status, state.limit, state.offset]);
+      readUrlState();
+      var next = JSON.stringify([state.query, state.env, state.lang, state.status, state.limit, state.offset]);
+      if (prev === next) return;
+      var container = state.container;
+      if (container) {
+        var input = container.querySelector('.search-input');
+        if (input) input.value = state.query;
+        // Re-apply chip active states from the new URL.
+        container.querySelectorAll('.chip-group').forEach(function (group) {
+          var key = group.dataset.key;
+          group.querySelectorAll('.chip').forEach(function (chip) {
+            chip.classList.toggle('active', chip.dataset.value === (state[key] || ''));
+          });
+        });
+      }
+      doSearch();
+    });
+  }
+
+  function doSearch() {
+    var resultsArea = state.container.querySelector('.search-results');
+    if (!resultsArea) return;
+
+    resultsArea.innerHTML = '';
+    resultsArea.appendChild(loadingEl());
+
+    syncUrl();
+
+    var url = '/api/v1/problems?' + buildParams().toString();
 
     fetch(url, { headers: { Accept: 'application/json' } })
       .then(function (r) {
@@ -199,6 +273,50 @@
     state.results.forEach(function (p) {
       area.appendChild(renderResultItem(p));
     });
+
+    // Pagination (only when the result set spans multiple pages)
+    if (state.total > state.limit) {
+      area.appendChild(renderPagination());
+    }
+  }
+
+  function renderPagination() {
+    var pages = Math.max(1, Math.ceil(state.total / state.limit));
+    var page = Math.floor(state.offset / state.limit) + 1;
+    var from = state.total === 0 ? 0 : state.offset + 1;
+    var to = Math.min(state.offset + state.limit, state.total);
+
+    var nav = el('div', 'search-pagination');
+
+    var prev = el('button', 'pagination-btn');
+    prev.type = 'button';
+    prev.textContent = '‹ Prev';
+    prev.disabled = state.offset <= 0;
+    prev.addEventListener('click', function () {
+      state.offset = Math.max(0, state.offset - state.limit);
+      doSearch();
+    });
+
+    var pageInfo = el('span', 'pagination-page');
+    pageInfo.textContent = 'Page ' + page + ' of ' + pages;
+
+    var range = el('span', 'pagination-range');
+    range.textContent = 'Showing ' + from + '–' + to + ' of ' + state.total;
+
+    var next = el('button', 'pagination-btn');
+    next.type = 'button';
+    next.textContent = 'Next ›';
+    next.disabled = state.offset + state.limit >= state.total;
+    next.addEventListener('click', function () {
+      state.offset = Math.min(state.offset + state.limit, Math.max(0, state.total - state.limit));
+      doSearch();
+    });
+
+    nav.appendChild(prev);
+    nav.appendChild(pageInfo);
+    nav.appendChild(range);
+    nav.appendChild(next);
+    return nav;
   }
 
   function renderResultItem(p) {
