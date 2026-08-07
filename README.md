@@ -165,11 +165,11 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
 | `DEEPSEEK_API_KEY` | Yes | — | DeepSeek API key for Pi Agent solving |
 | `OPENROUTER_API_KEY` | No | — | OpenRouter API key for embeddings (DS-003) |
 | `OFF_BY_ONE_PORT` | No | `8766` | HTTP server port |
-| `OFF_BY_ONE_DB_PATH` | No | `./data/off-by-one.db` | SQLite database path |
+| `OFF_BY_ONE_DB` | No | `./off-by-one.db` | SQLite database path |
 | `OFF_BY_ONE_BWRAP_PATH` | No | `bwrap` | Path to bubblewrap binary |
 | `OFF_BY_ONE_PI_AGENT_PATH` | No | `pi-agent` | Path to Pi Agent binary (resolved via PATH) |
 | `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
-| `OFF_BY_ONE_LOAD_THRESHOLD` | No | `2.0` | System load threshold for idle detection |
+| `OFF_BY_ONE_LOAD_THRESHOLD` | No | `1` | Max loadavg(1) for idle detection (negative = always idle) |
 | `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `5m` | Per-solve timeout |
 | `OFF_BY_ONE_EXPORT_DIR` | No | *(disabled)* | Working directory for git export clones — empty disables `POST /api/v1/export` (501) |
 | `OFF_BY_ONE_IMPORT_DIR` | No | *(disabled)* | Working directory for git import clones — empty disables `POST /api/v1/import` (501) |
@@ -182,11 +182,17 @@ go run ./cmd/off-by-one --help
 
 | Flag | Description |
 |------|-------------|
-| `--port` | HTTP server port |
+| `--bwrap` | Path to bubblewrap binary |
+| `--cron-interval` | Cron loop wake interval |
 | `--db` | SQLite database path |
-| `--bwrap` | Bubblewrap binary path |
 | `--export-dir` | Working directory for git export clones (empty = `POST /api/v1/export` disabled, 501) |
+| `--host` | HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy) |
 | `--import-dir` | Working directory for git import clones (empty = `POST /api/v1/import` disabled, 501) |
+| `--load-threshold` | Max loadavg(1) for idle detection (negative = always idle) |
+| `--pi-agent` | Path to Pi Agent binary |
+| `--port` | HTTP server port |
+| `--readonly` | Public catalog mode: block all mutating endpoints and the AI chat |
+| `--skip-sandbox` | Skip bwrap sandbox (for dev/testing) |
 | `--version` | Print version and exit |
 
 ## Development
