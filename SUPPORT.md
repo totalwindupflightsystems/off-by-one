@@ -18,4 +18,4 @@ Off-by-One is an MVP in active development. Support options:
 - Repository: github.com/totalwindupflightsystems/off-by-one
 
 ### Known Issues
-See `.coding-hermes/tasks.md` for the current task board and known bugs.
+See `.coding-hermes/board/tasks.jsonl` for the current task board and known bugs.

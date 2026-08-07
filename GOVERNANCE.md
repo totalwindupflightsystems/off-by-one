@@ -15,7 +15,7 @@ Project decisions are made by the maintainers. All changes go through the GitRei
 
 ## Process
 
-1. Features and bugs are tracked in `.coding-hermes/tasks.md`
+1. Features and bugs are tracked in `.coding-hermes/board/tasks.jsonl`
 2. All code changes require GitReins Tier 1 + Tier 2 (judge) evaluation
 3. Commits include co-author attribution per CONTRIBUTING.md
 4. The project follows the coding-hermes foreman/worker model for autonomous development

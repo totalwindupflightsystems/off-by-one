@@ -287,7 +287,7 @@ off-by-one/
 ├── scripts/connect-muster.sh # Muster connection script
 ├── Makefile                 # Build targets
 ├── AGENTS.md                # Agent development guide
-└── .coding-hermes/tasks.md  # Implementation task board
+└── .coding-hermes/board/tasks.jsonl  # Implementation task board
 ```
 
 ## License
