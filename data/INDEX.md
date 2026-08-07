@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**595 problem classes · 709 verified answers** · exported 2026-08-07 14:41 UTC
+**629 problem classes · 746 verified answers** · exported 2026-08-07 20:42 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 10 | off-by-one-self-test | 80 | bash, go, python, python3, shell, text |
+| 10 | off-by-one-self-test | 81 | bash, go, python, python3, shell, text |
 | 388 | typescript-barrel-split-large-file | 6 | go |
 | 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
@@ -27,6 +27,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 383 | go-websocket-e2e-live-battery | 2 | go |
 | 390 | typescript-barrel-split | 2 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
+| 419 | go-live-e2e-battery | 2 | go |
+| 550 | board-foreman-idle-audit | 2 | go, python |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 3 | shell-say-hello-test | 1 | go |
@@ -426,7 +428,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 416 | docker-compose-host-port-default-drift | 1 | go |
 | 417 | go-gofmt-hygiene-sweep | 1 | go |
 | 418 | go-scheduler-idle-audit | 1 | go |
-| 419 | go-live-e2e-battery | 1 | go |
 | 420 | go-board-jsonl-export-format | 1 | go |
 | 421 | go-idle-lean-verification-tick | 1 | go |
 | 422 | scheduler-stewardship-light-verification | 1 | go |
@@ -555,7 +556,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 547 | go-cli-flag-overrides | 1 | go |
 | 548 | typescript-cli-default-port-shadow | 1 | go |
 | 549 | go-claim-no-row-200-semantics | 1 | go |
-| 550 | board-foreman-idle-audit | 1 | go |
 | 551 | go-benchmark-hot-path-baseline | 1 | go |
 | 552 | go-seed-admin-scope-escalation | 1 | go |
 | 553 | go-docker-orphan-reconciliation | 1 | go |
@@ -601,3 +601,37 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 593 | go-board-jsonl-stale-task-row | 1 | go |
 | 594 | js-security-hardcoded-secret-in-script | 1 | go |
 | 595 | typescript-turbo-dev-server-wiring | 1 | go |
+| 596 | e2e-visual-regression-data-state-pollution | 1 | go |
+| 597 | rust-cli-clap-alias-docs-drift | 1 | go |
+| 598 | sqlite-idempotent-migration-adapter-chain | 1 | go |
+| 599 | frontend-visual-regression-order-dependent-selection | 1 | go |
+| 600 | docs-nonexistent-package-reference | 1 | go |
+| 601 | typescript-sprite-pack-wiring | 1 | go |
+| 602 | docs-npm-to-pnpm-migration | 1 | go |
+| 603 | go-lint-goconst-test-bundle-slice | 1 | go |
+| 604 | python-dead-code-removal | 1 | go |
+| 605 | seccomp-bpf-jump-offsets | 1 | go |
+| 606 | go-api-spec-gap-wiring | 1 | go |
+| 607 | docs-onboarding-cli-discoverability | 1 | go |
+| 608 | smith-waterman-affine-gap-gotoh | 1 | python |
+| 609 | go-e2e-hash-only-open-no-credit | 1 | go |
+| 610 | typescript-embedding-provider-fallback | 1 | go |
+| 611 | docs-tunnel-url-rotation | 1 | go |
+| 612 | infra-security-firewall-auth-reopen | 1 | go |
+| 613 | sql-rls-secdefiner-lost-migration | 1 | go |
+| 614 | typescript-mcp-embedding-provider-fallback | 1 | go |
+| 615 | go-docs-openapi-spec-drift | 1 | go |
+| 616 | python-pytest-collection-path | 1 | go |
+| 617 | docs-live-command-verification | 1 | python |
+| 618 | js-frontend-tokenless-status-surface | 1 | go |
+| 619 | foreman-verification-stale-reopen | 1 | go |
+| 620 | typescript-build-dist-stale-guard | 1 | go |
+| 621 | go-build-version-injection-ldflags | 1 | go |
+| 622 | typescript-api-legacy-bridge-roster-events | 1 | go |
+| 623 | go-hash-only-open-no-credit | 1 | go |
+| 624 | go-claim-returning-post-update-zero | 1 | go |
+| 625 | nodejs-gitignore-import-side-effect | 1 | go |
+| 626 | go-database-case-insensitive-duplicate-registration | 1 | go |
+| 627 | typescript-test-subprocess-path-prefix | 1 | go |
+| 628 | python-docs-stale-skill-sync | 1 | go |
+| 629 | python-monitoring-grafana-prometheus | 1 | go |

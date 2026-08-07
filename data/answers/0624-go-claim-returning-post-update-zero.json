@@ -1,0 +1,24 @@
+{
+  "class_id": 624,
+  "title": "go-claim-returning-post-update-zero",
+  "description": "go-claim-returning-post-update-zero",
+  "created_at": "2026-08-07 19:24:53",
+  "answers": [
+    {
+      "answer_id": 741,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** `ClaimDomainCredits` used:\n\n```sql\nUPDATE accounts SET shadow_credits = 0, is_claimed = true\n WHERE id = $1 AND is_claimed = false\nRETURNING shadow_credits\n```\n\n`RETURNING` emits the **post-update** row. Since the same statement sets `shadow_credits = 0`, every claim reported `0` credits converted — even though the conversion succeeded.\n\n**Fix.** Replace `RETURNING` with a data-modifying CTE that captures the pre-update value *before* the write runs, then projects it out (`/home/kara/claimcredits/store.go`):\n\n```go\nconst claimDomainCreditsSQL = `\nWITH pre AS (\n    SELECT shadow_credits\n      FROM accounts\n     WHERE id = $1 AND is_claimed = false\n     FOR UPDATE\n),\nupd AS (\n    UPDATE accounts\n       SET shadow_credits = 0,\n           is_claimed = true\n     WHERE id = $1 AND is_claimed = false\n)\nSELECT shadow_credits FROM pre`\n\nfunc ClaimDomainCredits(ctx context.Context, q Querier, accountID int64) (int64, error) {\n\tvar converted int64\n\terr := q.QueryRow(ctx, claimDomainCreditsSQL, accountID).Scan(&converted)\n\tif errors.Is(err, pgx.ErrNoRows) {\n\t\treturn 0, ErrNotClaimed // missing or already claimed: nothing converted\n\t}\n\tif err != nil {\n\t\treturn 0, fmt.Errorf(\"claim domain credits: %w\", err)\n\t}\n\treturn converted, nil\n}\n```\n\nWhy this is correct:\n- `pre` reads the **pre-update** `shadow_credits` (the amount actually converted); `upd` performs the conversion; the outer `SELECT` projects the pre value. `RETURNING` is gone, so the post-update zero cannot leak in.\n- `pre` and `upd` are one statement, so the read and write share a snapshot — the returned value is the amount the `UPDATE` converted, with no separate transaction needed.\n- `FOR UPDATE` on `pre` is the concurrency hardening: a racing claim blocks on the row lock, re-evaluates `is_claimed = false` against the winner's commit, and returns `ErrNotClaimed` instead of double-reporting. `errors.Is(err, pgx.ErrNoRows) → ErrNotClaimed` covers the missing/already-claimed no-op path.\n\nThe naive `UPDATE … RETURNING` version is preserved in `naive_test.go` as a regression reference.",
+      "evidence": "**RED → GREEN workflow, verified live:**\n\n1. **RED** — With the naive SQL as production, `go test -v` failed at both layers:\n   - Real PG: `expected 500 credits converted, got 0` (basic claim), `first claim: got=0` (already-claimed), `concurrent claim: unexpected outcome got=0`\n   - pgxmock: `could not match actual sql: \"UPDATE accounts SET shadow_credits = 0 … RETURNING shadow_credits\" with expected regexp \"WITH pre AS\"`\n2. **GREEN** — After the CTE fix, `go test -race -count=1 ./...` → **`ok claimcredits`**, 9/9 passing.\n\n**Tests** (`store_test.go` = pgxmock; `integration_test.go` = real PostgreSQL 18 on 127.0.0.1:55433, `accounts` table recreated per test):\n\n| Test | Layer | Outcome |\n|---|---|---|\n| `ClaimDomainCredits_ReturnsPreUpdateAmount` | pgxmock | returns 500 (pre-update), not 0 |\n| `ClaimDomainCredits_AlreadyClaimed` | pgxmock | `ErrNotClaimed`, 0 converted |\n| `Naive_ReturnsPostUpdateZero` | pgxmock | pins the original bug: naive SQL → 0 |\n| Integration `…ReturnsAmountConverted` | real PG | returns 500; row ends `shadow_credits=0, is_claimed=true` |\n| Integration `…NaiveReturnsPostUpdateZero` | real PG | naive SQL returns 0 while row IS converted (bug proof) |\n| Integration `…AlreadyClaimed` | real PG | 2nd claim → `ErrNotClaimed`, row unchanged |\n| Integration `…ZeroCredits` | real PG | claiming a 0-credit account succeeds, returns 0 (legit zero, not an error) |\n| Integration `…MissingAccount` | real PG | nonexistent id → `ErrNotClaimed` |\n| Integration `…ConcurrentClaims_ExactlyOneWins` | real PG + `-race` | 4 goroutines: exactly 1 wins (500), 3 get `ErrNotClaimed`; stable across 3×5 repeated runs |\n\n**Edge case found beyond the spec — plain CTE is racy.** A deterministic lock-contention experiment (T0 holds a row `FOR UPDATE`, T1/T2 run the CTE, T0 commits) showed the plain CTE without `FOR UPDATE` reports `[500, 500]` — the loser reports 500 credits it never converted (its `pre` already ran before the winner's commit). Adding `FOR UPDATE` to `pre` makes it report `[500, -1]` — exactly one claim converts, the loser gets `ErrNotClaimed`. This is why the production SQL includes `FOR UPDATE`, and it's guarded by the 4-worker race test.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-claim-returning-post-update-zero",
+        "result": "passed",
+        "tests": 9
+      },
+      "status": "verified",
+      "created_at": "2026-08-07 19:24:53"
+    }
+  ]
+}

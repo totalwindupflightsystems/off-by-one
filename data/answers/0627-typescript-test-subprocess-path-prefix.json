@@ -1,0 +1,24 @@
+{
+  "class_id": 627,
+  "title": "typescript-test-subprocess-path-prefix",
+  "description": "typescript-test-subprocess-path-prefix",
+  "created_at": "2026-08-07 20:10:05",
+  "answers": [
+    {
+      "answer_id": 744,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (SL-GAP-013).** The subprocess argv used a *bare script name* (`\"cli.mjs\"`) with `cwd = repo root`. `execFile`/`subprocess` resolve bare names **via PATH only**, never relative to cwd. The script lives in `scripts/`, which is not on PATH, so the spawn fails with `ENOENT`. The wrapper then collapsed the error into a numeric status via `Number(error.code)` — and since `error.code` is the *string* `'ENOENT'` on spawn failure, the test observed `Number('ENOENT') === NaN` instead of a real exit code.\n\n**Fix.** Prefix the repo-relative `scripts/` segment in the argv, and resolve external binaries (like gitleaks in `~/go/bin`, which is not on the default PATH) via PATH-then-absolute lookup — never by bare name.\n\n**TypeScript (the actual bug):**\n```ts\n// tests/subprocess-path.test.ts\nconst REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');\n\n// BEFORE (bug): bare name -> PATH lookup -> ENOENT -> Number('ENOENT') === NaN\nawait execFileP('cli.mjs', [], { cwd: REPO_ROOT });\n\n// AFTER (fix): repo-relative path -> resolved against cwd -> exits 0\nawait execFileP(path.join('scripts', 'cli.mjs'), [], { cwd: REPO_ROOT });\n\n// Defensive guard: never let 'ENOENT' masquerade as a numeric status\nfunction exitStatus(e: NodeJS.ErrnoException): number | 'MISSING_BINARY' {\n  if (e.code === 'ENOENT') return 'MISSING_BINARY'; // explicit, never NaN\n  return Number(e.code);\n}\n```\n\n**pytest equivalent:**\n```python\n# tests/test_subprocess_path.py\nREPO_ROOT = Path(__file__).resolve().parent.parent\n\n# AFTER: prefix scripts/ (repo-relative path)\nsubprocess.run([\"node\", \"scripts/cli.mjs\"], cwd=REPO_ROOT, check=True)\n\n# gitleaks: PATH first, then ~/go/bin fallback (env quirk, not a code regression)\ndef resolve_gitleaks() -> Path | None:\n    found = shutil.which(\"gitleaks\")\n    if found:\n        return Path(found)\n    candidate = Path.home() / \"go\" / \"bin\" / \"gitleaks\"\n    return candidate if candidate.is_file() else None\n# then pytest.skip(\"gitleaks not installed...\") when None, never assert on NaN\n```",
+      "evidence": "Reproduction sandbox: `/tmp/repro` (repo root `scripts/cli.mjs`, TS tests via `node --test` + tsx, pytest 9.0.2, Node 22).\n\n**Before-fix state (bug reproduced exactly):**\n```\n#   exit status observed by test: NaN  (Number.isNaN=true)\nnot ok 1 - BEFORE FIX: bare name, cwd=repo root, assert exit status === 0\n    NaN !== 0\n  name: 'AssertionError'\n  expected: 0\n  actual: NaN\n# fail 1\n```\n\n**After-fix: TS suite — 5/5 pass** (`npx tsx --test tests/*.test.ts`):\n- bare name + `cwd=repo root` → `ENOENT` confirmed (and `Number('ENOENT') === NaN` shown)\n- `scripts/` prefix → resolves, exits 0\n- guard: ENOENT surfaces as `'MISSING_BINARY'`, never NaN\n- argv passthrough with args (exit code `3` honored)\n- absolute path works from unrelated cwd (`/tmp`)\n\n**After-fix: pytest — 4 passed, 1 skipped:**\n```\ntests/test_subprocess_path.py::test_bare_script_name_fails_when_not_on_path PASSED\ntests/test_subprocess_path.py::test_repo_relative_path_runs               PASSED\ntests/test_subprocess_path.py::test_absolute_path_is_cwd_independent      PASSED\ntests/test_subprocess_path.py::test_gitleaks_resolved_via_path_or_absolute SKIPPED  # no gitleaks here\ntests/test_subprocess_path.py::test_external_binary_missing_is_explicit_not_nan PASSED\n```\n\n**Edge cases covered:** non-zero exit codes pass through prefixing; cwd-independent via absolute path; missing external binary → explicit `pytest.skip` with install hint (CI passes because CI installs gitleaks onto PATH — env quirk, not code regression); Windows-safe via `path.join`/`Path` instead of hard-coded separators.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-test-subprocess-path-prefix",
+        "result": "passed",
+        "tests": 10
+      },
+      "status": "verified",
+      "created_at": "2026-08-07 20:10:05"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "class_id": 605,
+  "title": "seccomp-bpf-jump-offsets",
+  "description": "seccomp-bpf-jump-offsets",
+  "created_at": "2026-08-07 15:58:32",
+  "answers": [
+    {
+      "answer_id": 720,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "BPF conditional-jump offsets (`jt`/`jf`) are **PC-relative to the instruction *after* the jump** — `jt=1` skips exactly one instruction, `jt=0` falls through. The pre-fix arch check in `_build_filter` had them inverted (`jt=0/jf=1`), so on a *matching* arch the program fell straight into the `RET KILL_PROCESS` (SIGSYS, shell status `159 = 128+31` under `setpriv --no-new-privs`), while a *foreign* arch jumped over the kill and survived. The fix swaps them to `jt=1/jf=0` in both the full and no-op paths:\n\n```c\n/* THE FIX — arch check preamble, identical in full and no-op paths */\n\n/* A = seccomp_data.arch */\nprog[n++] = (struct sock_filter)\n    BPF_STMT(BPF_LD | BPF_W | BPF_ABS, SECCOMP_OFF_ARCH);   /* ld [4] */\n\n/* FIXED: native arch skips the KILL (jt=1); mismatch falls in (jf=0).\n * Pre-fix this was BPF_JUMP(..., AUDIT_ARCH_X86_64, 0, 1) — inverted. */\nprog[n++] = (struct sock_filter)\n    BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, AUDIT_ARCH_X86_64, 1, 0);\n\n/* Foreign architecture: kill the whole process (SIGSYS). */\nprog[n++] = (struct sock_filter)\n    BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL_PROCESS);\n```\n\nGenerated program (fixed):\n\n```\n[0] ld   [4]                          ; A = seccomp_data.arch\n[1] jeq  AUDIT_ARCH_X86_64, 1, 0      ; FIXED: match -> skip next\n[2] ret  KILL_PROCESS                 ; wrong arch dies\n[3] ld   [0]                          ; A = seccomp_data.nr       (full path)\n[4..] jeq <allowed syscall>, jt, 0    ; allow-list hits jump over deny tail\n[...] ret  KILL                        ; deny-by-default tail\n[...] ret  ALLOW                       ; (allow tail after deny)\n```\n\nKey subtleties handled: the allow-list uses `jt = nallow - i` to hop over the deny tail onto `RET ALLOW` (the deny tail must come *before* `RET ALLOW` in program order), and `SECCOMP_RET_KILL`/`ALLOW`/`KILL_PROCESS` are the real kernel action values. A `-DBUGGY_ARCH_JEQ` switch is kept so the pre-fix code can be rebuilt to prove test coverage. Files: `seccomp_filter.{c,h}`, `test_seccomp.c`, `probe_program.c`, `Makefile` in `/home/kara/seccomp-jump-offsets`.",
+      "evidence": "Verification used two layers:\n\n**1. User-space BPF simulator** (implements `LD|W|ABS`, `JEQ|K`, `RET|K` with exact kernel jump semantics) run against synthetic `seccomp_data` for both paths, both arch cases, plus an allow/deny policy sanity check. **2. Live kernel probe** — a forked child sets `PR_SET_NO_NEW_PRIVS`, installs the real filter via `PR_SET_SECCOMP`, then makes a real `getpid()` syscall.\n\nFixed build (`make run`, under `setpriv --no-new-privs`) — **8/8 passed**:\n\n| Test | Result |\n|---|---|\n| noop path: native/getpid → ALLOW | PASS (real arch survives) |\n| full path: native/getpid → ALLOW | PASS |\n| full path: native/reboot → KILL (deny-by-default intact) | PASS |\n| noop path: i386/getpid → KILL_PROCESS | PASS (wrong arch dies) |\n| full path: i386/getpid → KILL_PROCESS | PASS |\n| full path: aarch64/read → KILL_PROCESS | PASS |\n| live: no-op path, real arch survives | PASS |\n| live: full path, real arch survives | PASS |\n\nPre-fix build (`make buggy`) — **0/8, every test fails**, reproducing the exact reported symptom: native/getpid evaluates to `0x80000000` (KILL_PROCESS), foreign arch evaluates to `0x7fff0000` (ALLOW, survives). Standalone probe under `setpriv --no-new-privs`:\n\n```\n$ setpriv --no-new-privs ./probe_buggy\nBad system call (core dumped)          # killed by SIGSYS\n$ echo $?\n159                                     # 128 + SIGSYS(31) — matches report\n$ setpriv --no-new-privs ./probe_fixed\n$ echo $?\n0\n```\n\nEdge cases tested: both filter paths (full + no-op), matching vs. two foreign arches (i386, aarch64), allowed vs. denied syscall on native arch, and jump-target alignment of every allow-list `jt` (off-by-one here would land on the deny tail — caught during development, fixed, and covered by the `native/reboot → KILL` check). A live i386 wrong-arch probe wasn't possible (no `libc6-dev-i386` for `-m32` in this container); the simulator models the kernel's evaluator exactly for this instruction subset, and the live native probes prove the filter passes the kernel verifier end-to-end.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "seccomp-bpf-jump-offsets",
+        "result": "passed",
+        "tests": 4
+      },
+      "status": "verified",
+      "created_at": "2026-08-07 15:58:32"
+    }
+  ]
+}
