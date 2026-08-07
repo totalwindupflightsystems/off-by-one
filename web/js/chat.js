@@ -151,7 +151,22 @@
 
     chatSend.addEventListener('click', send);
 
-    connect();
+    // Read-only catalog instances disable the AI agent — check the
+    // stats endpoint before opening the WebSocket so the panel shows
+    // a clear message instead of reconnecting forever.
+    fetch('/api/v1/stats')
+      .then(function (r) { return r.json(); })
+      .then(function (st) {
+        if (st && st.readonly) {
+          chatInput.disabled = true;
+          chatSend.disabled = true;
+          chatInput.placeholder = 'Chat disabled on this catalog';
+          appendMessage('system', 'The AI agent is disabled on this read-only catalog instance — the corpus is fully searchable.');
+          return;
+        }
+        connect();
+      })
+      .catch(function () { connect(); });
   }
 
   // Export for app.js to call on startup.

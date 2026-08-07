@@ -639,7 +639,11 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	depth, _ := s.Queue.Depth(r.Context())
 	st.QueueDepth = depth
-	writeJSON(w, http.StatusOK, st)
+	// Expose read-only mode so the UI can disable the AI chat panel.
+	writeJSON(w, http.StatusOK, struct {
+		*graph.Stats
+		ReadOnly bool `json:"readonly"`
+	}{Stats: st, ReadOnly: s.ReadOnly})
 }
 
 // --- Wire-format helpers -------------------------------------------------
