@@ -24,6 +24,36 @@
 -->
 
 
+### Tick 264 — 2026-08-07 11:26 UTC (deepseek-v4-flash — foreman) — LEGACY LOG FINAL ENTRY
+
+> **Transition note:** This board is JSONL-canonical since 6d7f0f7/b681041 (JSONL-NORM-001).
+> Tick records now live in `.coding-hermes/board/events.jsonl` (id=2 for tick 264);
+> tasks.md is FROZEN as the legacy log. One compact entry for tail-gate continuity.
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | check_scheduler_project.py → Enabled=true, **CooldownS=7200** (policy changed from 900 at 06:01Z — ticks now ~2h cadence), Priority=5, Weight=10; latest_tick.id = off-by-one-2026-08-07-06-24-09 (THIS tick, no duplicate fire) |
+| 1 | Git status | PASS (reconciled) | HEAD=c2a30bd (data sync 08:41Z), 0 ahead / 0 behind origin/master; leftover uncommitted tasks.md edits from parallel session (UI-002 row, UI-001 PARTIAL, JSONL-NORM-001 row) folded into this tick's board reconciliation |
+| 2 | Build / vet / gofmt | PASS | go build clean, go vet clean, gofmt -l cmd/ internal/ pkg/ sql/ = 0 files |
+| 3 | go test | PASS | 11 packages ok + 3 expected no-test (cmd/off-by-one, sql/schema, web) — -short -p 1 -count=1 -timeout 120s |
+| 4 | GitReins guard | PASS | full mode 4/4: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0) |
+| 5 | Server health | PASS + **SBOX-002 DEPLOYED** | :8766 200; **NEW binary since 07:33:39Z** (PID 1029862, uptime ~3h53m — replaces Aug 2 PID 2012, 100h+ era). readonly field present in /api/v1/stats (f54d6f2 feature) → post-SBOX-002 build confirmed. **required_tools probe accepted live: 409 deduplicated, NOT 400 unknown field — SBOX-002 feature ACTIVATED** (3-day watch item RESOLVED) |
+| 6 | DS-007 submit | PASS | sub_194ecd queued pos 8, est 4m0s, existing_solutions=79 (+1 vs tick 263) — E2E submit path healthy post-restart |
+| 7 | /tmp/pi survival | PASS | pi-monorepo clone intact (mtime Aug 6 18:15 local, tick-260 rebuild, 17h+), pi-agent --help OK; journal since 02:35Z: 0 `Can't find source path`, 0 `ERR_INVALID_PACKAGE_CONFIG` |
+| 8 | Solver throughput | PASS | DB queue since 02:35Z: **56 entries — 26 complete** (incl. cpp-txn-deadlock 56s, go-cli-attestation 2m43s, duckdb-board-jsonl-canonical 3m09s, go-json-extraction-multi-fence 3m36s, ts-gitreins-task-complete-no-verdict 2m45s, foreman-parallel-tick-stewardship 4m28s, python-cli-wrong-server-detection 3m25s), **25 failed ALL at exact 300s** (known bwrap-cap fleet pattern; **ZERO instant-fails**), **5 stale in_progress** (3 killed by 07:33Z restart: sub_1beb8b/sub_c1e6e7/sub_579b07; 2 old-binary bwrap hangs pre-restart: sub_938583/sub_76aef9 started 03:40/03:42Z, no completion — old-server goroutine hang, cleared by restart) |
+| 9 | Stats | PASS | **583 problems / 696 answers / 696 verified**, queue_depth=7, hit_rate=1.0, coverage=1.1938 (+30p/+31a vs tick 263 — fleet-fed growth + parallel-session solves) |
+| 10 | Queue window | PASS | API 100-window: 76 complete / 24 failed / 0 pending; all since-cutoff entries accounted in gate 8 (DB query authoritative for full picture) |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | CI | PASS | last 8 runs ALL success (data sync 08:41Z CI+pages, dad5482 07:33Z, 45faa4b 07:31Z, f54d6f2 07:30Z, 9936970/a880466 07:23-24Z) — GitHub outage era fully behind |
+| 13 | Board format | PASS | validate-board-format.py → PASS 0 issues; board JSONL-canonical (events.jsonl id=2 appended, header normalized single-line: branch=master, cooldown=7200, ticks_total=264, last_commit=c2a30bd); JSONL-NORM-001 + GITREINS-JUDGE bootstrap statuses repaired → complete |
+| 14 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 15 | Deps | PASS | 12 outdated (same set +1 vs tick 263), govulncheck clean — no security-critical |
+| 16 | DuckBrain | PASS | /project/off-by-one/status written via HTTP :3000 (201, id a17f5e66) |
+
+**Notable:** TRANSITION + DEPLOYMENT tick. **(1) SBOX-002 DEPLOYED** — server restarted 07:33:39Z by the parallel session with the post-Aug-2 binary; live proof: required_tools submit → 409 dedup (schema accepted), readonly field in stats. Watch item that stood for 3 days/100h+ uptime is CLOSED. **(2) Parallel-session feature burst documented** (not in foreman board until now): JSONL board migration (623e2ec/6d7f0f7/b681041 — this board is now JSONL-canonical per Bane directive; tasks.md frozen as legacy log), UI-001 markdown rendering DONE (9f01464), UI-002 search pagination DONE (e03db4b), read-only catalog mode (9936970), --host flag (a880466), readonly stats + chat disabled (f54d6f2), search UNION dedupe fix (dad5482), ob1.it.com link (45faa4b); public catalog runs on bunker host per ob1-public-sync cron. **(3) Solver healthy**: 26 completes since 02:35Z (most productive window continues), zero instant-fails, /tmp/pi 17h+ with zero bwrap-class hits. **(4) Stale rows**: 5 in_progress entries (3 restart-killed, 2 old-binary hangs) inflate queue_depth to 7 — cleanup candidate for a future tick; not a regression (pipeline processing pending normally, answer 696 landed 10:34Z). **(5) Cooldown policy changed 900→7200** (scheduler UpdatedAt 06:01Z) — ticks now ~2h. **Flag for fleet-governor**: tasks.jsonl bootstrap is partial vs legacy matrix (SOLVER-001/002, PERF-001, OSS-001, CONFIG-001, INFRA-001 rows not migrated).
+
+**Verdict:** IDLE — 15/16 gates PASS (benchmarks recurring GAP). Deployment milestone (SBOX-002 live), solver productive (583 problems / 696 answers / 696 verified, coverage 1.1938), CI fully green, /tmp/pi stable, board now JSONL-canonical with bootstrap statuses repaired. Remaining parked: SOLVER-001/002, PERF-001, OSS-001, CONFIG-001, INFRA-001 (+ E2E-001/NEVER-DONE fixtures). tasks.md FROZEN as legacy log — future tick records go to events.jsonl.
+
 ### Tick 263 — 2026-08-07 02:35 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
@@ -248,7 +278,8 @@
 | OB1-GAP-003 | README documents POST /api/v1/export and /api/v1/import as functional (lines 103-104) but both return HTTP 501 Not Implemented — distribution/collaboration features inaccessible via documented API. Fix: implement handlers or mark endpoints "planned" in README. PASS: curl -s -o /dev/null -w '%{http_code}' -X POST http://localhost:8766/api/v1/export returns 200 (or README no longer lists export/import as functional). | P1 | 2 | — | api, docs | deepseek-v4-flash @ deepseek-foreman | documented API stub | GLM-5.2 |
 | SOLVER-001 | Add retry logic to cron loop — if solve fails with `signal: killed` or empty stdout, retry once. Raft consensus succeeded on 2nd attempt at 3m4s; TCP proxy passed after timeout bump. | P2 | 3 | — | solver, cron | deepseek-v4-flash @ deepseek-foreman | solver retry logic | GLM-5.2 |
 | SOLVER-002 | B-tree kill investigation — `go-concurrent-btree` crashes Pi Agent instantly (empty stdout, same-second kill). Not timeout. Suspect token overflow from large problem description. Test with smaller prompt. | P2 | 3 | — | debug, solver | deepseek-v4-flash @ deepseek-foreman | B-tree kill investigation | GLM-5.2 |
-| UI-001 | LaTeX + Markdown answer rendering — spectral theorem answers contain LaTeX ($\lambda$, $\langle$, etc.) that renders as raw text. Add MathJax/KaTeX to web UI for math notation, and upgrade the minimal markdown renderer (search.js, explore.js, chat.js) to handle full Markdown with syntax highlighting. | P1 | 3 | — | ui, javascript | deepseek-v4-flash @ deepseek-foreman | LaTeX/markdown rendering | GLM-5.2 |
+| UI-002 | Search pagination + URL state — /api/v1/problems already supported limit/offset but returned page-length totals and search.js had no controls/URL sync. Fix (e03db4b): real totals (SearchCount/CountProblemClasses), SQL-side status filter, Prev/Next + Page X of Y + Showing a-b of N, #search?limit=&offset= URL state with back/forward, offset reset on new query/filter, app.js hash-param preservation, script-order boot race fix, no-cache assets. | P1 | 2 | DONE — e03db4b | ui, javascript, api | deepseek-v4-flash @ deepseek-foreman | pagination | GLM-5.2 |
+| UI-001 | LaTeX + Markdown answer rendering — spectral theorem answers contain LaTeX ($\lambda$, $\langle$, etc.) that renders as raw text. Add MathJax/KaTeX to web UI for math notation, and upgrade the minimal markdown renderer (search.js, explore.js, chat.js) to handle full Markdown with syntax highlighting. | P1 | 3 | PARTIAL — markdown/mermaid/tables DONE 9f01464; LaTeX + syntax highlight pending | ui, javascript | deepseek-v4-flash @ deepseek-foreman | LaTeX/markdown rendering | GLM-5.2 |
 | PERF-001 | DB load optimization — taxonomy page loads all problems in a single request. Add pagination (limit/offset), lazy loading, and response compression. The SQLite FTS5 index exists but frontend loads the full tree on every page view. | P2 | 3 | — | ui, sql, performance | deepseek-v4-flash @ deepseek-foreman | taxonomy pagination | GLM-5.2 |
 | OSS-001 | Open source launch readiness — repo has LICENSE (MIT), CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md, README. Missing: CI badge in README, version badge, Go report card, package documentation link (pkg.go.dev), release workflow (goreleaser). Make public on GitHub. | P2 | 2 | — | docs, ci, github | deepseek-v4-flash @ deepseek-foreman | open-source readiness | GLM-5.2 |
 | CONFIG-001 | Custom Pi Agent config support — currently model is hardcoded to deepseek-v4-flash in DefaultModel. Let users bring their own Pi config (~/.pi/credentials.json) or pass --pi-config flag. Document how to use Anthropic/OpenAI/Gemini keys. Default recommendation stays deepseek-v4-flash in docs. | P1 | 4 | — | config, docs, solver | deepseek-v4-flash @ deepseek-foreman | custom pi-agent config | GLM-5.2 |
@@ -4515,3 +4546,8 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
 
 **Verdict:** IDLE — 0 new gaps. 22/23 gates PASS (1 known recurring gap: benchmarks). 9 active enhancement tasks on board (SBOX-002, SOLVER-001, SOLVER-002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001). DS-007 deduplicated (74 existing). Cooldown verified (1350s). DuckBrain MCP healthy.
 
+
+## [ ] JSONL-NORM-001 — Board storage: JSONL canonical (git-friendly), untrack board.db/parquet (Bane directive 08-07)
+  Board must be git-uploadable JSONL (duckdb-native), not .db files. PASS: git ls-files .coding-hermes/board/ lists no board.db/*.parquet (git rm --cached); tasks.jsonl+events.jsonl tracked & authoritative (duckdb COPY export if migrating); .gitignore covers board.db+*.parquet; parity probe MATCH; commit with co-author trailer.
+  | ✅ DONE (tick 264) | P1 | — | deepseek-v4-flash @ foreman | — | — |
+  Complete per repo state: tasks/events/fixtures/schema.jsonl tracked & authoritative (6d7f0f7/b681041), board.db/parquet untracked, .gitignore covers; status repaired from bootstrap pending at Tick 264. tasks.md frozen as legacy log.
