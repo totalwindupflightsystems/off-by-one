@@ -22,42 +22,14 @@
   let chatInput = null;
   let chatSend = null;
 
-  // Minimal markdown renderer: handles **bold**, `code`, [links](url),
-  // and code fences. This is intentionally lightweight — the server
-  // already sends pre-formatted markdown from Pi Agent.
-  function renderMarkdown(text) {
-    // Escape HTML first to prevent injection.
-    let html = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
-
-    // Code fences (```)
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function (_m, _lang, code) {
-      return '<pre class="chat-code"><code>' + code.trim() + '</code></pre>';
-    });
-
-    // Inline code
-    html = html.replace(/`([^`]+)`/g, '<code class="chat-inline-code">$1</code>');
-
-    // Bold
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-
-    // Links
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-
-    // Line breaks (preserve newlines as <br>)
-    html = html.replace(/\n/g, '<br>');
-
-    return html;
-  }
 
   function appendMessage(type, text, actions) {
     if (!chatBody) return;
 
     const bubble = document.createElement('div');
     bubble.className = 'chat-msg chat-msg-' + type;
-    bubble.innerHTML = renderMarkdown(text || '');
+    bubble.innerHTML = '';
+    window.Ob1Markdown.renderInto(bubble, text || '');
 
     if (actions && actions.length > 0) {
       const actionRow = document.createElement('div');

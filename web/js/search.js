@@ -484,7 +484,8 @@
       var solLabel = el('div', 'answer-label');
       solLabel.textContent = 'Solution';
       var solBody = el('div', 'answer-body');
-      solBody.innerHTML = renderMarkdown(a.solution);
+      solBody.innerHTML = '';
+      window.Ob1Markdown.renderInto(solBody, a.solution);
       sol.appendChild(solLabel);
       sol.appendChild(solBody);
       card.appendChild(sol);
@@ -496,7 +497,8 @@
       var evLabel = el('div', 'answer-label');
       evLabel.textContent = 'Evidence';
       var evBody = el('div', 'answer-body');
-      evBody.innerHTML = renderMarkdown(a.evidence);
+      evBody.innerHTML = '';
+      window.Ob1Markdown.renderInto(evBody, a.evidence);
       ev.appendChild(evLabel);
       ev.appendChild(evBody);
       card.appendChild(ev);
@@ -706,38 +708,4 @@
     }
   }
 
-  // Minimal markdown → HTML: headings, bold, code blocks, inline code.
-  // Not a full markdown parser — just enough for solution/evidence.
-  function renderMarkdown(md) {
-    if (!md) return '';
-    var html = escapeHtml(md);
-    // Code blocks ```
-    html = html.replace(/```([\s\S]*?)```/g, function (_, code) {
-      return '<pre><code>' + code + '</code></pre>';
-    });
-    // Inline code
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-    // Bold
-    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-    // Headings
-    html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
-    html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
-    html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
-    // Line breaks (single newline → <br>, keep <pre> intact)
-    html = html.replace(/(<\/pre>)/g, function (m) { return m + '\x00PRESERVE\x00'; });
-    html = html.split('\x00PRESERVE\x00').map(function (block) {
-      if (block.indexOf('<pre>') !== -1) return block;
-      return block.replace(/\n/g, '<br>');
-    }).join('\x00PRESERVE\x00').replace(/\x00PRESERVE\x00/g, '');
-    return html;
-  }
-
-  function escapeHtml(s) {
-    return s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
 })();
