@@ -25,6 +25,32 @@
 
 
 
+### Tick 261 — 2026-08-07 00:20 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | check_scheduler_project.py → Enabled=true, CooldownS=900, Priority=5, Weight=10; latest_tick.id = off-by-one-2026-08-06-19-20-48 (this tick, no duplicate fire) |
+| 1 | Git status | PASS | HEAD=0664021 (docs: Tick 260), clean tree, 0 ahead / 0 behind origin/master |
+| 2 | Build / vet / gofmt | PASS | go build clean, go vet clean, gofmt -l cmd/ internal/ pkg/ sql/ empty |
+| 3 | go test | PASS | 11 packages ok + 3 expected no-test (cmd/off-by-one, sql/schema, web) — -short -p 1 -count=1 |
+| 4 | GitReins guard | PASS | full mode 4/4: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0) |
+| 5 | Server health | PASS | :8766 200, uptime 101h39m (Aug 2 binary — SBOX-002 STILL not deployed; restart blocked: sudo no-new-privileges in cron) |
+| 6 | DS-007 submit | PASS | sub_7c1f30 queued pos 7 (existing_solutions=76 — sub_3852f5's answer landed, +1) → **COMPLETE 00:25:39 in 12s** — second live post-rebuild E2E proof this tick |
+| 7 | /tmp/pi survival | PASS | pi-monorepo clone intact (rebuilt 18:15 local, tick 260), packages/ all present, pi-agent --help OK; zero `bwrap: Can't find source path` in journal since rebuild |
+| 8 | Solver throughput | PASS | DB queue since 23:10Z: 16 entries — 7 complete (sub_3852f5 self-test 38s + 6 fleet classes: sqlite-insert-replace, python-docker-stale-image, ts-barrel-split, go-rate-limiter, python-dep-pin, go-config-startup-validation), 8 failed (ALL known fleet patterns: instant-fail + 300s bwrap-cap `signal: killed`; sub_73c01b = pre-rebuild /tmp/pi class), 1 in_progress (cpp-deadlock-hang) — lab is the fleet solver and it's working |
+| 9 | Stats | PASS | 538 problems / 647 answers / 647 verified, queue_depth=4, hit_rate=1.0, coverage=1.2026 (+5p/+7a vs tick 260 — fleet-fed growth + local solves) |
+| 10 | Queue window | PASS | 100-entry API window: 73 complete / 27 failed; ZERO entries with completed_at ≥ 23:15Z besides sub_3852f5 (window is per self-test class; fleet entries visible via DB) |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | CI | PASS | **GitHub outage RESOLVED** — githubstatus.com: All Systems Operational; tick-260 push CI green 23:26Z (52s) + pages green 23:19Z; last 5 runs: 4 success + 2 outage-era (20:41 cancelled, 20:59 failed) |
+| 13 | Board format | PASS | validate-board-format.py → PASS, 0 issues; 10 matrix rows (9 pending + SBOX-002 completed); .gitreins/tasks.yaml empty (18 lines, 0 pending) |
+| 14 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 15 | Deps | PASS | 11 outdated (same set: go-cmp, pprof, demangle, isatty, goldmark, x/exp, x/telemetry, cc/v4, libc retracted, memory, sqlite direct) — no security-critical |
+| 16 | DuckBrain | PASS | /project/off-by-one/status written via HTTP :3000 (domain=event, 201, verify GET 200) |
+
+**Notable:** RECOVERY-CONFIRMED tick — tick 260's rebuild is holding and the solver pipeline is fully productive: 7 solves COMPLETED in the 75 min since the rebuild (sub_3852f5 self-test 38s + 6 fleet problem classes), plus this tick's own DS-007 probe sub_7c1f30 completed in 12s (00:25:39) — second live post-rebuild verification. Zero `bwrap: Can't find source path` journal hits since 18:15 local rebuild (0 in 6h+ window vs 84 before). The 4 "signal: killed" journal entries at 23:23-00:13Z are the KNOWN 300s bwrap-cap fleet pattern (5m spans, sub_0ac79d/sub_530802/sub_1b94c5/sub_790813 — go-test-short, godot-tscn, go-cli-help, docs-yaml classes), NOT the /tmp/pi class — consistent with the pre-outage baseline. Stats advanced +5 problems / +7 answers (533→538, 640→647) — fleet-fed ingest + local solves. GitHub outage fully resolved (statuspage All Systems Operational, CI green on tick-260 push). /tmp/pi is the pi-monorepo clone (packages/coding-agent etc., mtime 18:15 local), verified intact. **Watch items unchanged:** (1) SBOX-002 deployment STILL pending — uptime 101h39m, Aug 2 binary, privileged restart required (sudo blocked in cron); (2) 2nd unexplained /tmp/pi wipe root cause STILL unknown — no_agent watchdog for /tmp/pi presence still recommended; (3) benchmarks recurring GAP.
+
+**Verdict:** WORKING — recovery confirmed end-to-end: solver pipeline fully productive post-rebuild (7 fleet solves + 2 self-test E2E verifications in 75 min), zero /tmp/pi-class failures, GitHub outage resolved, all local gates PASS. 15/16 gates PASS (benchmarks recurring GAP). Lab healthy: 538 problems / 647 answers / 647 verified, solver busy. 8 enhancement tasks remain parked (SOLVER-001/002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001 + NEVER-DONE fixture).
+
 ### Tick 260 — 2026-08-06 23:15 UTC (deepseek-v4-flash — foreman)
 
 | # | Gate | Result | Detail |
