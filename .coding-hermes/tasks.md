@@ -24,6 +24,31 @@
 -->
 
 
+### Tick 262 — 2026-08-07 01:30 UTC (deepseek-v4-flash — foreman)
+
+| # | Gate | Result | Detail |
+|---|------|--------|--------|
+| 0 | Scheduler cooldown | PASS | check_scheduler_project.py → Enabled=true, CooldownS=900, DecayRate=1, Priority=5, Weight=10, LastTickStarted=null; latest tick 261 = off-by-one-2026-08-06-19-20-48, this fire 20-29-00 (sequential, no duplicate) |
+| 1 | Git status | PASS | HEAD=46d4ee9 (docs: Tick 261), clean tree, 0 ahead / 0 behind origin/master |
+| 2 | Build / vet / gofmt | PASS | go build clean, go vet clean, gofmt -l cmd/ internal/ pkg/ sql/ empty |
+| 3 | go test | PASS | 11 packages ok + 3 expected no-test (cmd/off-by-one, sql/schema, web) — -short -p 1 -count=1 -timeout 120s |
+| 4 | GitReins guard | PASS | full mode 4/4: secrets clean, go_build ok, go_lint ok, go_tests ok (exit 0) |
+| 5 | Server health | PASS | :8766 200, uptime 102h48m (Aug 2 binary — SBOX-002 STILL not deployed; restart blocked: sudo no-new-privileges in cron) |
+| 6 | DS-007 submit | PASS | sub_79e7b6 queued pos 6 (existing_solutions=77 — sub_7c1f30's answer landed, +1) → still pending at tick write (2 fleet entries ahead + 1 in_progress; NO instant-fail = solver pipeline alive) |
+| 7 | /tmp/pi survival | PASS | pi-monorepo clone intact (rebuilt 18:15 local tick 260), package.json + packages/ all present, pi-agent --help OK (`--problem-file required`); journal since 00:20Z: ZERO `Can't find source path`, ZERO `ERR_INVALID_PACKAGE_CONFIG`, ZERO `signal: killed` |
+| 8 | Solver throughput | PASS | DB queue since 00:20Z: **19 entries — 9 complete** (sub_7c1f30 self-test 12s + 8 fleet classes: typescript-barrel-split, ts-commander-silent-noop, python-cli-help-flag, go-api-route-rename, go-cli-ssh-identitiesonly, go-gateway-missing-routes, python-pydantic-extra-forbid, typescript-refactor-barrel-split), 7 failed (ALL exactly 300s = known bwrap-cap fleet pattern, ZERO instant-fails), 1 in_progress (python-softmax-fp16 01:29:52), 2 pending ahead of probe — **most productive window since the rebuild** |
+| 9 | Stats | PASS | 545 problems / 656 answers / 656 verified, queue_depth=5, hit_rate=1.0, coverage=1.2037 (+7p/+9a vs tick 261 — fleet-fed growth + local solves) |
+| 10 | Queue window | PASS | API 100-window: 74 complete / 25 failed / 1 pending — the 2 new window entries (sub_b16b96, sub_916cc5) are fleet 300s caps already counted in gate 8; DB query used for the full since-cutoff picture (window is per-class; fleet entries visible via DB) |
+| 11 | Endpoints | PASS | 7/7 return 200 (/, /health, /api/v1/problems, /api/v1/queue, /api/v1/taxonomy, /api/v1/stats, /openapi.json) |
+| 12 | CI | PASS | last 6 runs ALL success: tick-261 push CI green 00:26Z (51s) + pages green 00:26Z — GitHub outage fully resolved, no recurrences |
+| 13 | Board format | PASS | validate-board-format.py → PASS, 0 issues; 10 matrix rows (9 pending + SBOX-002 completed); .gitreins/tasks.yaml empty (18 lines, 0 pending) |
+| 14 | Benchmarks | GAP | 0 benchmarks (recurring — 80+ ticks) |
+| 15 | Deps | PASS | 11 outdated (same set: go-cmp, pprof, demangle, isatty, goldmark, x/exp, x/telemetry, cc/v4, libc retracted, memory, sqlite direct) — no security-critical |
+| 16 | DuckBrain | PASS | /project/off-by-one/status written via HTTP :3000 (domain=event, verify GET) |
+
+**Notable:** IDLE audit tick — no worker in flight, no code changes. Recovery continues to hold: /tmp/pi has now survived 7h+ since the tick-260 rebuild with ZERO bwrap-class errors in the journal (previously 84 hits in 3.5h). Solver pipeline HIGHLY productive: 19 DB queue entries since tick-261 cutoff — 9 complete (8 fleet solves + self-test), 7 failed ALL at exactly 300s (known bwrap-cap fleet class, ZERO instant-fails), 1 in_progress, 2 pending ahead of this tick's probe. Stats advanced +7 problems / +9 answers since tick 261 (545/656) — fleet-fed ingest + local solves. **Watch items unchanged:** (1) SBOX-002 deployment STILL pending — uptime 102h48m, Aug 2 binary, privileged restart required (sudo blocked in cron); (2) 2nd unexplained /tmp/pi wipe root cause STILL unknown — no_agent watchdog for /tmp/pi presence still recommended; (3) benchmarks recurring GAP.
+
+**Verdict:** IDLE — 15/16 gates PASS (benchmarks recurring GAP). Lab healthy and productive: 545 problems / 656 answers / 656 verified, coverage 1.2037, solver active (8 fleet solves completed this window; probe queued behind 2). Recovery confirmed stable: zero /tmp/pi-class failures since rebuild. 8 enhancement tasks remain parked (SOLVER-001/002, UI-001, PERF-001, OSS-001, CONFIG-001, E2E-001, INFRA-001 + NEVER-DONE fixture).
 
 ### Tick 261 — 2026-08-07 00:20 UTC (deepseek-v4-flash — foreman)
 
