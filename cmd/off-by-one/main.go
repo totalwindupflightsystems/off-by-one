@@ -49,6 +49,7 @@ var version = "0.1.0-dev"
 
 func main() {
 	port := flag.Int("port", envInt("OFF_BY_ONE_PORT", 8766), "HTTP listen port")
+	host := flag.String("host", envString("OFF_BY_ONE_HOST", ""), "HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy)")
 	dbPath := flag.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path")
 	bwrapPath := flag.String("bwrap", envString("OFF_BY_ONE_BWRAP", "/usr/bin/bwrap"), "Path to bwrap binary")
 	piAgentPath := flag.String("pi-agent", envString("OFF_BY_ONE_PI_AGENT", "pi-agent"), "Path to pi-agent binary")
@@ -196,7 +197,7 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:              fmt.Sprintf(":%d", *port),
+		Addr:              fmt.Sprintf("%s:%d", *host, *port),
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
