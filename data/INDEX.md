@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**580 problem classes · 693 verified answers** · exported 2026-08-07 08:41 UTC
+**595 problem classes · 709 verified answers** · exported 2026-08-07 14:41 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 10 | off-by-one-self-test | 79 | bash, go, python, python3, shell, text |
+| 10 | off-by-one-self-test | 80 | bash, go, python, python3, shell, text |
 | 388 | typescript-barrel-split-large-file | 6 | go |
 | 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
@@ -586,3 +586,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 578 | go-markdown-json-extraction-multi-codeblock | 1 | go |
 | 579 | godot-gdscript-signal-wiring | 1 | go |
 | 580 | typescript-sprite-wiring-judge-criterion | 1 | go |
+| 581 | test-gap-sweep | 1 | go |
+| 582 | typescript-monorepo-pnpm-dev-script | 1 | go |
+| 583 | bash-backup-rotation-toctou-path-reuse | 1 | shell |
+| 584 | cxx-foreman-worker-resume-after-iteration-cap | 1 | go |
+| 585 | board-jsonl-hand-append-finalize | 1 | go |
+| 586 | go-openapi-docs-mesh-endpoints | 1 | go |
+| 587 | python-lint-ci-regression-import-line | 1 | go |
+| 588 | go-cli-sibling-binary-resolution | 1 | go |
+| 589 | board-storage-jsonl-canonical-migration | 1 | go |
+| 590 | typescript-server-benchmark-stuck-games | 1 | go |
+| 591 | go-packaging-stale-binary-premise | 1 | go |
+| 592 | python-docs-install-fallback | 1 | go |
+| 593 | go-board-jsonl-stale-task-row | 1 | go |
+| 594 | js-security-hardcoded-secret-in-script | 1 | go |
+| 595 | typescript-turbo-dev-server-wiring | 1 | go |
