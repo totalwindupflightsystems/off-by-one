@@ -310,3 +310,37 @@ func TestCountProblemClasses_MatchesListPagination(t *testing.T) {
 		t.Errorf("CountProblemClasses = %d, want 5 (full total, not page size)", n)
 	}
 }
+
+// TestSearch_DeduplicatesClassMatchesAndAnswerMatches: a class whose title
+// AND whose answer's solution both match the query must appear exactly once
+// (the two UNION branches produce distinct rows; we dedupe by class id).
+func TestSearch_DeduplicatesClassMatchesAndAnswerMatches(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	cid, err := s.CreateProblemClass(ctx, "dup-check-regression", "dup-check-regression description")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	if _, err := s.CreateAnswerNode(ctx, cid, 0, "docker", "go", "v1",
+		"the dup-check-regression solution matches both branches", "", "{}"); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+
+	hits, err := s.Search(ctx, "dup-check-regression", "", "", "", 20, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) != 1 {
+		t.Fatalf("Search returned %d hits, want 1 (class must not be duplicated across UNION branches)", len(hits))
+	}
+	if hits[0].ClassID != cid {
+		t.Errorf("hit class id = %d, want %d", hits[0].ClassID, cid)
+	}
+	total, err := s.SearchCount(ctx, "dup-check-regression", "", "", "")
+	if err != nil {
+		t.Fatalf("SearchCount: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("SearchCount = %d, want 1 (must agree with hit count)", total)
+	}
+}

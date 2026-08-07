@@ -47,35 +47,48 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 	// answer_nodes solution. The answer query joins the FTS index with
 	// its parent problem_class for the title. Status filter applies to
 	// both.
+	//
+	// A class can match BOTH branches (title mentions the term AND an
+	// answer's solution does too) — the UNION rows differ in snippet/
+	// rank/answer_id, so SQLite keeps both. We dedupe by class id with
+	// ROW_NUMBER, preferring the class-level hit (answer_id NULL), so
+	// pagination aligns with SearchCount (which counts distinct ids).
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT pc.id, pc.title, snippet(problem_classes_fts, 1, '[', ']', '…', 8) AS snip,
-		       rank, NULL AS answer_id
-		FROM problem_classes_fts
-		JOIN problem_classes pc ON pc.id = problem_classes_fts.rowid
-		WHERE problem_classes_fts MATCH ?
-		  AND (? = '' OR EXISTS (
-		      SELECT 1 FROM answer_nodes a
-		      WHERE a.class_id = pc.id AND a.env = ?))
-		  AND (? = '' OR EXISTS (
-		      SELECT 1 FROM answer_nodes a
-		      WHERE a.class_id = pc.id AND a.lang = ?))
-		  AND (? = '' OR EXISTS (
-		      SELECT 1 FROM answer_nodes a
-		      WHERE a.class_id = pc.id AND (CASE WHEN ? = 'solved'
-		                                         THEN a.status IN ('verified', 'ci_passed')
-		                                         ELSE a.status = ? END)))
-		UNION
-		SELECT pc.id, pc.title, snippet(answer_nodes_fts, 0, '[', ']', '…', 8) AS snip,
-		       rank, a.id AS answer_id
-		FROM answer_nodes_fts
-		JOIN answer_nodes a ON a.id = answer_nodes_fts.rowid
-		JOIN problem_classes pc ON pc.id = a.class_id
-		WHERE answer_nodes_fts MATCH ?
-		  AND (? = '' OR a.env = ?)
-		  AND (? = '' OR a.lang = ?)
-		  AND (? = '' OR (CASE WHEN ? = 'solved'
-		                       THEN a.status IN ('verified', 'ci_passed')
-		                       ELSE a.status = ? END))
+		SELECT id, title, snip, rank, answer_id FROM (
+			SELECT *, ROW_NUMBER() OVER (
+				PARTITION BY id ORDER BY has_answer, rank
+			) AS rn FROM (
+				SELECT pc.id, pc.title, snippet(problem_classes_fts, 1, '[', ']', '…', 8) AS snip,
+				       rank, NULL AS answer_id, 0 AS has_answer
+				FROM problem_classes_fts
+				JOIN problem_classes pc ON pc.id = problem_classes_fts.rowid
+				WHERE problem_classes_fts MATCH ?
+				  AND (? = '' OR EXISTS (
+				      SELECT 1 FROM answer_nodes a
+				      WHERE a.class_id = pc.id AND a.env = ?))
+				  AND (? = '' OR EXISTS (
+				      SELECT 1 FROM answer_nodes a
+				      WHERE a.class_id = pc.id AND a.lang = ?))
+				  AND (? = '' OR EXISTS (
+				      SELECT 1 FROM answer_nodes a
+				      WHERE a.class_id = pc.id AND (CASE WHEN ? = 'solved'
+				                                         THEN a.status IN ('verified', 'ci_passed')
+				                                         ELSE a.status = ? END)))
+				UNION
+				SELECT pc.id, pc.title, snippet(answer_nodes_fts, 0, '[', ']', '…', 8) AS snip,
+				       rank, a.id AS answer_id, 1 AS has_answer
+				FROM answer_nodes_fts
+				JOIN answer_nodes a ON a.id = answer_nodes_fts.rowid
+				JOIN problem_classes pc ON pc.id = a.class_id
+				WHERE answer_nodes_fts MATCH ?
+				  AND (? = '' OR a.env = ?)
+				  AND (? = '' OR a.lang = ?)
+				  AND (? = '' OR (CASE WHEN ? = 'solved'
+				                       THEN a.status IN ('verified', 'ci_passed')
+				                       ELSE a.status = ? END))
+			)
+		)
+		WHERE rn = 1
 		ORDER BY rank
 		LIMIT ? OFFSET ?
 	`, ftsQuery, env, env, lang, lang, status, status, status,
