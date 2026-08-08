@@ -53,6 +53,12 @@ type Server struct {
 	// keys are present on the box.
 	ReadOnly bool
 
+	// SolverAvailable reports whether a solver (bwrap + pi-agent) is
+	// wired up. When false the cron loop is not running and queued
+	// submissions will not be processed — surfaced on /api/v1/stats
+	// so users can tell why their submission is stuck.
+	SolverAvailable bool
+
 	// StartedAt is set in New and used by /health to report uptime.
 	StartedAt time.Time
 }

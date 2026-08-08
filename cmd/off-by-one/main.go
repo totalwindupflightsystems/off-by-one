@@ -151,7 +151,7 @@ func main() {
 			log.Printf("cron loop stopped")
 		}()
 	} else {
-		log.Printf("cron loop not started (no solver)")
+		log.Printf("WARN: cron loop not started — no solver available (bwrap/pi-agent missing or sandbox skipped); queued submissions will NOT be processed until the server is restarted with a solver")
 	}
 
 	// --- 5. API server -------------------------------------------------
@@ -160,6 +160,7 @@ func main() {
 	apiServer.ExportLocalDir = *exportDir
 	apiServer.ImportLocalDir = *importDir
 	apiServer.ReadOnly = *readOnly
+	apiServer.SolverAvailable = solverExec != nil
 	apiHandler := apiServer.Handler()
 
 	// --- 6. WebSocket chat handler ------------------------------------

@@ -639,6 +639,42 @@ func TestStats_Populated(t *testing.T) {
 	}
 }
 
+// TestStats_SolverAvailable asserts the stats response always carries the
+// solver_available field and that it mirrors Server.SolverAvailable — the
+// signal that tells users why their submissions sit queued forever.
+func TestStats_SolverAvailable(t *testing.T) {
+	s, _, _ := newTestServer(t)
+
+	rr := do(t, s, "GET", "/api/v1/stats", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	v, ok := body["solver_available"]
+	if !ok {
+		t.Fatalf("solver_available missing from stats response: %v", body)
+	}
+	if v != false {
+		t.Errorf("solver_available = %v, want false (no solver wired)", v)
+	}
+
+	s.SolverAvailable = true
+	rr = do(t, s, "GET", "/api/v1/stats", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	body = map[string]any{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["solver_available"] != true {
+		t.Errorf("solver_available = %v, want true", body["solver_available"])
+	}
+}
+
 // --- Routing sanity ------------------------------------------------------
 
 // Verify a known-unknown path returns 404, not 500 (a common bug

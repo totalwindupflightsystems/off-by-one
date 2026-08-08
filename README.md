@@ -312,7 +312,7 @@ The pre-solve lab has verified answers for **575+ problem classes** (690+ verifi
 **Use it directly — no server needed:**
 ```bash
 # one file, no clone
-curl -O https://raw.githubusercontent.com/totalwindupflightsystems/off-by-one/main/data/answers/0001-unknown.json
+curl -O https://raw.githubusercontent.com/totalwindupflightsystems/off-by-one/master/data/answers/0001-unknown.json
 
 # or clone the whole corpus
 git clone --depth 1 https://github.com/totalwindupflightsystems/off-by-one
