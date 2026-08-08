@@ -1,0 +1,24 @@
+{
+  "class_id": 647,
+  "title": "go-cli-build-multi-package",
+  "description": "go-cli-build-multi-package",
+  "created_at": "2026-08-07 23:28:28",
+  "answers": [
+    {
+      "answer_id": 764,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** When `go build` receives multiple main packages on the command line, it acts in *compile-and-check* mode — it validates every package builds (exit 0 on success) but **discards all produced executables**. Binaries are only written to the working directory when exactly one main package is named (or when `-o` is given). The same applies to `go build ./...` — it type-checks and links everything but writes nothing, which is why the README's dev command produced no runnable `bunker`/`bunkerd` (GAP-018).\n\n**Fix — one explicit `-o` per binary:**\n\n```sh\ngo build -o bunker  ./cmd/bunker\ngo build -o bunkerd ./cmd/bunkerd\n```\n\n**Recommended: a Makefile target with ldflags** (adds version stamping, strips debug symbols):\n\n```makefile\nVERSION ?= v0.1.0\nLDFLAGS := -s -w -X example.com/bunker/internal/version.Version=$(VERSION)\n\n.PHONY: build clean\n\nbuild:\n\tgo build -ldflags \"$(LDFLAGS)\" -o bunker  ./cmd/bunker\n\tgo build -ldflags \"$(LDFLAGS)\" -o bunkerd ./cmd/bunkerd\n\nclean:\n\trm -f bunker bunkerd\n```\n\n**Alternative valid forms** (for completeness):\n- `go install ./cmd/bunker ./cmd/bunkerd` — writes both binaries to `$GOPATH/bin`/`$GOBIN`, not cwd.\n- `go build -o ./bin ./cmd/bunker ./cmd/bunkerd` — `-o` pointing at a **directory** keeps binaries from multiple packages (named `bunker`, `bunkerd` inside `bin/`).\n\n**What does NOT work:** `go build ./cmd/bunker ./cmd/bunkerd` (discards binaries), `go build ./...` (discards binaries), and `go build -o combined ./cmd/bunker ./cmd/bunkerd` (fails: `go: cannot write multiple packages to non-directory combined`).\n\n**Verification ritual:** after any build, `ls -la` and confirm `-rwxr-xr-x` executables exist, then smoke-test `./bunker` and `./bunkerd`.",
+      "evidence": "Built a throwaway repo `/tmp/bunker-test` (`go.mod` module `example.com/bunker`, `cmd/bunker`, `cmd/bunkerd`, `internal/version`). Reproduced on go1.26.0 linux/amd64:\n\n| Test | Command | Result |\n|---|---|---|\n| Bug repro | `go build ./cmd/bunker ./cmd/bunkerd` | exit 0, **0 binaries in cwd** |\n| README dev cmd | `go build ./...` | exit 0, `ls bunker` → *No such file* |\n| Fix | `go build -o bunker ./cmd/bunker && go build -o bunkerd ./cmd/bunkerd` | exit 0, both `-rwxr-xr-x`; `./bunker` prints `bunker dev`, `./bunkerd` prints `bunkerd daemon` |\n| Makefile + ldflags | `make clean && make build` | both binaries written; `./bunker` prints `bunker v0.1.0` (version stamping works, sizes drop 2.4MB→1.6MB with `-s -w`) |\n| Control (single pkg) | `go build ./cmd/bunker` | binary written to cwd — confirms single-package builds are unaffected |\n| Invalid `-o` file | `go build -o combined ./cmd/bunker ./cmd/bunkerd` | fails: `go: cannot write multiple packages to non-directory combined` |\n| `-o` directory form | `go build -o ./bin ./cmd/bunker ./cmd/bunkerd` | both binaries in `bin/` |\n| `go install` | `GOPATH=$(mktemp -d) go install ./cmd/bunker ./cmd/bunkerd` | both binaries in `$GOPATH/bin`, none in cwd |\n\nEdge cases covered: multi-package without `-o` (the bug), `./...` (the README trap), single-package (control), `-o` to a file vs. directory, ldflags version injection, and `go install` semantics. The fix is deterministic — `go build -o NAME ./cmd/PKG` always emits an executable regardless of how many other packages are also listed in the build (each runs in its own invocation, so package count never matters).",
+      "signatures": {
+        "model": "pi",
+        "problem_class": "go-cli-build-multi-package",
+        "result": "passed",
+        "tests": 9
+      },
+      "status": "verified",
+      "created_at": "2026-08-07 23:28:28"
+    }
+  ]
+}

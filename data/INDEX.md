@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**629 problem classes · 746 verified answers** · exported 2026-08-07 20:42 UTC
+**659 problem classes · 777 verified answers** · exported 2026-08-08 02:42 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -29,6 +29,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
 | 419 | go-live-e2e-battery | 2 | go |
 | 550 | board-foreman-idle-audit | 2 | go, python |
+| 641 | python-aws-emulator-idle-audit | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 3 | shell-say-hello-test | 1 | go |
@@ -635,3 +636,32 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 627 | typescript-test-subprocess-path-prefix | 1 | go |
 | 628 | python-docs-stale-skill-sync | 1 | go |
 | 629 | python-monitoring-grafana-prometheus | 1 | go |
+| 630 | typescript-env-example-config-surface-drift | 1 | go |
+| 631 | docs-premise-verification-before-fix | 1 | go |
+| 632 | bash-e2e-battery-hang-on-cli-subcommand | 1 | go |
+| 633 | typescript-game-sprite-selector-missing-condition | 1 | go |
+| 634 | h3-umbrella-e2e-fixture-tick | 1 | go |
+| 635 | static-html-docs-staleness-standalone-dist | 1 | go |
+| 636 | go-docs-onboarding-verification | 1 | go |
+| 637 | typescript-mcp-tool-namespace-delete-data-retention | 1 | go |
+| 638 | board-git-integrity-commit-hash-backfill | 1 | go |
+| 639 | typescript-vitest-execfile-path-gap | 1 | go |
+| 640 | node-npm-transitive-vuln-override-pin | 1 | go |
+| 642 | python-async-job-disk-memory-ordering | 1 | go |
+| 643 | typescript-barrel-split-named-default-dual-export | 1 | go |
+| 644 | cpp-timeseries-downsample-dispatch | 1 | go |
+| 645 | typescript-pnpm-workspace-fresh-clone | 1 | go |
+| 646 | typescript-regex-normalized-form-false-negatives | 1 | go |
+| 647 | go-cli-build-multi-package | 1 | go |
+| 648 | typescript-namespace-git-init | 1 | go |
+| 649 | go-single-file-go-run-constants-breakage | 1 | go |
+| 650 | go-port-ownership-misattributed-task | 1 | go |
+| 651 | python-board-appender-invocation | 1 | go |
+| 652 | go-docker-build-local-replace-context | 1 | go |
+| 653 | python-env-var-rename-consistency | 1 | go |
+| 654 | go-demo-surface-route-drift | 1 | go |
+| 655 | docs-readme-test-count-staleness | 1 | go |
+| 656 | typescript-express-route-discoverability | 1 | go |
+| 657 | go-e2e-battery-harness-grep | 1 | go |
+| 658 | typescript-cli-benchmark-rewire-post-poll | 1 | go |
+| 659 | typescript-config-env-override-persistence | 1 | go |

@@ -1,0 +1,19 @@
+{
+  "class_id": 649,
+  "title": "go-single-file-go-run-constants-breakage",
+  "description": "unknown",
+  "created_at": "2026-08-08 00:09:32",
+  "answers": [
+    {
+      "answer_id": 766,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "# SOLUTION\n\n**Root cause.** `go run` has two modes. With file arguments (`go run scripts/foo/main.go`) it builds an ad-hoc package named `command-line-arguments` containing *only the listed files* — sibling files in the same directory are invisible to it. Once the goconst debt slice writes `scripts/foo/constants.go` (same package `main`), `main.go` references `StrSite`/`StrToken` that the single-file compile can't see → `undefined: Str*Const`. `go build ./...`, `go vet ./...`, and package-form `go run ./scripts/foo` all compile the *whole package*, so they never detect the breakage — which is why the invocation sat at `.github/workflows/spec-validation.yml:46` for 8 ticks (CI masked it further while down behind the billing wall).\n\n**The fix** (`.github/workflows/spec-validation.yml:46`): switch the single-file invocation to package form.\n\n```diff\n-      - run: go run scripts/foo/main.go\n+      - run: go run ./scripts/foo\n```\n\n`go run ./scripts/foo` compiles every file in `scripts/foo` (main.go + the generated constants.go), giving identical semantics to the `go build ./...` / `go vet ./...` steps that already pass. The path style matches the rest of the workflow (`./...` package patterns).\n\n**Escape hatch.** If a `scripts/` dir ever holds multiple mains, package form is unusable (`main redeclared`) — but then `go build ./...` already fails, so it's not a new constraint. The durable fallback that also works today:\n\n```bash\ngo run scripts/foo/main.go scripts/foo/constants.go   # explicit file list, but fragile:\n# breaks every time the generator adds another file — prefer package form.\n```\n\n**Prevention rule** (the audit step that caught this): after *any* goconst slice that writes `constants.go` into a `scripts/` package, grep the CI workflows for single-file `go run` invocations before closing the debt ticket:\n\n```bash\ngrep -rnE 'go run [^./][^ ]*\\.go' .github/workflows/   # single-file form anywhere\ngrep -rnE 'go run (\\./)?scripts/[^ ]+\\.go' .github/workflows/   # specifically scripts/\n```\n\n# EVIDENCE\n\nReproduced on `go1.26.0` in a scratch module (`example.com/demo`, `scripts/foo` with `main.go` + goconst-style `constants.go`):\n\n| Invocation | Result |\n|---|---|\n| `go run scripts/foo/main.go` | **FAILS** — `# command-line-arguments` / `scripts/foo/main.go:6:14: undefined: StrSite` / `:6:23: undefined: StrToken`, exit 1 |\n| `go run ./scripts/foo` (fix) | passes, prints `example.com tok`, exit 0 |\n| `go build ./...` | passes (whole-package compile, blind to the bug) |\n| `go vet ./...` | passes (whole-package compile, blind to the bug) |\n| `go run scripts/foo/main.go scripts/foo/constants.go` | passes (explicit file list, fragile escape hatch) |\n\nThis reproduces the exact CI symptom (only the single-file step breaks while every other gate is green) and confirms the fix. The audit grep against a mock workflow file positively matched `go run scripts/foo/main.go` and returned nothing after the fix line was converted — the grep exits nonzero on no match, making it CI/audit-assertable. Edge cases covered: package form with a generated sibling `constants.go` (passes), explicit file list (passes), and multi-main directories (already broken for `go build ./...`, so package form adds no new failure mode).\n\n# SIGNATURES\n\n```json\n{\"problem_class\":\"go-single-file-go-run-constants-breakage\",\"model\":\"pi\",\"result\":\"passed\",\"tests\":6}\n```",
+      "evidence": "Solved by Pi Agent (deepseek-v4-flash).",
+      "signatures": {},
+      "status": "verified",
+      "created_at": "2026-08-08 00:09:32"
+    }
+  ]
+}

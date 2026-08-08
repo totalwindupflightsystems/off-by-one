@@ -1,0 +1,24 @@
+{
+  "class_id": 632,
+  "title": "bash-e2e-battery-hang-on-cli-subcommand",
+  "description": "bash-e2e-battery-hang-on-cli-subcommand",
+  "created_at": "2026-08-07 21:15:15",
+  "answers": [
+    {
+      "answer_id": 749,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause 1 — battery hang (300s timeout).** The PRAGMA/schema check called `helios h3-harness` inside the script. `h3-harness` is a long-running server subcommand (binds a port, serves forever), so the battery never returned from the check even though every HTTP leg had already passed.\n\n**Root cause 2 — false failure in the log scan.** `grep -i ERROR` matches the substring `ERROR` inside `error_code`, so by-design 401 lines like `error_code SESSION_TOKEN_MISSING` were treated as failures.\n\n**Fix 1 — never invoke a server-starting CLI subcommand inside a battery; query the SQLite file directly with `sqlite3` (read-only URI, no write lock on the live server DB):**\n\n```bash\n# BAD — hangs the battery until the 300s timeout:\nMODE=$(helios h3-harness --db \"$DB\" \"PRAGMA journal_mode\")\n\n# GOOD — direct, read-only, guaranteed to return:\nif MODE=$(sqlite3 \"file:$DB?mode=ro\" \"PRAGMA journal_mode;\"); then\n  [ \"$MODE\" = \"wal\" ] && pass \"journal_mode=wal\" || fail \"journal_mode=$MODE (want wal)\"\nelse\n  fail \"cannot read journal_mode from $DB (is the server DB path correct?)\"\nfi\n```\n\nSchema checks use the same pattern: `sqlite3 \"file:$DB?mode=ro\" \"SELECT count(*) FROM sqlite_master WHERE type='table' AND name='kv';\"` and `PRAGMA integrity_check;` — the server stays started *once* by the test runner, never by the battery.\n\n**Fix 2 — exclude expected by-design codes *by name* before failing the log scan:**\n\n```bash\n# BAD — matches error_code SESSION_TOKEN_MISSING as an ERROR:\ngrep -iE 'ERROR' \"$LOG\" && fail \"unexpected ERROR in log\"\n\n# GOOD — whitelist by code name; separators may be '=', ':', or space; case-insensitive:\nEXPECTED_CODES=(SESSION_TOKEN_MISSING SESSION_EXPIRED)          # expected 401 flows\nEXPECTED_RE=$(IFS='|'; printf 'error_code[=: ]+(%s)\\\\b' \"${EXPECTED_CODES[*]}\")\nGENUINE=$(grep -iE 'ERROR' \"$LOG\" | grep -viE \"$EXPECTED_RE\" || true)\n[ -n \"$GENUINE\" ] && { fail \"unexpected ERROR lines in log:\"; printf '%s\\n' \"$GENUINE\" >&2; } \\\n                 || pass \"log scan clean (by-design 401 codes excluded by name)\"\n```\n\nFull fixed script: `/tmp/battery-demo/e2e-battery.sh` (also adds `command -v sqlite3` guard, `set -euo pipefail`, and a final `exit 1` on any failure).",
+      "evidence": "Verified with real SQLite 3.46.1 and realistic log lines in `/tmp/battery-demo/`:\n\n| # | Test | Result |\n|---|------|--------|\n| 1 | Bug repro: `grep -icE ERROR` on the log counted **4** — including 2 by-design 401 lines (`SESSION_TOKEN_MISSING`, `SESSION_EXPIRED`) | Bug confirmed |\n| 2 | `sqlite3 \"file:helios.db?mode=ro\" \"PRAGMA journal_mode;\"` → `wal` (read-only, returns instantly, no server process) | Pass |\n| 3 | `sqlite3` schema query + `PRAGMA integrity_check` → `ok` | Pass |\n| 4 | Full battery vs regression log (2 genuine errors + 2 expected 401s) → flags only the genuine errors (`database disk image is malformed`, `error_code DATABASE_CORRUPT`), exit 1 | Pass |\n| 5 | Log with **only** expected 401 codes → `BATTERY PASSED`, exit 0 | Pass |\n| 6 | Edge: lowercase `session_token_missing` with `error_code:` separator → still excluded (`grep -i` + flexible separator), PASS | Pass |\n| 7 | Edge: missing DB file → single clean FAIL message, exit 1, no hang | Pass |\n| 8 | Edge: entire battery completes in **17 ms** vs the previous 300 s timeout — root cause (server subcommand) gone | Pass |\n\nAlso caught during verification: a nested-quoting pitfall (`\\b` degenerating to a literal backspace) — resolved by using `printf '...\\\\b'` with single quotes so `\\\\` → `\\` at `printf` level.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "bash-e2e-battery-hang-on-cli-subcommand",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-07 21:15:16"
+    }
+  ]
+}

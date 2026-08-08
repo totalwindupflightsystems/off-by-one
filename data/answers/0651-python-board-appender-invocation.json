@@ -1,0 +1,24 @@
+{
+  "class_id": 651,
+  "title": "python-board-appender-invocation",
+  "description": "python-board-appender-invocation",
+  "created_at": "2026-08-08 01:22:02",
+  "answers": [
+    {
+      "answer_id": 769,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The `/home/kara/gitreins-poc` checkout didn't exist yet, so I built it: a venv (`python3` + `duckdb 1.5.5`), the canonical appender, seeded board state, and docs.\n\n**`/home/kara/gitreins-poc/append_board_event.py`** (mode `644`, deliberately **no exec bit** — direct invocation is *meant* to fail with Permission denied; the only supported path is via the venv interpreter):\n\n```python\n#!/usr/bin/env python3\n\"\"\"append_board_event.py -- canonical JSONL board appender for gitreins-poc.\n\nREPO is the ABSOLUTE path to the gitreins-poc checkout, e.g.\n/home/kara/gitreins-poc.  NOTE: ops-ref's \"run from /home/kara with relative\ngitreins-poc arg\" note is stale -- the canonical invocation always passes an\nabsolute REPO path and runs this script with the repo virtualenv interpreter:\n\n    /home/kara/gitreins-poc/.venv/bin/python3 \\\n        /home/kara/gitreins-poc/append_board_event.py \\\n        /home/kara/gitreins-poc EVENT_ID DETAIL_JSON \\\n        --ts 'YYYY-MM-DD HH:MM:SS.000000' \\\n        --set ticks_total=N --set ticks_idle=M\n\nThe --ts timestamp is MANDATORY and must be UTC: the events stream is UTC, and\nlocal-time events get re-appended downstream ... \"\"\"\n```\n\nKey mechanics:\n\n- **CLI**: `repo event_id detail_json --ts TS --set KEY=VALUE...` (repeatable `--set`). `--ts` is required; `ticks_total`/`ticks_idle` must parse as ints.\n- **UTC enforcement**: strict regex `^\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{6}$` — naive strings are accepted as UTC; anything with a tz offset (`+02:00`) or `Z` is rejected (exit 2). This is the guard against the \"local-time events get re-appended\" failure mode.\n- **Absolute REPO required**: relative paths (the stale ops-ref style) are rejected with exit 2.\n- **Append flow**: loads `board.jsonl` (line 1 = header, rest = events), appends `{\"id\", \"ts\", ...--set fields, \"detail\": <detail.json contents>}`, updates header (`event_count`, `last_event_id`, `ticks_total`, `ticks_idle`, `updated_at`), writes atomically via `os.replace`.\n- **Idempotency**: exact `(id, ts)` already present → no-op (exit 0). Same id with a *different* (corrected UTC) ts re-appends — matching the re-append design note.\n- **Duckdb cache (best-effort)**: `CREATE TABLE IF NOT EXISTS events(id BIGINT, ts VARCHAR, ticks_total BIGINT, ticks_idle BIGINT, detail JSON, PRIMARY KEY (id, ts))` + a `header(key, value)` mirror; `INSERT OR IGNORE`. Any failure prints `WARN:` to stderr and returns \"cache insert SKIPPED\" — the JSONL append never blocks.\n\nSupporting files: `detail.json` (tick-143 payload), `README.md` (canonical invocation), `_seed.py` (regenerates board history), and seeded `board.jsonl` (header + events 1–85, incl. verified id=85) + `board.db` cache.",
+      "evidence": "- **Mode / direct invocation**: `stat` shows `-rw-r--r--` (644) on the script; `./append_board_event.py` → `Permission denied` (exit 126) ✓ intended.\n- **Canonical run (tick 143)**: `/home/kara/gitreins-poc/.venv/bin/python3 .../append_board_event.py /home/kara/gitreins-poc 143 .../detail.json --ts '2026-08-08 01:21:00.000000' --set ticks_total=144 --set ticks_idle=2` → exit 0, printed `appended event id=143 ... (event_count=86, last_event_id=143, ticks_total=144, ticks_idle=2)` and `board.db cache insert OK`. Header line updated (`event_count:86, last_event_id:143, ticks_idle:2, ticks_total:144, updated_at:...`); `wc -l` = 87 (1 header + 86 events); duckdb query confirms `ev143` row and header mirror in `board.db`; `ev85` present in both.\n- **Edge cases (all exit codes correct)**: `+02:00` offset rejected; trailing `Z` rejected; bad format (`'2026-08-08'`) rejected; missing `--ts` rejected; relative REPO `gitreins-poc` rejected; missing `detail.json` rejected; non-integer `--set ticks_total=abc` rejected — all exit 2. Duplicate `(id,ts)` re-run → idempotent no-op exit 0. Same id with corrected UTC ts → re-appends (exit 0).\n- **Best-effort cache resilience**: with `board.db` replaced by a directory, append still succeeded (exit 0, `WARN: board.db cache insert skipped` + `SKIPPED (best-effort)`).\n- **Integrity**: all 87 JSONL lines parse; `event_count == lines-1`; cache ids == JSONL ids (parity holds even with the intentional re-appended id 143); cache header JSON == JSONL header.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-board-appender-invocation",
+        "result": "passed",
+        "tests": 14
+      },
+      "status": "verified",
+      "created_at": "2026-08-08 01:22:02"
+    }
+  ]
+}

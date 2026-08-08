@@ -1,0 +1,24 @@
+{
+  "class_id": 631,
+  "title": "docs-premise-verification-before-fix",
+  "description": "docs-premise-verification-before-fix",
+  "created_at": "2026-08-07 21:12:44",
+  "answers": [
+    {
+      "answer_id": 748,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (RT-GAP-003):** `web_assets.cc` embeds **208 bundled assets incl `/index.html`** and serves the admin console with HTTP 200. The reported 404 was a **host port collision** — `asce-krakend-1` owns 8080 and answers `404`; the request never reached our server. The \"assets never bundled\" premise was stale; the fix is workflow + docs, not a bundle rewrite.\n\n**Fix 1 — premise gate before dispatching a worker** (`verify_premise.sh`): check who owns the default port (`ss -ltn`/`lsof -i :8080`/`docker ps`) → serve on an **explicit `--http-port`** → curl `/`, `/index.html`, `/_health` demanding 200 → stamp-proof the 404 is foreign. Only a live failure becomes a real bug; otherwise close as premise-stale.\n\n**Fix 2 — `--http-port` override + collision diagnostics** (`web_assets.cc`):\n\n```cpp\nint port = 8080;\nfor (int i = 1; i < argc; ++i)\n  if (strcmp(argv[i], \"--http-port\") == 0 && i + 1 < argc) port = atoi(argv[++i]);\n\nif (bind(fd, (sockaddr*)&addr, sizeof addr) != 0) {\n  fprintf(stderr,\n    \"web_assets: FATAL cannot bind 0.0.0.0:%d: %s\\n\"\n    \"web_assets: HOST PORT COLLISION, not a missing UI. Identify the owner:\\n\"\n    \"web_assets:   lsof -i :%d      (or: ss -ltnp | grep :%d)\\n\"\n    \"web_assets:   docker ps\\n\"\n    \"web_assets: then serve on a free port:  --http-port PORT\\n\",\n    port, strerror(errno), port, port);\n  return 2;   // never half-start on the wrong port\n}\n```\n\nEvery response is stamped `X-Server: web_assets` so a legit 404 from us is distinguishable from the foreign owner's 404.\n\n**Fix 3 — docs** (`README.md`): new **Web Admin UI** section (endpoints table, `--http-port` override, troubleshooting: `lsof -i :8080` → `docker ps` → serve on free port → `curl -i` expecting `200` + `X-Server: web_assets`).",
+      "evidence": "Live reproduction, not simulated — the sandbox's own gateway owns 8080 and emits the exact phantom:\n\n```\n$ curl -s -D - -o /dev/null http://127.0.0.1:8080/\nHTTP/1.1 404 Not Found\nX-Krakend: Version 2.9.4          ← the OTHER owner (asce-krakend-1 analog)\n```\n\n```\n$ curl -s -D - http://127.0.0.1:18081/index.html     # explicit --http-port\nHTTP/1.1 200 OK\nX-Server: web_assets\n<!DOCTYPE html> ... <h1>Web Admin Console</h1>\n```\n\nEdge cases tested — **18/18 pass**: manifest = 208 assets incl `/index.html`; default-port collision exits 2 with `lsof`/`docker ps` diagnostics; explicit-port serves `/`, `/index.html`, `/_health` all 200; our legit 404 is stamped (unconfusable with foreign); two instances coexist on 18081/18082; invalid args (`nope`, `70000`, `--bogus`) exit 2; premise gate end-to-end proves the default-port 404 belongs to the other owner. One self-inflicted bug caught and fixed: glibc `signal()` sets `SA_RESTART`, so a flag-only SIGTERM handler never unblocks `accept()` — fixed with async-signal-safe `_exit(0)`.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "docs-premise-verification-before-fix",
+        "result": "passed",
+        "tests": 18
+      },
+      "status": "verified",
+      "created_at": "2026-08-07 21:12:44"
+    }
+  ]
+}
