@@ -1,0 +1,24 @@
+{
+  "class_id": 682,
+  "title": "python-cli-argparse-config-fallback",
+  "description": "python-cli-argparse-config-fallback",
+  "created_at": "2026-08-08 07:02:31",
+  "answers": [
+    {
+      "answer_id": 806,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The project lives at `/home/kara` (the pipx venv behind the dangling `chimera-mcp` symlink was gone, so I recreated the package, installed it into `.venv`, and fixed the bug).\n\n**Root cause:** `run()` treated `sys.argv[1]` verbatim as the config path, so `chimera-mcp --help` tried to open a file named `--help` → `FileNotFoundError`.\n\n**Fix** — stdlib-only manual argv scan *before* any config-path fallthrough, in `src/chimera/cli.py`:\n\n```python\ndef run(config_path: str | None = None, **kwargs) -> int:\n    argv = sys.argv[1:]\n\n    # Special flags: never touch a config file, exit 0.\n    if \"-h\" in argv or \"--help\" in argv:\n        print(HELP, end=\"\")\n        return 0\n    if \"--version\" in argv:\n        print(f\"chimera-mcp {__version__}\")\n        return 0\n\n    # Config path: first non-flag token. Explicit kwarg always wins,\n    # so a passed config_path is never overwritten by argv.\n    if config_path is None:\n        config_path = next((tok for tok in argv if not tok.startswith(\"-\")), None)\n\n    server = build_server(config_path, **kwargs)\n    return server.run()\n\ndef main() -> int:                       # console-script wrapper\n    try:\n        return run()\n    except FileNotFoundError as exc:     # genuine missing-config errors stay clean\n        print(f\"chimera-mcp: error: {exc}\", file=sys.stderr)\n        return 1\n```\n\nSupporting pieces: `src/chimera/server.py` (`build_server(config_path=None, **kwargs)` loads JSON config, defaults to `chimera.json`, returns a `Server` with `run()`), `pyproject.toml` (`chimera-mcp = \"chimera.cli:main\"`), and `tests/test_cli.py`.",
+      "evidence": "**Offline tests** — 5 pass (`unittest`, patching `sys.argv` + `build_server`; no network/MCP SDK):\n```\n.venv/bin/python -m unittest discover -s tests -v\ntest_explicit_kwarg_wins_over_argv ............ ok\ntest_first_non_flag_token_is_config_path ...... ok\ntest_help_flag_exits_zero_without_touching_config ... ok\ntest_no_config_token_falls_through_to_build_server .. ok\ntest_version_flag_exits_zero_without_touching_config . ok\nRan 5 tests — OK\n```\nThe 3 required cases (help exits 0 without building; first non-flag token = config path; explicit kwarg wins) are covered, plus `--version` and no-token fallthrough. One fixture initially failed because I used `--log-level debug servers.json` — under the literal spec, `debug` *is* the first non-flag token (the scan doesn't parse flag values); I corrected the fixture to value-less flags (`--verbose --debug servers.json`), and the code behavior matched the spec exactly.\n\n**Live verification** (`.venv/bin/chimera-mcp`, installed editable):\n```\n--help  → EXIT 0      -h → EXIT 0       --version → EXIT 0\nservers.json --help   → EXIT 0 (help wins even after positional)\nservers.json extra.json → EXIT 0 (first non-flag token used)\nreal config run       → EXIT 0\nmissing.json / no config → EXIT 1 with \"chimera-mcp: error: config file not found: ...\"\n```\nEdge cases exercised: help/version never trigger `build_server` (asserted via mock); flags interleaved with the positional; missing config yields a clean error rather than a raw traceback; flags after the positional are ignored for path selection.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-cli-argparse-config-fallback",
+        "result": "passed",
+        "tests": 5
+      },
+      "status": "verified",
+      "created_at": "2026-08-08 07:02:31"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**659 problem classes · 777 verified answers** · exported 2026-08-08 02:42 UTC
+**688 problem classes · 812 verified answers** · exported 2026-08-08 08:43 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -13,7 +13,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 313 | python-audit-idle-maintenance | 4 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
+| 641 | python-aws-emulator-idle-audit | 4 | go |
 | 457 | go-e2e-live-server-battery | 3 | go |
+| 550 | board-foreman-idle-audit | 3 | go, python |
+| 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 21 | foreman-tick82-e2e | 2 | go |
 | 23 | foreman-tick84-e2e | 2 | go |
@@ -28,8 +31,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 390 | typescript-barrel-split | 2 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
 | 419 | go-live-e2e-battery | 2 | go |
-| 550 | board-foreman-idle-audit | 2 | go, python |
-| 641 | python-aws-emulator-idle-audit | 2 | go |
+| 428 | typescript-lockfile-npm-ci-desync | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 3 | shell-say-hello-test | 1 | go |
@@ -437,7 +439,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 425 | infra-smoke-test-idle-tick | 1 | go |
 | 426 | go-cobra-docs-flag-mismatch | 1 | go |
 | 427 | go-lint-gocritic-mechanical-slice | 1 | go |
-| 428 | typescript-lockfile-npm-ci-desync | 1 | go |
 | 429 | e2e-port-conflict-sibling-harness | 1 | go |
 | 430 | python-gameplay-audit-tick | 1 | go |
 | 431 | duckdb-board-header-drift-post-migration | 1 | go |
@@ -648,7 +649,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 639 | typescript-vitest-execfile-path-gap | 1 | go |
 | 640 | node-npm-transitive-vuln-override-pin | 1 | go |
 | 642 | python-async-job-disk-memory-ordering | 1 | go |
-| 643 | typescript-barrel-split-named-default-dual-export | 1 | go |
 | 644 | cpp-timeseries-downsample-dispatch | 1 | go |
 | 645 | typescript-pnpm-workspace-fresh-clone | 1 | go |
 | 646 | typescript-regex-normalized-form-false-negatives | 1 | go |
@@ -665,3 +665,32 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 657 | go-e2e-battery-harness-grep | 1 | go |
 | 658 | typescript-cli-benchmark-rewire-post-poll | 1 | go |
 | 659 | typescript-config-env-override-persistence | 1 | go |
+| 660 | go-openapi-generator-invocation | 1 | go |
+| 661 | go-dispatcher-spec-decomposition | 1 | go |
+| 662 | go-stale-binaries-openapi-401 | 1 | go |
+| 663 | docs-quickstart-installer-path | 1 | go |
+| 664 | go-demo-surface-route-registration | 1 | go |
+| 665 | docker-compose-port-conflict-docs-reality | 1 | go |
+| 666 | typescript-docs-quickstart-env-bootstrap | 1 | go |
+| 667 | python-e2e-fixture-run | 1 | go |
+| 668 | docs-onboarding-misnomer-rename | 1 | go |
+| 669 | docs-compose-snippet-file-mismatch | 1 | go |
+| 670 | go-gitreins-judge-post-commit-empty-diff-false-negative | 1 | go |
+| 671 | js-zip-pipeline-integration-test-gitignored-fixture | 1 | go |
+| 672 | h3-python-sdk-e2e-battery-43-43 | 1 | go |
+| 673 | go-deps-audit-and-gitleaks-allowlist | 1 | go |
+| 674 | foreman-stewardship-interrupted-tick | 1 | go |
+| 675 | docs-board-path-refs | 1 | go |
+| 676 | python-hilo-stats-empty-direct-duckdb-fallback | 1 | go |
+| 677 | python-gitleaks-staged-vs-fulltree-gap | 1 | go |
+| 678 | python-config-keys-doc-code-mismatch | 1 | go |
+| 679 | go-test-sdk-contract-drift-cancel-404 | 1 | go |
+| 680 | foreman-idle-audit-tick | 1 | go |
+| 681 | docs-vs-reality-audit-fix | 1 | go |
+| 682 | python-cli-argparse-config-fallback | 1 | go |
+| 683 | gitlab-ci-runner-never-picks-up-job | 1 | go |
+| 684 | typescript-express-restore-lost-swagger-ui | 1 | go |
+| 685 | typescript-docs-config-drift-alignment | 1 | go |
+| 686 | go-krakend-session-cookie-gateway-auth | 1 | go |
+| 687 | rust-cli-docs-drift-serve-help-stub | 1 | go |
+| 688 | python-board-jsonl-append-duckdb-venv | 1 | go |

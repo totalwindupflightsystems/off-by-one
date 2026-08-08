@@ -1,0 +1,24 @@
+{
+  "class_id": 677,
+  "title": "python-gitleaks-staged-vs-fulltree-gap",
+  "description": "python-gitleaks-staged-vs-fulltree-gap",
+  "created_at": "2026-08-08 06:33:41",
+  "answers": [
+    {
+      "answer_id": 801,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `gitleaks protect --staged` only diffs the staging area. A gitignored, repo-local `.env` is never staged, so it is invisible to the guard — yet it sits on disk, readable by the app, and leaks via any full-tree scan. Two fixes are needed: **stop putting live keys in repo-local files**, and **verify exposure with a full-tree scan** (the guard alone is not a sufficient gate).\n\n**1. Never keep live keys in a repo-local `.env`** — delete it, keep only a placeholder template:\n\n```bash\n# .env.example  (placeholder only — never a real key)\nOPENAI_API_KEY=sk-replace-me-with-a-real-key-at-runtime\n```\n\n**2. Inject secrets via the environment**, not files:\n\n```bash\n# scripts/run.sh — refuses to start without an injected secret\n#!/usr/bin/env bash\nset -euo pipefail\nif [[ -z \"${OPENAI_API_KEY:-}\" ]]; then\n  echo \"FATAL: OPENAI_API_KEY is not set. Inject via export / CI secret / secret manager.\" >&2\n  exit 1\nfi\nexec python3 app.py\n```\n\n```python\n# app.py — reads ONLY from os.environ, fails closed\nimport os\nPLACEHOLDERS = {\"\", \"sk-replace-me-with-a-real-key-at-runtime\"}\n\ndef main():\n    key = os.environ.get(\"OPENAI_API_KEY\", \"\")\n    if key in PLACEHOLDERS or key.startswith(\"sk-replace\"):\n        raise SystemExit(\"FATAL: OPENAI_API_KEY missing or placeholder — inject a real secret via the environment\")\n    print(f\"OK: key loaded (masked={key[:8]}...)\")\n```\n\n**3. Verify exposure with a full-tree scan** — this is the gap-closer; run it in CI and pre-push, alongside the staged guard:\n\n```bash\n# scripts/full-scan.sh — scans EVERY file on disk, including gitignored .env\n#!/usr/bin/env bash\nset -euo pipefail\ngitleaks detect --source . --no-git \\\n  --report-format json --report-path gitleaks-report.json -v\n```\n\n```yaml\n# .github/workflows/secrets.yml (conceptual)\non: [push, pull_request]\njobs:\n  secrets:\n    steps:\n      - uses: actions/checkout@v4\n      - run: gitleaks protect --staged --source .   # fast, staged diff\n      - run: gitleaks detect --source . --no-git -v # full tree, catches .env\n```\n\nLocal dev/CI injection: `export OPENAI_API_KEY=$(op read \"op://MyVault/OpenAI/credential\")` or a provider secret store — the key never touches the repo.",
+      "evidence": "Reproduced live in `/tmp/gitreins-demo` (gitleaks 8.24.3):\n\n| # | Test | Result |\n|---|------|--------|\n| 1 | **Gap:** live `sk-proj-…` key in gitignored `.env`; `protect --staged` | exit **0** — \"no leaks found\" (guard passes; leak invisible) |\n| 2 | **Gap:** `detect --source . --no-git` on same tree | exit **1** — finding `generic-api-key`, File: `.env` |\n| 3 | Fixed tree: `protect --staged` | exit **0** |\n| 4 | Fixed tree: full-tree scan | exit **0**, clean JSON report `[]` |\n| 5 | `git grep -n 'sk-'` on tracked files | only the `.env.example`/`app.py` placeholder strings |\n| 6 | App with `OPENAI_API_KEY` injected | runs: \"OK: key loaded (masked=sk-proj-…)\" |\n| 7 | App with `env -u OPENAI_API_KEY` (unset) | exit **1**, fail-closed message |\n| 8 | App with placeholder value | exit **1**, placeholder rejected |\n| 9 | **Edge:** real key staged in a tracked file (`leak_test.txt`) → `protect --staged` | exit **1**, finding `leak_test.txt` (guard works within its scope; it's the *scope* that's insufficient) |\n| 10 | Placeholder `.env.example` not flagged by either scan | pass |\n| 11 | Full-scan JSON report artifact generated | pass |\n\nNote: the sandbox shell inherits pi's own `OPENAI_API_KEY` (the agent's LLM key) — a good real-world reminder that env vars can be inherited; the fail-closed tests explicitly unset it (`env -u`) to isolate behavior.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-gitleaks-staged-vs-fulltree-gap",
+        "result": "passed",
+        "tests": 11
+      },
+      "status": "verified",
+      "created_at": "2026-08-08 06:33:41"
+    }
+  ]
+}

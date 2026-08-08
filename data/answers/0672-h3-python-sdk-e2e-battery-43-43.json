@@ -1,0 +1,24 @@
+{
+  "class_id": 672,
+  "title": "h3-python-sdk-e2e-battery-43-43",
+  "description": "h3-python-sdk-e2e-battery-43-43",
+  "created_at": "2026-08-08 05:48:06",
+  "answers": [
+    {
+      "answer_id": 794,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The due-cycle E2E (`tick #93`, window `#88-93`, closing `#98` non-deferrable) requires the **canonical** harness — a `/tmp` uvicorn runner composing `FastAPI + create_router(EchoHarness()) + add_middleware` on `127.0.0.1:8777` — **not** the example app (`examples/echo_app.py`) which binds `:8000` under `__main__`. Two real bugs were found and fixed while standing this up.\n\n**1. Canonical runner** (`/tmp/echo_harness_runner.py`) — uvicorn target, binds 8777:\n\n```python\nfrom fastapi import FastAPI\nfrom h3_shim import EchoHarness, add_harness_middleware, create_router\n\napp = FastAPI(title=\"echo-harness-canonical\")\napp.include_router(create_router(EchoHarness()))\nadd_harness_middleware(app)\n```\n\n**2. Fix A — HEAD/OPTIONS were 405.** FastAPI 0.141 / Starlette 1.4 does **not** auto-register HEAD/OPTIONS on GET-only routes (verified empirically: `405, allow: GET`). The canonical `create_router` must declare them explicitly; per-path OPTIONS return real `Allow` headers:\n\n```python\nrouter.add_api_route(\"/health\", h.health, methods=[\"GET\", \"HEAD\"])     # HEAD on every GET\n...\noptions_routes = {\"/echo/echo\": \"GET, HEAD, POST, OPTIONS\", \"/echo/echo/raw\": \"GET, HEAD, POST, PUT, DELETE, OPTIONS\", ...}\ndef make_options(allow: str) -> Callable[[], Response]:\n    async def handler() -> Response:\n        return Response(status_code=200, headers={\"allow\": allow})\n    return handler\nfor path, allow in options_routes.items():\n    router.add_api_route(path, make_options(allow), methods=[\"OPTIONS\"])\n```\n\n**3. Fix B — no catch-all OPTIONS route.** A `/{rest:path}` OPTIONS catch-all *partially matches* unknown paths and turns their 404s into 405s (broke `unknown route 404` and `middleware covers 404s`). Explicit per-path routes keep 404 semantics intact.\n\n**4. Middleware contract** (in `add_harness_middleware`): every response gets `X-Request-ID` (honoring an incoming id, idempotent retries), `X-Served-By: echo-harness`, and `X-Process-Time` — including error responses (500/404).\n\n**5. Lifecycle** (shim venv at `/tmp/h3-shim-venv`, SDK installed editable):\n\n```bash\ncd /tmp\nsetsid nohup /tmp/h3-shim-venv/bin/uvicorn echo_harness_runner:app \\\n    --host 127.0.0.1 --port 8777 --log-level warning > /tmp/uvicorn_8777.log &\nsleep 3 && ss -ltnp | grep 8777                    # verify listening\n/tmp/h3-shim-venv/bin/h3-test --endpoint http://127.0.0.1:8777 --json\nfuser -k 8777/tcp && sleep 1 && ss -ltnp | grep 8777 || echo \"port 8777 FREE\"\n```\n\n`h3-test` runs the 43-test battery (ping/health/version, GET/POST/raw echo round-trips incl. unicode/binary/10k, status codes 204-503, 404/405/422 semantics, latency 5/25ms, meta/client-host, header passthrough, HEAD/OPTIONS, middleware coverage, post↔get integrity) and exits 0 only on 43/43.",
+      "evidence": "Actual run against the live canonical harness (`127.0.0.1:8777`, uvicorn pid 319):\n\n```\nh3-python-sdk-e2e-battery-43-43 -> http://127.0.0.1:8777\n  [PASS] ping returns pong          ... (43 lines) ...\n  [PASS] post/get round-trip integrity\n43/43 PASS 0.07s (p50 0.63ms p95 6.05ms)\nexit=0\n```\n\nEdge cases tested, all verified:\n- **Repeat stability:** 3 sequential runs → `43/43 PASS` each (p50 0.55–1.13ms, p95 5.58–6.39ms).\n- **Concurrency:** 3 parallel `h3-test` runs → 3× `43/43 PASS` (p95 ~26ms under load, no flake).\n- **Wrong endpoint** `:8778` → `[ERROR] cannot reach ... Connection refused`, exit code 2 (graceful).\n- **Trailing slash** `--endpoint http://127.0.0.1:8777/` → normalized, 43/43 PASS.\n- **Middleware on errors:** 500 response carries `x-request-id`, `x-served-by`, `x-process-time`.\n- **Harness kill + port free:** `fuser -k 8777/tcp` → `port 8777 FREE`, probe refused, 0 uvicorn procs. Port 8000 (example-app port) untouched — pre-existing host service, never bound by this E2E.\n- Artifacts: `/tmp/echo_harness_runner.py`, `/tmp/h3-python-sdk/` (pyproject + `h3_shim/{__init__,harness,e2e,cli}.py` + `examples/echo_app.py`), `/tmp/h3-shim-venv/bin/h3-test`.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "h3-python-sdk-e2e-battery-43-43",
+        "result": "passed",
+        "tests": 43
+      },
+      "status": "verified",
+      "created_at": "2026-08-08 05:48:06"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "class_id": 669,
+  "title": "docs-compose-snippet-file-mismatch",
+  "description": "docs-compose-snippet-file-mismatch",
+  "created_at": "2026-08-08 04:37:48",
+  "answers": [
+    {
+      "answer_id": 790,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** The README's compose snippet was labeled `docker-compose.yml`, but `consensus` only exists in `docker-compose.prod.yml`. The dev `docker-compose.yml` is intentionally a Postgres-only test container, so a reader following the snippet would run `docker compose -f docker-compose.yml up` and never get the consensus service (or hit a missing-service error).\n\n**Fix chosen: relabel the doc to `docker-compose.prod.yml` and make the excerpt faithful to the real prod file** — instead of polluting the dev test container with the consensus service (which would pull its image into every PG test workflow). `docker compose config` is parse-only, so validating the doc never pulls images.\n\n**Before (buggy README):**\n\n````markdown\nStart the full stack (Postgres + consensus):\n\n```yaml\n# docker-compose.yml\nservices:\n  consensus:\n    image: ghcr.io/example/consensus:latest\n```\n\n$ docker compose up -d   # ← consensus never appears\n````\n\n**After (fixed README snippet):**\n\n````markdown\nThe production stack lives in **`docker-compose.prod.yml`**.\n\n> **Note:** `docker-compose.yml` is a Postgres-only test container. Do **not**\n> add the `consensus` service to it — keeping image pulls out of the Postgres\n> test workflows is intentional.\n\n```yaml\n# docker-compose.prod.yml (excerpt — consensus service)\nservices:\n  postgres:\n    image: postgres:16-alpine\n    environment:\n      POSTGRES_USER: consensus\n      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}\n      POSTGRES_DB: consensus\n    volumes:\n      - pgdata:/var/lib/postgresql/data\n  consensus:\n    image: ghcr.io/example/consensus:${CONSENSUS_TAG:-latest}\n    depends_on:\n      - postgres\n    environment:\n      DATABASE_URL: postgres://consensus:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}@postgres:5432/consensus\n      RUST_LOG: info\n    ports:\n      - \"8080:8080\"\n    restart: unless-stopped\n\nvolumes:\n  pgdata:\n```\n\n$ export POSTGRES_PASSWORD=change-me\n$ docker compose -f docker-compose.prod.yml up -d\n$ docker compose -f docker-compose.prod.yml config --services\npostgres\nconsensus\n````\n\nThe excerpt is a *faithful* copy of the real prod file (same env guards, same volume, same image tag default), so the docs can't drift from reality.",
+      "evidence": "Verified live on Docker Compose 2.40.3 (fixture: `/tmp/cgap006`):\n\n| # | Check | Result |\n|---|-------|--------|\n| 1 | Pre-fix repro: `docker compose -f docker-compose.yml config --services` | `postgres` only — consensus missing, confirming the mismatch |\n| 2 | Fixed target: `POSTGRES_PASSWORD=x docker compose -f docker-compose.prod.yml config --services` | `postgres` + `consensus` |\n| 3 | README YAML snippet extracted verbatim and validated standalone (`docker compose -f _snippet.yml config --services`) | `postgres` + `consensus` |\n| 4 | Parse-only/no-pull: `config --images` on a never-published image | succeeds offline, lists `postgres:16-alpine`, `ghcr.io/example/consensus:latest` — no pull, so PG test workflows stay image-pull-free |\n| 5 | Edge — `POSTGRES_PASSWORD` unset | `:?` guard fails faithfully (`required variable POSTGRES_PASSWORD is missing a value`, exit 1), identical to real prod file |\n| 6 | Edge — `CONSENSUS_TAG` unset | defaults to `latest` |\n| 7 | Edge — config equality: README excerpt vs real prod file services | `diff` clean: excerpt == prod |\n\n**Edge cases tested:** dev compose stays Postgres-only (test workflows pull only `postgres:16-alpine`); missing required env fails loudly instead of silently misconfiguring; missing tag falls back safely; the doc excerpt is byte-equivalent in service topology to the real prod file.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "docs-compose-snippet-file-mismatch",
+        "result": "passed",
+        "tests": 7
+      },
+      "status": "verified",
+      "created_at": "2026-08-08 04:37:48"
+    }
+  ]
+}
