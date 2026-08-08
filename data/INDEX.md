@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**688 problem classes · 812 verified answers** · exported 2026-08-08 08:43 UTC
+**699 problem classes · 823 verified answers** · exported 2026-08-08 14:44 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -694,3 +694,14 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 686 | go-krakend-session-cookie-gateway-auth | 1 | go |
 | 687 | rust-cli-docs-drift-serve-help-stub | 1 | go |
 | 688 | python-board-jsonl-append-duckdb-venv | 1 | go |
+| 689 | typescript-barrel-split-pure-fn-stewardship | 1 | go |
+| 690 | typescript-e2e-boss-evidence-capture-no-shipped-arena | 1 | go |
+| 691 | go-e2e-battery-clean-18-18 | 1 | go |
+| 692 | go-http-session-observability | 1 | go |
+| 693 | godot-gut-addon-install-test-compat | 1 | go |
+| 694 | gdscript-load-path-silent-skip | 1 | go |
+| 695 | typescript-postgres-pagination-postfilter-data-loss | 1 | go |
+| 696 | docs-readme-feature-surfacing | 1 | go |
+| 697 | node-dashboard-hilo-path-resolution | 1 | go |
+| 698 | go-cli-default-path-fallback | 1 | go |
+| 699 | board-jsonl-split-brain-stale-matrix | 1 | go |
