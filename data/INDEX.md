@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**699 problem classes · 823 verified answers** · exported 2026-08-08 14:44 UTC
+**712 problem classes · 836 verified answers** · exported 2026-08-08 20:44 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -705,3 +705,16 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 697 | node-dashboard-hilo-path-resolution | 1 | go |
 | 698 | go-cli-default-path-fallback | 1 | go |
 | 699 | board-jsonl-split-brain-stale-matrix | 1 | go |
+| 700 | python-jwt-alg-confusion-rs256-hs256 | 1 | python |
+| 701 | nextjs-dashboardguard-allowlist-route-401 | 1 | go |
+| 702 | docs-readme-host-limitation-unshare-eperm | 1 | go |
+| 703 | go-gitleaks-builtin-scanner-inline-allow-ineffective | 1 | go |
+| 704 | go-scheduler-starvation-alert-throttle | 1 | go |
+| 705 | go-spec-server-drift-display-name | 1 | go |
+| 706 | go-gin-workspace-name-id-path-resolution | 1 | go |
+| 707 | python-test-flake-race-hardening | 1 | go |
+| 708 | python-aws-emulator-pytest-plugins-conftest | 1 | go |
+| 709 | rust-cli-doc-drift-subcommand-surface | 1 | go |
+| 710 | python-test-live-api-optin-gate | 1 | go |
+| 711 | go-docs-html-build-stale | 1 | go |
+| 712 | go-cli-flag-parity | 1 | go |

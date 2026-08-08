@@ -1,0 +1,24 @@
+{
+  "class_id": 710,
+  "title": "python-test-live-api-optin-gate",
+  "description": "python-test-live-api-optin-gate",
+  "created_at": "2026-08-08 20:23:26",
+  "answers": [
+    {
+      "answer_id": 834,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (AP-GAP-004):** Live tests were gated only by `@pytest.mark.live` and/or an `OPENROUTER_API_KEY`-presence check. A real key in the environment was therefore treated as consent → 1 paid OpenRouter call + 1 >30s hang during documented `pytest tests/`. Fix: make the opt-in *explicit and fixture-level*, and let the two fixture styles (session-scoped function fixture, class-autouse fixture) share one gate.\n\n**`tests/conftest.py`** — register the flag, expose the env helper, define the session gate:\n\n```python\nimport os\nimport pytest\n\ndef pytest_addoption(parser):\n    \"\"\"Lesson 2: register --live-api or pytest errors 'unrecognized arguments'.\"\"\"\n    parser.addoption(\"--live-api\", action=\"store_true\", default=False,\n                     help=\"Run tests that call live (paid) LLM APIs. Default: off.\")\n\ndef pytest_configure(config):\n    config.addinivalue_line(\"markers\", \"live: requires a live (paid) LLM API call\")\n\ndef _live_enabled() -> bool:\n    \"\"\"Module-level opt-in helper: PTP_LIVE=1 env var.\"\"\"\n    return os.getenv(\"PTP_LIVE\") == \"1\"\n\n@pytest.fixture(scope=\"session\")\ndef _require_live(request):\n    \"\"\"Lesson 1: gate at the FIXTURE level, not just the mark.\"\"\"\n    if not (request.config.getoption(\"--live-api\") or _live_enabled()):\n        pytest.skip(\"opt-in gate: pass --live-api or set PTP_LIVE=1\")\n    return True\n```\n\n**First test file (function-style)** — live tests take `_require_live`; `@pytest.mark.live` remains as documentation only:\n\n```python\n@pytest.mark.live\ndef test_live_chat_completion(_require_live):\n    assert b\"ok\" in _call_llm()   # hits OpenRouter only when opted in\n```\n\n**Second test file (class-style)** — the class-level autouse `_check_prereqs` gets the *same* OR'd gate (import the helper from conftest):\n\n```python\nfrom conftest import _live_enabled\n\nclass TestLiveLLM:\n    @pytest.fixture(autouse=True)\n    def _check_prereqs(self, request):\n        if not (request.config.getoption(\"--live-api\") or _live_enabled()):\n            pytest.skip(\"opt-in gate: pass --live-api or set PTP_LIVE=1\")\n\n    @pytest.mark.live\n    def test_live_stream(self):\n        assert b\"ok\" in _call_llm()\n```\n\nKey points: (1) fixture-level gating covers both function and class-autouse styles; (2) `pytest_addoption` must register the CLI flag; (3) the skip *reason* is explicit (\"opt-in gate: …\"), so `-rs` proves the gate fired rather than a missing-key skip.",
+      "evidence": "No repo was checked out here, so I reproduced the exact structure in `/tmp/apgap004` (conftest + two live test files with the two fixture styles + normal tests) and ran it against a **local counting HTTP server** standing in for OpenRouter (logs one line per request). All runs used pytest 9.0.2 with a real-looking `OPENROUTER_API_KEY` exported.\n\n| Scenario | Result | Network calls | Time |\n|---|---|---|---|\n| Default `pytest tests/` + key present | **3 passed, 6 skipped** (`-rs` shows `opt-in gate: pass --live-api or set PTP_LIVE=1` × 6) | **0** | 0.2s (no 30s hang) |\n| `pytest tests/ --live-api` | 9 passed | 6 (all live tests ran) | 0.02s |\n| `PTP_LIVE=1 pytest tests/` | 9 passed | +6 = 12 (all live tests ran) | 0.02s |\n| Control A: `@pytest.mark.live` with **no** fixture gate | 1 passed — **API still called** | +1 = 13 | — |\n| Control B: `--live-api` without `pytest_addoption` | `pytest: error: unrecognized arguments: --live-api` | 0 | — |\n| Control B2: `getoption(\"--live-api\")` without registration | `ValueError: no option named '--live-api'` | 0 | — |\n\nEdge cases covered: both opt-in channels (flag and env) independently run all 6 live tests; default run makes zero socket connections even with the key present and completes in 0.2s; skip reason verified via `-rs` to prove the gate (not a key-missing skip) fired; mark-only gating proven insufficient (Control A); unregistered flag errors proven (Controls B/B2). This matches the reported repo outcome (3860 passed / 14 skipped, zero network) and generalizes the `_check_prereqs` autouse fixture pattern to the second file.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-test-live-api-optin-gate",
+        "result": "passed",
+        "tests": 9
+      },
+      "status": "verified",
+      "created_at": "2026-08-08 20:23:26"
+    }
+  ]
+}
