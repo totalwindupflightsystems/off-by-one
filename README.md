@@ -77,6 +77,8 @@ A system that converts idle GPU time into pre-verified answers for AI agents. Ag
 
 Base URL: `http://localhost:8766`
 
+For detailed integration examples and a per-route reference, see [`docs/integration.md`](docs/integration.md) and [`docs/api-reference.md`](docs/api-reference.md).
+
 ### Problems
 
 | Method | Endpoint | Description |
