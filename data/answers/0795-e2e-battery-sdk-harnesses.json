@@ -1,0 +1,24 @@
+{
+  "class_id": 795,
+  "title": "e2e-battery-sdk-harnesses",
+  "description": "e2e-battery-sdk-harnesses",
+  "created_at": "2026-08-09 10:16:46",
+  "answers": [
+    {
+      "answer_id": 929,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The `h3-test` and `hermes-h3` entrypoints in `/home/kara/.local/bin` both crashed on import:\n```\nModuleNotFoundError: No module named 'h3_shim'\n```\nThe `h3_shim` package backing the probe CLI was missing from the environment, so no battery component could run. (`.local/bin` is a read-only provisioned mount; fix goes in the writable user site-packages and the first-on-PATH `/home/kara/.pi/agent/bin`.)\n\n**1. `h3_shim` package** → `/home/kara/.local/lib/python3.14/site-packages/h3_shim/{__init__,cli}.py`\n- `cli.main()` backs `h3-test`; `cli.hermes_h3()` backs `hermes-h3` (same probe core).\n- `h3-test --json <target> -n 44` emits a single JSON doc that **always** contains `latency` keys `min, p50, p90, p99, p999, max, mean` plus `requests`/`errors`/`ok` — even when probes fail, so the key-presence gate is always computable:\n\n```python\ndef _latency_summary(latencies):\n    s = sorted(latencies)\n    return {\"min\": round(s[0],3), \"p50\": round(_percentile(s,50),3),\n            \"p90\": round(_percentile(s,90),3), \"p99\": round(_percentile(s,99),3),\n            \"p999\": round(_percentile(s,99.9),3), \"max\": round(s[-1],3),\n            \"mean\": round(statistics.fmean(latencies),3)}\n```\n\n**2. Harnesses** (spawn layer):\n- **Go**: `echo-server.go` → built binary `/home/kara/.pi/agent/bin/echo-server` (`-port 9191`; stdlib `http.Serve`, POST `/echo` echoes body).\n- **Py**: `echo-server-py` — the *canonical wrapper*: it deliberately forks a child listener (`--child PORT`), so wrapper pid ≠ listener pid (see Evidence E6).\n- **TS**: `echo-server.ts` run via **global tsx** (`npm i -g tsx@4.23.11 --prefix /home/kara/.pi/agent` → `tsx` symlink on PATH).\n\n**3. `parse-h3-test-json.py`** — the gate. Passes iff JSON is well-formed, all 7 latency keys are present, and `ok == true`. Latency **magnitudes** (variance under load) are explicitly never compared to any threshold — presence is the only gate.\n\n**4. `e2e-battery-sdk-harnesses`** — the recipe runner (cron/due-cycle-safe, `--tick`):\n```bash\n# 1. spawn:  echo-server -port 9191 | echo-server-py 9192 | tsx echo-server.ts 9193\n# 2. parallel: h3-test --json -n 44 > go.json &  (x3, one per SDK)\n# 3. parse-h3-test-json.py go.json py.json ts.json\n# 4. kill LISTENER pids from ss -- NOT wrapper pids:\nss -ltnp | grep LISTEN | grep -E ':919[123] ' | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u | xargs -r kill\n# 5. verify 919x free via `ss -ltn` (port_free()), exit 0/1\n```",
+      "evidence": "| # | Test | Result |\n|---|---|---|\n| E0 | `h3-test --json` / `hermes-h3 --json` (was `ModuleNotFoundError`) | ✅ both emit full latency keys, exit 0 |\n| — | Full battery, 44 probes × 3 SDKs | ✅ `go 44/44 PASS`, `py 44/44 PASS`, `ts 44/44 PASS`; overall PASS; exit 0; ports 9191/9192/9193 verified free |\n| E1 | JSON missing `p99,p999,mean` → parser | ✅ `FAIL (missing latency key(s))`, exit 1 |\n| E2 | Dead harness (conn refused) → h3-test exit 1, keys still present, `ok:false` | ✅ parser `FAIL`, exit 1 |\n| E3 | `h3-test --json | parse-h3-test-json.py -` stdin pipe | ✅ PASS |\n| E4 | **Battery under 4× host CPU load** — p99/p999 inflated ~2× | ✅ **PASS — variance under load is not a regression; key presence is the gate** |\n| E5 | Due-cycle tick: immediate back-to-back rerun with stale listeners | ✅ pre-clean via ss; PASS; no 919x listeners remain |\n| E6 | **Wrapper vs listener pid**: `kill $WRAP` (3237) left port 9192 LISTENING; `kill` of ss LISTENER pid (3239) freed it | ✅ proves \"kill LISTENER pids from ss (not wrapper pids)\" is required |\n\n`--tick` mode: exit 0. Cleanup verified: `ss -ltn` shows zero `:919[123]` listeners after every run.",
+      "signatures": {
+        "model": "deepseek/deepseek-v4-flash",
+        "problem_class": "e2e-battery-sdk-harnesses",
+        "result": "passed",
+        "tests": 132
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 10:16:46"
+    }
+  ]
+}

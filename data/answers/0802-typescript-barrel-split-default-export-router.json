@@ -1,0 +1,24 @@
+{
+  "class_id": 802,
+  "title": "typescript-barrel-split-default-export-router",
+  "description": "typescript-barrel-split-default-export-router",
+  "created_at": "2026-08-09 11:01:17",
+  "answers": [
+    {
+      "answer_id": 936,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Goal:** split `backend/api/routes/import.ts` (465L) into an `import/` module directory where the router's **only export is `export default router`**, with zero changes to importers (`app.ts` default import, tests via original path).\n\n**Why this variant is special (LF-039 precedent):** `export *` never re-exports a default. When the barrel's only public export is the default, the shim *must* be `export { default } from \"./import/index.js\"` — the `export *` form silently drops the default (verified: TS1192 \"Module has no default export\").\n\n**Final structure:**\n```\nbackend/api/routes/import.ts          ← shim (replaces original, same path)\nbackend/api/routes/import/\n  ├── index.ts                        ← barrel: assembles router, `export default router;` (only ^export line)\n  ├── types.ts                        ← ImportStatus/ImportRecord/ImportRow/ImportSummary\n  ├── schemas.ts                      ← zod schemas (recordSchema, idParamSchema, commitBodySchema)\n  ├── helpers.ts                      ← parseCsv, summarize, createRecord, asyncHandler, notFound, constants\n  ├── upload.ts                       ← multer instance (memoryStorage, size/mime limits)\n  └── events.ts                       ← EventEmitter + emit()\n```\n\n**Shim** (`import.ts`, 1 line):\n```ts\nexport { default } from \"./import/index.js\";\n```\n\n**Barrel** (`import/index.ts`) — submodule imports, then `export default router;` as its sole export:\n```ts\nimport { Router } from \"express\";\nimport type { Request, Response, NextFunction } from \"express\";\nimport { upload, uploadFieldName } from \"./upload.js\";\nimport { idParamSchema, commitBodySchema } from \"./schemas.js\";\nimport { createRecord, parseCsv, summarize, asyncHandler, notFound } from \"./helpers.js\";\nimport { emit } from \"./events.js\";\nimport type { ImportRecord } from \"./types.js\";\n\nconst memoryStore: Map<string, ImportRecord> = new Map();\nconst router = Router();\n// ... POST /, GET /:id, POST /:id/commit, DELETE /:id, GET /, error handler ...\n\nexport default router;\n```\n\n**Untouched importers** resolve through the shim automatically: `app.ts` keeps `import importRouter from \"./api/routes/import.js\"` and the test keeps importing via the original path. Resolution order (file `import.ts` beats directory `import/index.ts` for `./import` imports, while the shim's explicit `./import/index.js` targets the barrel) makes the swap invisible.",
+      "evidence": "Built a full reproduction repo (`/tmp/lf101-repro`: Express + multer + zod, NodeNext ESM, `git` history) with a 296-line single-file router committed as the pre-split baseline (`087b3ac`), then applied the split. Judge checks — **8/8 PASS**:\n\n```\nPASS 1. pre-split file has exactly one export line (export default router)\nPASS 2. barrel index.ts has exactly one export line (export default router)\nPASS 3. export parity: git show 087b3ac:.../import.ts | grep '^export' == barrel grep '^export'\nPASS 4. shim uses default re-export (NOT export *)\nPASS 5. importer app.ts has ZERO changes vs pre-split commit\nPASS 6. test file has ZERO changes vs pre-split commit\nPASS 7. tsc build clean (default import resolves through shim)\nPASS 8. runtime test via original path passes\n```\n\nEdge cases:\n- **Negative control:** swapping shim to `export * from \"./import/index.js\"` → `app.ts(2,8): error TS1192: Module ... has no default export` — proves `export { default }` is mandatory for the default-only variant.\n- **Runtime shape:** emitted shim namespace exposes only `[\"default\"]`; default is a function with 6 registered route handlers; routed live request through shim returned expected 404; submodule internals (types/schemas/helpers/upload/events) are **not** leaked through the barrel.\n- **Coexistence:** tsc/Node handle `import.ts` (file) + `import/` (dir) — emitted `import.js` + `import/index.js` resolve correctly under NodeNext; only the shim references the `import/` dir.\n- **Zero-change guarantee:** `git diff 087b3ac -- src/backend/app.ts tests/import.test.ts` empty; final diff touches only the route files.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-barrel-split-default-export-router",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 11:01:17"
+    }
+  ]
+}

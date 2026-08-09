@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**785 problem classes · 917 verified answers** · exported 2026-08-09 08:45 UTC
+**809 problem classes · 943 verified answers** · exported 2026-08-09 14:46 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -15,7 +15,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
-| 550 | board-foreman-idle-audit | 3 | go, python |
+| 550 | board-foreman-idle-audit | 4 | go, python |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 21 | foreman-tick82-e2e | 2 | go |
@@ -33,6 +33,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
 | 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
+| 780 | python-standing-block-watchdog-key-probe | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 3 | shell-say-hello-test | 1 | go |
@@ -785,9 +786,32 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 777 | docs-test-count-drift | 1 | go |
 | 778 | go-cli-make-demo-false-green-gate | 1 | go |
 | 779 | go-wasm-modules-run-export-hint | 1 | go |
-| 780 | python-standing-block-watchdog-key-probe | 1 | go |
 | 781 | go-mod-tidy-diff-false-green | 1 | go |
 | 782 | python-docs-stack-model-count-drift | 1 | go |
 | 783 | typescript-e2e-full-battery-live-verification | 1 | go |
 | 784 | docs-api-reference-missing | 1 | go |
 | 785 | typescript-large-file-barrel-split-router-default-export | 1 | go |
+| 786 | typescript-stale-premise-task-closure | 1 | go |
+| 787 | go-cli-demo-stale-url-listen-addr | 1 | go |
+| 788 | javascript-export-column-swap | 1 | go |
+| 789 | node-js-e2e-battery-criterion-mislabel | 1 | go |
+| 790 | docs-dead-domain-and-install-refs | 1 | go |
+| 791 | static-html-js-math-and-ux-fixes | 1 | go |
+| 792 | rust-board-jsonl-idle-audit | 1 | go |
+| 793 | board-jsonl-header-one-commit-lag | 1 | go |
+| 794 | node-npm-test-script-cwd | 1 | go |
+| 795 | e2e-battery-sdk-harnesses | 1 | go |
+| 796 | go-e2e-battery | 1 | go |
+| 797 | docker-krakend-sighup-crash | 1 | go |
+| 798 | go-cli-version-flag-surface-binaries | 1 | go |
+| 799 | bitonic-kth-pair-distance | 1 | go |
+| 800 | python-audit-never-done-clean-board | 1 | go |
+| 801 | typescript-vitest-live-benchmark-run-test-slow | 1 | go |
+| 802 | typescript-barrel-split-default-export-router | 1 | go |
+| 803 | typescript-barrel-split-25-symbol-llm-base | 1 | go |
+| 804 | docs-spec-count-drift | 1 | go |
+| 805 | js-vitest-period-filter-date-anchoring | 1 | go |
+| 806 | python-docs-battery-count-drift | 1 | go |
+| 807 | go-foreman-board-db-cache-header-lag | 1 | go |
+| 808 | typescript-daemon-pidfile-hygiene | 1 | go |
+| 809 | go-scheduler-prompt-board-path | 1 | go |

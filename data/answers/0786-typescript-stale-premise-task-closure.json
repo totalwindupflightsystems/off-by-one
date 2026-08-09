@@ -1,0 +1,24 @@
+{
+  "class_id": 786,
+  "title": "typescript-stale-premise-task-closure",
+  "description": "typescript-stale-premise-task-closure",
+  "created_at": "2026-08-09 09:06:38",
+  "answers": [
+    {
+      "answer_id": 918,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The fix is a **pre-dispatch verification gate** for the P3 board, shipped as a small TypeScript CLI (`/home/kara/stale-premise-closer/`). Every open P3 row is a *premise* (\"GET `/api/v1/parents/{id}/analytics` returns 403\"); before spending a worker, it verifies the premise cheaply and closes dead rows with **disposition + evidence**. Three gates:\n\n**Gate 1 — consumer grep before believing \"missing endpoint\" rows** (kills the BUG-LUNA-009 class). Zero frontend call sites → `BY-DESIGN`, close. Consumers exist → stay open, worker gets call-site evidence. Template-literal aware (`/api/v1/profile/${id}` matches `/api/v1/profile/{id}`):\n\n```ts\n// src/consumers.ts\nexport async function findConsumers(root: string, endpoint: string, maxResults = 10): Promise<ConsumerRef[]> {\n  const out: ConsumerRef[] = [];\n  if (!endpoint) return out;\n  await walk(path.resolve(root), endpointToConsumerRegex(endpoint), out, maxResults);\n  return out;\n}\n// param segments become wildcards: /api/v1/profile/{id}  ->  /api/v1/profile/[^\\s`\"']+/\n```\n\n**Gate 2 — cheap live probe** (kills the BUG-LUNA-010 class). One status-only GET with a hard timeout; two caller classes: `anon` (foreign/unauth) and `authed` (legit first-party, via `--service-token`):\n\n```ts\n// src/probe.ts\nexport async function probe(url: string, opts: ProbeOptions = {}): Promise<ProbeResult> {\n  const started = Date.now();\n  try {\n    const res = await fetch(url, {\n      method: 'GET', redirect: 'follow',\n      headers: { 'user-agent': 'stale-premise-closer/1.0 (probe)', ...opts.headers },\n      signal: AbortSignal.timeout(opts.timeoutMs ?? 4_000),\n    });\n    return { status: res.status, finalUrl: res.url, redirected: res.redirected, latencyMs: Date.now() - started };\n    // body intentionally never read — a few ms of traffic, not a worker dispatch\n  } catch (err) { /* status: null => timeout/DNS/refused */ }\n}\n```\n\n**Gate 3 — classify + close with evidence** (`src/classify.ts`). Decision table: authed 2xx → `RESOLVED-by-fix`; correct access-control 4xx on a foreign resource (`probe-expect: denied`) → `BY-DESIGN`; any other 4xx/5xx, conflicting signals, or probe failure → `STILL-OPEN`/`INCONCLUSIVE`, never auto-closed. Orchestrated in `src/closer.ts`:\n\n```ts\nif (verdict.disposition === 'RESOLVED-by-fix' || verdict.disposition === 'BY-DESIGN') {\n  if (!deps.opts.dryRun) {\n    await deps.board.comment(row, verdict); // disposition + reason + evidence on the issue\n    await deps.board.close(row, verdict);\n  }\n}\n```\n\nRows can carry directives to keep them machine-verifiable: `probe-url:` (exact URL) and `probe-expect: allowed|denied`. `--min-age-days` refuses to auto-close rows touched recently. Boards: live GitHub issues (`GithubBoard`) or an offline JSON dump (`JsonBoard`); default is **dry-run** until `--close`.\n\n```\nnode dist/cli.js --repo acme/api --token $GH_TOKEN --probe-base https://api.example.com \\\n  --service-token $SVC_TOKEN --frontend ../web --min-age-days 2 --close\n```",
+      "evidence": "**36/36 tests pass** (`npm test`, strict `tsc --noEmit` clean), plus a live end-to-end demo:\n\n- **BUG-LUNA-010 replay** — local API serves `/api/v1/parents/42/analytics` → 200 while the board row claims 403: row closed `RESOLVED-by-fix` with evidence `authed probe: 200 (2ms)`; board persisted `10:closed`. (Same flow: row with real 403 → `STILL-OPEN`, board unchanged.)\n- **BUG-LUNA-009 replay** — \"missing endpoint /api/v1/profile\" row + frontend dir: zero consumers → `BY-DESIGN` closed; with a `fetch(`/api/v1/profile/${id}`)` consumer → `STILL-OPEN` kept.\n- **Edge cases tested**: redirects followed to final 200; `followRedirects:false` returns raw 301; timeout (`AbortSignal.timeout`) → status null → `INCONCLUSIVE`; connection-refused → status null; authed-403 + anon-200 → `INCONCLUSIVE` (conflicting); authed 500 → `STILL-OPEN`; param substitution (`{parentId}` → probed as `/1`); dry-run computes verdicts but mutates nothing; min-age guard blocks fresh rows; `node_modules`/`.git` excluded from consumer grep; 401/403/404 treated as access control when `expect: denied`.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-stale-premise-task-closure",
+        "result": "passed",
+        "tests": 36
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 09:06:38"
+    }
+  ]
+}

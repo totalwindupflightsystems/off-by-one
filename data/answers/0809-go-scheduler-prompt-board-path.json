@@ -1,0 +1,24 @@
+{
+  "class_id": 809,
+  "title": "go-scheduler-prompt-board-path",
+  "description": "go-scheduler-prompt-board-path",
+  "created_at": "2026-08-09 14:05:18",
+  "answers": [
+    {
+      "answer_id": 943,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The scheduler foreman hard-coded the board path into the spawned agent's prompt as `.coding-hermes/tasks.md` (root-level, markdown). In JSONL-canonical workspaces that file no longer exists — only `.coding-hermes/tasks.md.bak` remains — while the canonical board lives at `.coding-hermes/board/tasks.jsonl`. Every spawned agent was therefore pointed at a stale, nonexistent board.\n\n**Fix.** Make the foreman board-aware with a `boardPath` resolver that prefers the JSONL-canonical board and falls back to the tracked-markdown board only for legacy repos. The prompt template literal stays untouched, so the mirror literal in `spawn_test.go` remains byte-identical.\n\n```go\n// scheduler.go\npackage boardsched\n\nimport (\n\t\"fmt\"\n\t\"os\"\n\t\"path/filepath\"\n)\n\n// spawnPromptFmt is mirrored byte-for-byte in spawn_test.go — do not alter.\nconst spawnPromptFmt = \"Read the task board at %s and execute the oldest open task.\\n\"\n\n// boardPath resolves the canonical task board for a workspace.\n// Priority: 1) .coding-hermes/board/tasks.jsonl (JSONL-canonical) when present;\n//           2) .coding-hermes/tasks.md (tracked-markdown, legacy fallback).\nfunc boardPath(workspace string) string {\n\tjsonl := filepath.Join(workspace, \".coding-hermes\", \"board\", \"tasks.jsonl\")\n\tif fi, err := os.Stat(jsonl); err == nil && !fi.IsDir() {\n\t\treturn jsonl\n\t}\n\treturn filepath.Join(workspace, \".coding-hermes\", \"tasks.md\")\n}\n\nfunc SpawnPrompt(workspace string) string {\n\treturn fmt.Sprintf(spawnPromptFmt, boardPath(workspace))\n}\n```\n\nThe guard lives in the test mirror literal:\n\n```go\n// spawn_test.go\nconst mirrorSpawnPromptFmt = \"Read the task board at %s and execute the oldest open task.\\n\"\n\nfunc TestSpawnPromptLiteralMirror(t *testing.T) {\n\tif spawnPromptFmt != mirrorSpawnPromptFmt {\n\t\tt.Fatalf(\"mirror drift: prod=%q mirror=%q\", spawnPromptFmt, mirrorSpawnPromptFmt)\n\t}\n}\n```",
+      "evidence": "Verified with `go vet` + `go test -v` (Go 1.26) against a reconstructed workspace: `.coding-hermes/board/tasks.jsonl` (canonical) plus only `.coding-hermes/tasks.md.bak` at root (stale).\n\n```\n=== RUN   TestBoardPathPrefersJSONLCanonical  --- PASS\n=== RUN   TestBoardPathFallsBackToMarkdown    --- PASS\n=== RUN   TestSpawnPromptLiteralMirror        --- PASS\n=== RUN   TestSpawnPromptPointsAtCanonicalBoard --- PASS\nPASS  ok  boardsched  0.003s\n```\n\nEnd-to-end foreman run:\n\n```\n# canonical workspace (JSONL present, root tasks.md missing):\nRead the task board at /tmp/boardsched/.coding-hermes/board/tasks.jsonl and execute the oldest open task.\n(old hard-coded .coding-hermes/tasks.md is missing — would have pointed the agent at a stale path)\n\n# legacy workspace (JSONL absent):\nRead the task board at /tmp/boardsched-legacy/.coding-hermes/tasks.md and execute the oldest open task.\n```\n\n**Edge cases tested:**\n- JSONL board present + root `tasks.md.bak` decoy → resolves to `board/tasks.jsonl` (never the `.bak`).\n- JSONL board absent → falls back to `.coding-hermes/tasks.md` (tracked-markdown boards keep working).\n- `boardPath` treats a directory named `tasks.jsonl` as absent (`!fi.IsDir()`), so the fallback still triggers.\n- Prompt literal byte-identical: production constant, test mirror constant, and the inline golden string all agree — no drift introduced by the fix.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-scheduler-prompt-board-path",
+        "result": "passed",
+        "tests": 4
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 14:05:18"
+    }
+  ]
+}
