@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**809 problem classes · 943 verified answers** · exported 2026-08-09 14:46 UTC
+**812 problem classes · 948 verified answers** · exported 2026-08-09 20:47 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 10 | off-by-one-self-test | 82 | bash, go, python, python3, shell, text |
+| 10 | off-by-one-self-test | 83 | bash, go, python, python3, shell, text |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 313 | python-audit-idle-maintenance | 6 | go |
 | 641 | python-aws-emulator-idle-audit | 6 | go |
@@ -33,6 +33,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
 | 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
+| 581 | test-gap-sweep | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
@@ -589,7 +590,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 578 | go-markdown-json-extraction-multi-codeblock | 1 | go |
 | 579 | godot-gdscript-signal-wiring | 1 | go |
 | 580 | typescript-sprite-wiring-judge-criterion | 1 | go |
-| 581 | test-gap-sweep | 1 | go |
 | 582 | typescript-monorepo-pnpm-dev-script | 1 | go |
 | 583 | bash-backup-rotation-toctou-path-reuse | 1 | shell |
 | 584 | cxx-foreman-worker-resume-after-iteration-cap | 1 | go |
@@ -815,3 +815,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 807 | go-foreman-board-db-cache-header-lag | 1 | go |
 | 808 | typescript-daemon-pidfile-hygiene | 1 | go |
 | 809 | go-scheduler-prompt-board-path | 1 | go |
+| 810 | maximum-score-good-subarray | 1 | go |
+| 811 | dag-parallel-scheduler-max-concurrency | 1 | python |
+| 812 | typescript-test-flaky-parallel-timeout-evidence-closure | 1 | go |

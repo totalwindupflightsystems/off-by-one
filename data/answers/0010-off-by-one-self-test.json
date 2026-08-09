@@ -1314,6 +1314,22 @@
       },
       "status": "verified",
       "created_at": "2026-08-09 08:20:28"
+    },
+    {
+      "answer_id": 947,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (off-by-one):** the license validity predicate used a strict comparison against the expiry date — `now < expiry` — so a license expiring *today* was already reported invalid. Every license died one day early.\n\n**The fix** (`/home/kara/license-fix/license_check.py`): validity is inclusive — a license is valid *through* its expiry date (end of day), with an optional grace window wired from env vars:\n\n```python\ndef is_valid(expiry, now, grace_days=None, config=None) -> bool:\n    exp = parse_date(expiry, \"expiry\")\n    today = parse_date(now, \"now\")\n    if grace_days is None:\n        grace_days = int((config or load_config()).get(\"grace_days\", DEFAULT_GRACE_DAYS))\n    if grace_days < 0:\n        raise LicenseError(\"grace_days must be >= 0\")\n    return today <= exp + dt.timedelta(days=grace_days)   # <= (was <): the off-by-one fix\n```\n\n**Env-var wiring** (`load_config`): reads `LICENSE_GRACE_DAYS` (default `0`) and `LICENSE_DAYS` (default `30`, feeds `grant_expiry`); missing or garbage values fall back to defaults without crashing (garbage is logged, not fatal).\n\n**Deploy** (`deploy.sh`): `test → stage → wire env → E2E probe`. Stages the fixed module into `_deploy/`, exports deployment defaults (`LICENSE_DAYS=90`, `LICENSE_GRACE_DAYS=7`), then runs a boundary sweep against the *staged* copy in a fresh interpreter.\n\n**What the test suite catches:** a regression test asserts `is_valid(EXPIRY, EXPIRY) is True`, plus a companion test that pins the buggy predicate to `False` — so the off-by-one can never silently return.",
+      "evidence": "- **Regression + wiring suite:** `16 passed in 0.04s` (pytest 9.0.2, Python 3.14.4).\n- **Deploy pipeline:** all 4 stages green; `PROBE OK`. Boundary sweep around the grant: offset `-1 → True`, `+0 (expiry day) → True`, `+7 (grace end) → True`, `+8 → False` — exactly one day of separation at the threshold.\n- **Mutation check (proves the suite catches the bug):** swapping the fixed predicate back to the buggy `_buggy_is_valid` makes `test_expiry_day_is_valid_fixed` and `test_same_day_different_times_are_date_equal` fail (exit code 1). The pre-fix code is provably broken; the fix is provably needed.\n- **Isolated env probe:** a clean interpreter with only `LICENSE_GRACE_DAYS=1` (no pytest, no inherited env) returns `True True` — expiry day valid, expiry+1 valid under grace — rc 0, clean stderr.\n- **Edge cases tested:** expiry-day boundary; day-after expiry invalid; zero grace ≡ no grace; 30-day grace boundaries (30 valid / 31 invalid); negative grace and negative grant rejected via `LicenseError`; malformed dates (`2026/08/09`, `not-a-date`) rejected; leap day (2000-02-29) and epoch (1970-01-01) boundaries; missing/garbage env fallbacks; real-process env wiring.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "off-by-one-self-test",
+        "result": "passed",
+        "tests": 16
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 18:15:35"
     }
   ]
 }
