@@ -55,6 +55,7 @@ func main() {
 	piAgentPath := flag.String("pi-agent", envString("OFF_BY_ONE_PI_AGENT", "pi-agent"), "Path to pi-agent binary")
 	cronInterval := flag.Duration("cron-interval", envDuration("OFF_BY_ONE_CRON_INTERVAL", 5*time.Minute), "Cron loop wake interval")
 	loadThreshold := flag.Float64("load-threshold", envFloat("OFF_BY_ONE_LOAD_THRESHOLD", 1.0), "Max loadavg(1) for idle detection (negative = always idle)")
+	solveTimeout := flag.Duration("solve-timeout", envDuration("OFF_BY_ONE_SOLVE_TIMEOUT", solver.DefaultSolveTimeout), "Per-solve timeout cap")
 	skipSandbox := flag.Bool("skip-sandbox", envBool("OFF_BY_ONE_SKIP_SANDBOX", false), "Skip bwrap sandbox (for dev/testing)")
 	readOnly := flag.Bool("readonly", envBool("OFF_BY_ONE_READONLY", false), "Public catalog mode: block all mutating endpoints and the AI chat")
 	exportDir := flag.String("export-dir", envString("OFF_BY_ONE_EXPORT_DIR", ""), "Working directory for git export clones (empty = export disabled)")
@@ -120,7 +121,7 @@ func main() {
 				PiAgentPath: *piAgentPath,
 				Model:       solver.DefaultModel,
 				APIKey:      apiKey,
-				Timeout:     solver.DefaultSolveTimeout,
+				Timeout:     *solveTimeout,
 			}, runner, store)
 			log.Printf("solver ready: pi-agent=%s bwrap=%s", *piAgentPath, *bwrapPath)
 		}

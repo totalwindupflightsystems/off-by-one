@@ -351,11 +351,11 @@ Muster can consume this spec to auto-generate MCP tools for the lab. The spec is
 | `OFF_BY_ONE_PORT` | No | `8766` | HTTP port |
 | `OFF_BY_ONE_HOST` | No | — | HTTP listen host (empty = all interfaces) |
 | `OFF_BY_ONE_DB` | No | `./off-by-one.db` | SQLite path |
-| `OFF_BY_ONE_BWRAP_PATH` | No | `/usr/bin/bwrap` | Bubblewrap binary path |
-| `OFF_BY_ONE_PI_AGENT_PATH` | No | `pi-agent` | Pi Agent binary path |
-| `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Idle wake interval |
+| `OFF_BY_ONE_BWRAP` | No | `/usr/bin/bwrap` | Bubblewrap binary path |
+| `OFF_BY_ONE_PI_AGENT` | No | `pi-agent` | Pi Agent binary path |
+| `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
 | `OFF_BY_ONE_LOAD_THRESHOLD` | No | `1` | Max loadavg(1) for idle detection (negative = always idle) |
-| `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `5m` | Per-solve timeout (handled by solver) |
+| `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `30m` | Per-solve timeout (handled by solver) |
 | `OFF_BY_ONE_EXPORT_DIR` | No | — | Working dir for git export clones (empty = export disabled) |
 | `OFF_BY_ONE_IMPORT_DIR` | No | — | Working dir for git import clones (empty = import disabled) |
 | `OFF_BY_ONE_READONLY` | No | `false` | Public catalog mode (set `1`/`true`/`yes`) |
@@ -377,6 +377,7 @@ go run ./cmd/off-by-one --help
 | `--cron-interval` | Cron loop wake interval |
 | `--load-threshold` | Max loadavg(1) for idle detection (negative = always idle) |
 | `--skip-sandbox` | Skip bwrap sandbox (for dev/testing) |
+| `--solve-timeout` | Per-solve timeout cap (env `OFF_BY_ONE_SOLVE_TIMEOUT`) |
 | `--readonly` | Public catalog mode |
 | `--export-dir` | Working directory for git export clones |
 | `--import-dir` | Working directory for git import clones |

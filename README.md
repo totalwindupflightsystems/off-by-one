@@ -168,11 +168,11 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
 | `OPENROUTER_API_KEY` | No | — | OpenRouter API key for embeddings (DS-003) |
 | `OFF_BY_ONE_PORT` | No | `8766` | HTTP server port |
 | `OFF_BY_ONE_DB` | No | `./off-by-one.db` | SQLite database path |
-| `OFF_BY_ONE_BWRAP_PATH` | No | `bwrap` | Path to bubblewrap binary |
-| `OFF_BY_ONE_PI_AGENT_PATH` | No | `pi-agent` | Path to Pi Agent binary (resolved via PATH) |
+| `OFF_BY_ONE_BWRAP` | No | `/usr/bin/bwrap` | Path to bubblewrap binary |
+| `OFF_BY_ONE_PI_AGENT` | No | `pi-agent` | Path to Pi Agent binary (resolved via PATH) |
 | `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
 | `OFF_BY_ONE_LOAD_THRESHOLD` | No | `1` | Max loadavg(1) for idle detection (negative = always idle) |
-| `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `5m` | Per-solve timeout |
+| `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `30m` | Per-solve timeout |
 | `OFF_BY_ONE_EXPORT_DIR` | No | *(disabled)* | Working directory for git export clones — empty disables `POST /api/v1/export` (501) |
 | `OFF_BY_ONE_IMPORT_DIR` | No | *(disabled)* | Working directory for git import clones — empty disables `POST /api/v1/import` (501) |
 
@@ -195,6 +195,7 @@ go run ./cmd/off-by-one --help
 | `--port` | HTTP server port |
 | `--readonly` | Public catalog mode: block all mutating endpoints and the AI chat |
 | `--skip-sandbox` | Skip bwrap sandbox (for dev/testing) |
+| `--solve-timeout` | Per-solve timeout cap (env `OFF_BY_ONE_SOLVE_TIMEOUT`) |
 | `--version` | Print version and exit |
 
 ## Development

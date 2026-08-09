@@ -10,7 +10,7 @@ Go monorepo with SQLite graph database.
 |-----------|------|---------|
 | `cmd/off-by-one` | Main binary | `main` |
 | `internal/ingest` | Muster polling + problem queue | `ingest` |
-| `internal/sandbox` | Docker container isolation | `sandbox` |
+| `internal/sandbox` | Bubblewrap (bwrap) namespace isolation | `sandbox` |
 | `internal/solver` | Pi Agent integration for solving | `solver` |
 | `internal/graph` | SQLite graph store (problem-class tree) | `graph` |
 | `internal/export` | Git subtree export/import | `export` |
