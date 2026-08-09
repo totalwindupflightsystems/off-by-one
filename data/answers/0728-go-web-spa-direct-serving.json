@@ -1,0 +1,24 @@
+{
+  "class_id": 728,
+  "title": "go-web-spa-direct-serving",
+  "description": "go-web-spa-direct-serving",
+  "created_at": "2026-08-08 23:43:15",
+  "answers": [
+    {
+      "answer_id": 853,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (GAP-006 rabbit hole):** the embedded SPA was mounted only as a subtree handler:\n```go\nmux.Handle(\"/dashboard/\", http.StripPrefix(\"/dashboard/\", http.FileServer(http.FS(sub))))\n```\n`GET /dashboard` (no slash) never reached `FileServer` — Go's `ServeMux` itself emits a trailing-slash redirect to `/dashboard/` (301 on older Go, **307 on this Go 1.26 toolchain**, verified live). Meanwhile `openapi.yaml` (GAP-003) declared `/dashboard` a valid **200** path, so spec-following consumers (which don't chase redirects) broke.\n\n**Fix (`server.go`):** keep the subtree handler, and serve `index.html` directly at the exact `/dashboard` path with Go 1.22+ stdlib `http.ServeFileFS`:\n```go\nmux.Handle(\"/dashboard/\", http.StripPrefix(\"/dashboard/\", http.FileServer(http.FS(sub)))) // kept\n\nmux.HandleFunc(\"/dashboard\", func(w http.ResponseWriter, r *http.Request) {\n    http.ServeFileFS(w, r, sub, \"index.html\") // exact path -> 200, no redirect\n})\n```\n`ServeFileFS` opens the named file inside an `fs.FS` regardless of request path, so it never triggers the directory-redirect logic; it also sets `Content-Type` (`text/html; charset=utf-8`) and handles `If-Modified-Since`/`Last-Modified`. (`http.FS(sub)` conversion is the wrong direction — it wants `fs.FS`, and `fs.Sub` output is already one; the wrapper is a plain `func(w, r)`.)\n\n**Tests converted per spec:** the old test asserted `301 + Location`; now it asserts `200`, `Content-Type: text/html`, body `>5000` bytes, and content markers, plus a kept `/dashboard/` subtree test, an asset test, and an `If-Modified-Since`/OpenAPI-conformance test — `go test` **4/4 PASS**.",
+      "evidence": "Setup: `/workspace/spa-demo` — a self-contained Go module (`go 1.22`, stdlib-only, no external deps) with an `embed.FS` SPA (`web/index.html`, 35,345 bytes with `GAP-006`/`index.html` markers), `web/app.js`, and `openapi.yaml` declaring `/dashboard → 200`. Files: `server.go`, `server_test.go`, `oldbehavior_test.go` (behind `//go:build demo`).\n\nVerification runs (Go 1.26.0, linux/amd64):\n\n- `go vet ./...`, `gofmt -l` → clean; `go test -count=1 ./...` → `ok spademo`:\n  - `TestDashboardNoSlashServesIndex` PASS — 200, no `Location`, `text/html`, 35,345 bytes, all markers\n  - `TestDashboardSlashSubtreeKept` PASS — `/dashboard/` still serves the directory index\n  - `TestDashboardAssetFromSubtree` PASS — `/dashboard/app.js` → 200, `text/javascript`\n  - `TestDashboardIfModifiedSinceAndOpenAPIConformance` PASS — 304 + empty body on `If-Modified-Since` replay (via `fstest.MapFS` with a real mtime); `openapi.yaml` declares `/dashboard: 200` and the live handler returns 200\n- `go test -tags demo` → `TestOldFileServerOnlyRedirects` PASS — the pre-fix handler still answers 3xx\n- Live smoke (`curl`):\n  - NEW: `GET /dashboard` → `HTTP/1.1 200 OK`, `Content-Type: text/html; charset=utf-8`, `Content-Length: 35345`, no `Location`; `GET /dashboard/` → 200; `GET /dashboard/app.js` → 200 `text/javascript`\n  - OLD (FileServer-only): `GET /dashboard` → `HTTP/1.1 307 Temporary Redirect`, `Location: /dashboard/` (the 301 from the GAP-006 note becomes 307 via `ServeMux` on Go 1.25+; both are 3xx contract violations)\n\nEdge cases tested: exact-slash path (no `Location` header asserted), subtree path kept serving, deep asset resolution, `Content-Type` sniffing by extension, `If-Modified-Since → 304` with zero-length body, and spec/handler parity. One inherent nuance: `embed.FS` reports zero mtimes, so embedded content never emits `Last-Modified`/`304` — the 304 mechanism was exercised with a non-zero-mtime `fs.FS`, which is what on-disk serving gets. Note (pre-existing, not a regression): the original repo's `TestChatCmd_ConnectionRefused` is environment-sensitive — it requires `127.0.0.1:9734` free; a live dogfood server on that port flips it, provable by re-running with `RABBITHOLE_LISTEN_ADDR` on a free port.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-web-spa-direct-serving",
+        "result": "passed",
+        "tests": 4
+      },
+      "status": "verified",
+      "created_at": "2026-08-08 23:43:15"
+    }
+  ]
+}

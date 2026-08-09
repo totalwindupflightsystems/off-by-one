@@ -1,0 +1,24 @@
+{
+  "class_id": 745,
+  "title": "js-sliding-window-log-epoch-trap",
+  "description": "js-sliding-window-log-epoch-trap",
+  "created_at": "2026-08-09 01:40:08",
+  "answers": [
+    {
+      "answer_id": 871,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "The rate limiter must match a naive per-request reference exactly. The naive reference keeps accepted timestamps verbatim and, for a request at time `t`, prunes every entry `s <= t - windowMs` before counting. Two bugs plague typical \"optimized\" implementations:\n\n1. **The epoch trap**: bucketing with `epoch = Math.floor(t / windowMs)` and resetting counts on an epoch change. `floor` flips *exactly at the boundary*, so a request arriving at `t % windowMs === 0` either drops the just-expired boundary (false accept) or double-counts it (false reject). Timestamps must never be bucketed — store them verbatim.\n2. **The off-by-one prune**: pruning with `< cutoff` instead of `<= cutoff` keeps an entry that is *exactly* `windowMs` old. `s == t - W` means the window `(t - W, t]` is fully elapsed for that entry — it must be removed, or the count inflates and requests get falsely rejected.\n\n```js\n'use strict';\n\nclass SlidingWindowLog {\n  constructor({ limit, windowMs, now = () => performance.now() }) {\n    if (!Number.isInteger(limit) || limit <= 0) throw new RangeError('limit must be a positive integer');\n    if (!Number.isFinite(windowMs) || windowMs <= 0) throw new RangeError('windowMs must be positive');\n    this.limit = limit;\n    this.windowMs = windowMs;\n    this.now = now; // monotonic clock (performance.now)\n    this.log = [];  // timestamps of accepted requests, arrival order\n  }\n\n  tryAcquire(t) {\n    const now = t === undefined ? this.now() : t; // deterministic when given\n    const cutoff = now - this.windowMs;\n\n    // Prune entries at or past the window edge: `<=`, never `<`.\n    const log = this.log;\n    let i = 0;\n    while (i < log.length && log[i] <= cutoff) i++;\n    if (i > 0) log.splice(0, i);\n\n    if (log.length < this.limit) {\n      log.push(now);\n      return true;\n    }\n    return false;\n  }\n}\n\nmodule.exports = { SlidingWindowLog };\n```\n\nWhy it's correct: a request accepted at `s` is inside the window for request `t` iff `s > t - W`, so the cutoff is exact and boundary hits (`t % W === 0`) fall out naturally. Memory is `O(limit)`: the log is pruned before every check and only grows on accept, so `log.length <= limit` at all times regardless of how long the process runs or how far timestamps advance.",
+      "evidence": "Verified in Node against a literal naive reference (`shift()` queue, `<= t - windowMs` prune) with `verify.js`:\n\n- **150 adversarial cases, 0 mismatches** across `(limit, windowMs)` ∈ `{1,2,3,5}×1000`, `2×10`, `1×7`, `4×25`, `10×500`, `3×1`, `1×1`, including: requests *exactly on* every boundary (`[0, W, 2W, 3W, …]`), straddling sequences (`[0, W-1, W, W+1, 2W]`), duplicate boundary hits (`[W, W, W]`), dense clusters `{kW + d : d ∈ {-2,-1,0,1,2}}`, boundary pressure with `limit+5` boundary requests, huge epoch values (`10⁶·W`), fractional positions (`W/2`), identical duplicates, single requests, 300-step spans, and 1000-step deterministic pseudo-random streams with boundary snapping. Decisions match bit-for-bit on every one.\n- **Trap is real**: the two buggy variants (epoch-bucket and `<`-prune) diverge from the reference on **42 of those cases**; the fix never does.\n- **Spot check** `N=1, W=1000, seq=[0,999,1000,1001]` → `accept, reject, accept, reject` (identical to naive). Note `t=1000` is accepted even though `t=0` is present — the epoch bug rejects here (fresh-bucket reset drops `t=999`'s block) and the `<`-bug rejects here too (keeps stale `t=0`). Both traps avoided.\n- **Memory bound**: 100k-request stream with `limit=5` → max stored log size **5** (never exceeds the limit).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "js-sliding-window-log-epoch-trap",
+        "result": "passed",
+        "tests": 150
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 01:40:08"
+    }
+  ]
+}

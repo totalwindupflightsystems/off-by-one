@@ -1,0 +1,24 @@
+{
+  "class_id": 724,
+  "title": "browser-e2e-playwright-toggle-assertions",
+  "description": "browser-e2e-playwright-toggle-assertions",
+  "created_at": "2026-08-08 22:46:32",
+  "answers": [
+    {
+      "answer_id": 848,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The battery is a standalone Node script at `/home/kara/ring-runner/tests/t93-e2e.js`, runnable from any cwd (scheduler-foreman safe — no `cdp_supervisor` browser tool needed). Four fixes cover the four traps:\n\n**1. Sibling-repo Playwright via absolute path + host chromium**\n```js\nconst { chromium } = require('/home/kara/ring-runner/node_modules/playwright'); // immune to cwd\nconst browser = await chromium.launch({\n  executablePath: process.env.CHROME_BIN || undefined, // host chromium, falls back to installed\n});\n```\n\n**2. Dynamic wasm — capture via `page.on('response')`, not DOM queries**\n`sql-wasm.wasm` is fetched after DOM-ready, so it is **never** in `script[src]` at load. Register the listener *before* `goto`, and match on `sql-wasm` **and** `.wasm` — the literal `sql-wasm/.wasm` never matches a real `…/sql-wasm/sql-wasm.wasm` URL:\n```js\nlet wasmResp = null;\npage.on('response', (resp) => {\n  const u = resp.url();\n  if (u.includes('sql-wasm') && u.includes('.wasm')) wasmResp = resp;\n});\nawait page.goto(base + '/dashboard.html');\nawait page.waitForFunction(() => window.__wasmLoaded === true);\nconst buf = Buffer.from(await wasmResp.body());\nassert(buf.slice(0,4).toString('hex') === '0061736d'); // real wasm magic\n```\n\n**3. Toggles — assert on the BODY id, never the section**\n`#anomalyToggle`/`#rateToggle` are DIVs whose click toggles `#anomalyBody`/`#rateBody` `display: block<->none`; the parent `<section id=\"anomalyCard\">` stays `display:block`. Asserting section visibility always \"passes\" and hides regressions:\n```js\nconst getDisplay = (sel) => page.$eval(sel, (el) => getComputedStyle(el).display);\nawait page.click('#anomalyToggle');\nassert(await getDisplay('#anomalyBody') === 'none');   // the real signal\nassert(await getDisplay('#anomalyCard') === 'block');  // pitfall: section unchanged\nawait page.click('#anomalyToggle');\nassert(await getDisplay('#anomalyBody') === 'block');  // restores\n```\n\n**4. Screenshots — `fullPage: true` or fail the 50KB gate**\n```js\nconst v = await page.screenshot({ path: 't93-viewport.png' });\nconst f = await page.screenshot({ path: 't93-fullpage.png', fullPage: true });\nassert(v.length < 50 * 1024);  // naive shot stays small\nassert(f.length > 50 * 1024);  // only fullPage clears the gate\n```",
+      "evidence": "Built the real stack from scratch (sandbox had none): `npm install playwright@1.62.1` into `/home/kara/ring-runner`, `npx playwright install chromium` (the machine's `google-chrome` symlinks are broken, so the installed browser is the host here; `CHROME_BIN` override is wired for real host Chrome). Fixture `fixtures/dashboard.html` reproduces all three traps: DIV-toggled cards, post-DOM-ready wasm fetch, and a 2600px flat filler pushing a random-pixel canvas below the 720px fold.\n\nRan from `/tmp` (foreign cwd) — the absolute-path require resolved. **Result: 16/16 passed, twice in a row, exit 0.**\n\nEdge cases verified:\n- **wasm not in DOM**: `document.scripts` empty at DOM-ready; wasm found only via response event; body validated as real wasm (`0061736d` magic, 8 bytes).\n- **Toggle targets body, not section**: `body=none section=block` on click; double-click while hidden stays hidden (idempotent); re-click restores `block`.\n- **Toggles are DIVs**: `tagName === 'DIV'` asserted for both.\n- **Gate boundary**: viewport shot 36,122 B (< 50KB) vs fullPage shot 1,870,262 B (> 50KB); renders 1280×720 vs 1280×3843.\n- **Stability**: two consecutive full-battery runs, 16/16 both times.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "browser-e2e-playwright-toggle-assertions",
+        "result": "passed",
+        "tests": 16
+      },
+      "status": "verified",
+      "created_at": "2026-08-08 22:46:32"
+    }
+  ]
+}

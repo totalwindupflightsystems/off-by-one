@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**712 problem classes · 836 verified answers** · exported 2026-08-08 20:44 UTC
+**751 problem classes · 877 verified answers** · exported 2026-08-09 02:45 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -8,13 +8,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 |----------|---------|---------|-----------|
 | 10 | off-by-one-self-test | 81 | bash, go, python, python3, shell, text |
 | 388 | typescript-barrel-split-large-file | 6 | go |
+| 641 | python-aws-emulator-idle-audit | 5 | go |
 | 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
 | 313 | python-audit-idle-maintenance | 4 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
-| 641 | python-aws-emulator-idle-audit | 4 | go |
-| 457 | go-e2e-live-server-battery | 3 | go |
+| 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 3 | go, python |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
 | 12 | shell-script | 2 | bash |
@@ -718,3 +718,42 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 710 | python-test-live-api-optin-gate | 1 | go |
 | 711 | go-docs-html-build-stale | 1 | go |
 | 712 | go-cli-flag-parity | 1 | go |
+| 713 | js-auth-header-relay-federation | 1 | go |
+| 714 | python-rsa-wiener-small-d-key-recovery | 1 | python |
+| 715 | typescript-cli-scaffold-package-json | 1 | go |
+| 716 | go-cli-stub-mode-surfacing | 1 | go |
+| 717 | typescript-config-manifest-duplication | 1 | go |
+| 718 | go-dispatch-stub-wiring | 1 | go |
+| 719 | docs-battery-count-drift | 1 | go |
+| 720 | go-stats-solver-availability-surfacing | 1 | go |
+| 721 | typescript-cli-hallucinated-default-model | 1 | go |
+| 722 | typescript-config-docs-db-port-mismatch | 1 | go |
+| 723 | ops-verification-stale-binary | 1 | go |
+| 724 | browser-e2e-playwright-toggle-assertions | 1 | go |
+| 725 | docs-docker-port-mapping-mismatch | 1 | go |
+| 726 | go-docs-auth-header-quickstart | 1 | go |
+| 727 | typescript-docs-cli-reachability | 1 | go |
+| 728 | go-web-spa-direct-serving | 1 | go |
+| 729 | go-session-status-lifecycle-completed | 1 | go |
+| 730 | go-e2e-stale-assertion-after-wiring | 1 | go |
+| 731 | python-credentials-key-rotation | 1 | go |
+| 732 | python-docs-stale-version-refs | 1 | go |
+| 733 | go-make-run-no-dotenv | 1 | go |
+| 734 | go-cli-flag-gap-verification | 1 | go |
+| 735 | go-docs-stale-runtime-refs | 1 | go |
+| 736 | cpp-timeseries-chaos-verification-literal-criteria-trap | 1 | go |
+| 737 | typescript-cli-noninteractive-flag-alias | 1 | go |
+| 738 | node-pnpm-audit-override-pin | 1 | go |
+| 739 | typescript-golang-phantom-stub-wiring | 1 | go |
+| 740 | javascript-nextjs-standalone-dynamic-imports | 1 | go |
+| 741 | typescript-cli-output-tree-renderer | 1 | go |
+| 742 | go-cli-progress-line-timing | 1 | go |
+| 743 | go-audit-neverdone-clean-gates | 1 | go |
+| 744 | python-subarray-divisible-negative-mod | 1 | python |
+| 745 | js-sliding-window-log-epoch-trap | 1 | js |
+| 746 | krakend-stale-config-after-bind-mount | 1 | go |
+| 747 | go-host-mode-dsn-compose-network-names | 1 | go |
+| 748 | typescript-barrel-split-pure-fn-docs-gap-close | 1 | go |
+| 749 | docs-claims-vs-implementation-drift | 1 | go |
+| 750 | python-test-env-key-leak | 1 | go |
+| 751 | github-pr-clean-head-branch | 1 | go |

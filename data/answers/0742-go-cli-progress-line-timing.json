@@ -1,0 +1,24 @@
+{
+  "class_id": 742,
+  "title": "go-cli-progress-line-timing",
+  "description": "go-cli-progress-line-timing",
+  "created_at": "2026-08-09 01:16:32",
+  "answers": [
+    {
+      "answer_id": 867,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (GAP-023):** `bunker spawn` issued the `SpawnAgent` RPC and produced no output until the call returned. With a ~20s backend the terminal was silent, so users Ctrl-C'd into a half-created agent.\n\n**Fix** (`/home/kara/go-cli-progress-line-timing/internal/spawn/spawn.go`): print the progress line **immediately before** the RPC, so feedback is emitted while the call is still in flight:\n\n```go\nfunc Run(ctx context.Context, client SpawnClient, out io.Writer) (SpawnResult, error) {\n\tfmt.Fprintln(out, \"Creating agent...\") // <-- before the RPC, while it may block\n\treturn client.SpawnAgent(ctx, SpawnRequest{Image: \"bunker-default\"})\n}\n```\n\nThe CLI (`cmd/bunker/main.go`) wraps a stdlib `net/rpc` client in the `SpawnClient` interface and calls `Run`; `cmd/spawnserver` simulates the slow backend.\n\n**Verification pattern** (`internal/spawn/spawn_test.go`): a `blockingSpawnServer` mock whose `SpawnAgent` blocks on a `release` channel (so the RPC is *provably in flight*), plus a **streaming stdout pipe read** that asserts `Creating agent...` arrives **within 2s while the RPC is still blocked** (its `returned` channel still open). Post-hoc `captureStdout` cannot distinguish before/after ordering; the streaming read can. Key harness detail: `io.Pipe` writes block until read, so the pipe reader must be started before `Run`.",
+      "evidence": "- `go vet` clean, `gofmt` clean, all tests pass under `-race`, stable across 5 consecutive runs.\n- **`TestProgressLineAppearsWhileRPCBlocked` (PASS, 0.20s):** line observed on the live pipe within 2s; mock's `returned` channel confirmed still open at observation time (RPC blocked); after `close(release)`, `Run` completes.\n- **`TestProgressLineOrderedBeforeResult` (PASS):** stream order is progress line → result line.\n- **`TestProgressLineAppearsBeforeRPCInCode` (PASS):** write-time event recorder proves the write precedes the RPC invocation.\n- **`TestRunCancelledWhileRPCBlocked` (PASS, edge case):** on Ctrl-C the progress line is already emitted and `Run` returns `context.Canceled` promptly — no hang, no false success.\n- **End-to-end demo:** real CLI vs. 4s simulated server — `[20:15:56.861] Creating agent...` then `[20:16:00.862] Agent agent-201600 created` (line appears instantly, result exactly at delay expiry).\n- **Negative control (proves the AC bites):** a temporary pre-fix variant (print *after* RPC) produced **no output within 2s while the RPC was blocked** — the timing AC fails it, demonstrating it can't be satisfied by luck or by a post-hoc assertion. (Regress harness removed after verification.)",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cli-progress-line-timing",
+        "result": "passed",
+        "tests": 4
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 01:16:32"
+    }
+  ]
+}

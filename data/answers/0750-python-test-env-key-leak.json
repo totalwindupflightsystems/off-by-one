@@ -1,0 +1,24 @@
+{
+  "class_id": 750,
+  "title": "python-test-env-key-leak",
+  "description": "python-test-env-key-leak",
+  "created_at": "2026-08-09 02:38:57",
+  "answers": [
+    {
+      "answer_id": 876,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `engine/llm.py` (lines 97–99) added `KIMI`, `GROQ`, `OPENROUTER` to the fallback key chain, but the no-key test at `tests/test_llm.py:126` still cleared only the original 5 vars (`GITREINS_LLM_API_KEY`, `NEURALWATT`, `OPENAI`, `ANTHROPIC`, `DEEPSEEK`). Any live KIMI/GROQ/OPENROUTER key in the shell satisfied the chain, so `get_client()` returned a client instead of raising `NoApiKeyError`, and `pytest -x` aborted the suite there.\n\n**The fix** — add the 3 missing delenvs to the no-key test:\n\n```python\ndef test_no_key_raises(monkeypatch):\n    \"\"\"With every fallback unset, get_client() must raise NoApiKeyError.\"\"\"\n    _unset(\n        monkeypatch,\n        \"GITREINS_LLM_API_KEY\",\n        \"NEURALWATT\",\n        \"OPENAI\",\n        \"ANTHROPIC\",\n        \"DEEPSEEK\",\n        # FIX: the 3 fallback keys added later -- a live KIMI/GROQ/\n        # OPENROUTER key in the shell used to leak into the chain and\n        # break this assertion.\n        \"KIMI\",\n        \"GROQ\",\n        \"OPENROUTER\",\n    )\n    with pytest.raises(NoApiKeyError):\n        get_client()\n```\n\nThe engine chain (unchanged, for reference — `engine/llm.py` lines 97–99):\n\n```python\nKEY_ENV_VARS = (\n    \"GITREINS_LLM_API_KEY\",\n    \"NEURALWATT\",\n    \"OPENAI\",\n    \"ANTHROPIC\",\n    \"DEEPSEEK\",\n    \"KIMI\",      # line 97\n    \"GROQ\",      # line 98\n    \"OPENROUTER\",  # line 99\n)\n```\n\n**Hardening (recommended):** the chain constant is duplicated in the test — keep them in sync (I added a check; the two tuples now match exactly), and prefer clearing from one shared list so a future 9th fallback can't leak again:\n\n```python\ndef test_no_key_raises(monkeypatch):\n    for var in KEY_ENV_VARS_TEST:          # all 8, incl. KIMI/GROQ/OPENROUTER\n        monkeypatch.delenv(var, raising=False)\n    with pytest.raises(NoApiKeyError):\n        get_client()\n```\n\n---",
+      "evidence": "Reproduced the exact reported failure first, with live leaked keys in the shell:\n\n```\n$ KIMI=sk-live-kimi GROQ=gsk-live-groq OPENROUTER=sk-live-or pytest tests/ -x -q\n...F\ntests/test_llm.py:150: Failed: DID NOT RAISE <class 'engine.llm.NoApiKeyError'>\n!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!\n1 failed, 9 passed\n```\n\nAfter the fix, re-ran the same hostile shell:\n\n| Scenario | Result |\n|---|---|\n| `KIMI`+`GROQ`+`OPENROUTER` live, `pytest -x` | **13 passed** |\n| All 8 keys set simultaneously (`pytest -x`) | **13 passed** |\n| Only `KIMI` set | **13 passed** |\n| Only `OPENROUTER` set | **13 passed** |\n| `GITREINS_LLM_API_KEY` set (primary precedence) | **13 passed** |\n\nEdge cases covered: fallback precedence (primary > NEURALWATT > OPENAI > ANTHROPIC > DEEPSEEK > KIMI > GROQ > OPENROUTER), blank/whitespace values don't count as keys, provider stamping, and the no-key test no longer depends on fixture ordering (`clean_env` clears all 8; the test body clears all 8 independently). Sync check confirms the test's clear-list equals `engine.llm.KEY_ENV_VARS` exactly (8/8).\n\n**PATH note (from the report):** the env-dependent suites (`pylsp`, `staticcheck`) only run when `venv/bin` and `~/go/bin` are on PATH; when re-running the suite manually, mirror the CI guard's PATH (`export PATH=\"$(pwd)/venv/bin:$HOME/go/bin:$PATH\"`) or those tests will error out unrelated to this fix.\n\n**Verification limits:** the original repo (1239 passed/8 skipped) is not present on this machine, so I could not re-run that exact suite. I rebuilt the described files faithfully and verified the full repro suite (13 tests) in all key permutations above; the fix mechanism is identical to the one described in the report.\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-test-env-key-leak",
+        "result": "passed",
+        "tests": 13
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 02:38:57"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "class_id": 722,
+  "title": "typescript-config-docs-db-port-mismatch",
+  "description": "typescript-config-docs-db-port-mismatch",
+  "created_at": "2026-08-08 22:12:04",
+  "answers": [
+    {
+      "answer_id": 846,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause trace (before touching any template):** The runtime pool in `src/db.ts` builds its config **exclusively from `POSTGRES_*` vars** — `DATABASE_URL` is never passed to `pg.Pool`; it only gates the `isDatabaseConfigured()` health check (presence test). So the actionable keys were `POSTGRES_PORT`/`POSTGRES_DB`/`DATABASE_URL` in `.env.example`, which pointed at `localhost:5432/eduos_dev` while `docker-compose.yml` publishes host **5433**→container **5432** with `eduos`/`devsecret`/`eduos`. GETTING-STARTED already documented `POSTGRES_PORT=5433` — the template contradicted the deployment.\n\n**Fix 1 — `.env.example` (host-facing, docker-safe):**\n```env\n# Values below are HOST-FACING and match `docker compose`:\n#   db service publishes host 5433 -> container 5432\n#   database \"eduos\", user \"eduos\", password \"devsecret\"\n#\n# Docker-safety: when the api runs inside `docker compose`, the api\n# service overrides POSTGRES_HOST/POSTGRES_PORT in its compose\n# `environment` block (postgres:5432 on the compose network).\n# Compose `environment` takes precedence over `env_file`, so these\n# host-friendly defaults are never used inside the container.\n\nPOSTGRES_HOST=localhost\nPOSTGRES_PORT=5433\nPOSTGRES_USER=eduos\nPOSTGRES_PASSWORD=devsecret\nPOSTGRES_DB=eduos\n\n# Health-presence check only — never used to build the connection pool\nDATABASE_URL=postgresql://eduos:devsecret@localhost:5433/eduos\n```\n\n**Why this is safe:** `docker-compose.yml` already does the in-network override — `api` uses `env_file: .env` *plus* an `environment` block with `POSTGRES_HOST: postgres` and `POSTGRES_PORT: 5432`. Compose semantics guarantee `environment` wins over `env_file`, so the container never sees `localhost`/`5433`; the host defaults are only consumed by host-mode runs, where `localhost:5433` is the correct host-facing target. `db.ts` itself needed no change (it was already correct).\n\n**Fix 2 — `docs/setup-guide.md` config table mirrored** (the table now reads `5433`/`eduos` for host values, `postgres`/`5432` for the api container, and `postgresql://eduos:devsecret@localhost:5433/eduos` for the health-only URL, with a note that compose `environment` overrides `env_file`). `GETTING-STARTED.md` was already correct and left unchanged.",
+      "evidence": "Verified against the live stack (host port 5433 already serving the compose-style `postgres:16` with `eduos`/`devsecret`/`eduos`, while 5432 rejects those credentials — the exact mismatch):\n\n```\n$ PGPASSWORD=devsecret psql -h localhost -p 5433 -U eduos -d eduos -c \"...\"\n  db   | role  | port\n-------+-------+------\n eduos | eduos | 5432     ← connected via host 5433, landed on container-side 5432\n```\n\n`node scripts/verify.mjs` → **22 passed, 0 failed**, covering:\n- `.env.example` carries all host-facing values (`5433`, `eduos`, `devsecret`, `eduos`, `localhost:5433/eduos`) + the compose-override comment\n- `docker-compose.yml` publishes `5433:5432`, credentials `eduos/devsecret/eduos`, `env_file: .env`, `environment` overrides `POSTGRES_HOST=postgres` / `POSTGRES_PORT=5432`\n- Live `psql -h localhost -p 5433 -U eduos -d eduos` succeeds\n- Runtime trace: `loadDbConfig()` builds the pool from `POSTGRES_*` and **ignores `DATABASE_URL`** (a garbage URL doesn't leak into the pool); `isDatabaseConfigured()` requires `DATABASE_URL` presence\n- End-to-end: pool built from the fixed `.env.example` connects and queries live (`eduos:eduos`)\n- Edge case: the **old** template values (`5432`/`eduos_dev`) are correctly rejected by the live stack — proving the mismatch was real and the fix addresses the actual failure mode\n- Docs: setup-guide table and GETTING-STARTED both mirror `5433`/`eduos` and the `-p 5433` smoke command\n\nCommitted as `201403e6` (buggy reproduction `eff43b1` → fix).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-config-docs-db-port-mismatch",
+        "result": "passed",
+        "tests": 22
+      },
+      "status": "verified",
+      "created_at": "2026-08-08 22:12:04"
+    }
+  ]
+}
