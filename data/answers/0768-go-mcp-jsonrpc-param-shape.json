@@ -1,0 +1,24 @@
+{
+  "class_id": 768,
+  "title": "go-mcp-jsonrpc-param-shape",
+  "description": "go-mcp-jsonrpc-param-shape",
+  "created_at": "2026-08-09 05:26:17",
+  "answers": [
+    {
+      "answer_id": 897,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The root cause: the `tools/call` params struct was decoded with `encoding/json` tags only for `tool`/`input`, so standard MCP clients sending `{name, arguments}` decoded to an empty tool name → `400 tool name is required`.\n\nThe fix is a dual-shape `ToolCallParams` with a custom `UnmarshalJSON` that decodes **both** shapes in one pass, prefers `name`/`arguments` whenever either is present, falls back to `tool`/`input`, and returns `ErrToolNameRequired` only when both pairs are absent (including `null`/missing params):\n\n```go\n// mcp/params.go\nvar ErrToolNameRequired = errors.New(\"tool name is required\")\n\ntype ToolCallParams struct {\n\tName      string          `json:\"name\"`\n\tArguments json.RawMessage `json:\"arguments,omitempty\"`\n}\n\n// UnmarshalJSON accepts both shapes; standard (name, arguments) wins,\n// legacy (tool, input) is the fallback, error only when both are absent.\nfunc (p *ToolCallParams) UnmarshalJSON(data []byte) error {\n\tvar wire struct {\n\t\tName      string          `json:\"name\"`\n\t\tArguments json.RawMessage `json:\"arguments\"`\n\t\tTool      string          `json:\"tool\"`\n\t\tInput     json.RawMessage `json:\"input\"`\n\t}\n\tif err := json.Unmarshal(data, &wire); err != nil {\n\t\treturn fmt.Errorf(\"decode tools/call params: %w\", err)\n\t}\n\tif bytes.Equal(bytes.TrimSpace(data), []byte(\"null\")) {\n\t\treturn ErrToolNameRequired\n\t}\n\t*p = ToolCallParams{}\n\tswitch {\n\tcase wire.Name != \"\" || wire.Arguments != nil:\n\t\tp.Name, p.Arguments = wire.Name, wire.Arguments // standard — preferred\n\tcase wire.Tool != \"\" || wire.Input != nil:\n\t\tp.Name, p.Arguments = wire.Tool, wire.Input     // legacy — fallback\n\tdefault:\n\t\treturn ErrToolNameRequired\n\t}\n\treturn nil\n}\n```\n\nThe handler surfaces it as a JSON-RPC invalid-params error (`-32602`, message `\"tool name is required\"`), and the HTTP layer maps that to HTTP 400:\n\n```go\n// mcp/handler.go — Handle() excerpt\nif err := json.Unmarshal(body, &req); err != nil {\n\tcode := CodeParseError\n\tvar syn *json.SyntaxError\n\tif !errors.As(err, &syn) {\n\t\tcode = CodeInvalidParams\n\t}\n\tif errors.Is(err, ErrToolNameRequired) {\n\t\tcode = CodeInvalidParams\n\t\tmsg = ErrToolNameRequired.Error() // \"tool name is required\"\n\t}\n\treturn Response{JSONRPC: \"2.0\", Error: &RPCError{Code: code, Message: msg}}\n}\n// HandleCall rejects an empty resolved name as defense-in-depth:\nif params.Name == \"\" { return nil, ErrToolNameRequired }\n```\n\nTable tests in `mcp/params_test.go` (`TestToolCallParamsUnmarshal`, `TestStandardAndLegacyShapesResolveIdentically`) assert both shapes decode identically and re-encode to the same canonical output; `handler_test.go` and `cmd/server/main_test.go` cover the full JSON-RPC/HTTP path.",
+      "evidence": "Verified three ways — unit tests, HTTP integration tests, and a live server + curl:\n\n```\n$ go test -race ./...   → ok  go-mcp-jsonrpc-param-shape/mcp, cmd/server  (33 tests pass)\n```\n\nTable tests covered: standard shape, legacy shape, both-present (standard wins), name-without-args, tool-without-input, null arguments, nested/array args, `{}` → error, `null` → error, stray-field → error, plus 5 \"resolve identically\" cases (scalar, no args, nested, null, empty-object).\n\nLive curl against the built server:\n\n| Request | Result |\n|---|---|\n| `params:{\"name\":\"greet\",\"arguments\":{\"name\":\"World\"}}` | **200** `\"greeting\":\"Hello, World!\"` |\n| `params:{\"tool\":\"greet\",\"input\":{\"name\":\"Legacy\"}}` | **200** `\"greeting\":\"Hello, Legacy!\"` |\n| both shapes present | **200** — standard wins (`\"Hello, Std!\"`) |\n| `params:{}` | **400** `{\"code\":-32602,\"message\":\"tool name is required\"}` |\n| params missing / `null` | **400** `\"tool name is required\"` |\n\nEdge cases verified: `name` present without `arguments`, `tool` present without `input`, `\"arguments\":null`, nested/array arguments, `null` and missing params, unknown method (`-32601`). `gofmt`, `go vet`, and `-race` are all clean. Files: `mcp/params.go`, `mcp/handler.go`, `mcp/params_test.go`, `mcp/handler_test.go`, `cmd/server/main.go`, `cmd/server/main_test.go` under `/home/kara/go-mcp-jsonrpc-param-shape`.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-mcp-jsonrpc-param-shape",
+        "result": "passed",
+        "tests": 33
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 05:26:17"
+    }
+  ]
+}

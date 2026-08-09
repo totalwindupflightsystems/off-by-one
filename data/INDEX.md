@@ -1,17 +1,17 @@
 # Off-by-One Answer Index
 
-**751 problem classes · 877 verified answers** · exported 2026-08-09 02:45 UTC
+**785 problem classes · 917 verified answers** · exported 2026-08-09 08:45 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 10 | off-by-one-self-test | 81 | bash, go, python, python3, shell, text |
-| 388 | typescript-barrel-split-large-file | 6 | go |
-| 641 | python-aws-emulator-idle-audit | 5 | go |
+| 10 | off-by-one-self-test | 82 | bash, go, python, python3, shell, text |
+| 388 | typescript-barrel-split-large-file | 7 | go |
+| 313 | python-audit-idle-maintenance | 6 | go |
+| 641 | python-aws-emulator-idle-audit | 6 | go |
 | 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
-| 313 | python-audit-idle-maintenance | 4 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
@@ -25,6 +25,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 206 | off-by-one-self-test-2026-07-29-tick200 | 2 | go |
 | 229 | off-by-one-self-test-2026-07-30-tick210 | 2 | go |
 | 247 | cron-double-fire-detection | 2 | go |
+| 259 | python-audit-idle-tick | 2 | go |
 | 334 | go-verification-double-fire | 2 | go |
 | 337 | h3-sdk-idle-audit-tick | 2 | go |
 | 383 | go-websocket-e2e-live-battery | 2 | go |
@@ -280,7 +281,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 256 | python-infra-audit-tick | 1 | go |
 | 257 | typescript-test-infra-duckdb-file-lock | 1 | go |
 | 258 | git-merge-external-fixes-audit-tick | 1 | go |
-| 259 | python-audit-idle-tick | 1 | go |
 | 260 | infra-project-bootstrap-missing-workdir | 1 | go |
 | 261 | python-benchmark-pytest-benchmark-setup | 1 | go |
 | 262 | go-testing-load-flake | 1 | go |
@@ -757,3 +757,37 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 749 | docs-claims-vs-implementation-drift | 1 | go |
 | 750 | python-test-env-key-leak | 1 | go |
 | 751 | github-pr-clean-head-branch | 1 | go |
+| 752 | typescript-e2e-realtime-sync-test | 1 | go |
+| 753 | github-clean-fork-pr | 1 | go |
+| 754 | python-docs-vs-reality-route-inventory | 1 | go |
+| 755 | python-e2e-battery-due-cycle | 1 | go |
+| 756 | typescript-http-api-route-wrapping-mcp-tools | 1 | go |
+| 757 | go-audit-never-done-sweep | 1 | go |
+| 758 | python-rfc6979-deterministic-ecdsa-nonce | 1 | python |
+| 759 | docs-spec-inventory-stale-stub | 1 | go |
+| 760 | go-config-default-port-host-gateway-collision | 1 | go |
+| 761 | typescript-doc-quickstart-tsc-strict-fix | 1 | go |
+| 762 | typescript-config-validation-test-loop | 1 | go |
+| 763 | docs-spec-status-drift | 1 | go |
+| 764 | cpp-scheduler-worker-dispatch-death | 1 | go |
+| 765 | go-chat-structured-filters-time-range | 1 | go |
+| 766 | docs-stale-route-reference | 1 | go |
+| 767 | go-release-tag-stale | 1 | go |
+| 768 | go-mcp-jsonrpc-param-shape | 1 | go |
+| 769 | typescript-docs-consistency | 1 | go |
+| 770 | python-deps-cryptography-major-upgrade | 1 | go |
+| 771 | typescript-cost-tracking-nan-total-tokens | 1 | go |
+| 772 | go-http-openapi-docs-viewer | 1 | go |
+| 773 | go-docs-count-drift | 1 | go |
+| 774 | go-json-snake-case-wire-format | 1 | go |
+| 775 | python-docs-mcp-tool-count-drift | 1 | go |
+| 776 | js-frontend-inert-filter-threading | 1 | go |
+| 777 | docs-test-count-drift | 1 | go |
+| 778 | go-cli-make-demo-false-green-gate | 1 | go |
+| 779 | go-wasm-modules-run-export-hint | 1 | go |
+| 780 | python-standing-block-watchdog-key-probe | 1 | go |
+| 781 | go-mod-tidy-diff-false-green | 1 | go |
+| 782 | python-docs-stack-model-count-drift | 1 | go |
+| 783 | typescript-e2e-full-battery-live-verification | 1 | go |
+| 784 | docs-api-reference-missing | 1 | go |
+| 785 | typescript-large-file-barrel-split-router-default-export | 1 | go |

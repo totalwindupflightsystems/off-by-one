@@ -1,0 +1,24 @@
+{
+  "class_id": 767,
+  "title": "go-release-tag-stale",
+  "description": "go-release-tag-stale",
+  "created_at": "2026-08-09 04:37:57",
+  "answers": [
+    {
+      "answer_id": 896,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** `v0.1.0` was tagged 53 commits behind HEAD and its handlers shipped bodies that violated the OpenAPI contract (`POST /cancel` → `{\"status\":\"ok\"}`; `DELETE /sessions/{id}` → `204 No Content`). Since `go get @latest` resolves the highest semver tag from the proxy/VCS tags — not HEAD — consumers kept pulling the stale, non-compliant build. The fix is two-layered: **(1) make the wire bodies compliant at HEAD, (2) re-release a higher tag at HEAD so `@latest` resolves the fixed code.**\n\n### 1. Fix the wire bodies (`api.go`)\n\nBefore (shipped in `v0.1.0`):\n\n```go\n// BUG: contract says {\"cancelled\",\"cancelled_decision_id\"}; 404 when unknown\ntype cancelReply struct{ Status string `json:\"status\"` }\n\nfunc (s *server) handleCancel(w http.ResponseWriter, r *http.Request) {\n    ...\n    writeJSON(w, http.StatusOK, cancelReply{Status: \"ok\"})   // always \"ok\"\n}\n\n// BUG: contract says 200 {\"terminated\",\"session_id\"}\nfunc (s *server) handleTerminate(w http.ResponseWriter, r *http.Request) {\n    w.WriteHeader(http.StatusNoContent)                       // 204, empty body\n}\n```\n\nAfter (the fix, tagged `v0.1.1`):\n\n```go\n// CancelResponse: {\"cancelled\": true, \"cancelled_decision_id\": \"...\"}\ntype CancelResponse struct {\n    Cancelled           bool   `json:\"cancelled\"`\n    CancelledDecisionID string `json:\"cancelled_decision_id\"`\n}\ntype TerminateResponse struct {\n    Terminated bool   `json:\"terminated\"`\n    SessionID  string `json:\"session_id\"`\n}\n\nfunc (s *server) handleCancel(w http.ResponseWriter, r *http.Request) {\n    // ...decode req...\n    if !s.knownDecision(req.DecisionID) {\n        writeJSON(w, http.StatusNotFound, errorResponse{Error: \"decision not found\"})\n        return\n    }\n    writeJSON(w, http.StatusOK, CancelResponse{Cancelled: true, CancelledDecisionID: req.DecisionID})\n}\n\nfunc (s *server) handleTerminate(w http.ResponseWriter, r *http.Request) {\n    id := r.PathValue(\"id\")\n    writeJSON(w, http.StatusOK, TerminateResponse{Terminated: true, SessionID: id}) // 200, idempotent\n}\n```\n\nRegression tests (`api_test.go`) assert: cancel body has `cancelled`+`cancelled_decision_id` and **no** `status` field, cancel-unknown → 404, delete → 200 with `terminated`+`session_id`.\n\n### 2. CHANGELOG (`CHANGELOG.md`)\n\nRename the mislabeled header `## [1.0.0]` → `## [0.1.0]` (matches the actual tag), and prepend:\n\n```markdown",
+      "evidence": "Reproduced end-to-end in `/tmp/runner-demo/runner` (module `example.com/runner`, `v0.1.0` tagged at commit 1, 52 unrelated commits, fix commit #54 at HEAD, annotated tag, bare origin, file-based module proxy). Real outputs:\n\n**Staleness (before fix):** `git rev-list --count v0.1.0..HEAD` → **53**. Proxy containing only `v0.1.0`: `go list -m -json @latest` → `\"Version\": \"v0.1.0\"` (the broken tag wins).\n\n**Broken `v0.1.0` live probe:** `cancel` → `{\"status\":\"ok\"}`; `delete` → HTTP **204**, empty body (confirmed the non-compliance).\n\n**Fixed HEAD / `v0.1.1` live probe:**\n```\nprocess:        HTTP 200  body: {\"session_id\":\"sess-00000001\"}\ncancel-unknown: HTTP 404  body: {\"error\":\"decision not found\"}\ndelete:         HTTP 200  body: {\"terminated\":true,\"session_id\":\"sess-00000001\"}\n```\n\n**Guard 4/4:**\n1. **CHANGELOG** — `## [v0.1.1]` header present; `## [1.0.0]` mislabeled header removed; `## [0.1.0]` present. ✓\n2. **Tag** — `v0.1.1` annotated (`git cat-file -t` → `tag`), `git tag --points-at HEAD` → `v0.1.1`; pushed to origin (`refs/tags/v0.1.1` + peeled `^{}` on remote). ✓\n3. **@latest** — after adding `v0.1.1` to the proxy: `go list -m -f '@latest -> {{.Version}}'` → **`@latest -> v0.1.1`**; module zip validated by `go mod download -json example.com/runner@v0.1.1`. ✓\n4. **Wire contract** — process 200 / cancel-unknown 404 / delete 200 `{terminated, session_id}`, all confirmed by live curl. ✓\n\n**Edge cases tested:** cancel success body contains `cancelled`+`cancelled_decision_id` and *not* legacy `status` (`TestCancelWireBody`); cancel-unknown → 404 (not 200-ok); delete idempotent 200 with body (not 204); process 200 with `session_id`; `go vet` clean, `gofmt` clean; all 4 unit tests PASS.\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-release-tag-stale",
+        "result": "passed",
+        "tests": 4
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 04:37:57"
+    }
+  ]
+}

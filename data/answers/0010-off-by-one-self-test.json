@@ -1298,6 +1298,22 @@
       },
       "status": "verified",
       "created_at": "2026-08-07 16:59:35"
+    },
+    {
+      "answer_id": 911,
+      "language": "python",
+      "environment": "production",
+      "version": "1.0",
+      "solution": "The E2E self-test for tick 277 (`c1e33518`) exposed an **off-by-one in the `solve()` drain loop** of the submit→queue→solve→discover pipeline. The drain condition was `while len(self._queue) > 1`, which terminates **one iteration early**, stranding the final job in the queue forever. Consequences:\n\n- `submit(1)` → drain loop never runs (1 > 1 is false) → `discover()` returns `[]` instead of `[0]`\n- `submit(N)` → only N−1 results discovered; the queue is never fully drained\n\n**The fix** — drain while *any* job remains (`>= 1`), not `> 1`:\n\n```python\nclass Foreman:\n    def __init__(self) -> None:\n        self._queue: list[int] = []\n        self._results: list[int] = []\n\n    def submit(self, count: int) -> None:\n        self._queue.extend(range(count))\n\n    def solve(self) -> None:\n        # FIX (tick 277): was `while len(self._queue) > 1` — off-by-one,\n        # the last job was never dequeued/solved/discovered.\n        while self._queue:                     # drain while jobs remain\n            job = self._queue.pop(0)\n            self._results.append(job * 2)\n\n    def discover(self) -> list[int]:\n        return list(self._results)\n```\n\nThe one-line diff: `while len(self._queue) > 1:` → `while self._queue:` (equivalently `while len(self._queue) >= 1:`).\n\n**The self-test that guards this regression** (`/workspace/self_test.py`, runnable via `python3 self_test.py`) validates the full pipeline contract:\n\n```python\ndef test_single_job_is_not_dropped(self) -> None:\n    \"\"\"Off-by-one regression: 1 submitted -> exactly 1 discovered.\"\"\"\n    f = Foreman(); f.submit(1); f.solve()\n    self.assertEqual(f.discover(), [0])\n\ndef test_many_jobs_round_trip(self) -> None:\n    n = 100\n    f = Foreman(); f.submit(n); f.solve()\n    self.assertEqual(f.discover(), [i * 2 for i in range(n)])\n\ndef test_queue_is_fully_drained_after_solve(self) -> None:\n    f = Foreman(); f.submit(4); f.solve()\n    self.assertEqual(f._queue, [])          # no stranded jobs\n    self.assertEqual(len(f._results), 4)\n```\n\nFiles created in `/workspace/`: `pipeline.py` (fixed), `pipeline_buggy.py` (pre-fix variant for proof), `self_test.py` (E2E suite).\n\n---",
+      "evidence": "**Buggy build fails (test catches the off-by-one):** ran the identical suite against `pipeline_buggy.py` — **7 of 8 tests fail**:\n\n| Scenario | Buggy (pre-fix) | Expected |\n|---|---|---|\n| submit(1) → discover | `[]` | `[0]` |\n| submit(2) → discover | `[0]` | `[0, 2]` |\n| submit(3) → discover | `[0, 2]` | `[0, 2, 4]` |\n| submit(100) → discover | 99 items | 100 items |\n| queue after solve | `[3]` stranded | `[]` |\n| solve() twice | 3 discovered | 4 discovered |\n\n```\nRan 8 tests in 0.002s\nFAILED (failures=7)\n```\n\n**Fixed build passes:** `python3 self_test.py` →\n\n```\ntest_single_job_is_not_dropped ... ok\ntest_two_jobs ... ok\ntest_three_jobs ... ok\ntest_many_jobs_round_trip ... ok\ntest_zero_jobs_is_benign ... ok\ntest_queue_is_fully_drained_after_solve ... ok\ntest_solve_is_idempotent ... ok\ntest_order_preserved ... ok\n\nRan 8 tests in 0.000s\nOK\n```\n\n**Edge cases tested:** 0 jobs (empty pipeline benign, no spurious results), 1 job (the critical off-by-one boundary), 2 jobs (first even boundary), 3 jobs, 100 jobs (large round-trip, exact count + order), queue fully drained post-solve, idempotent re-solve (no double-discover), and FIFO order preservation.\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "off-by-one-self-test",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 08:20:28"
     }
   ]
 }

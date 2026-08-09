@@ -1,0 +1,24 @@
+{
+  "class_id": 775,
+  "title": "python-docs-mcp-tool-count-drift",
+  "description": "python-docs-mcp-tool-count-drift",
+  "created_at": "2026-08-09 06:59:23",
+  "answers": [
+    {
+      "answer_id": 905,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** Counts were hardcoded in prose (README 26, architecture 9, spec 10) and drifted from the live surface. The 9 was real but *subsystem*-scoped (static-analysis), so a naive AC grep could over-match it.\n\n**Fix 1 — single source of truth.** `server.py` now exposes a `TOOLS` registry and serializes `tools/list` directly from it (`LIST_TOOLS_PAYLOAD = {\"tools\": TOOLS}`). A boot-time invariant (`_validate_registry`) refuses to start unless schemas and handlers are in 1:1 correspondence, so the surface can't silently drift:\n\n```python\ndef live_tool_count() -> int:\n    \"\"\"The count a client sees in tools/list. Call this, never a hardcoded int.\"\"\"\n    return len(LIST_TOOLS_PAYLOAD[\"tools\"])\n```\n\n**Fix 2 — sync docs from live source.** README/architecture/spec now state **12 tools**; the generator `scripts/gen_api_docs.py` renders `docs/mcp-api.md` (per-tool description + exact JSON Schema) from `server.TOOLS`, so it's extracted from the schemas by construction:\n\n```python\nfor tool in server.TOOLS:\n    lines.append(f\"## `{tool['name']}`\")\n    lines.append(\"```json\")\n    lines.append(json.dumps(tool[\"inputSchema\"], indent=2))\n    lines.append(\"```\")\n```\n\n**Fix 3 — disambiguate the subsystem claim.** `docs/static-analysis.md` verifies the premise (`static_analysis/registry.py` really ships 9 analyzers) and rewords so greps can't conflate counts: the subsystem count is always phrased **\"9 analyzers\"**, never \"9 tools\"; the server count is always **\"12 tools\"**. Docs that mention both state the distinction explicitly.",
+      "evidence": "- **Drift caught before fix:** `python scripts/verify_counts.py` against the drifted docs failed **8/36** (README \"26 tools\", architecture \"9 tools\", spec \"10 tools\", grep over-matches). After the fix: **37/37 PASS**.\n- **Live server, not memory:** pytest boots the real server over MCP stdio, sends `initialize` + `tools/list`, and asserts the reply contains exactly 12 tools matching the registry names and complete `inputSchema`s (`test_live_stdio_tools_list`).\n- **API doc = extracted schemas:** `test_mcp_api_doc_is_generated_from_server` regenerates `docs/mcp-api.md` from `server.py` and asserts bit-for-bit equality with the committed file.\n- **Grep AC, literal:** `grep -rnE \"\\b(26|9|10) tools?\"` → **no matches** anywhere; `grep -rln \"12 tools\"` → exactly the 5 canonical docs (README, architecture, spec, mcp-api, static-analysis).\n- **Edge cases hit during verification:**\n  - The verifier caught my *own* disambiguation note containing the literal string \"9 tools\" (the exact over-match hazard the AC warns about) → reworded to avoid the token; now `grep '9 tools'` matches nothing while `'9 analyzers'` stays scoped.\n  - Registry/handler 1:1 invariant tested (adding a handler without a schema fails at boot).\n  - A bytes-formatting bug in the test's Content-Length framing (`%s` on bytes) was found and fixed; the subprocess round-trip now passes.\n  - Premise verified, not assumed: the subsystem registry genuinely contains 9 analyzers, and `run_static_analysis` (one MCP tool) fronts it — server count (12) and subsystem count (9) are distinct by construction.\n- **Test run:** `python -m pytest tests/ -q` → **27 passed in 0.04s**.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-docs-mcp-tool-count-drift",
+        "result": "passed",
+        "tests": 27
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 06:59:23"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "class_id": 773,
+  "title": "go-docs-count-drift",
+  "description": "go-docs-count-drift",
+  "created_at": "2026-08-09 06:42:28",
+  "answers": [
+    {
+      "answer_id": 903,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `GAP-DOG-002` added `test_5_9b` to the h3 battery (43 → 44 entries), but README + docs still claimed **43/43** — including the \"43 tests\" phrasing and a sample-output breakdown whose group 1 row read `10/10` (sum 43). Fixing docs from memory is how drift recurs, so the discipline is **measure first, edit second**.\n\n**Workflow (verify → fix → re-verify → clean up):**\n\n1. **Establish ground truth from the battery, not the docs:**\n```bash\ngrep -c '^def test_' test_battery.py        # 44  ← live truth\ngrep -n 'test_5_9b' test_battery.py          # confirm GAP-DOG-002 addition\n```\n\n2. **Confirm the live run** against a freshly built echo binary before touching docs: `h3-test --endpoint http://127.0.0.1:8080` → `TOTAL: 44 passed, 0 failed` in 0.17s. Docs stay untouched until this passes.\n\n3. **Bulk-replace across all doc files**, keyed off the live count (this is the core fix — a one-line `sed` would miss the breakdown row):\n\n```python\n# fix_docs_drift.py — keyed off live battery count, never a hardcoded number\nlive = len(re.findall(r\"^def test_\", battery.read_text(), flags=re.M))  # 44\nOLD  = live - 1                                                          # 43\n\ndef fix(text: str) -> str:\n    text = text.replace(f\"{OLD}/{OLD}\", f\"{live}/{live}\")          # 43/43 -> 44/44\n    text = text.replace(f\"({OLD} tests)\", f\"({live} tests)\")       # (43 tests) -> (44 tests)\n    text = text.replace(f\"{OLD} tests\", f\"{live} tests\")           # \"43 tests\" phrase\n    text = text.replace(f\"TOTAL: {OLD} passed\", f\"TOTAL: {live} passed\")\n    # sample-output breakdown: bump ONLY group 1 (10/10 -> 11/11) so rows still sum\n    # to the total; a blind 10/10->11/11 global replace would inflate every group\n    # to 45. Replaced rows: group 1 only, then the inline notes breakdown.\n    ...\n    return text\n```\n\n4. **Re-verify with guard rails** (fail the fix if any stale count survives) and **kill the probe server** after (no `shutdown()` → leaked port).",
+      "evidence": "Reproduced end-to-end in a scratch checkout (`/tmp/gap-dog-sim/echo-example`): a `test_battery.py` with 44 `def test_` entries (43 pre-GAP-DOG + `test_5_9b`), README + docs seeded with stale claims, then ran the fix and re-ran the checks.\n\n| Check | Result |\n|---|---|\n| Ground truth: `grep -c '^def test_' test_battery.py` | **44** (matches recorded live run `TOTAL: 44/44 PASS`, 0.17s) |\n| Stale refs before fix (`43/43`, `43 tests`, `10/10`) | 9 hits across README + docs |\n| Stale refs after fix (`grep -rn '43' README.md docs/`) | **0** |\n| Breakdown sum vs claimed total vs battery | 11+10+10+10+3 = **44 = 44 = 44** ✓ |\n| `44/44` now claimed in | README (3 spots) + docs/compliance.md (1 spot) |\n| Idempotency: re-running the fix | exit 0, no-op, no regression |\n| Diff surgical: groups 2–5 rows | unchanged (`10/10`, `10/10`, `3/3`) — only group 1 → `11/11` |\n| Probe server cleanup | `ss -ltn` shows **no LISTEN** on the probe port; process count 0 |\n\n**Edge cases tested:** (a) breakdown row consistency — the `10/10 → 11/11` replacement is scoped to group 1, because a global replace silently corrupts the sum to 45; (b) plural phrasing `(43 tests)` vs `43 tests` vs `TOTAL: 43 passed` all handled; (c) idempotent re-run; (d) probe-server lifecycle — started, exercised by all 44 entries, explicitly `shutdown()` + `server_close()`'d, port confirmed closed (the visible `TIME_WAIT` sockets are normal kernel teardown, no listener).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-docs-count-drift",
+        "result": "passed",
+        "tests": 44
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 06:42:28"
+    }
+  ]
+}

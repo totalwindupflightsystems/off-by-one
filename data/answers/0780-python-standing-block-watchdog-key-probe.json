@@ -1,0 +1,24 @@
+{
+  "class_id": 780,
+  "title": "python-standing-block-watchdog-key-probe",
+  "description": "python-standing-block-watchdog-key-probe",
+  "created_at": "2026-08-09 08:22:06",
+  "answers": [
+    {
+      "answer_id": 912,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "A standing-block watchdog at `/home/kara/openrouter_key_watchdog.py` that probes the OpenRouter key once per tick and reports state. Core probe (raw `curl -s -w` HTTP code, exactly as the standing task requires):\n\n```python\nAUTH_URL = \"https://openrouter.ai/api/v1/auth/key\"\nNOT_FOUND_MARKER = \"user not found\"  # 401 body: {\"error\":{\"message\":\"User not found.\"}}\n\ndef probe(key: str) -> dict:\n    if not key:\n        return {\"http_code\": None, \"body\": \"\", \"curl_rc\": None, \"ok\": False,\n                \"note\": \"OPENROUTER_API_KEY is unset/empty\"}\n    proc = subprocess.run(\n        [\"curl\", \"-s\", \"-w\", \"%{http_code}\", \"-H\", f\"Authorization: Bearer {key}\",\n         \"-m\", \"15\", AUTH_URL],\n        capture_output=True, text=True, timeout=30)\n    raw = proc.stdout\n    http_code = raw[-3:] if raw[-3:].isdigit() else \"\"\n    body = raw[:-3] if http_code else raw\n    return {\"http_code\": http_code or None, \"body\": body.strip()[:400],\n            \"curl_rc\": proc.returncode, \"ok\": proc.returncode == 0 and bool(http_code)}\n```\n\nClassification and the no-solution rule:\n\n```python\ndef classify(state: dict) -> str:\n    http = state.get(\"http_code\"); body = state.get(\"body\", \"\").lower()\n    if not state.get(\"ok\") or http is None: return \"PROBE_ERROR\"\n    if http == \"200\":                        return \"KEY_VALID\"\n    if http == \"401\" and NOT_FOUND_MARKER in body:\n        return \"KEY_NOT_FOUND\"   # rotated/revoked -> NORMAL no-solution state\n    if http == \"429\":                        return \"RATE_LIMITED\"\n    return f\"UNEXPECTED_HTTP_{http}\"\n```\n\nThe loop runs forever (`TICK_INTERVAL`/`--interval`, default 60s; `--once` for a single tick). Every tick emits a timestamped report line; the 401 report is explicit:\n\n```\nREPORT: 401 User not found — key is rotated/revoked; not_found is the NORMAL no-solution outcome (no fix to apply, keep probing).\n```\n\nKey design decisions:\n- **401 + \"User not found\" body is the expected no-solution signal**, not an error: the watchdog records `observed_not_found=True`, keeps probing every tick, and exits 0. A 401 *without* the marker is NOT treated as no-solution (`UNEXPECTED_HTTP_401`).\n- Only the exact `curl -s -w \"%{http_code}\"` last-3-chars trick is trusted for the code; everything else is body. Network/curl failures (`PROBE_ERROR`) are retried next tick, never fatal.\n- `*TRANSITION*` tags mark state changes (e.g., `KEY_VALID → KEY_NOT_FOUND` when rotation happens), so a human/upstream consumer can see exactly when the key flipped.",
+      "evidence": "Verified live against the real endpoint, plus simulated rotation:\n\n| Test | Input | Result |\n|---|---|---|\n| 1. Valid key (real) | `OPENROUTER_API_KEY` set | `http=200 status=KEY_VALID` → `REPORT: key is VALID (HTTP 200).`, exit 0 |\n| 2. Rotated key (simulated) | `sk-or-v1-rotated-invalid-key` | `http=401 status=KEY_NOT_FOUND`, body `{\"error\":{\"message\":\"User not found.\",\"code\":401}}` → no-solution REPORT, `observed_not_found=True`, exit 0 |\n| 3. Mid-run rotation transition | tick0 real key → tick1 invalid key | `KEY_VALID` → `KEY_NOT_FOUND`, transition detected |\n| 4. Classification unit matrix | 6 hand-built states | all assertions passed (`KEY_VALID`, `KEY_NOT_FOUND`, `RATE_LIMITED`, `UNEXPECTED_HTTP_502`, `PROBE_ERROR`, and 401-without-marker ≠ no-solution) |\n| 5. Empty key guard | `probe(\"\")` | returns safe `ok=False` note, no crash |\n\nEdge cases covered: empty/unset key, curl network failure, 429 rate limiting, 5xx, 401 with missing marker, and raw-`curl` stdout parsing when the HTTP code is missing. Exit code is always 0 (success = we reported what we observed), matching the standing-block contract: probing and reporting is the deliverable; finding `not_found` is the expected terminal answer, not a failure.",
+      "signatures": {
+        "model": "pi",
+        "problem_class": "python-standing-block-watchdog-key-probe",
+        "result": "passed",
+        "tests": 5
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 08:22:06"
+    }
+  ]
+}

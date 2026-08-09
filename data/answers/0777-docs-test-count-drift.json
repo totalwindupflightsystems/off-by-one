@@ -1,0 +1,24 @@
+{
+  "class_id": 777,
+  "title": "docs-test-count-drift",
+  "description": "docs-test-count-drift",
+  "created_at": "2026-08-09 07:43:59",
+  "answers": [
+    {
+      "answer_id": 907,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The durable fix replaces the bare `npm test` CI step with an assertion step that tees the live vitest output, greps it with `grep -oP`, greps `AGENTS.md` for those exact strings, and fails the build on drift. Files delivered:\n\n- `scripts/check-doc-test-counts.sh` — the assertion script\n- `.github/workflows/ci.yml` — CI wiring (swap the `Test` step for `Test and assert doc test counts`)\n- `AGENTS.md` — the live-verified `Test Counts` section (source of truth, explicitly \"do not edit by hand\")\n\nCore script (parsing + assertion):\n\n```bash\nset -euo pipefail\nset +e\n\"${cmd[@]}\" 2>&1 | tee \"$log\"          # tee test output\ntest_status=${PIPESTATUS[0]}           # keep real exit code\nset -e\n\n# Live vitest summary: 'Test Files  N passed (N)' / 'Tests  N passed (N)'\nfiles=\"$(sed 's/\\x1B\\[[0-9;]*[mK]//g' \"$log\" |\n  grep -oP '^\\s*Test Files\\s+\\K\\d+ passed \\(\\d+\\)' | tail -1 || true)\"\ntests=\"$(sed 's/\\x1B\\[[0-9;]*[mK]//g' \"$log\" |\n  grep -oP '^\\s*Tests\\s+\\K\\d+ passed \\(\\d+\\)' | tail -1 || true)\"\n\nstatus=0\nfor count in \"$files\" \"$tests\"; do\n  grep -qF -- \"$count\" \"$doc\" || { echo \"error: doc test count drift - '$count' missing from $doc\"; status=1; }\ndone\n(( status != 0 )) && exit 1\nexit \"$test_status\"\n```\n\nDesign decisions:\n- **Drift check always runs**, even when tests fail (`set +e` + `PIPESTATUS`), so a red suite and stale docs surface in one run instead of the assertion being silently skipped.\n- **`grep -qF` against the doc** means the count convention is loose — any AGENTS.md line containing `45 passed (45)` / `338 passed (338)` satisfies it, but `44 passed (330)` does not.\n- **ANSI-strip + anchored patterns + `tail -1`** make it robust to color-forced CI runners and monorepos that print one summary per workspace (last summary wins).\n- `--doc PATH -- CMD...` injection so any repo/command works; the live run is the source of truth, never PM/task-AC counts.\n\nAGENTS.md convention:\n\n```markdown\n- Test Files: 3 passed (3)\n- Tests: 7 passed (7)\n```",
+      "evidence": "Verified against real vitest 4.1.9 output (3 files / 7 tests) in a scratch project. The genuine summary format is confirmed byte-for-byte:\n\n```\n Test Files  3 passed (3)\n      Tests  7 passed (7)\n```\n\n| # | Scenario | Result |\n|---|----------|--------|\n| 1 | Doc matches live counts | exit 0, `doc test counts match live vitest output` |\n| 2 | Doc stale (2 passed (2) / 6 passed (6) vs live 3/7) | exit 1, drift error per count |\n| 3 | Failing suite, doc matches | exit 1 (test failure preserved); assertion runs and reports \"skipped\" because a failing suite prints `1 failed | 3 passed (4)` — correctly not treated as a pass-only count |\n| 4 | Failing suite + stale doc | exit 1, both signals shown |\n| 5 | Monorepo: earlier stale summary `44 passed (44)` / `330 passed (330)` then real run | `tail -1` picks the last summary, matches doc, exit 0 |\n| 6 | ANSI-colorized summary lines | sed strip yields `3 passed (3)` / `7 passed (7)` |\n| 7 | No test files found | exit 1 with clear message |\n| 8 | `--doc` path missing | exit 1: `error: doc '...' not found` |\n| 9 | `--help` | exit 0 |\n| 10 | Exact reported case: doc `44 passed (44)`/`330 passed (330)` vs live `45 passed (45)`/`338 passed (338)` | exit 1: `error: doc test count drift - live vitest count '45 passed (45)' is missing from ...` |\n\nEdge cases covered: fixed-stale-counts-but-recurred recurrence is impossible by construction (the doc is re-asserted on every CI run against live output); `grep -oP` requires GNU grep (present on `ubuntu-latest`); `bash -n` syntax check passes.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "docs-test-count-drift",
+        "result": "passed",
+        "tests": 7
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 07:43:59"
+    }
+  ]
+}
