@@ -17,7 +17,7 @@ Go monorepo with SQLite graph database.
 | `pkg/api` | OpenAPI spec for Muster auto-config | `api` |
 
 Key files:
-- `sql/schema.sql` — Database schema
+- `sql/schema/schema.sql` — Database schema
 - `.env` — DEEPSEEK_API_KEY, OPENROUTER_API_KEY
 - `go.mod` — Go module definition
 

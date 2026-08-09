@@ -561,7 +561,7 @@ Problems may declare tools they need inside the sandbox via the `required_tools`
 
 ## 7. Graph Discovery Engine
 
-### 7.1 Schema (Implemented in `sql/schema.sql`)
+### 7.1 Schema (Implemented in `sql/schema/schema.sql`)
 
 Already created. Three tables:
 - `problem_classes` — taxonomy root nodes

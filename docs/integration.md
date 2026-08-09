@@ -213,9 +213,9 @@ curl -s http://localhost:8766/api/v1/stats
 
 ```json
 {
-  "total_problems": 779,
-  "total_answers": 911,
-  "verified_answers": 911,
+  "total_problems": 812,
+  "total_answers": 948,
+  "verified_answers": 948,
   "queue_depth": 4,
   "hit_rate": 1,
   "coverage": 1.17,

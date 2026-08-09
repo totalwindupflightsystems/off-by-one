@@ -61,7 +61,7 @@ A system that converts idle GPU time into pre-verified answers for AI agents. Ag
 | `internal/cron` | Idle cron loop | Polls queue, spawns solves during idle cycles |
 | `internal/web` | Web UI server | Embedded SPA (go:embed), WebSocket chat |
 | `pkg/api` | OpenAPI spec | Embedded OpenAPI 3.0.3 spec for Muster auto-config |
-| `sql/schema.sql` | Database DDL | Embedded schema for SQLite initialization |
+| `sql/schema/schema.sql` | Database DDL | Embedded schema for SQLite initialization |
 
 ### Core Loop
 
@@ -167,12 +167,15 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
 | `DEEPSEEK_API_KEY` | Yes | — | DeepSeek API key for Pi Agent solving |
 | `OPENROUTER_API_KEY` | No | — | OpenRouter API key for embeddings (DS-003) |
 | `OFF_BY_ONE_PORT` | No | `8766` | HTTP server port |
+| `OFF_BY_ONE_HOST` | No | *(all interfaces)* | HTTP listen host (empty = all interfaces; use `127.0.0.1` behind a reverse proxy) |
 | `OFF_BY_ONE_DB` | No | `./off-by-one.db` | SQLite database path |
 | `OFF_BY_ONE_BWRAP` | No | `/usr/bin/bwrap` | Path to bubblewrap binary |
 | `OFF_BY_ONE_PI_AGENT` | No | `pi-agent` | Path to Pi Agent binary (resolved via PATH) |
 | `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
 | `OFF_BY_ONE_LOAD_THRESHOLD` | No | `1` | Max loadavg(1) for idle detection (negative = always idle) |
 | `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `30m` | Per-solve timeout |
+| `OFF_BY_ONE_READONLY` | No | `false` | Public catalog mode: block all mutating endpoints and the AI chat (set `1`/`true`/`yes`) |
+| `OFF_BY_ONE_SKIP_SANDBOX` | No | `false` | Skip bwrap sandbox for dev/testing (set `1`/`true`/`yes`) |
 | `OFF_BY_ONE_EXPORT_DIR` | No | *(disabled)* | Working directory for git export clones — empty disables `POST /api/v1/export` (501) |
 | `OFF_BY_ONE_IMPORT_DIR` | No | *(disabled)* | Working directory for git import clones — empty disables `POST /api/v1/import` (501) |
 
@@ -290,12 +293,20 @@ off-by-one/
 │   ├── index.html
 │   ├── css/style.css
 │   └── js/*.js
-├── sql/schema.sql           # Database schema (go:embed)
+├── sql/schema/schema.sql   # Database schema (go:embed)
+├── docs/                   # Integration guide + API reference
+│   ├── integration.md
+│   └── api-reference.md
 ├── specs/system-spec.md     # System specification
+├── specs/ui-spec.md         # UI specification
+├── tests/                   # Test scripts (guard smoke)
 ├── muster-config.yaml       # Muster connection config
 ├── scripts/connect-muster.sh # Muster connection script
+├── scripts/sync-answers.sh  # Answer corpus sync script
 ├── Makefile                 # Build targets
 ├── AGENTS.md                # Agent development guide
+├── CONTRIBUTING.md          # Contribution guide
+├── SECURITY.md              # Security policy
 └── .coding-hermes/board/tasks.jsonl  # Implementation task board
 ```
 
@@ -305,7 +316,7 @@ MIT
 
 ## Answer Database — Browse & Share
 
-The pre-solve lab has verified answers for **575+ problem classes** (690+ verified answers) across 20+ domains — published as **flat files in this repo** so anyone can use them without running a server (live counts: `GET /api/v1/stats`):
+The pre-solve lab has verified answers for **812 problem classes** (948 verified answers) across 20+ domains — published as **flat files in this repo** so anyone can use them without running a server (live counts: `GET /api/v1/stats`; corpus index: `data/INDEX.md`):
 
 - **🌐 [Live public catalog — ob1.it.com](https://ob1.it.com)** — searchable web UI with rendered markdown, tables, and mermaid diagrams; read-only community instance, synced from the lab every 6h
 - **[data/answers.jsonl](data/answers.jsonl)** — Master file, one verified answer per line (JSON)
