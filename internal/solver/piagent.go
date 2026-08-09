@@ -44,9 +44,10 @@ type Config struct {
 	// to DefaultModel when empty.
 	Model string
 
-	// APIKey is the LLM API key passed via --api-key. The solver
-	// also propagates it as DEEPSEEK_API_KEY (and the generic
-	// LLM_API_KEY) for Pi Agent's environment.
+	// APIKey is the LLM API key used to authenticate with the
+	// upstream model provider. The solver propagates it as
+	// DEEPSEEK_API_KEY (and the generic LLM_API_KEY) for Pi Agent's
+	// environment.
 	APIKey string
 
 	// Timeout is the wall-clock cap for a single solve. Defaults
@@ -236,9 +237,10 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 		return nil, fmt.Errorf("write problem.json: %w", err)
 	}
 
-	// Build the command and the env. We pass --api-key explicitly
-	// (in addition to DEEPSEEK_API_KEY) because some pi-agent
-	// versions don't read env vars. Extra env vars come last so
+	// Build the command and the env. Authentication is supplied via
+	// DEEPSEEK_API_KEY / LLM_API_KEY env vars (pi-agent 0.84.0
+	// reads them); we intentionally do NOT pass it as a CLI flag so
+	// it is not visible in process listings. Extra env vars come last so
 	// they win over our defaults when both define the same key.
 	args := []string{
 		"solve",
@@ -247,9 +249,6 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 		"--evidence", "/workspace/evidence.md",
 		"--signatures", "/workspace/signatures.json",
 		"--model", e.cfg.Model,
-	}
-	if e.cfg.APIKey != "" {
-		args = append(args, "--api-key", e.cfg.APIKey)
 	}
 	env := append([]string{}, e.cfg.ExtraEnv...)
 	if e.cfg.APIKey != "" {

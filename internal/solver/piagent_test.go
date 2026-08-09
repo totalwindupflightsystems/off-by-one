@@ -689,6 +689,13 @@ func TestExecutor_Solve_PropagatesAPIVars(t *testing.T) {
 	if !hasKey {
 		t.Errorf("env did not include DEEPSEEK_API_KEY: %v", env)
 	}
+	// Regression: the API key must NOT be passed on the command line
+	// where it would be visible in ps output (OB-GAP-006).
+	for _, a := range rec.lastHandle.lastArgs {
+		if a == "--api-key" {
+			t.Errorf("args contained --api-key; should rely on env vars only: %v", rec.lastHandle.lastArgs)
+		}
+	}
 }
 
 // recordingRunner records the env passed to its handle's Exec
@@ -702,10 +709,11 @@ type recordingRunner struct {
 }
 
 type recordingHandle struct {
-	root    string
-	lastEnv []string
-	mu      *sync.Mutex
-	problem *[]byte // pointer to runner.lastProblem for capture
+	root     string
+	lastEnv  []string
+	lastArgs []string
+	mu       *sync.Mutex
+	problem  *[]byte // pointer to runner.lastProblem for capture
 }
 
 func (r *recordingRunner) Create(ctx context.Context, id string, opts ...CreateOption) (Handle, error) {
@@ -742,6 +750,7 @@ func (h *recordingHandle) ReadFile(relPath string) ([]byte, error) {
 func (h *recordingHandle) Exec(ctx context.Context, name string, args, env []string) ([]byte, error) {
 	h.mu.Lock()
 	h.lastEnv = append([]string{}, env...)
+	h.lastArgs = append([]string{}, args...)
 	h.mu.Unlock()
 	// Write a minimal solution to make Solve succeed.
 	_ = h.WriteFile("solution.md", []byte("# Solved\nOK.\n"))
