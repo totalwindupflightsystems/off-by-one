@@ -514,9 +514,9 @@ Return system-level statistics.
 
 ```json
 {
-  "total_problems": 779,
-  "total_answers": 911,
-  "verified_answers": 911,
+  "total_problems": 854,
+  "total_answers": 992,
+  "verified_answers": 992,
   "queue_depth": 4,
   "hit_rate": 1,
   "coverage": 1.17,

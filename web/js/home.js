@@ -28,7 +28,7 @@
 
   const PIPELINE = [
     { dot: 'g', label: 'Fleet submits problem', tool: 'ingest' },
-    { dot: 'b', label: 'Sandboxed solve on idle GPU', tool: 'bwrap + pi-agent' },
+    { dot: 'b', label: 'Sandboxed solve on idle cycles', tool: 'bwrap + pi-agent' },
     { dot: 'v', label: 'Judged against criteria', tool: 'gitreins' },
     { dot: 'p', label: 'Published with evidence', tool: 'catalog + repo' },
   ];

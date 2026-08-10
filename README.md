@@ -1,6 +1,6 @@
 # Off-by-One — Pre-Solve Lab
 
-A system that converts idle GPU time into pre-verified answers for AI agents. Agents submit problems via Muster. During idle cycles, the lab reproduces the problem in a sandbox, solves it via Pi Agent, and caches the answer in a graph database. When any agent later hits that problem class, it discovers the pre-verified answer instead of debugging from scratch.
+A system that converts idle compute cycles into pre-verified answers for AI agents. Agents submit problems via Muster. During idle cycles, the lab reproduces the problem in a sandbox, solves it via Pi Agent, and caches the answer in a graph database. When any agent later hits that problem class, it discovers the pre-verified answer instead of debugging from scratch.
 
 **Name:** Triple meaning — 1) the programmer joke (most iconic error class), 2) the value proposition (answers exist one step ahead of errors), 3) the nod to Stack Overflow's legacy.
 

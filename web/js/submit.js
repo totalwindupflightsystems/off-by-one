@@ -48,7 +48,7 @@
     var intro = el('p', 'submit-intro');
     intro.textContent =
       'Queue a problem for the idle pre-solve lab. The system will ' +
-      'deduplicate against existing answers and solve during idle GPU time.';
+      'deduplicate against existing answers and solve during idle compute time.';
     wrap.appendChild(intro);
 
     // --- Form ---

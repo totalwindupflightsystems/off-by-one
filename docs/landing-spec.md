@@ -369,7 +369,7 @@ a, button, .card, .btn-primary, .btn-secondary, .stat {
 ┌──────────────────────────────────────────────────────────────────┐
 │                                                                   │
 │                      Off-By-One                                  │
-│              Convert idle GPU time into                          │
+│              Convert idle compute time into                       
 │              pre-verified answers for AI agents                   │
 │                                                                   │
 │    AI agents submit problems. During idle cycles, the lab         │
@@ -410,7 +410,7 @@ The colored wordmark is the primary brand identity. Each part has a distinct sem
 #### Subtitle (H2-style)
 
 The value proposition line(s). Two-line treatment:
-- Line 1: "Convert idle GPU time into" (weight 400, `var(--text-secondary)`)
+- Line 1: "Convert idle compute time into" (weight 400, `var(--text-secondar
 - Line 2: "pre-verified answers for AI agents" (weight 600, `var(--text-primary)`)
 
 Combined using `<br>` or two `<span>` elements inside a single `<p class="hero-subtitle">`.
@@ -525,7 +525,7 @@ Each stat gets a staggered `fade-up` animation on load:
 │  │  📥      │  │  🏖️      │  │  💾      │  │  🔍      │         │
 │  │  Submit  │  │  Solve   │  │  Cache   │  │ Discover │         │
 │  │          │  │  (Idle)  │  │          │  │          │         │
-│  │ AI agents│  │ GPU      │  │ SQLite   │  │ Any agent│         │
+│  │ AI agents│  │ LLM      │  │ SQLite   │  │ Any agent│         │
 │  │ submit   │  │ solves in│  │ graph +  │  │ queries & │         │
 │  │ problems │  │ sandbox  │  │ FTS5     │  │ retrieves │         │
 │  │ via REST │  │ via Pi   │  │ storage  │  │ instantly │         │
@@ -1097,7 +1097,7 @@ A smooth 300ms fade between themes. Disabled when `prefers-reduced-motion` is ac
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Off-by-One: Convert idle GPU time into pre-verified answers for AI agents. A Go-based pre-solve lab.">
+  <meta name="description" content="Off-by-One: Convert idle compute time into pre-verified answers for AI agents. A Go-based pre-solve la
   <meta name="color-scheme" content="dark light">
   <title>Off-by-One — Pre-Solve Lab</title>
   <style>
@@ -1163,7 +1163,7 @@ A smooth 300ms fade between themes. Disabled when `prefers-reduced-motion` is ac
 
 | Tag | Value | Purpose |
 |-----|-------|---------|
-| `description` | "Convert idle GPU time into pre-verified answers for AI agents. A Go-based pre-solve lab." | SEO, link previews |
+| `description` | "Convert idle compute time into pre-verified answers for AI agents. A Go-based pre-solve lab." | SEO, link previe
 | `color-scheme` | `dark light` | Tells browser both themes are supported (prevents auto-dark-mode overrides) |
 | `viewport` | `width=device-width, initial-scale=1.0` | Mobile responsiveness |
 | `charset` | `UTF-8` | Character encoding |
@@ -1174,7 +1174,7 @@ If social sharing is desired:
 
 ```html
 <meta property="og:title" content="Off-by-One — Pre-Solve Lab">
-<meta property="og:description" content="Convert idle GPU time into pre-verified answers for AI agents.">
+<meta property="og:description" content="Convert idle compute time into pre-verified answers for AI agent
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://github.com/totalwindupflightsystems/off-by-one">
 ```

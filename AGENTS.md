@@ -1,6 +1,6 @@
 # Off-by-One — AGENTS.md
 
-An AI-powered pre-solve lab that converts idle GPU time into pre-verified answers. Named as a nod to Stack Overflow — answers exist one step ahead of errors.
+An AI-powered pre-solve lab that converts idle compute cycles into pre-verified answers. Named as a nod to Stack Overflow — answers exist one step ahead of errors.
 
 ## Architecture
 
