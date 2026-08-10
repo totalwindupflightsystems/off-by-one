@@ -109,7 +109,7 @@ func (s *Server) Handler() http.Handler {
 				writeError(w, http.StatusForbidden, "read_only", "AI agent disabled in read-only catalog mode")
 				return
 			}
-			if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/api/v1/") && !readOnlyAllowedPost(r.URL.Path) {
 				writeError(w, http.StatusForbidden, "read_only", "catalog is read-only — submissions go through the upstream lab")
 				return
 			}
@@ -118,6 +118,16 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	return mux
+}
+
+// readOnlyAllowedPost reports whether a POST endpoint stays available in
+// read-only catalog mode. Discovery is the only exemption: handleDiscover
+// is a pure read — it runs the graph discovery query and returns a cached
+// answer, never mutating state — so the agent-discovery workflow keeps
+// working on public catalog deployments (OB-GAP-020). Every other POST
+// (submit, export, import) is a write and stays blocked.
+func readOnlyAllowedPost(path string) bool {
+	return path == "/api/v1/problems/discover"
 }
 
 // ListenAndServe binds to addr and serves until ctx is cancelled.

@@ -326,6 +326,54 @@ func TestNewID(t *testing.T) {
 	}
 }
 
+// GetProblemClassStatus must derive the same best_status as the list
+// query: ci_passed > verified > pending > failed, 'pending' when the
+// class has no answers (OB-GAP-024).
+func TestStore_GetProblemClassStatus(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	pc, _, err := s.UpsertProblemClass(ctx, "status-class", "desc")
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	check := func(want string) {
+		t.Helper()
+		got, err := s.GetProblemClassStatus(ctx, pc.ID)
+		if err != nil {
+			t.Fatalf("GetProblemClassStatus: %v", err)
+		}
+		if got != want {
+			t.Errorf("status = %q, want %q", got, want)
+		}
+	}
+	add := func(solution, status string) {
+		t.Helper()
+		id, err := s.CreateAnswerNode(ctx, pc.ID, 0, "docker", "go", "1.0", solution, "evidence: test", "{}")
+		if err != nil {
+			t.Fatalf("create answer: %v", err)
+		}
+		if err := s.UpdateAnswerStatus(ctx, id, status); err != nil {
+			t.Fatalf("update status: %v", err)
+		}
+	}
+
+	check(AnswerPending) // no answers → COALESCE to pending
+
+	add("sol-failed", AnswerFailed)
+	check(AnswerFailed)
+
+	add("sol-pending", AnswerPending)
+	check(AnswerPending) // pending beats failed
+
+	add("sol-verified", AnswerVerified)
+	check(AnswerVerified) // verified beats pending
+
+	add("sol-ci", AnswerCIPassed)
+	check(AnswerCIPassed) // ci_passed beats verified
+}
+
 func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }

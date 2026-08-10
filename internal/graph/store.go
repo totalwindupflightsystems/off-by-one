@@ -501,6 +501,33 @@ func (s *Store) AnswerCount(ctx context.Context, classID int64) (int, error) {
 	return n, nil
 }
 
+// GetProblemClassStatus returns the derived best answer status for one
+// problem class, using the same precedence as
+// ListProblemClassesWithCountsFiltered: ci_passed > verified > pending >
+// failed, coalescing to 'pending' when the class has no answers. The
+// detail endpoint (/api/v1/problems/{class}) uses it so its status
+// matches the list view (OB-GAP-024).
+func (s *Store) GetProblemClassStatus(ctx context.Context, classID int64) (string, error) {
+	var status string
+	row := s.db.QueryRowContext(ctx, `
+		SELECT COALESCE(
+			(SELECT CASE
+			        WHEN MAX(CASE WHEN status = 'ci_passed' THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
+			        WHEN MAX(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) = 1 THEN 'verified'
+			        WHEN MAX(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) = 1 THEN 'pending'
+			        ELSE 'failed'
+			    END
+			 FROM answer_nodes
+			 WHERE class_id = ?
+			 GROUP BY class_id),
+			'pending')
+	`, classID)
+	if err := row.Scan(&status); err != nil {
+		return "", fmt.Errorf("problem class status: %w", err)
+	}
+	return status, nil
+}
+
 // ProblemClassWithCounts is the ProblemClass plus derived fields the
 // /api/v1/problems endpoint needs: answer_count, status (best answer's
 // status), hit_count, last_hit.

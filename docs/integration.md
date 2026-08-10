@@ -317,9 +317,10 @@ If `solver_available` is false in `/api/v1/stats`, the cron loop is not running 
 
 Start the binary with `--readonly` (or `OFF_BY_ONE_READONLY=1`) to serve a public catalog. In this mode:
 
-- All `POST /api/v1/*` endpoints return `403 Forbidden`.
+- All mutating `POST /api/v1/*` endpoints (`submit`, `export`, `import`) return `403 Forbidden`.
 - The WebSocket AI chat endpoint (`/ws/chat`) is disabled.
-- `GET` endpoints for discovery, taxonomy, stats, and answers still work.
+- `GET` endpoints for problems, taxonomy, stats, and answers still work.
+- `POST /api/v1/problems/discover` remains available: discovery is a pure read (cached-answer lookup, no mutation), so agents can still discover pre-verified answers from a read-only catalog.
 
 Use this for `ob1.it.com`-style public deployments where the corpus is pre-solved and no solver keys are present on the box.
 

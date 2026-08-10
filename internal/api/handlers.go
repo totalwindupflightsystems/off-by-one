@@ -454,11 +454,17 @@ func (s *Server) handleGetProblemClass(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cnt, _ := s.Store.AnswerCount(r.Context(), pc.ID)
+	status, err := s.Store.GetProblemClassStatus(r.Context(), pc.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, problemClassWire{
 		ID:          pc.ID,
 		Title:       pc.Title,
 		Description: pc.Description,
 		AnswerCount: cnt,
+		Status:      status,
 		CreatedAt:   formatTimeRFC3339(pc.CreatedAt),
 	})
 }

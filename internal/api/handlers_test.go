@@ -339,6 +339,59 @@ func TestDiscover_NotFound(t *testing.T) {
 	}
 }
 
+// --- Read-only catalog mode (OB-GAP-020) ---------------------------------
+
+// Discovery is a pure read, so it must keep working in read-only catalog
+// mode — the agent-discovery workflow depends on it.
+func TestReadOnly_DiscoverAllowed(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	s.ReadOnly = true
+	seedClass(t, store, "docker-perms", "permissions", "docker", "go", "1.0", "use --user", graph.AnswerVerified)
+	body := discoverRequest{
+		ProblemClass: "docker-perms",
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "1.0",
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/discover", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (discover is a pure read), body = %s", rr.Code, rr.Body.String())
+	}
+	var resp discoverResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Found {
+		t.Error("found = false, want true")
+	}
+}
+
+// Every other POST endpoint is a write and stays blocked in read-only
+// mode, along with the AI chat WebSocket.
+func TestReadOnly_MutatingEndpointsBlocked(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	s.ReadOnly = true
+	for _, path := range []string{
+		"/api/v1/problems/submit",
+		"/api/v1/export",
+		"/api/v1/import",
+		"/ws/chat",
+	} {
+		rr := do(t, s, "POST", path, map[string]any{"problem_class": "x"})
+		if rr.Code != http.StatusForbidden {
+			t.Errorf("POST %s: status = %d, want 403", path, rr.Code)
+			continue
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+			t.Fatalf("POST %s: decode: %v", path, err)
+		}
+		if body["error"] != "read_only" {
+			t.Errorf("POST %s: error = %v, want read_only", path, body["error"])
+		}
+	}
+}
+
 // --- List problems -------------------------------------------------------
 
 func TestListProblems_Empty(t *testing.T) {
@@ -406,6 +459,62 @@ func TestGetProblemClass_NotFound(t *testing.T) {
 	rr := do(t, s, "GET", "/api/v1/problems/nope", nil)
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rr.Code)
+	}
+}
+
+// The detail endpoint must report the same derived status as the list
+// endpoint for the same class: ci_passed > verified > pending > failed,
+// 'pending' when the class has no answers (OB-GAP-024).
+func TestGetProblemClass_StatusMatchesList(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	seedClass(t, store, "docker-perms", "permissions", "docker", "go", "1.0", "use --user", graph.AnswerVerified)
+	if _, _, err := store.UpsertProblemClass(context.Background(), "no-answers-class", "desc"); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	listStatus := func(title string) string {
+		t.Helper()
+		rr := do(t, s, "GET", "/api/v1/problems?limit=100", nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list: status = %d, want 200", rr.Code)
+		}
+		var resp listProblemsResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode list: %v", err)
+		}
+		for _, p := range resp.Problems {
+			if p.Title == title {
+				return p.Status
+			}
+		}
+		t.Fatalf("class %q not in list response", title)
+		return ""
+	}
+
+	for _, tc := range []struct {
+		class string
+		want  string
+	}{
+		{"docker-perms", "verified"},
+		{"no-answers-class", "pending"},
+	} {
+		rr := do(t, s, "GET", "/api/v1/problems/"+tc.class, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, want 200", tc.class, rr.Code)
+		}
+		var pc problemClassWire
+		if err := json.Unmarshal(rr.Body.Bytes(), &pc); err != nil {
+			t.Fatalf("GET %s: decode: %v", tc.class, err)
+		}
+		if pc.Status == "" {
+			t.Errorf("GET %s: status is empty, want %q", tc.class, tc.want)
+		}
+		if pc.Status != tc.want {
+			t.Errorf("GET %s: status = %q, want %q", tc.class, pc.Status, tc.want)
+		}
+		if ls := listStatus(tc.class); ls != pc.Status {
+			t.Errorf("%s: detail status %q != list status %q", tc.class, pc.Status, ls)
+		}
 	}
 }
 
