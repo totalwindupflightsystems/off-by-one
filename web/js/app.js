@@ -27,6 +27,8 @@
       v.classList.toggle('active', active);
       v.hidden = !active;
     });
+    // The Home view is the dark immersive landing — flip the shell chrome.
+    document.body.classList.toggle('home-view', name === 'home');
 
     // Best-effort: invoke per-view module if it registered an init fn.
     const fnName = 'initView_' + name.replace(/[^a-z0-9_]/gi, '_');
