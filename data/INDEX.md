@@ -1,15 +1,15 @@
 # Off-by-One Answer Index
 
-**812 problem classes · 948 verified answers** · exported 2026-08-09 20:47 UTC
+**841 problem classes · 979 verified answers** · exported 2026-08-10 02:48 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 10 | off-by-one-self-test | 83 | bash, go, python, python3, shell, text |
+| 10 | off-by-one-self-test | 84 | bash, go, python, python3, shell, text |
 | 388 | typescript-barrel-split-large-file | 7 | go |
+| 641 | python-aws-emulator-idle-audit | 7 | go |
 | 313 | python-audit-idle-maintenance | 6 | go |
-| 641 | python-aws-emulator-idle-audit | 6 | go |
 | 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
 | 314 | python-idle-audit | 4 | go |
@@ -818,3 +818,32 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 810 | maximum-score-good-subarray | 1 | go |
 | 811 | dag-parallel-scheduler-max-concurrency | 1 | python |
 | 812 | typescript-test-flaky-parallel-timeout-evidence-closure | 1 | go |
+| 813 | js-ux-toast-error-reasons | 1 | go |
+| 814 | docs-mcp-tools-table-drift | 1 | go |
+| 815 | typescript-docs-broken-cli-command | 1 | go |
+| 816 | go-module-absolute-replace-docs-note | 1 | go |
+| 817 | board-hygiene-fixtures-schema-uniformity | 1 | go |
+| 818 | npm-dep-audit-direct-major-bump | 1 | go |
+| 819 | go-cli-request-error-usage-suppression | 1 | go |
+| 820 | go-wiring-dead-pipeline-activation | 1 | go |
+| 821 | go-cli-cobra-shared-addr-flag | 1 | go |
+| 822 | node-vitest-root-cwd-false-red | 1 | go |
+| 823 | docs-drift-sweep-foreman-direct | 1 | go |
+| 824 | postgres-trigger-bytea-cast-text | 1 | go |
+| 825 | docker-nextjs-buildtime-env-inlining | 1 | go |
+| 826 | crdt-lwwmap-convergent-merge | 1 | python3 |
+| 827 | ecdsa-k-reuse-key-recovery | 1 | js |
+| 828 | python-test-setup-pytest-systemexit-on-import | 1 | go |
+| 829 | ci-github-actions-vitest-ansi-parse | 1 | go |
+| 830 | typescript-cli-path-mismatch | 1 | go |
+| 831 | go-api-validation-phantom-run | 1 | go |
+| 832 | go-security-auth-identity-trust | 1 | go |
+| 833 | docs-fictional-cli-commands-replacement | 1 | go |
+| 834 | go-workflow-dag-wiring-execute-path | 1 | go |
+| 835 | typescript-port-conflict-duckbrain-3000 | 1 | go |
+| 836 | gitlab-api-http-redirect-post-downgrade | 1 | go |
+| 837 | go-subprocess-process-group-timeout | 1 | go |
+| 838 | typescript-jsx-rendering-unit-spacing | 1 | go |
+| 839 | docs-readme-feature-table | 1 | go |
+| 840 | typescript-react-side-panel-api-consumption | 1 | go |
+| 841 | go-e2e-fixture-window | 1 | go |

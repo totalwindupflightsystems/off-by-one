@@ -1,0 +1,24 @@
+{
+  "class_id": 824,
+  "title": "postgres-trigger-bytea-cast-text",
+  "description": "postgres-trigger-bytea-cast-text",
+  "created_at": "2026-08-09 22:53:03",
+  "answers": [
+    {
+      "answer_id": 960,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** `NEW.content::bytea` does *not* \"convert\" text to bytes — it **parses the string as a bytea literal** (escape format). When the text contains a backslash (`\\`), the parser interprets it as the start of an escape sequence (`\\x` hex, `\\ooo` octal, etc.). A sequence like `\\Users` contains `\\U`, which is not a valid bytea escape, so Postgres raises `22P02: invalid input syntax for type bytea` inside the trigger. Real content (Windows paths, ANSI escape codes, hex dumps) breaks every insert.\n\n**Fix.** `convert_to(content, 'UTF8')` performs a genuine text→bytes encoding conversion (no literal parsing), producing exactly the UTF-8 bytes of the string:\n\n```sql\n-- BUG (throws 22P02 on backslash / \\x escape sequences in content):\nCREATE FUNCTION docs_sha() RETURNS trigger AS $$\nBEGIN\n    NEW.sha256 := sha256(NEW.content::bytea);      -- parses text as bytea literal\n    RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql;\n\n-- FIX (converts text to its UTF-8 bytes; safe for any content):\nCREATE FUNCTION docs_sha() RETURNS trigger AS $$\nBEGIN\n    NEW.sha256 := sha256(convert_to(NEW.content, 'UTF8'));   -- no literal parsing\n    RETURN NEW;\nEND;\n$$ LANGUAGE plpgsql;\n\nCREATE TABLE documents (\n    id     bigserial PRIMARY KEY,\n    content text NOT NULL,\n    sha256 bytea NOT NULL\n);\n\nCREATE TRIGGER trg_docs_sha\n    BEFORE INSERT ON documents\n    FOR EACH ROW EXECUTE FUNCTION docs_sha();\n```\n\n**Regression test** (the exact failing content — a Windows path with `\\U`/`\\x`-style escapes):\n\n```sql\n-- Previously: ERROR: 22P02 invalid input syntax for type bytea\nINSERT INTO documents (content) VALUES (E'C:\\\\Users\\\\bob\\\\tmp\\\\file.txt');\nSELECT id, encode(sha256, 'hex') FROM documents;  -- 729acff168c7...4b44018\n```\n\nNotes: `sha256()` is a core Postgres built-in (PG 11+, no pgcrypto needed). `convert_to(..., 'UTF8')` also keeps the hash stable and predictable for external consumers — it's the UTF-8 bytes of the text, not an encoding-dependent cast.",
+      "evidence": "Verified live on **PostgreSQL 18.4** (initdb'd instance, psql).\n\n**1. Bug reproduced** — with the broken trigger, the failing insert errors exactly as in the report:\n```\nERROR:  invalid input syntax for type bytea\nCONTEXT:  PL/pgSQL function docs_sha_broken() line 3 at assignment   -- 22P02\n```\nPlain text (`'hello world'`) worked under the buggy trigger, confirming the failure is backslash/escape-specific, not universal.\n\n**2. Fix verified — trigger hash == `sha256(convert_to(content,'UTF8'))` for all rows** (8/8 `true`).\n\n**3. Adversarial edge cases tested** (all insert and hash correctly under the fixed trigger):\n| content | result |\n|---|---|\n| `C:\\Users\\bob\\tmp\\file.txt` (real failing content) | ✓ inserts, `729acff168c7...` |\n| `\\x41\\x42\\x43` (literal hex-escape text) | ✓ |\n| `trail\\` (trailing backslash) | ✓ |\n| `back\\\\slash` (double backslash) | ✓ |\n| `\\` (single backslash alone) | ✓ |\n| `control\\u0001\\n\\t` (escape-lookalike text) | ✓ |\n| `日本語テキスト\\x1b[31mred\\x1b[0m` (multibyte UTF-8 + ANSI escapes) | ✓ |\n\n**4. External cross-validation** — exported all rows via CSV and hashed the UTF-8 bytes with Python `hashlib.sha256`: **8/8 match the trigger-computed hashes exactly**. This proves `convert_to(content,'UTF8')` produces the canonical UTF-8 bytes and the trigger stores the correct digest.\n\n**5. Negative re-confirmation** — `sha256(d.content::bytea)` still throws `22P02` on the stored rows, proving the bug remains without the fix (the fix targets the correct line, not a data-side workaround).\n\n**Caveat found while testing:** verifying via `COPY` text format doubles backslashes (`C:\\\\Users`) and corrupts the comparison; CSV format (no backslash escaping) is the correct export for byte-exact verification.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "postgres-trigger-bytea-cast-text",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 22:53:03"
+    }
+  ]
+}

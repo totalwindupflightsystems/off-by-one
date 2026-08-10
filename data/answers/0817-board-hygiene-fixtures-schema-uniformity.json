@@ -1,0 +1,24 @@
+{
+  "class_id": 817,
+  "title": "board-hygiene-fixtures-schema-uniformity",
+  "description": "board-hygiene-fixtures-schema-uniformity",
+  "created_at": "2026-08-09 22:02:03",
+  "answers": [
+    {
+      "answer_id": 953,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** one row of `fixtures.jsonl` was written with the 31-key task schema (`status`, `priority`, `assignee`, `pending`, …) instead of the 5-key fixture schema (`id/title/description/active/created_at`). Parsers that iterate the registry and dispatch on key sets hit the outlier.\n\n**Fix:** a normalizer (`board/normalize.py`) that rewrites every non-conforming row into the fixture schema, mapping task-schema `pending` semantics to `active: false` — and deliberately **not** promoting the row to `tasks.jsonl` (its id stays in the fixture registry; promotion would change registry membership and break id references). Unknown schemas now raise instead of silently passing.\n\n```python\n# board/normalize.py (core of the fix)\ndef normalize_row(row: dict) -> dict:\n    keys = set(row)\n    if keys == FIXTURE_KEYS:                      # 5-key: pass through\n        return dict(row)\n    if keys == TASK_KEYS:                         # 31-key outlier: normalize\n        return {\n            \"id\": row[\"id\"],\n            \"title\": row[\"title\"],\n            \"description\": row.get(\"description\", \"\"),\n            \"active\": not bool(row.get(\"pending\", False)),   # pending -> active:false\n            \"created_at\": row[\"created_at\"],\n        }\n    raise ValueError(f\"row {row.get('id')!r}: unrecognized {len(keys)}-key schema\")\n\ndef normalize_file(path: Path) -> tuple[int, int]:\n    out = [normalize_row(json.loads(line)) for line in path.read_text().splitlines() if line.strip()]\n    path.write_text(\"\\n\".join(json.dumps(r, sort_keys=True) for r in out) + \"\\n\")\n    return len(out), ...\n```\n\nResult for the outlier row `T-003`:\n```json\n{\"id\": \"T-003\", \"title\": \"Wire kanban columns\", \"description\": \"Draft column layout for the kanban view\", \"active\": false, \"created_at\": \"2026-08-02T10:00:00Z\"}\n```\n(31 keys → 5 keys; `pending: true` → `active: false`; `id/title/description/created_at` carried over.)\n\nA validator (`board/validate.py`) enforces the PASS criterion — every row's key set must equal the 5 fixture keys, and no fixture id may leak into `tasks.jsonl`.",
+      "evidence": "Repo: `/home/kara/board-hygiene/` — `board/{constants,normalize,validate}.py`, `data/{fixtures,tasks,fixtures.buggy}.jsonl`, `tests/test_uniformity.py`.\n\n**Before fix** (reproduced on the pre-fix snapshot):\n```\nFAIL: fixtures.jsonl line 3: ['archived','assignee',...,'pending','status',...] != ['active','created_at','description','id','title']   (exit=1)\n```\n\n**After fix:**\n```\nnormalized data/fixtures.jsonl: 1/4 rows rewritten to fixture schema\nOK: all rows parse with uniform fixture key sets   (exit=0)\n```\n`distinct key sets: [['active','created_at','description','id','title']]` → uniform; `T-003 active: False`; `grep -c '\"T-003\"' data/tasks.jsonl` → `0` (not promoted).\n\n**Tests — 7 passed:**\n1. `test_repro_outlier_before_fix` — bug snapshot contains a 31-key row among 5-key rows\n2. `test_normalize_row_maps_task_schema_to_fixture_schema` — 31 keys → 5 keys, pending→`active:false`\n3. `test_normalize_row_pending_false_is_active` — `pending:false` → `active:true`\n4. `test_normalize_row_idempotent` — conforming rows pass through untouched\n5. `test_normalize_row_unknown_schema_raises` — future schema drift raises `ValueError`\n6. `test_fix_not_promoted_to_tasks` — fixture id never appears in `tasks.jsonl`\n7. `test_pass_criterion_uniform_key_sets` — end-to-end: validate fails pre-fix, passes post-fix, every row parses with uniform key sets, and re-running the fix is a no-op",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "board-hygiene-fixtures-schema-uniformity",
+        "result": "passed",
+        "tests": 7
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 22:02:03"
+    }
+  ]
+}

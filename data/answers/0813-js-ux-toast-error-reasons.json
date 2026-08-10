@@ -1,0 +1,24 @@
+{
+  "class_id": 813,
+  "title": "js-ux-toast-error-reasons",
+  "description": "js-ux-toast-error-reasons",
+  "created_at": "2026-08-09 21:26:12",
+  "answers": [
+    {
+      "answer_id": 949,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (DSD-GAP-018):** both the per-file error toast and the final summary toast were written to the *same* `#toast` container, so the summary (`Done: 0 succeeded, 1 failed`) clobbered the per-file message. Users saw counts but never *why* a file failed.\n\n**Fix (4 parts, implemented in `src/uploader.js`):**\n\n1. **`handleMultipleUpload` collects `failReasons`** as `` `${file.name}: ${e.message}` `` per failing file.\n2. **Final summary toast appends the reasons**, truncated to 200 chars, and is flagged `warn: true` when any file failed — the detail can no longer be overwritten/lost.\n3. **`_processSingleFile` throws a specific, actionable error** (`No amount-*/cost-* CSV found in archive`) instead of a generic unzip failure.\n4. **Restored the DOM-writing toast stub** (writes real `textContent`/`dataset` into `#toast`) so end-to-end tests can assert exactly what the user sees.\n\n```js\n// handleMultipleUpload — key changed lines\nconst failReasons = [];\nfor (const file of list) {\n  try {\n    results.push({ file: file.name, ok: true, data: await _processSingleFile(file) });\n  } catch (e) {\n    const reason = `${file.name}: ${e.message}`;          // (1) collect reason\n    failReasons.push(reason);\n    results.push({ file: file.name, ok: false, error: e.message });\n    toast({ type: \"error\", message: truncateReason(reason, reasonLimit), warn: true });\n  }\n}\nconst okCount = results.filter(r => r.ok).length;\nconst failCount = list.length - okCount;\n\nlet summary = `Done: ${okCount} succeeded, ${failCount} failed`;\nif (failReasons.length) summary += \" — \" + truncateReason(failReasons.join(\"; \"), reasonLimit);\ntoast({ type: failCount ? \"error\" : \"success\",\n        message: truncateReason(summary, reasonLimit),    // (2) counts + reasons, ≤200 chars\n        warn: failCount > 0 });\nreturn { ok: failCount === 0, results, failReasons };\n```\n\n```js\n// _processSingleFile — specific error (3)\nif (!amountCsv && !costCsv) {\n  throw new Error(\"No amount-*/cost-* CSV found in archive\");\n}\n```\n\n```js\n// truncateReason (shared helper)\nexport function truncateReason(text, limit = 200) {\n  if (!text) return \"\";\n  return text.length <= limit ? text : text.slice(0, limit - 3).trimEnd() + \"...\";\n}\n```\n\nFiles: `/home/kara/src/uploader.js` (fix), `/home/kara/test/uploader.test.js` (e2e suite, node:test + jsdom + real JSZip).",
+      "evidence": "Verified end-to-end in **jsdom with real JSZip-generated synthetic ZIPs** (built via `JSZip.generateAsync({type:'uint8array'})`, wrapped in real `File`), asserting the actual DOM `textContent` of `#toast`.\n\nRendered final toast for a CSV-less upload:\n```\n\"Done: 0 succeeded, 1 failed — august-report.zip: No amount-*/cost-* CSV found in archive\"\ntype: error | warn: true\n```\n\n**8/8 tests pass** (`npm test`):\n1. `_processSingleFile` rejects CSV-less archive with the specific error\n2. `_processSingleFile` parses rows from valid `amount-2024.csv`/`cost-2024.csv`\n3. Single failed upload → toast contains **counts AND the reason** (the DSD-GAP regression)\n4. Per-file error toast fires with the specific reason (2 toast writes, nothing lost)\n5. Mixed valid+invalid → `Done: 1 succeeded, 1 failed` + only the failing file's reason\n6. All valid → `Done: 2 succeeded, 0 failed`, `warn: \"false\"`\n7. Truncation: 252-char reason → whole summary capped at 200 chars with `...`, `warn: \"true\"`\n8. `truncateReason` unit: passthrough, exact-200 boundary kept, empty-safe\n\n**Edge cases handled:** CSV-less ZIP (bad), valid amount/cost ZIPs (good), mixed batches, >200-char reason overflow, per-file vs summary toast ordering, jsdom `File` lacking `.arrayBuffer()` (FileReader fallback so JSZip can read it in any realm).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "js-ux-toast-error-reasons",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-09 21:26:12"
+    }
+  ]
+}
