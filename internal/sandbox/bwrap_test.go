@@ -440,3 +440,65 @@ func TestSandbox_ID(t *testing.T) {
 		t.Errorf("ID() = %q, want it to contain 'my-id-test'", id)
 	}
 }
+
+// makeRecordingBwrap writes a fake bwrap that records its full
+// argv (what `ps` would show) and its own process environment
+// (envp) into files, then exits 0. Used by the OB-GAP-015
+// regression tests to prove secrets travel via envp, never argv.
+func makeRecordingBwrap(t *testing.T) (bwrapPath, argvFile, envFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	argvFile = filepath.Join(dir, "argv.txt")
+	envFile = filepath.Join(dir, "env.txt")
+	bwrapPath = filepath.Join(dir, "bwrap")
+	script := "#!/bin/sh\n" +
+		"printf '%s\n' \"$@\" > " + argvFile + "\n" +
+		"env > " + envFile + "\n" +
+		"exit 0\n"
+	if err := os.WriteFile(bwrapPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write recording fake bwrap: %v", err)
+	}
+	return bwrapPath, argvFile, envFile
+}
+
+// TestRunWithEnv_EnvNotInArgv is the OB-GAP-015 regression test:
+// per-call env (API keys) must reach the sandboxed process through
+// the environment (envp), never through argv — argv is visible in
+// `ps` listings, envp is not.
+func TestRunWithEnv_EnvNotInArgv(t *testing.T) {
+	bwrapPath, argvFile, envFile := makeRecordingBwrap(t)
+	x := &Executor{BwrapPath: bwrapPath, WorkDir: t.TempDir(), Timeout: 5 * time.Second}
+	s, err := x.Create(context.Background(), "env-leak", Config{})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer func() { _ = s.Destroy() }()
+
+	const secret = "sk-obgap015-test-secret"
+	env := []string{"DEEPSEEK_API_KEY=" + secret, "LLM_API_KEY=" + secret}
+	if _, _, err := s.RunWithEnv(context.Background(), "/bin/echo", []string{"hello"}, env); err != nil {
+		t.Fatalf("RunWithEnv: %v", err)
+	}
+
+	// argv must carry NO key names and NO key values.
+	argvDump, err := os.ReadFile(argvFile)
+	if err != nil {
+		t.Fatalf("read argv dump: %v", err)
+	}
+	for _, leak := range []string{"DEEPSEEK_API_KEY", "LLM_API_KEY", secret, "sk-"} {
+		if strings.Contains(string(argvDump), leak) {
+			t.Errorf("argv contains %q — secret would be visible in ps:\n%s", leak, argvDump)
+		}
+	}
+
+	// envp MUST carry the vars — delivery still works.
+	envDump, err := os.ReadFile(envFile)
+	if err != nil {
+		t.Fatalf("read env dump: %v", err)
+	}
+	for _, want := range []string{"DEEPSEEK_API_KEY=" + secret, "LLM_API_KEY=" + secret} {
+		if !strings.Contains(string(envDump), want) {
+			t.Errorf("envp missing %q — per-call env did not reach the sandboxed process:\n%s", want, envDump)
+		}
+	}
+}

@@ -260,6 +260,20 @@ func (s *Sandbox) CopyInFile(relPath, srcPath string) error {
 //   - bind on the workspace at /workspace
 //   - proc /dev for minimal runtime
 func (s *Sandbox) Run(ctx context.Context, name string, args ...string) (stdout, stderr []byte, err error) {
+	return s.RunWithEnv(ctx, name, args, nil)
+}
+
+// RunWithEnv behaves exactly like Run but additionally delivers the
+// per-call env to the sandboxed process via the process environment
+// (envp), appended AFTER Config.ExtraEnv so per-call values win on
+// duplicate keys (exec.Cmd dedupes keeping the last value).
+//
+// Security (OB-GAP-015): env is carried in envp, never in argv, so
+// secrets such as DEEPSEEK_API_KEY do not appear in `ps` listings.
+// Do NOT reintroduce an env-carrying argv shim (/usr/bin/env
+// KEY=VAL ...) or bwrap --setenv here — both leak values into the
+// process command line.
+func (s *Sandbox) RunWithEnv(ctx context.Context, name string, args, env []string) (stdout, stderr []byte, err error) {
 	s.mu.Lock()
 	if s.workDir == "" {
 		s.mu.Unlock()
@@ -274,6 +288,7 @@ func (s *Sandbox) Run(ctx context.Context, name string, args ...string) (stdout,
 
 	cmd := exec.CommandContext(timeoutCtx, s.cfg.BwrapPath, bwrapArgs...)
 	cmd.Env = append(os.Environ(), s.cfg.ExtraEnv...)
+	cmd.Env = append(cmd.Env, env...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf

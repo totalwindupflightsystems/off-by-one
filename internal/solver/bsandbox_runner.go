@@ -48,7 +48,8 @@ func (r *BSandboxRunner) Create(ctx context.Context, id string, opts ...CreateOp
 }
 
 // bwrapHandle adapts *sandbox.Sandbox to the solver's Handle
-// interface. The Exec method calls sandbox.Run under the hood.
+// interface. The Exec method calls sandbox.Run/RunWithEnv under
+// the hood.
 type bwrapHandle struct {
 	sandbox *sandbox.Sandbox
 }
@@ -67,25 +68,21 @@ func (h *bwrapHandle) ReadFile(relPath string) ([]byte, error) {
 // and stderr are merged into the returned bytes. The sandbox's
 // configured Timeout caps the run; pass a shorter context to
 // tighten it further.
+//
+// Per-call env (e.g. DEEPSEEK_API_KEY) is delivered through
+// RunWithEnv, which passes it via exec.Cmd.Env (envp) — never via
+// the process argv — so secrets stay out of `ps` listings
+// (OB-GAP-015). The old /usr/bin/env KEY=VAL shim is gone.
 func (h *bwrapHandle) Exec(ctx context.Context, name string, args, env []string) ([]byte, error) {
-	// The sandbox.Config.ExtraEnv is set at Create time and can't
-	// be changed per-Run. We work around this by passing the
-	// per-call env through a tiny shim command: when env is
-	// non-empty, we exec /usr/bin/env with the env vars and the
-	// real command. When env is empty, we exec the command
-	// directly.
+	var stdout, stderr []byte
+	var err error
 	if len(env) == 0 {
-		stdout, _, err := h.sandbox.Run(ctx, name, args...)
-		return stdout, err
+		stdout, stderr, err = h.sandbox.Run(ctx, name, args...)
+	} else {
+		stdout, stderr, err = h.sandbox.RunWithEnv(ctx, name, args, env)
 	}
-	// Build a /usr/bin/env command line: env KEY=VAL ... name args...
-	envArgs := append([]string{}, env...)
-	envArgs = append(envArgs, name)
-	envArgs = append(envArgs, args...)
-	stdout, stderr, err := h.sandbox.Run(ctx, "/usr/bin/env", envArgs...)
-	// Merge stderr into the returned stdout on success so callers
-	// see pi-agent's full output. On error, the caller already
-	// gets the error — we just include stderr for diagnostics.
+	// Merge stderr into the returned stdout on error so the caller
+	// gets the error plus stderr for diagnostics.
 	if err != nil && len(stderr) > 0 {
 		merged := append([]byte{}, stdout...)
 		merged = append(merged, '\n')

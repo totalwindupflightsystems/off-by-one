@@ -2,7 +2,9 @@ package solver
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -98,4 +100,103 @@ exit 0
 	if !strings.Contains(string(sigMD), `"problem_class":"bwrap-test"`) {
 		t.Errorf("signatures.json = %q, want problem_class=bwrap-test", sigMD)
 	}
+}
+
+// makeRecordingBwrap writes a fake bwrap that records its full
+// argv (what `ps` would show) and its own process environment
+// (envp) into files, then exits 0. Used by the OB-GAP-015
+// regression test below.
+func makeRecordingBwrap(t *testing.T) (bwrapPath, argvFile, envFile string) {
+	t.Helper()
+	dir := t.TempDir()
+	argvFile = filepath.Join(dir, "argv.txt")
+	envFile = filepath.Join(dir, "env.txt")
+	bwrapPath = filepath.Join(dir, "bwrap")
+	script := "#!/bin/sh\n" +
+		"printf '%s\n' \"$@\" > " + argvFile + "\n" +
+		"env > " + envFile + "\n" +
+		"exit 0\n"
+	if err := os.WriteFile(bwrapPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write recording fake bwrap: %v", err)
+	}
+	return bwrapPath, argvFile, envFile
+}
+
+// TestExecEnvNotInArgv is the OB-GAP-015 regression test: env
+// passed to bwrapHandle.Exec (DEEPSEEK_API_KEY / LLM_API_KEY from
+// the pi-agent solve path) must reach the sandboxed process via
+// envp, never via argv. argv is visible in `ps` listings; envp is
+// not. The old /usr/bin/env KEY=VAL shim leaked both names and
+// values into argv — this test pins the fix.
+func TestExecEnvNotInArgv(t *testing.T) {
+	t.Run("env delivered via envp not argv", func(t *testing.T) {
+		bwrapPath, argvFile, envFile := makeRecordingBwrap(t)
+		runner := NewBSandboxRunner(&sandbox.Executor{
+			BwrapPath: bwrapPath,
+			WorkDir:   t.TempDir(),
+			Timeout:   5 * time.Second,
+		})
+		handle, err := runner.Create(context.Background(), "exec-env-leak")
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer func() { _ = handle.Destroy() }()
+
+		const secret = "sk-obgap015-test-secret"
+		env := []string{"DEEPSEEK_API_KEY=" + secret, "LLM_API_KEY=" + secret}
+		if _, err := handle.Exec(context.Background(), "/bin/echo", []string{"hello"}, env); err != nil {
+			t.Fatalf("Exec: %v", err)
+		}
+
+		// argv must carry NO key names and NO key values.
+		argvDump, err := os.ReadFile(argvFile)
+		if err != nil {
+			t.Fatalf("read argv dump: %v", err)
+		}
+		for _, leak := range []string{"DEEPSEEK_API_KEY", "LLM_API_KEY", secret, "sk-"} {
+			if strings.Contains(string(argvDump), leak) {
+				t.Errorf("argv contains %q — secret would be visible in ps:\n%s", leak, argvDump)
+			}
+		}
+
+		// envp MUST carry the vars — delivery still works.
+		envDump, err := os.ReadFile(envFile)
+		if err != nil {
+			t.Fatalf("read env dump: %v", err)
+		}
+		for _, want := range []string{"DEEPSEEK_API_KEY=" + secret, "LLM_API_KEY=" + secret} {
+			if !strings.Contains(string(envDump), want) {
+				t.Errorf("envp missing %q — per-call env did not reach the sandboxed process:\n%s", want, envDump)
+			}
+		}
+	})
+
+	t.Run("empty env runs command directly", func(t *testing.T) {
+		bwrapPath, argvFile, _ := makeRecordingBwrap(t)
+		runner := NewBSandboxRunner(&sandbox.Executor{
+			BwrapPath: bwrapPath,
+			WorkDir:   t.TempDir(),
+			Timeout:   5 * time.Second,
+		})
+		handle, err := runner.Create(context.Background(), "exec-no-env")
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer func() { _ = handle.Destroy() }()
+
+		if _, err := handle.Exec(context.Background(), "/bin/echo", []string{"hello"}, nil); err != nil {
+			t.Fatalf("Exec: %v", err)
+		}
+
+		argvDump, err := os.ReadFile(argvFile)
+		if err != nil {
+			t.Fatalf("read argv dump: %v", err)
+		}
+		if strings.Contains(string(argvDump), "/usr/bin/env") {
+			t.Errorf("argv contains /usr/bin/env shim — command not run directly:\n%s", argvDump)
+		}
+		if !strings.Contains(string(argvDump), "/bin/echo") {
+			t.Errorf("argv missing the command itself:\n%s", argvDump)
+		}
+	})
 }
