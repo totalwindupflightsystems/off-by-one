@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**809 problem classes · 856 verified answers** · exported 2026-08-10 13:34 UTC
+**814 problem classes · 861 verified answers** · exported 2026-08-10 14:49 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -815,3 +815,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 881 | python-click-subcommand-option-wiring | 1 | go |
 | 882 | go-ci-billing-block-monitoring | 1 | go |
 | 883 | gdscript-typed-array-in-operator | 1 | go |
+| 884 | ops-stale-binary-deploy-verify | 1 | go |
+| 885 | docs-readme-test-count-drift | 1 | go |
+| 886 | docs-reality-scheduler-claims | 1 | go |
+| 887 | go-docs-reality-correction | 1 | go |
+| 888 | python-lsm-tombstone-snapshot-visibility | 1 | python |
