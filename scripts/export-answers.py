@@ -6,6 +6,7 @@ Outputs (relative to repo root):
   data/answers.jsonl            — master bulk file, one answer per line (JSON)
   data/answers/<slug>.json      — one file per problem class (PR-friendly)
   data/INDEX.md                 — human-readable catalog of problem classes
+  data/COUNTS.md                — live corpus counts (auto-stamped every export)
   data/README.md                — usage guide for consumers
 
 The flat files ARE the distribution layer: teams clone the repo (or fetch a
@@ -28,6 +29,34 @@ DB_PATH = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(REPO_ROOT, "data")
 ANSWERS_DIR = os.path.join(DATA_DIR, "answers")
+
+# Self-test / canary / probe classes that must never reach the public export.
+# Matched (case-insensitive regex search) against the raw class title,
+# lowercased. Keep these specific: real engineering classes whose titles
+# merely contain "test" (e.g. "test-mocking-http-requests",
+# "test-property-based-shrinking") must NOT be excluded.
+EXCLUDED_CLASS_PATTERNS = [
+    r"self-test",             # off-by-one-self-test family, bare "self-test"
+    r"self[-_]dogfood",       # self-dogfood probes
+    r"dogfood",               # test-self-dogfood, dogfood-field-test-*
+    r"canary",                # docs-canary-*
+    r"field-test",            # dogfood-field-test-*
+    r"^test$",                # bare "test" placeholder class
+    r"test-gap-sweep",
+    r"test-foreman-",
+    r"e2e-tick",              # e2e-tickNN probe classes
+    r"shell-say-hello-test",
+    r"shell-echo-hello-fix",
+    r"tick\d+-self-test",     # tickN-self-test variants of the self-test family
+    r"docs-canary",
+]
+_EXCLUDED_RES = [re.compile(p, re.IGNORECASE) for p in EXCLUDED_CLASS_PATTERNS]
+
+
+def is_excluded_class(title: str) -> bool:
+    """True if a raw (pre-slugify) class title is a self-test/canary/probe."""
+    t = title.lower()
+    return any(p.search(t) for p in _EXCLUDED_RES)
 
 
 def slugify(title: str) -> str:
@@ -75,6 +104,17 @@ def main() -> None:
             "created_at": r["answer_created"],
         })
 
+    # Filter out self-test/canary/probe classes — lab plumbing, not verified
+    # engineering answers. They must not appear in any export output.
+    excluded = [cls for cls in classes.values() if is_excluded_class(cls["title"])]
+    for cls in excluded:
+        del classes[cls["class_id"]]
+    if excluded:
+        print(f"Excluded {len(excluded)} self-test/canary/probe classes:")
+        for cls in sorted(excluded, key=lambda x: x["class_id"]):
+            print(f"  - [{cls['class_id']}] {cls['title']} "
+                  f"({len(cls['answers'])} answers)")
+
     os.makedirs(ANSWERS_DIR, exist_ok=True)
 
     # 1. Master JSONL (one answer per line, class metadata embedded)
@@ -101,6 +141,21 @@ def main() -> None:
             json.dump(cls, f, ensure_ascii=False, indent=2)
             f.write("\n")
 
+    # 2b. Remove stale per-class files so data/answers/ stays in sync with
+    # the export (excluded classes, renamed slugs, deleted classes).
+    expected_files = {
+        f"{cls['class_id']:04d}-{slugify(cls['title'])}.json"
+        for cls in classes.values()
+    }
+    removed = 0
+    for fname in sorted(os.listdir(ANSWERS_DIR)):
+        if re.match(r"^\d{4}-.+\.json$", fname) and fname not in expected_files:
+            os.remove(os.path.join(ANSWERS_DIR, fname))
+            removed += 1
+            print(f"  removed stale {fname}")
+    if removed:
+        print(f"Removed {removed} stale per-class files")
+
     # 3. INDEX.md
     index_path = os.path.join(DATA_DIR, "INDEX.md")
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -116,6 +171,15 @@ def main() -> None:
             langs = sorted({a["language"] for a in cls["answers"] if a["language"]})
             f.write(f"| {cls['class_id']} | {cls['title']} | {len(cls['answers'])} "
                     f"| {', '.join(langs)} |\n")
+
+    # 3b. COUNTS.md — small auto-stamped counts file. README and docs link to
+    # this instead of hardcoding corpus counts that drift within days.
+    counts_path = os.path.join(DATA_DIR, "COUNTS.md")
+    with open(counts_path, "w") as f:
+        f.write("# Corpus counts\n\n")
+        f.write(f"**{len(classes)} problem classes · {n_answers} verified answers** · "
+                f"exported {now}\n\n")
+        f.write("Source of truth: data/INDEX.md (regenerated every sync).\n")
 
     # 4. README.md (consumer guide)
     readme_path = os.path.join(DATA_DIR, "README.md")
@@ -133,6 +197,7 @@ no SQLite, no setup** needed to consume or contribute.
 | `answers.jsonl` | Master file — one verified answer per line (JSON) |
 | `answers/` | One JSON file per problem class — browse, diff, PR |
 | `INDEX.md` | Catalog of every problem class + language coverage |
+| `COUNTS.md` | Live corpus counts — auto-stamped every export |
 
 ## Consume (3 ways)
 
@@ -192,6 +257,7 @@ python3 scripts/export-answers.py
     print(f"  {jsonl_path}")
     print(f"  {ANSWERS_DIR}/ (per-class files)")
     print(f"  {index_path}")
+    print(f"  {counts_path}")
     print(f"  {readme_path}")
 
 

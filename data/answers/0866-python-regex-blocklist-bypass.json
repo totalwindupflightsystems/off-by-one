@@ -1,0 +1,24 @@
+{
+  "class_id": 866,
+  "title": "python-regex-blocklist-bypass",
+  "description": "python-regex-blocklist-bypass",
+  "created_at": "2026-08-10 09:01:16",
+  "answers": [
+    {
+      "answer_id": 1004,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Why the old pattern was bypassable (TJ-DF-001).** A naive blocklist like `rm\\s+-rf\\s+/\\b` fails three ways:\n1. **Flag splitting/reordering** — `rm -f -r /`, `rm -r -f /`, `rm -fr /` never contain the literal token `-rf`, so a literal `-rf` misses.\n2. **Intervening tokens** — `rm -rf --no-preserve-root /` has a token between `-rf` and `/`, so `-rf\\s+/` misses.\n3. **`\\b` can't bridge** — `/\\b` requires a *word* char after `/`, which never holds for the worst case `rm -rf /` (end of input); and a bare `-rf\\s+/` over-blocks `/tmp`.\n\n**The fix** — order-independent flag *set* via two lookaheads, token-start `(?<!\\S)` boundaries, and an exact root target:\n\n```python\nimport re\n\n_TOKEN_START = r\"(?<!\\S)\"                          # start of an argv token (ws or string start)\n_SEGMENT     = r\"[^|;&]*\"                          # one shell segment: stop at `|`, `;`, `&`\n_RECURSIVE   = rf\"{_TOKEN_START}-[^\\s|;&]*[rR]\"    # -r -R -rf -fr -rR --recursive\n_FORCE       = rf\"{_TOKEN_START}-[^\\s|;&]*f\"       # -f -rf -fr -Rf --force\n_TARGET      = rf\"{_TOKEN_START}/(?:\\*)?(?=\\s|[|;&]|$)\"   # exactly `/` or `/*`\n\nDANGEROUS_RM = re.compile(\n    rf\"{_TOKEN_START}rm\\b\"             # `rm` is its own argv token\n    rf\"(?={_SEGMENT}{_RECURSIVE})\"     # recursive flag exists somewhere ahead\n    rf\"(?={_SEGMENT}{_FORCE})\"         # force flag exists somewhere ahead\n    rf\"{_SEGMENT}{_TARGET}\"            # root target in the same shell segment\n)\n\ndef is_dangerous_rm(command: str) -> bool:\n    return DANGEROUS_RM.search(command) is not None\n```\n\nCompact portable form: `(?<!\\S)rm\\b(?=[^|;&]*(?<!\\S)-[^\\s|;&]*[rR])(?=[^|;&]*(?<!\\S)-[^\\s|;&]*f)[^|;&]*(?<!\\S)/(?:\\*)?(?=\\s|[|;&]|$)`\n\nHow each piece addresses the bypass:\n- **Two lookaheads** `(?=[^|;&]*REC)(?=[^|;&]*FORCE)` require the flag *set* (recursive + force), order-independent: matched whether flags are one token (`-rf`), split (`-r -f`), reversed (`-f -r`, `-fr`), long-form (`--recursive --force`), or have `--no-preserve-root` / the target between them.\n- **`(?<!\\S)` token-start boundary** on `rm`, flags, and target kills glued-token false matches: `myrm`, `arm`, `foo/`, `./`, `/tmp`'s `/`.\n- **`[^|;&]*` segments** stop the lookaheads and the target search at `| ; &`, so a sibling command can never donate the flags or the target (`rm -rf /; echo done` is blocked, not aided).\n- **Trailing `(?=\\s|[|;&]|$)`** pins the target to exactly `/` or `/*` — `/tmp`, `/home`, `//`, `/*/`, `/etc/passwd` are untouched.\n\nThe skeleton is reusable for any argv-flag blocklist: swap the command token, plug in the two flag patterns, keep the segment/boundary/target structure.",
+      "evidence": "Ran `python3 -W error::SyntaxWarning test_rm_blocklist.py` — **35/35 passed, 0 failed** (13-case regression plus 22 edge cases).\n\n13-case regression (7 block / 6 allow):\n\n| must BLOCK | must ALLOW |\n|---|---|\n| `rm -rf /` | `rm /` |\n| `rm -rf /*` | `rm -r /` |\n| `rm -r -f /` (split) | `rm -f /` |\n| `rm -f -r /` (reversed) | `rm -rf /tmp` |\n| `rm -fr /` (reversed combined) | `rm -rf /home` |\n| `rm -rf --no-preserve-root /` | `rm -rf ./` |\n| `rm -rf / --no-preserve-root` | |\n\nEdge cases verified:\n- **Blocked:** `sudo rm -rf /`, `rm -Rf /`, `rm -rRf /`, `rm --recursive --force /`, `rm / -rf`, `rm -r / -f`, `rm -rf /; echo done`, `echo hi; rm -rf /`, `rm -rf / | cat`\n- **Allowed:** `rmdir /`, `myrm -rf /`, `arm -rf /`, `rm -rf //`, `rm -rf /tmp/`, `rm -rf /*/`, `rm -rf /etc/passwd`, `rm -rf foo/`, `rm -rf ./*`, `rm -f -r /tmp`, `rm -rf`, `rm -rf ~`\n\nNotable checks: order-independence proven both directions (`-r -f` and `-f -r`; flags after target `rm / -rf`); target pinning proven (`/tmp`, `/home`, `//`, `/*/`, `./` all allowed while `/` and `/*` blocked); separator isolation proven (`rm -rf /; echo done` blocked, `echo hi; rm -rf /` blocked, target can't be supplied across `;`). Known spec-faithful residual: a `/` glued to a flag (`rm -rf/`) or a bare `;rm` with no space is allowed, since the spec's `(?<!\\S)` boundary requires true token starts.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-regex-blocklist-bypass",
+        "result": "passed",
+        "tests": 35
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 09:01:16"
+    }
+  ]
+}

@@ -11,6 +11,7 @@ no SQLite, no setup** needed to consume or contribute.
 | `answers.jsonl` | Master file — one verified answer per line (JSON) |
 | `answers/` | One JSON file per problem class — browse, diff, PR |
 | `INDEX.md` | Catalog of every problem class + language coverage |
+| `COUNTS.md` | Live corpus counts — auto-stamped every export |
 
 ## Consume (3 ways)
 

@@ -1,0 +1,24 @@
+{
+  "class_id": 878,
+  "title": "docs-duplicate-canonical-symlink",
+  "description": "docs-duplicate-canonical-symlink",
+  "created_at": "2026-08-10 12:11:58",
+  "answers": [
+    {
+      "answer_id": 1016,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (GAP-017):** `helios` had two divergent OpenAPI documents. `specs/api/openapi.yaml` was canonical (embedded into the binary via `go:embed`), while `docs/api/openapi.yaml` was a hand-maintained copy that drifted (stale v1.9.0, removed endpoints still documented). Every edit to the canonical spec silently desynchronized the docs copy.\n\n**Fix — delete the stale copy, replace with a relative symlink to the canonical file:**\n\n```bash\ncd helios\nrm docs/api/openapi.yaml\nln -s ../../specs/api/openapi.yaml docs/api/openapi.yaml\ngit add -A && git commit -m \"GAP-017: docs/api/openapi.yaml is now a symlink to canonical specs/api/openapi.yaml\"\n```\n\nWhy it's correct by construction:\n- **Byte equality by construction** — the docs path *is* the canonical file; there is no second copy to drift.\n- **Swagger UI keeps working** — a page served at `/docs/api/` resolves `openapi.yaml` relative to its own URL, i.e. `docs/api/ + ../../specs/api/openapi.yaml` → `specs/api/openapi.yaml`. The relative link resolves within the repo tree (also survives relocation/containers).\n- **Git tracks mode `100644 → 120000`** — the commit is a 1-line deletion + symlink blob (the target string is the blob content).\n- **`go:embed` untouched** — the embed pattern `specs/api/openapi.yaml` stays unchanged since the canonical file never moved.\n\n**Gotcha found during implementation:** `go:embed` patterns may not contain `..` elements (`pattern ../../specs/api/openapi.yaml: invalid pattern syntax`). The embed consumer must live where the pattern is a downward path. I placed the consumer at the module root (`embed.go`, package `helios`):\n\n```go\n//go:embed specs/api/openapi.yaml\nvar canonical embed.FS\n\nfunc SpecBytes() []byte {\n    b, err := canonical.ReadFile(\"specs/api/openapi.yaml\")\n    if err != nil { panic(err) }\n    return b\n}\n```\n\n**Regression guard (`parity_test.go`, 3 tests):** asserts (1) `docs/api/openapi.yaml` is a symlink with target `../../specs/api/openapi.yaml`; (2) bytes read *through* the symlink equal the `go:embed` bytes and md5s match; (3) the relative URL resolves to the canonical absolute path.",
+      "evidence": "Repo reproduced in `/home/kara/helios` (git history mirrors the fix):\n\n**Pre-fix divergence (commit `822e30f`):**\n```\n100644 f949dfd…  docs/api/openapi.yaml   ← stale copy (68-byte drift vs canonical 1303 bytes)\n100644 1ffc589…  specs/api/openapi.yaml\n```\n\n**Post-fix (commit `b5f2061`):**\n```\n120000 0918587…  docs/api/openapi.yaml   ← blob IS the target string \"../../specs/api/openapi.yaml\"\n```\n\n**md5 through symlink == canonical:**\n```\nd96cdffff42c8e7cfb7d13159522fe72  docs/api/openapi.yaml\nd96cdffff42c8e7cfb7d13159522fe72  specs/api/openapi.yaml\n```\n\n**Parity tests:**\n```\n--- PASS: TestDocsSpecIsSymlinkToCanonical\n--- PASS: TestDocSpecBytesParityWithEmbed (1303 bytes, md5 d96cdfff…)\n--- PASS: TestSwaggerUIRelativeResolution\nok  helios  0.002s\n```\n\n**Negative case (regression to the old diverged regular file) — all 3 tests fail:**\n```\n--- FAIL: TestDocsSpecIsSymlinkToCanonical  regular file (mode -rw-r--r--)\n--- FAIL: TestDocSpecBytesParityWithEmbed    parity violation: 68 bytes != 1303 bytes\n--- FAIL: TestSwaggerUIRelativeResolution    readlink: invalid argument\n```\n`git checkout -- docs/api/openapi.yaml` restored the symlink from the git blob; tests green again.\n\n**Fresh-clone round-trip** — symlinks are checked out as symlinks; tests pass in a clean clone; `git status` clean.\n\n**Edge cases handled:** go:embed `..` restriction (consumer relocated to module root); relative (not absolute) symlink keeps Swagger UI and repo relocation working; `os.Lstat`+`os.Readlink` make tests portable (they fail loudly, not spuriously, if a checkout lands on a symlink-less filesystem — requires `core.symlinks=true` on Windows). `go build ./... && go vet ./...` clean.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "docs-duplicate-canonical-symlink",
+        "result": "passed",
+        "tests": 3
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 12:11:58"
+    }
+  ]
+}

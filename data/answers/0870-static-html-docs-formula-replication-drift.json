@@ -1,0 +1,24 @@
+{
+  "class_id": 870,
+  "title": "static-html-docs-formula-replication-drift",
+  "description": "static-html-docs-formula-replication-drift",
+  "created_at": "2026-08-10 10:03:52",
+  "answers": [
+    {
+      "answer_id": 1008,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** `docs/example-calc.js` replicated the tool's `recalculate()` but omitted the IE-GAP-011 TP×PP floor, so `gpusNeeded = max(rMemGpus, rThrGpus)` instead of `max(…, tp×pp)`. For the 70B QUICKSTART (TP=2, PP=4): memory said 1 GPU, throughput said 1 GPU → docs printed **1** and $2/hr, while the tool floored to **8** and $16/hr.\n\n**The fix (4 parts):**\n\n1. **Formula fixed in the replication** — `docs/example-calc.js` now mirrors `tool/calc.js` exactly (parity is enforced by tests, so it can't silently drift again):\n\n```js\n// IE-GAP-011 TP×PP floor — replicated from tool/calc.js (was missing here).\nvar rTpPpFloor = c.tp * c.pp;\nvar gpusNeeded = Math.max(rMemGpus, rThrGpus, rTpPpFloor);\n```\n\n2. **Numbers regenerated, never hand-copied** — `docs/generate-quickstart.js` computes every number in `quickstart.html` from the calculator and substitutes `{{placeholders}}`. It also has a **parity gate** that refuses to publish if the replication disagrees with the tool:\n\n```js\n// 1) Parity gate: abort if the docs replication disagrees with the tool.\nfor (const f of fields) {\n  if (Math.abs(a[f] - b[f]) > 1e-9) {\n    throw new Error(`PARITY FAIL: ${f} tool=${a[f]} docs=${b[f]}. ` +\n      'Fix docs/example-calc.js before regenerating the docs.');\n  }\n}\n```\n\n3. **Known-answer assertions** in `test.js` — literals derived from the tool (not from the docs), tight enough to be mutation-proof:\n\n```js\nconst KA = {\n  rModelMem: 65.1925802230835,  // GiB: 70B × 2B FP16 ÷ TP=2\n  rKvCache: 0.625,              // GiB: K+V × 80L × 8H × 128d × 2B × 4k ctx ÷ TP=2\n  rGpusNeeded: 8,               // IE-GAP-011 floor: TP(2) × PP(4)\n  rDecodeThroughput: 30,        // tok/s/GPU: 60 base ÷ TP=2\n  costPerHour: 16, costPerDay: 384,\n};\nt('KA: rKvCache = 0.625 GiB (K+V ×2 included)', () => {\n  approx(docs.recalculate(QUICKSTART).rKvCache, KA.rKvCache);  // fails if ×2 dropped\n});\nt('KA: gpusNeeded = 8 (TP×PP floor …)', () => {\n  assert.equal(docs.recalculate(QUICKSTART).gpusNeeded, KA.rGpusNeeded);  // fails if floor dropped\n});\n```\n\n4. **Parity tests + invariants** — `docs` must deep-equal `tool` on 4 scenarios, and `gpusNeeded ≥ tp×pp` always holds.",
+      "evidence": "All runs against the final tree (`/home/kara`, Node v22):\n\n- **Suite (fixed):** `14 passed, 0 failed` — known answers, 4 parity checks, 3 edge scenarios, floor invariant, unknown-field guard.\n- **Regeneration:** `quickstart.html regenerated: gpusNeeded=8, costPerHour=$16, costPerDay=$384`; HTML contains `GPUs Needed = 8` and the corrected cost table.\n- **Mutation A — drop K+V ×2 (default `kvTensors: 2→1`):** `10 passed, 4 failed` (exit 1). Caught by parity (`expected 160, got 80`) and the memory-bound edge.\n- **Mutation B — remove TP×PP floor (the original drift):** `11 passed, 3 failed` (exit 1). Caught by `gpusNeeded: 8 ≠ 1`, `costPerHour: 16 ≠ 2`, QUICKSTART parity — exactly the incident signature.\n- **Mutation C — drop ×2 in the formula (docs only):** `4 passed, 10 failed` — KA `rKvCache`, KA `gpusNeeded`, KA costs, and all parity tests fail.\n- **Generator parity gate:** aborts with `PARITY FAIL: rTpPpFloor tool=8 docs=1` (exit 1) and writes no HTML — a drifted replication can never be published.\n- **Edge cases:** single-GPU model not inflated by floor (`gpusNeeded=1`); memory-bound 256k ctx (KV = 160 GiB → 5 GPUs); throughput-bound 1000 tok/s (17 GPUs); `gpusNeeded ≥ tp×pp` on all 4 scenarios.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "static-html-docs-formula-replication-drift",
+        "result": "passed",
+        "tests": 14
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 10:03:52"
+    }
+  ]
+}

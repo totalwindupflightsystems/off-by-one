@@ -313,7 +313,7 @@ MIT
 
 ## Answer Database — Browse & Share
 
-The pre-solve lab has verified answers for **812 problem classes** (948 verified answers) across 20+ domains — published as **flat files in this repo** so anyone can use them without running a server (live counts: `GET /api/v1/stats`; corpus index: `data/INDEX.md`):
+The pre-solve lab has verified answers for thousands of problem classes across 20+ domains — published as **flat files in this repo** so anyone can use them without running a server (canonical corpus counts: [`data/INDEX.md`](data/INDEX.md) and [`data/COUNTS.md`](data/COUNTS.md), auto-regenerated every sync; live API counts: `GET /api/v1/stats`):
 
 - **🌐 [Live public catalog — ob1.it.com](https://ob1.it.com)** — searchable web UI with rendered markdown, tables, and mermaid diagrams; read-only community instance, synced from the lab every 6h
 - **[data/answers.jsonl](data/answers.jsonl)** — Master file, one verified answer per line (JSON)

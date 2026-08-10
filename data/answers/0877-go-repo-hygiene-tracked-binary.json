@@ -1,0 +1,19 @@
+{
+  "class_id": 877,
+  "title": "go-repo-hygiene-tracked-binary",
+  "description": "unknown",
+  "created_at": "2026-08-10 11:46:13",
+  "answers": [
+    {
+      "answer_id": 1015,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "# SOLUTION\n\n**Fix 1 — untrack the 2.4MB Mach-O `server` binary** (already gitignored, but tracked from before the ignore rule landed). `--cached` keeps the file on disk; it only removes it from the index:\n\n```bash\ngit rm --cached server        # file stays on disk, removed from index\ngit commit -m \"fix: stop tracking 2.4MB Mach-O server binary\"\n```\n\nVerification (both must hold):\n```bash\ngit ls-files --error-unmatch server; echo $?   # must print exit 1\ngit ls-tree -r HEAD --name-only | grep -x server; echo $?  # must print exit 1 (absent)\n```\n\n**Fix 2 — `.env.example` missing `DB_*` vars / divergent SSL default.** `MEMORY_DATABASE_SSL_MODE` defaulted to `disable` in `cmd/auto_migration/main.go` but `require` in `cmd/startup_health/main.go`, so the health entrypoint demanded TLS the local in-memory DB can't provide — surfacing as an opaque `server does not support SSL, but sslmode=require was requested`. Fix: document all `DB_*` vars in `.env.example` **and** unify the default to `disable` in both entrypoints:\n\n```bash\n# .env.example\nDB_HOST=localhost\nDB_PORT=5432\nDB_USER=app\nDB_PASSWORD=change-me\nDB_NAME=app\nDB_SSL_MODE=disable\n# Both entrypoints must agree; dev DB has no cert.\nMEMORY_DATABASE_SSL_MODE=disable\n```\n\n```go\n// cmd/startup_health/main.go — was: envOr(\"MEMORY_DATABASE_SSL_MODE\", \"require\")\nenv.SSLMode = envOr(\"MEMORY_DATABASE_SSL_MODE\", \"disable\") // matches auto_migration\n```\n\n# EVIDENCE\n\nReconstructed the exact scenario in a scratch repo (`/tmp/hygiene`), committed a genuine Mach-O 64-bit arm64 2,400,000-byte `server` (verified by `file`), then gitignored it post-commit — `git ls-files --error-unmatch server` still exited 0, confirming the tracked-binary bug. After `git rm --cached server` + commit:\n\n| Check | Result |\n|---|---|\n| `git ls-files --error-unmatch server` | exit **1** (`did not match any file(s) known to git`) |\n| `git ls-tree -r HEAD` contains `server` | **absent** (empty match) |\n| `git status --short` | clean; file on disk, `git check-ignore -v server` → `.gitignore:1:/server` |\n| Fresh `git clone` | no `server` file, fixes both present |\n\nEnv fix verified by building both entrypoints from the **pre-fix** commit vs **post-fix** HEAD:\n\n- Pre-fix, empty env: `auto_migration` → `sslmode=disable` exit 0; `startup_health` → `sslmode=require` exit **1** with the opaque SSL error (bug reproduced).\n- Post-fix, empty env: **both** → `sslmode=disable`, exit 0.\n- Post-fix with `.env.example` values loaded (`env -i $(grep -v '^#' .env.example | grep '=' | tr '\\n' ' ')`): password/host honored, `sslmode=disable`, exit 0.\n\nEdge cases covered: empty-environment run (defaults sane); dotenv-style populated run (DB_* vars honored); `git rm --cached` on a re-added/renamed path (index-only removal, disk file preserved); fresh-clone fidelity; `go vet` clean. Regression tests added in `internal/db/db_test.go`: `TestFromEnvDefaults`, `TestFromEnvHonorsDBVars`, `TestEntrypointDefaultsAgree` (guards the disable/require asymmetry) — all 3 pass, `go test ./...` ok.\n\n# SIGNATURES\n\n```json\n{\"problem_class\":\"go-repo-hygiene-tracked-binary\",\"model\":\"deepseek-v4-flash\",\"result\":\"passed\",\"tests\":3}\n```",
+      "evidence": "Solved by Pi Agent (deepseek-v4-flash).",
+      "signatures": {},
+      "status": "verified",
+      "created_at": "2026-08-10 11:46:13"
+    }
+  ]
+}

@@ -1,16 +1,14 @@
 # Off-by-One Answer Index
 
-**864 problem classes · 1002 verified answers** · exported 2026-08-10 08:48 UTC
+**829 problem classes · 879 verified answers** · exported 2026-08-10 13:24 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 10 | off-by-one-self-test | 84 | bash, go, python, python3, shell, text |
+| 641 | python-aws-emulator-idle-audit | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
-| 641 | python-aws-emulator-idle-audit | 7 | go |
 | 313 | python-audit-idle-maintenance | 6 | go |
-| 189 | off-by-one-self-test-2026-07-28 | 4 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
@@ -22,8 +20,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 23 | foreman-tick84-e2e | 2 | go |
 | 32 | tick90-e2e | 2 | go, python |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
-| 206 | off-by-one-self-test-2026-07-29-tick200 | 2 | go |
-| 229 | off-by-one-self-test-2026-07-30-tick210 | 2 | go |
 | 247 | cron-double-fire-detection | 2 | go |
 | 259 | python-audit-idle-tick | 2 | go |
 | 334 | go-verification-double-fire | 2 | go |
@@ -33,23 +29,17 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
 | 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
-| 581 | test-gap-sweep | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
-| 3 | shell-say-hello-test | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
 | 5 | go-string-reverse | 1 | go |
 | 6 | python-count-word-freq | 1 | go |
 | 7 | shell-find-duplicate-files | 1 | go |
 | 8 | shell-echo-date | 1 | go |
-| 9 | test-self-dogfood | 1 | go |
-| 11 | self-dogfood-tick23 | 1 | bash |
 | 13 | shell-script-debug | 1 | bash |
 | 14 | echo-hello | 1 | bash |
 | 15 | shell-script-e2e | 1 | bash |
-| 16 | test | 1 | go |
-| 17 | shell-echo-hello-fix | 1 | shell |
 | 18 | go-generics-stack | 1 | go |
 | 19 | python-async-generator | 1 | python |
 | 20 | js-flatten-deep-object | 1 | javascript |
@@ -88,10 +78,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 56 | tick90-linklist-1784911768 | 1 | go |
 | 57 | foreman-tick90-e2e | 1 | go |
 | 58 | foreman-tick91-e2e | 1 | bash |
-| 59 | e2e-tick92 | 1 | go |
-| 60 | e2e-tick93 | 1 | go |
-| 61 | e2e-tick94 | 1 | go |
-| 62 | e2e-tick95 | 1 | go |
 | 63 | buddy-memory-allocator | 1 | go |
 | 64 | hindley-milner-inference | 1 | python |
 | 65 | aes-128-scratch | 1 | python |
@@ -151,22 +137,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 119 | sec-bcrypt-scrypt-hashing | 1 | python |
 | 120 | dp-pubsub-event-bus | 1 | python |
 | 121 | perf-memory-alignment | 1 | go |
-| 122 | e2e-tick99-self-test | 1 | go |
 | 123 | mvcc-snapshot-isolation-txn | 1 | javascript |
 | 124 | fault-tolerant-2pc-coordinator | 1 | python |
-| 125 | e2e-tick96 | 1 | go |
-| 126 | e2e-tick97 | 1 | go |
-| 127 | e2e-tick98-health-check | 1 | go |
-| 128 | e2e-tick101-c12add36 | 1 | go |
-| 129 | e2e-tick103-count-files-by-ext | 1 | go |
-| 130 | e2e-tick100 | 1 | go |
-| 131 | e2e-tick102 | 1 | go |
-| 132 | e2e-tick104-foreman | 1 | go |
-| 133 | e2e-tick105 | 1 | go |
 | 134 | ds-007-tick-106 | 1 | go |
-| 135 | test-foreman-107 | 1 | go |
 | 136 | spectral-cluster-eigen | 1 | python |
-| 137 | e2e-tick-109 | 1 | go |
 | 138 | ds-007 | 1 | go |
 | 139 | vector-clock-merge-reconcile | 1 | go |
 | 140 | ssa-dead-code-elimination | 1 | python |
@@ -180,7 +154,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 148 | lr1-parser-generator-resolve-8b3d | 1 | python |
 | 149 | garbled-circuit-evaluator | 1 | js |
 | 150 | crdt-sequences-observed-remove | 1 | js |
-| 151 | foreman-tick-132-self-test | 1 | go |
 | 152 | crdt-state-merge | 1 | js |
 | 153 | register-allocator-graph-color | 1 | python |
 | 154 | lockfree-treiber-stack | 1 | go |
@@ -193,7 +166,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 161 | foreman-tick153-e2e | 1 | go |
 | 162 | hm-type-inference-engine | 1 | python |
 | 163 | ct-merkle-proof-verifier | 1 | js |
-| 164 | off-by-one-self-test-tick155 | 1 | go |
 | 165 | observed-remove-crdt | 1 | js |
 | 166 | txn-serializability-validator | 1 | go |
 | 167 | foreman-tick168-e2e | 1 | go |
@@ -208,7 +180,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 177 | byzantine-broadcast-protocol | 1 | python |
 | 178 | bls-threshold-aggregation | 1 | js |
 | 179 | mcs-queue-spinlock | 1 | go |
-| 180 | off-by-one-self-test-foreman-tick179 | 1 | go |
 | 181 | constant-time-modular-exp | 1 | python |
 | 182 | lockfree-mpmc-bounded-queue | 1 | go |
 | 183 | zk-snark-circuit-arithmetization-v2 | 1 | javascript |
@@ -222,26 +193,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 192 | bloom-cascade-join-optimizer | 1 | python |
 | 193 | hm-type-inference | 1 | python |
 | 194 | phi-accrual-detector | 1 | js |
-| 195 | off-by-one-self-test-2026-07-28-tick191 | 1 | go |
-| 196 | off-by-one-self-test-2026-07-28-tick192 | 1 | go |
 | 197 | crdt-state-merge-engine | 1 | go |
-| 198 | off-by-one-self-test-2026-07-28-tick193 | 1 | go |
-| 199 | off-by-one-self-test-2026-07-28-tick20260728212211 | 1 | go |
 | 200 | barnes-hut-nbody-simulator | 1 | python |
 | 201 | si-serializability-certifier | 1 | js |
-| 202 | off-by-one-self-test-2026-07-29-tick196 | 1 | go |
-| 203 | off-by-one-self-test-2026-07-29-tick197-1785297635 | 1 | go |
-| 204 | off-by-one-self-test-2026-07-29-tick20260728230520 | 1 | go |
-| 205 | off-by-one-self-test-2026-07-29-tick199 | 1 | go |
-| 207 | off-by-one-self-test-2026-07-29-tick201 | 1 | text |
-| 208 | off-by-one-self-test-2026-07-29-tick202 | 1 | go |
-| 209 | off-by-one-self-test-2026-07-29-tick203 | 1 | go |
 | 210 | raft-snapshot-compaction-20260729 | 1 | go |
-| 211 | off-by-one-self-test-tick204 | 1 | python |
-| 212 | off-by-one-self-test-tick205-20260729075500 | 1 | go |
-| 213 | off-by-one-self-test-2026-07-29-tick1785313445 | 1 | go |
-| 214 | off-by-one-self-test-2026-07-29-tick207 | 1 | go |
-| 215 | off-by-one-self-test-tick207 | 1 | go |
 | 216 | concurrent-lockfree-skiplist | 1 | go |
 | 217 | simplex-two-phase-solver | 1 | python |
 | 218 | consistent-hash-vnode-ring | 1 | go |
@@ -253,17 +208,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 224 | raft-log-compaction-snapshot-v6 | 1 | go |
 | 225 | differential-privacy-fl-v3 | 1 | python |
 | 226 | raft-snapshot-joint-consensus | 1 | go |
-| 227 | off-by-one-self-test-2026-07-29-tick-fallback | 1 | go |
-| 228 | off-by-one-self-test-2026-07-30-tick209 | 1 | go |
 | 230 | verifiable-delay-function-wesolowski | 1 | python |
 | 231 | vectorized-flash-attention-kernel | 1 | js |
-| 232 | self-test | 1 | go |
-| 233 | off-by-one-self-test-2026-07-30-tick213 | 1 | go |
-| 234 | off-by-one-self-test-2026-07-30-tick214 | 1 | go |
 | 235 | bgp-route-reflector-rib-in | 1 | go |
 | 236 | zk-stark-fri-low-degree-verifier | 1 | python |
-| 237 | off-by-one-self-test-2026-07-30-tick215 | 1 | python |
-| 238 | off-by-one-self-test-2026-07-30-tick216 | 1 | go |
 | 239 | adaptive-connpool-circuitbreaker | 1 | go |
 | 240 | hyperloglog-plusplus-cardinality | 1 | python |
 | 241 | kv-cache-token-eviction-policy | 1 | python |
@@ -870,3 +818,20 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 862 | crypto-aesgcm-timestamp-nonce-reuse | 1 | js |
 | 863 | shell-fifo-backpressure-deadlock | 1 | shell |
 | 864 | docs-test-count-drift-gitreins-criterion | 1 | go |
+| 865 | board-hygiene-jsonl-store-drift | 1 | go |
+| 866 | python-regex-blocklist-bypass | 1 | go |
+| 867 | go-session-store-delete-lifecycle | 1 | go |
+| 868 | frontend-css-responsive-select-overflow | 1 | go |
+| 869 | go-docs-code-consistency-unimplemented-backbone | 1 | go |
+| 870 | static-html-docs-formula-replication-drift | 1 | go |
+| 871 | python-packaging-path-resolution | 1 | go |
+| 872 | typescript-game-boss-dormancy-gating | 1 | go |
+| 874 | godot-save-checksum-canonicalization | 1 | go |
+| 875 | ci-workflow-configure-invalid-var-arg | 1 | go |
+| 876 | docs-cli-reference-surface-gap | 1 | go |
+| 877 | go-repo-hygiene-tracked-binary | 1 | go |
+| 878 | docs-duplicate-canonical-symlink | 1 | go |
+| 879 | typescript-aggregate-null-set-member | 1 | go |
+| 880 | go-gin-noroute-json-404 | 1 | go |
+| 881 | python-click-subcommand-option-wiring | 1 | go |
+| 882 | go-ci-billing-block-monitoring | 1 | go |
