@@ -1,0 +1,24 @@
+{
+  "class_id": 849,
+  "title": "ops-failure-reconciliation",
+  "description": "ops-failure-reconciliation",
+  "created_at": "2026-08-10 04:38:09",
+  "answers": [
+    {
+      "answer_id": 987,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Built the zero-source smoke board at `/home/kara/ops-failure-reconciliation/` (JSONL-canonical, foreman-direct). The fix has three parts:\n\n**1. Canary — `scripts/smoke_check.py ticks`** splits failed/timeout journal ticks into `NEW_FAIL` vs `KNOWN_FAIL` against the board header `last_tick` baseline, exits `1` on any NEW_FAIL/zombie:\n\n```python\ndef classify(header, journal, known):\n    failures = [e for e in journal if e[\"failed\"]]      # failed|timeout|exit!=0\n    new_fail, known_fail, zombies = [], [], []\n    for f in failures:\n        if str(f[\"tick\"]) in known:                     # reconciliation event exists\n            known_fail.append(f)\n        else:\n            new_fail.append(f)\n            if f[\"tick\"] > header[\"last_tick\"]:         # beyond baseline => zombie\n                zombies.append(f)\n    return failures, new_fail, known_fail, zombies\n```\n\nA failure is KNOWN only if a `reconciliation` event's `detail.tick_ids` carries its id (`load_known_failures` filters `event_type == \"reconciliation\"` — a plain failed `tick` event does *not* count). A tick is a failure if `status ∈ {failed, timeout, error}` **or** `exit != 0` (catches silent nonzero exits).\n\n**2. Foreman convention — `ticks --reconcile`** appends one reconciliation event per NEW_FAIL to `events.jsonl` within the same tick, then advances the header:\n\n```python\nevent = {\n    \"event_type\": \"reconciliation\",\n    \"ts\": now_utc(),\n    \"tick\": f[\"tick\"],\n    \"detail\": {\"tick_ids\": [f[\"tick\"]], \"status\": f[\"status\"],\n               \"exit\": f[\"exit\"], \"cause\": f[\"cause\"]},\n}\nappend_jsonl(args.events, event)   # idempotent: KNOWN failures never re-appended\n```\n\n**3. Historical failures** — tick 4 (chdir, exit 1), tick 7 (gateway drain timeout, exit 124), tick 8 (exit status 1) were invisible in `events.jsonl`; now each is cross-recorded exactly once and tabulated in `docs/dogfood/diagnostics.md` (error-history table: tick / ts / status / exit / cause / class / recorded via).",
+      "evidence": "Live cycle on the board (all exit codes verified via `$?`):\n- **Phase 1 pre-fix audit** (read-only): `NEW_FAIL=3, KNOWN_FAIL=0, ZOMBIE=0`, flags chdir / gateway drain / exit status 1 → **exit 1**; `events.jsonl` and header untouched.\n- **Phase 2 `--reconcile`**: 3 reconciliation events appended (`detail.tick_ids=[4]`, `[7]`, `[8]` with status/exit/cause); header → `status:\"ok\", last_reconciled_tick:8`; exits 1 (the tick that healed still surfaces the anomaly).\n- **Phase 3 healed audit**: `NEW_FAIL=0, KNOWN_FAIL=3` → **exit 0**.\n- **Phase 4 idempotency**: re-`--reconcile` appends nothing (events.jsonl stays 9 lines), exit 0.\n\nEdge cases tested (31/31 pass, `python3 tests/test_smoke_check.py`, isolated temp boards from pre-fix fixtures):\n- zombie tick beyond baseline (tick 11 > last_tick 9) → ZOMBIE class, exit 1\n- clean board (no failures) → exit 0, nothing appended\n- malformed JSONL line in events.jsonl → warned + skipped, classification unaffected\n- exit-code-only failure (`status:\"ok\", exit:1`) → detected as NEW_FAIL\n- plain failed `tick` event ≠ reconciliation (doesn't heal the board)\n- read-only audit mutates nothing; cross-recorded exactly once (`[4,7,8]` each in exactly one event)",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "ops-failure-reconciliation",
+        "result": "passed",
+        "tests": 31
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 04:38:09"
+    }
+  ]
+}

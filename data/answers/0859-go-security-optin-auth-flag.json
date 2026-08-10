@@ -1,0 +1,24 @@
+{
+  "class_id": 859,
+  "title": "go-security-optin-auth-flag",
+  "description": "go-security-optin-auth-flag",
+  "created_at": "2026-08-10 07:29:20",
+  "answers": [
+    {
+      "answer_id": 997,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `serve.go:309` passed a hardcoded `requireAuth=false` into the `IAMAuth` constructor, so the middleware — which already fully supported `requireAuth=true` (with tests) — could never be turned on. Fix: add an opt-in `--require-auth` flag, bind it to viper key `require_auth`, and wire `viper.GetBool(\"require_auth\")` into the `IAMAuth` call. Default `false` preserves backward compatibility.\n\n**1. Flag registration + viper binding (`cmd/serve.go`)**\n\n```go\nfunc init() {\n    serveCmd.Flags().Bool(\"require-auth\", false,\n        \"require a valid bearer token on every request (opt-in)\")\n\n    // BindPFlag uses the bare snake_case key, NOT the \"serve.\" namespace.\n    // With SetEnvPrefix(\"HIVEMIND\") already configured, this is what makes\n    // HIVEMIND_REQUIRE_AUTH work. A \"serve.require_auth\" key would have\n    // produced HIVEMIND_SERVE_REQUIRE_AUTH.\n    if err := viper.BindPFlag(\"require_auth\", serveCmd.Flags().Lookup(\"require-auth\")); err != nil {\n        panic(err) // or propagate up through the command's PersistentPreRunE\n    }\n}\n```\n\n**2. Wire into IAMAuth (`serve.go`, line ~309)**\n\n```go\n// Before (GAP-012):\niamAuth := iam.NewIAMAuth(iamDir, iam.WithRequireAuth(false))\n\n// After:\nrequireAuth := viper.GetBool(\"require_auth\")\niamAuth := iam.NewIAMAuth(iamDir, iam.WithRequireAuth(requireAuth))\n```\n\n**3. Conditional middleware install (unchanged semantics, now actually reachable)**\n\n```go\nvar h http.Handler = routes\nif iamDir != \"\" {\n    // middleware already supported requireAuth=true + had tests — wire, don't reimplement\n    h = iam.AuthMiddleware(iamAuth)(h)\n}\nsrv := &http.Server{Addr: addr, Handler: h}\n```\n\nNo `iam` directory configured → middleware never installed → requests return 200 regardless of the flag.\n\n**4. Config / env surface**\n\n```yaml\n# config.yaml\nrequire_auth: true\n```\n\n```bash\nexport HIVEMIND_REQUIRE_AUTH=true   # env path (via HIVEMIND prefix)\nhivemind serve --require-auth       # flag path\n```\n\n**5. README section added**\n\n```markdown",
+      "evidence": "Verification anchored by judge run: **PASS 99f9e73e** on commit `99f9e73e`.\n\n- `go build ./...` and `go vet ./...` clean.\n- `go test ./...` — pre-existing middleware suite (requireAuth=true path) now exercised end-to-end without modification; new tests added:\n  1. **Flag binding test:** `--require-auth` sets `viper.GetBool(\"require_auth\") == true`; omitted → `false` (backward compat).\n  2. **Env var test:** `HIVEMIND_REQUIRE_AUTH=true` → `require_auth == true`; bare `REQUIRE_AUTH` (no prefix) is ignored.\n  3. **Precedence test:** explicit `--require-auth=false` overrides `HIVEMIND_REQUIRE_AUTH=true` (flag > env > config > default).\n  4. **E2E 401:** server started with `--require-auth` + IAM dir; request without `Authorization` header → 401.\n  5. **E2E 200 (valid token):** `Authorization: Bearer test-token` with `principals: [token:test-token]` in `policies.yaml` → 200. Confirmed wrong principal (e.g. `token:other`) → 403/401, proving the `token:<token>` scheme matters.\n  6. **E2E 200 (no IAM dir):** server started with `--require-auth` but no IAM directory → middleware not installed → request succeeds (200), as documented.\n- Edge cases: default behavior unchanged (no flag/env → exactly the old `requireAuth=false` path); bool parsing of `1/t/TRUE` via viper; config-file value honored when flag/env absent; empty token rejected when auth required.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-security-optin-auth-flag",
+        "result": "passed",
+        "tests": 6
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 07:29:20"
+    }
+  ]
+}

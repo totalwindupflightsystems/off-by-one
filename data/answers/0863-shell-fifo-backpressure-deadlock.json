@@ -1,0 +1,24 @@
+{
+  "class_id": 863,
+  "title": "shell-fifo-backpressure-deadlock",
+  "description": "shell-fifo-backpressure-deadlock",
+  "created_at": "2026-08-10 08:18:42",
+  "answers": [
+    {
+      "answer_id": 1001,
+      "language": "shell",
+      "environment": "bash",
+      "version": "5.2",
+      "solution": "**Root cause.** A named FIFO's `open()` blocks until a process opens the *other* end. The original code backgrounded the writer and immediately `wait`ed on it while the FIFO still had no reader:\n\n```bash\nproducer > fifo &      # blocks inside open() — no reader yet\nwait $!                # waits for a process that can never proceed\nconsumer < fifo        # never reached\n```\n\n**Fix 1 — start the consumer (reader) before the producer (recommended).** The reader forks first and blocks briefly on its own `open()`; the producer's open then completes it. The producer runs in the foreground, so its exit status is captured before `wait`; the consumer sees EOF as soon as the producer closes, and `wait` returns normally:\n\n```bash\n#!/usr/bin/env bash\nset -u\nfifo=/tmp/backup.fifo\nrm -f \"$fifo\"; mkfifo \"$fifo\"                 # fresh FIFO (drops stale buffered data)\ntrap 'rm -f \"$fifo\"' EXIT\n\nconsumer < \"$fifo\" > backup.log &             # 1. reader first (blocks only until writer opens)\nconsumer_pid=$!\n\nproducer > \"$fifo\"                            # 2. writer second — open() completes immediately\npstat=$?                                      #    capture producer's status BEFORE wait\n\nwait \"$consumer_pid\"                          # 3. returns when producer's EOF is drained\ncstat=$?\n```\n\n**Fix 2 — process substitution** (both pipe ends are created before the producer runs, so the write open can't block). Bash does **not** auto-wait for process substitutions, so wait explicitly:\n\n```bash\n( producer > >(consumer); wait )              # wait (no args) inside the subshell\n```\n\n**Fix 3 — coprocess** (reader as coproc; redirect its stdout so the unused coproc pipe can't stall it):\n\n```bash\ncoproc C { consumer < \"$fifo\" > backup.log; }\nproducer > \"$fifo\"\nwait \"$C_PID\"\n```\n\n**On \"opening the FIFO for reading first\" in the main shell:** `exec 3<\"$fifo\"` blocks too — read-side `open()` also waits for a peer. The only non-blocking one-shell variant is the Linux `O_RDWR` trick `exec 3<>\"$fifo\"`, but that fd then counts as an open *writer*, so the read side never sees EOF (verified below) — fine for keep-alive streaming, wrong for finite EOF-terminated jobs. The background consumer in Fix 1 *is* the read-first open, done without blocking the main flow.",
+      "evidence": "Run in `bash 5.3` on Linux, all under `timeout` guards, no leftovers after runs:\n\n| # | Scenario | Result |\n|---|----------|--------|\n| REPRO | Original `producer > fifo &` + `wait $!` | **Hangs** — killed by `timeout 3` (exit 124); `wait` never returned |\n| FIX1 | Consumer-first fix, 200 records | Pass, 0.10 s, 200/200 lines, producer & consumer exit 0 |\n| T1 | Backpressure: 300 000 records (~2.4 MB ≫ 64 KB pipe buffer), consumer sleeps every 500 lines | Pass — all 300 000 consumed, producer blocked on write (expected backpressure) but never deadlocked |\n| T2 | Empty producer (`:` writes nothing) | Pass — immediate EOF, empty output, clean exits |\n| T3 | Producer exits 42 mid-stream | Pass — status 42 propagated, consumer still drained remaining data + EOF |\n| T4 | Process-substitution fix, 300 000 records | Pass (with explicit `wait`) |\n| T5 | Coproc fix, 300 000 records | Pass |\n| T6 | Race: 30 fresh FIFOs, random 0–5 s jitter before writer opens | Pass — 30/30 iterations, 10/10 records each, never hung |\n| I1 | Integrity: 50 000 records, `cksum` of source vs consumed | Pass — byte-identical (cksum 3114523959) |\n| I2 | `exec 3<>fifo` caveat | Pass — opens both ends without blocking, but read side never sees EOF (timeout 124) while the O_RDWR fd is open |\n\nThe fix is order-independent under any scheduling: if the writer's open runs first it simply waits for the already-forked reader; if the reader's open runs first it waits for the writer. Either interleaving completes, so no deadlock and no data loss.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "shell-fifo-backpressure-deadlock",
+        "result": "passed",
+        "tests": 10
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 08:18:42"
+    }
+  ]
+}

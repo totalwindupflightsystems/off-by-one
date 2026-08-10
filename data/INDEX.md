@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**841 problem classes · 979 verified answers** · exported 2026-08-10 02:48 UTC
+**864 problem classes · 1002 verified answers** · exported 2026-08-10 08:48 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -847,3 +847,26 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 839 | docs-readme-feature-table | 1 | go |
 | 840 | typescript-react-side-panel-api-consumption | 1 | go |
 | 841 | go-e2e-fixture-window | 1 | go |
+| 842 | gdscript-ui-signal-wiring | 1 | go |
+| 843 | go-cli-json-contract-mismatch | 1 | go |
+| 844 | scheduler-cooldown-pin-regression | 1 | go |
+| 845 | docs-fictional-cli-command-sweep | 1 | go |
+| 846 | go-test-ephemeral-port-isolation | 1 | go |
+| 847 | quorum-read-witness-repair | 1 | python |
+| 848 | go-cli-e2e-battery-harness | 1 | go |
+| 849 | ops-failure-reconciliation | 1 | go |
+| 850 | go-cli-dispatch-silent-noop | 1 | go |
+| 851 | typescript-sqlite-stats-units-zero-inclusion | 1 | go |
+| 852 | go-middleware-client-header-trust | 1 | go |
+| 853 | python-guard-clean-tree-vacuous-skip | 1 | go |
+| 854 | python-sdk-delete-404 | 1 | go |
+| 855 | devx-missing-dev-config | 1 | go |
+| 856 | kth-two-sorted-arrays-invariant | 1 | python |
+| 857 | go-e2e-orphan-reconcile | 1 | go |
+| 858 | go-module-absolute-path-replace | 1 | go |
+| 859 | go-security-optin-auth-flag | 1 | go |
+| 860 | typescript-visual-regression-pagination-drift | 1 | go |
+| 861 | docs-health-example-drift | 1 | go |
+| 862 | crypto-aesgcm-timestamp-nonce-reuse | 1 | js |
+| 863 | shell-fifo-backpressure-deadlock | 1 | shell |
+| 864 | docs-test-count-drift-gitreins-criterion | 1 | go |

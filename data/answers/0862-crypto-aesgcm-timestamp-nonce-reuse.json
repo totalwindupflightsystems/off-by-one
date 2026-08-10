@@ -1,0 +1,24 @@
+{
+  "class_id": 862,
+  "title": "crypto-aesgcm-timestamp-nonce-reuse",
+  "description": "crypto-aesgcm-timestamp-nonce-reuse",
+  "created_at": "2026-08-10 08:01:02",
+  "answers": [
+    {
+      "answer_id": 1000,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "The bug: the service built a 12-byte GCM nonce from `zero-padded Unix timestamp (8B) + per-process counter (4B)`. Because GCM's keystream is a function of `(key, nonce)`, any reuse — two messages in the same second, or counter reset on restart — makes the keystream repeat. An attacker with two ciphertexts `C1, C2` can compute `P1 ⊕ P2 = C1 ⊕ C2`, and forge valid tags under the reused nonce.\n\nThe fix (`/home/kara/secure-encrypt.js`): **one nonce per encryption, sampled fresh from `crypto.randomBytes(12)`**, never from wall-clock time or resettable counters. The nonce is prepended to the ciphertext so decryption can recover it:\n\n```js\nconst crypto = require('crypto');\nconst NONCE_LEN = 12, KEY_LEN = 32, TAG_LEN = 16;\n\nfunction encrypt(plaintext, key) {\n  if (!Buffer.isBuffer(plaintext)) plaintext = Buffer.from(plaintext);\n  if (!Buffer.isBuffer(key) || key.length !== KEY_LEN)\n    throw new TypeError(`key must be a ${KEY_LEN}-byte Buffer`);\n\n  // FIX: fresh 96-bit nonce from the OS CSPRNG per message.\n  // No timestamps, no counters — nothing that can reset or repeat.\n  const nonce = crypto.randomBytes(NONCE_LEN);\n\n  const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);\n  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);\n  return Buffer.concat([nonce, ciphertext, cipher.getAuthTag()]); // nonce||ct||tag\n}\n\nfunction decrypt(payload, key) {\n  if (payload.length < NONCE_LEN + TAG_LEN) throw new Error('payload too short');\n  const nonce = payload.subarray(0, NONCE_LEN);\n  const tag   = payload.subarray(payload.length - TAG_LEN);\n  const ct    = payload.subarray(NONCE_LEN, payload.length - TAG_LEN);\n  const d = crypto.createDecipheriv('aes-256-gcm', key, nonce);\n  d.setAuthTag(tag);\n  return Buffer.concat([d.update(ct), d.final()]); // throws on tamper\n}\n```\n\nKey points:\n- `crypto.randomBytes` is backed by the OS CSPRNG (`getrandom`/`RtlGenRandom`), seeded independently per process — restart-resistance is inherent.\n- 12 bytes = 96 bits is the recommended GCM nonce size; at ~2⁶⁴ messages the collision probability stays negligible.\n- The nonce must be stored/transmitted with the ciphertext (prepended here) — it is **not secret**, only unique.\n- `decrypt` throws on any authentication failure (tampered ciphertext, wrong key, bit-flipped tag), so forgery is rejected by GCM's 128-bit tag.",
+      "evidence": "Test suite at `/home/kara/test.js` — run with `node test.js`:\n\n```\nPASS  round-trip empty message\nPASS  round-trip 1-byte message\nPASS  round-trip 1 MiB message\nPASS  nonce length is 12 bytes\nPASS  nonce is 96-bit random, not time-derived\nPASS  no nonce reuse across 10k rapid encryptions\nPASS  old scheme: same-second nonce reuse (XOR leak) is real\nPASS  fixed scheme: same-second encryptions use distinct nonces\nPASS  tampered ciphertext rejected (auth tag)\nPASS  tampered tag rejected\nPASS  wrong key rejected\nPASS  short key rejected at encrypt\nPASS  truncated payload rejected\n13 passed, 0 failed\n```\n\nVerification highlights and edge cases:\n- **Attack reproduced on old scheme, then killed:** I kept the old implementation in `vulnerable-encrypt.js` and forced the counter back to 0 before each call (same second / after restart). The old code produced identical nonces and `C1 ⊕ C2 === P1 ⊕ P2` — the plaintext XOR leak is real. The fixed scheme produces distinct nonces for back-to-back encryptions, so the XOR reveals nothing.\n- **Same-second / high-volume reuse:** 10,000 rapid encryptions in the test suite, plus a separate 500,000-encryption stress run — all 500,000 nonces unique (Set size 500000).\n- **Round-trips:** empty buffer, 1-byte buffer, 1 MiB blob all decrypt intact.\n- **Integrity:** flipping one ciphertext bit or one tag bit, using the wrong key, and truncating the payload all throw (GCM auth failure) — no silent decryption, no forgery path.\n- **Validation:** non-32-byte keys rejected at encrypt time; too-short payloads rejected at decrypt time.\n- **Nonce shape check:** the first 8 bytes are never the zero-padded epoch-seconds pattern (high 4 bytes are non-zero, low 4 bytes don't equal the current seconds), confirming it's not time-derived.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "crypto-aesgcm-timestamp-nonce-reuse",
+        "result": "passed",
+        "tests": 13
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 08:01:02"
+    }
+  ]
+}

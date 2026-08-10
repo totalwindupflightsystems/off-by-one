@@ -1,0 +1,24 @@
+{
+  "class_id": 852,
+  "title": "go-middleware-client-header-trust",
+  "description": "go-middleware-client-header-trust",
+  "created_at": "2026-08-10 05:35:35",
+  "answers": [
+    {
+      "answer_id": 990,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The vulnerable middleware built `Entitlements` directly from client-controlled request headers (`X-ASCE-Tier`, `X-ASCE-Quota-Limit`, `X-ASCE-Features`). Any caller could forge `X-ASCE-Tier: enterprise` and bypass entitlement checks — a classic entitlement-bypass landmine.\n\n**The fix** (repo: `/home/kara/entitlements`, module `entitlements`):\n1. Delete every `r.Header.Get(\"X-ASCE-*\")` read.\n2. Derive identity server-side from `auth.KeyRecordContextKey` (populated only by the authn middleware from verified key lookups — never from headers).\n3. Derive tier server-side via `tiers.Service.GetAccountTier(apiKeyID)`, falling back to `tiers.Free()` when the key is **unassigned** (`(*Tier, nil)`) or the **db is nil** (`(nil, error)`).\n4. Static regression tripwire test forbids any `Header.Get(\"X-ASCE` / `Header[\"X-ASCE` from reappearing.\n\n**Before (vulnerable, deleted):**\n```go\nfunc EntitlementsFromHeaders(next http.Handler) http.Handler {\n    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n        limit, _ := strconv.ParseInt(r.Header.Get(\"X-ASCE-Quota-Limit\"), 10, 64)\n        e := Entitlements{\n            TierName:   r.Header.Get(\"X-ASCE-Tier\"),      // ← client-controlled!\n            QuotaLimit: limit,                            // ← client-controlled!\n            Features:   strings.Split(r.Header.Get(\"X-ASCE-Features\"), \",\"),\n        }\n        next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), entitlementsCtxKey, e)))\n    })\n}\n```\n\n**After (fixed — `middleware/entitlements.go`):**\n```go\nfunc EntitlementsFromKeyRecord(svc *tiers.Service) func(http.Handler) http.Handler {\n    return func(next http.Handler) http.Handler {\n        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n            e := resolve(r.Context(), svc) // r's headers are never consulted\n            ctx := context.WithValue(r.Context(), entitlementsCtxKey, e)\n            next.ServeHTTP(w, r.WithContext(ctx))\n        })\n    }\n}\n\nfunc resolve(ctx context.Context, svc *tiers.Service) Entitlements {\n    rec, ok := auth.KeyRecordFromContext(ctx) // identity: server-side only\n    if !ok {\n        return fromTier(tiers.Free()) // unauthenticated caller\n    }\n    t, err := svc.GetAccountTier(rec.APIKeyID) // tier: server-side only\n    if err != nil || t == nil {\n        return fromTier(tiers.Free()) // unassigned or DB nil → free\n    }\n    return fromTier(*t)\n}\n```\n\nSupporting pieces: `auth.KeyRecordContextKey` (typed context key for the verified `KeyRecord`), and `tiers.Service.GetAccountTier` with documented `(*Tier, nil)` = unassigned / `(nil, error)` = db-nil semantics plus a nil-receiver guard. The old middleware is retained only as `entitlements_legacy.go` behind `//go:build legacy` for diff reference — excluded from default builds.",
+      "evidence": "Verified with Go 1.26.0: `go vet ./...` clean, `go build ./...` clean, `go test -race -count=1 ./...` all pass. Grep confirms zero `X-ASCE` reads in production code (only the tripwire test and the build-tagged legacy reference match).\n\nEdge cases tested (`middleware/entitlements_test.go`):\n- **Upgrade attempt**: free key + forged `enterprise/999999999` headers → **free**; unauthenticated caller + forged headers → **free**.\n- **Downgrade attempt**: premium key + forged `free/1` headers → **premium** (headers have zero effect in *both* directions).\n- **Unassigned key** (`GetAccountTier` → `nil, nil`) + forged headers → **free**.\n- **DB nil** (`SetDown(true)`) and **nil `*tiers.Service`** + forged headers → **free**.\n- **Handler-level enforcement**: free key forging enterprise headers still gets **402**; premium key claiming free still gets **200**.\n- **Regression tripwire** `TestNoClientHeaderReads`: statically scans production sources; fails if any `Header.Get(\"X-ASCE` / `Header[\"X-ASCE` reappears.\n- **Contrast proof** (`-tags legacy`): `TestLegacyShowsTheVulnerability` confirms the old code *would* grant enterprise to an unauthenticated caller from headers alone — the exact bypass the fix closes.\n\nTest count: **11** (8 entitlement-matrix subtests + 3 top-level tests).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-middleware-client-header-trust",
+        "result": "passed",
+        "tests": 11
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 05:35:35"
+    }
+  ]
+}
