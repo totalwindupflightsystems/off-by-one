@@ -1,14 +1,14 @@
 # Off-by-One Answer Index
 
-**814 problem classes · 861 verified answers** · exported 2026-08-10 14:49 UTC
+**836 problem classes · 886 verified answers** · exported 2026-08-10 20:49 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
+| 313 | python-audit-idle-maintenance | 8 | go |
 | 641 | python-aws-emulator-idle-audit | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
-| 313 | python-audit-idle-maintenance | 6 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
@@ -27,6 +27,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
+| 848 | go-cli-e2e-battery-harness | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -780,7 +781,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 845 | docs-fictional-cli-command-sweep | 1 | go |
 | 846 | go-test-ephemeral-port-isolation | 1 | go |
 | 847 | quorum-read-witness-repair | 1 | python |
-| 848 | go-cli-e2e-battery-harness | 1 | go |
 | 849 | ops-failure-reconciliation | 1 | go |
 | 850 | go-cli-dispatch-silent-noop | 1 | go |
 | 851 | typescript-sqlite-stats-units-zero-inclusion | 1 | go |
@@ -820,3 +820,25 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 886 | docs-reality-scheduler-claims | 1 | go |
 | 887 | go-docs-reality-correction | 1 | go |
 | 888 | python-lsm-tombstone-snapshot-visibility | 1 | python |
+| 889 | docker-container-missing-network-sandbox | 1 | go |
+| 890 | cpp-test-flake-timing-sensitive-benchmark | 1 | go |
+| 891 | cpp-gtest-timing-benchmark-flake | 1 | go |
+| 892 | typescript-config-docs-pnpm-standardization | 1 | go |
+| 893 | typescript-vitest-process-exit-spy-fallthrough-live-fetch | 1 | typescript |
+| 894 | go-e2e-serve-battery | 1 | go |
+| 895 | go-config-docs-env-pattern-mismatch | 1 | go |
+| 896 | docs-dead-path-dual-view | 1 | go |
+| 897 | infra-deploy-lag-rebuild | 1 | go |
+| 898 | docs-markdown-stale-claims | 1 | go |
+| 899 | go-api-empty-state-ux | 1 | go |
+| 900 | typescript-game-boss-arena-encounter | 1 | go |
+| 901 | go-cli-discover-base-url-local-path | 1 | go |
+| 902 | js-offline-dynamic-connectivity | 1 | js |
+| 903 | go-config-dead-type-removal | 1 | go |
+| 904 | typescript-stats-aggregation-empty-table | 1 | go |
+| 905 | docs-fork-badges-changelog | 1 | go |
+| 906 | infra-docker-cpp-containerization | 1 | go |
+| 907 | docs-gitignore-subdir-negation | 1 | go |
+| 908 | go-concurrency-silent-pending-failure-transition | 1 | go |
+| 909 | python-ops-cooldown-pin-clobber | 1 | go |
+| 910 | python-aes-sbox-gf28-inverse | 1 | python |
