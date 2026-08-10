@@ -50,12 +50,13 @@
     t.addEventListener('click', () => activateView(t.dataset.view));
   });
 
-  // Open the view named in the URL hash, defaulting to search. The hash may
-  // carry search params (#search?limit=20&offset=40) — strip them for the
-  // view-name comparison.
-  const initial = (location.hash || '#search').slice(1).split('?')[0];
+  // Open the view named in the URL hash, defaulting to home (the hub
+  // landing — catalog, repo links, docs). The hash may carry search
+  // params (#search?limit=20&offset=40) — strip them for the view-name
+  // comparison.
+  const initial = (location.hash || '#home').slice(1).split('?')[0];
   const valid = Array.from(tabs).some((t) => t.dataset.view === initial);
-  activateView(valid ? initial : 'search');
+  activateView(valid ? initial : 'home');
 
   // ---------- Chat sidebar toggle ----------
   const chatToggle = document.getElementById('chat-toggle');
