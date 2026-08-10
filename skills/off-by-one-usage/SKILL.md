@@ -43,8 +43,8 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
 - **Query class-ONLY.** env/lang/version are EXACT filters, not scoring: a
   non-matching env returns `{"found":false}` even when a verified answer exists
   under another tuple. Class-only returns the best answer (OB-GAP-023).
-- Use a real class from `data/INDEX.md` — the README's `go-nil-pointer-deref`
-  example does not exist (404) (OB-GAP-022).
+- Use a real class from `data/INDEX.md` — the README examples use
+  `so-nil-pointer-deref` (verified in corpus).
 - 404 = class not in graph; 200 `found:false` = class exists, no verified answer.
 
 ### 2. Submit a problem (ingest)

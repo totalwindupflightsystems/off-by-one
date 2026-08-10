@@ -50,7 +50,7 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
 ```json
 {
   "submission_id": "sub-abc123",
-  "problem_class": "go-nil-pointer-deref",
+  "problem_class": "so-nil-pointer-deref",
   "status": "queued",
   "position": 1,
   "estimated_time": "30s",
@@ -69,7 +69,7 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
 curl -s -X POST http://localhost:8766/api/v1/problems/submit \
   -H "Content-Type: application/json" \
   -d '{
-    "problem_class": "go-nil-pointer-deref",
+    "problem_class": "so-nil-pointer-deref",
     "environment": "linux",
     "language": "go",
     "version": "1.26.1",
@@ -103,7 +103,7 @@ List or search problem classes. Supports full-text search via `q` and filtering 
   "problems": [
     {
       "id": 1,
-      "title": "go-nil-pointer-deref",
+      "title": "so-nil-pointer-deref",
       "description": "Nil pointer dereference in Go code",
       "answer_count": 3,
       "status": "verified",
@@ -132,7 +132,7 @@ Get one problem class by slugified title.
 
 | Parameter | Description |
 |-----------|-------------|
-| `class` | Problem class slug (e.g. `go-nil-pointer-deref`) |
+| `class` | Problem class slug (e.g. `so-nil-pointer-deref`) |
 
 **Response `200 OK`**
 
@@ -143,7 +143,7 @@ Same `ProblemClass` shape as the list endpoint.
 **Example**
 
 ```bash
-curl -s http://localhost:8766/api/v1/problems/go-nil-pointer-deref
+curl -s http://localhost:8766/api/v1/problems/so-nil-pointer-deref
 ```
 
 ---
@@ -167,7 +167,7 @@ List answers for a problem class.
   "answers": [
     {
       "id": 42,
-      "problem_class": "go-nil-pointer-deref",
+      "problem_class": "so-nil-pointer-deref",
       "env": "linux",
       "lang": "go",
       "version": "1.26.1",
@@ -189,7 +189,7 @@ List answers for a problem class.
 **Example**
 
 ```bash
-curl -s "http://localhost:8766/api/v1/problems/go-nil-pointer-deref/answers?limit=5"
+curl -s "http://localhost:8766/api/v1/problems/so-nil-pointer-deref/answers?limit=5"
 ```
 
 ---
@@ -214,7 +214,7 @@ Same `Answer` shape as the list endpoint.
 **Example**
 
 ```bash
-curl -s http://localhost:8766/api/v1/problems/go-nil-pointer-deref/answers/42
+curl -s http://localhost:8766/api/v1/problems/so-nil-pointer-deref/answers/42
 ```
 
 ---
@@ -223,7 +223,7 @@ curl -s http://localhost:8766/api/v1/problems/go-nil-pointer-deref/answers/42
 
 ### `POST /api/v1/problems/discover`
 
-Search the graph for a pre-verified answer. Matches on `problem_class`, then optionally scores by environment, language, and version.
+Search the graph for a pre-verified answer. When only `problem_class` is provided, the best verified answer for that class is returned; `environment`, `language`, and `version` are exact-match filters when provided (a non-matching tuple returns `found:false` even if the class has answers under other tuples).
 
 **Request body**
 
@@ -242,7 +242,7 @@ Search the graph for a pre-verified answer. Matches on `problem_class`, then opt
   "found": true,
   "answer": {
     "id": 42,
-    "problem_class": "go-nil-pointer-deref",
+    "problem_class": "so-nil-pointer-deref",
     "env": "linux",
     "lang": "go",
     "version": "1.26.1",
@@ -271,7 +271,7 @@ Search the graph for a pre-verified answer. Matches on `problem_class`, then opt
 curl -s -X POST http://localhost:8766/api/v1/problems/discover \
   -H "Content-Type: application/json" \
   -d '{
-    "problem_class": "go-nil-pointer-deref",
+    "problem_class": "so-nil-pointer-deref",
     "environment": "linux",
     "language": "go",
     "version": "1.26"
@@ -309,7 +309,7 @@ Get related problem classes for a given class using graph edges.
 **Example**
 
 ```bash
-curl -s http://localhost:8766/api/v1/problems/go-nil-pointer-deref/related
+curl -s http://localhost:8766/api/v1/problems/so-nil-pointer-deref/related
 ```
 
 ---
@@ -335,7 +335,7 @@ List all queued submissions. Optionally filter by `status`.
   "entries": [
     {
       "submission_id": "sub-abc123",
-      "problem_class": "go-nil-pointer-deref",
+      "problem_class": "so-nil-pointer-deref",
       "status": "pending",
       "stage": "queued",
       "position": 1,
@@ -481,13 +481,13 @@ Return the full problem-class tree. Each node includes title, description, optio
 {
   "tree": [
     {
-      "title": "go-nil-pointer-deref",
+      "title": "so-nil-pointer-deref",
       "description": "Nil pointer dereference in Go code",
       "children": [],
       "answers": [
         {
           "id": 42,
-          "problem_class": "go-nil-pointer-deref",
+          "problem_class": "so-nil-pointer-deref",
           ...
         }
       ]

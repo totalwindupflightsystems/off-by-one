@@ -62,7 +62,7 @@ Priority formula: `priority = cadence_weight + recurrence * 0.5`, where recurren
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `problem_class` | string | Yes | Slugified problem identifier (e.g. `go-nil-pointer-deref`) |
+| `problem_class` | string | Yes | Slugified problem identifier (e.g. `so-nil-pointer-deref`) |
 | `cadence` | string | Yes | One of `pre-phase`, `end-of-day`, `post-debug` |
 | `environment` | string | No | Runtime environment (e.g. `linux`, `docker`) |
 | `language` | string | No | Programming language (e.g. `go`, `python`) |
@@ -79,7 +79,7 @@ Priority formula: `priority = cadence_weight + recurrence * 0.5`, where recurren
 curl -s -X POST http://localhost:8766/api/v1/problems/submit \
   -H "Content-Type: application/json" \
   -d '{
-    "problem_class": "go-nil-pointer-deref",
+    "problem_class": "so-nil-pointer-deref",
     "environment": "linux",
     "language": "go",
     "version": "1.26.1",
@@ -94,7 +94,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
 ```json
 {
   "submission_id": "sub-...",
-  "problem_class": "go-nil-pointer-deref",
+  "problem_class": "so-nil-pointer-deref",
   "status": "queued",
   "position": 1,
   "estimated_time": "30s",
@@ -120,7 +120,7 @@ curl -s http://localhost:8766/api/v1/queue/sub-...
 ```json
 {
   "submission_id": "sub-...",
-  "problem_class": "go-nil-pointer-deref",
+  "problem_class": "so-nil-pointer-deref",
   "status": "in_progress",
   "stage": "sandbox_solve",
   "position": 1,
@@ -148,16 +148,13 @@ The `position` field in a list response is the 1-based place in the queue. Posit
 
 ## Discover Cached Solutions
 
-`POST /api/v1/problems/discover` searches the graph for a verified answer. Discovery matches on `problem_class`, then optionally scores by environment, language, and version.
+`POST /api/v1/problems/discover` searches the graph for a verified answer. When only `problem_class` is provided, the best verified answer for that class is returned. `environment`, `language`, and `version` — when provided — are **exact-match filters, not scoring hints**: a query whose tuple matches no stored answer returns `found:false` even if the class has verified answers under other tuples. Omit the tuple fields for the broadest match.
 
 ```bash
 curl -s -X POST http://localhost:8766/api/v1/problems/discover \
   -H "Content-Type: application/json" \
   -d '{
-    "problem_class": "go-nil-pointer-deref",
-    "environment": "linux",
-    "language": "go",
-    "version": "1.26"
+    "problem_class": "so-nil-pointer-deref"
   }'
 ```
 
@@ -168,7 +165,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
   "found": true,
   "answer": {
     "id": 42,
-    "problem_class": "go-nil-pointer-deref",
+    "problem_class": "so-nil-pointer-deref",
     "env": "linux",
     "lang": "go",
     "version": "1.26",
@@ -297,7 +294,7 @@ When a duplicate is detected, the API returns HTTP `409 Conflict` with a body li
 ```json
 {
   "submission_id": "sub-...",
-  "problem_class": "go-nil-pointer-deref",
+  "problem_class": "so-nil-pointer-deref",
   "status": "deduplicated",
   "position": 1,
   "estimated_time": "30s",

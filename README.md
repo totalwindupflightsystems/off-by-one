@@ -120,7 +120,7 @@ For detailed integration examples and a per-route reference, see [`docs/integrat
 curl -s -X POST http://localhost:8766/api/v1/problems/submit \
   -H "Content-Type: application/json" \
   -d '{
-    "problem_class": "go-nil-pointer-deref",
+    "problem_class": "so-nil-pointer-deref",
     "environment": "linux",
     "language": "go",
     "version": "1.26.1",
@@ -151,10 +151,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
 curl -s -X POST http://localhost:8766/api/v1/problems/discover \
   -H "Content-Type: application/json" \
   -d '{
-    "problem_class": "go-nil-pointer-deref",
-    "environment": "linux",
-    "language": "go",
-    "version": "1.26"
+    "problem_class": "so-nil-pointer-deref"
   }'
 ```
 
