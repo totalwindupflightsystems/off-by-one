@@ -45,6 +45,11 @@ EXCLUDED_CLASS_PATTERNS = [
     r"test-gap-sweep",
     r"test-foreman-",
     r"e2e-tick",              # e2e-tickNN probe classes
+    r"tick\d+-e2e",           # reversed-form probes: foreman-tick82-e2e, tick89-e2e, tick90-e2e
+    r"shell-script-e2e",      # 0001-0017-era probe class
+    r"e2e-verification-pipeline",  # foreman-e2e-verification-pipeline probe
+    r"foreman-audit",         # tick88-foreman-audit probe
+    r"ds-007",                # DS-007 probe family (ds-007, ds-007-tick-106)
     r"shell-say-hello-test",
     r"shell-echo-hello-fix",
     r"tick\d+-self-test",     # tickN-self-test variants of the self-test family

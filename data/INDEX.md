@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**829 problem classes · 879 verified answers** · exported 2026-08-10 13:24 UTC
+**809 problem classes · 856 verified answers** · exported 2026-08-10 13:30 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -16,9 +16,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 550 | board-foreman-idle-audit | 4 | go, python |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
 | 12 | shell-script | 2 | bash |
-| 21 | foreman-tick82-e2e | 2 | go |
-| 23 | foreman-tick84-e2e | 2 | go |
-| 32 | tick90-e2e | 2 | go, python |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
 | 247 | cron-double-fire-detection | 2 | go |
 | 259 | python-audit-idle-tick | 2 | go |
@@ -39,19 +36,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 8 | shell-echo-date | 1 | go |
 | 13 | shell-script-debug | 1 | bash |
 | 14 | echo-hello | 1 | bash |
-| 15 | shell-script-e2e | 1 | bash |
 | 18 | go-generics-stack | 1 | go |
 | 19 | python-async-generator | 1 | python |
 | 20 | js-flatten-deep-object | 1 | javascript |
-| 22 | foreman-tick83-e2e | 1 | go |
 | 24 | shell-echo-date-real | 1 | shell |
-| 25 | foreman-tick85-e2e | 1 | shell |
-| 26 | foreman-tick86-e2e | 1 | go |
-| 27 | foreman-tick86-e2e-1784889020 | 1 | go |
-| 28 | tick88-foreman-audit | 1 | go |
 | 29 | reverse-linked-list-tick88 | 1 | go |
-| 30 | tick89-e2e | 1 | go |
-| 31 | foreman-e2e-verification-pipeline | 1 | go |
 | 33 | go-worker-pool-rate-limit | 1 | go |
 | 34 | sql-recursive-cte-org-chart | 1 | sql |
 | 35 | python-streaming-json-parser | 1 | python |
@@ -76,8 +65,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 54 | python-dep-conflict-resolution | 1 | go |
 | 55 | string-rotation-check-tick1784909564 | 1 | go |
 | 56 | tick90-linklist-1784911768 | 1 | go |
-| 57 | foreman-tick90-e2e | 1 | go |
-| 58 | foreman-tick91-e2e | 1 | bash |
 | 63 | buddy-memory-allocator | 1 | go |
 | 64 | hindley-milner-inference | 1 | python |
 | 65 | aes-128-scratch | 1 | python |
@@ -139,9 +126,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 121 | perf-memory-alignment | 1 | go |
 | 123 | mvcc-snapshot-isolation-txn | 1 | javascript |
 | 124 | fault-tolerant-2pc-coordinator | 1 | python |
-| 134 | ds-007-tick-106 | 1 | go |
 | 136 | spectral-cluster-eigen | 1 | python |
-| 138 | ds-007 | 1 | go |
 | 139 | vector-clock-merge-reconcile | 1 | go |
 | 140 | ssa-dead-code-elimination | 1 | python |
 | 141 | sorted-array-branch-prediction | 1 | go |
@@ -158,17 +143,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 153 | register-allocator-graph-color | 1 | python |
 | 154 | lockfree-treiber-stack | 1 | go |
 | 155 | crdt-grow-only-set | 1 | js |
-| 156 | foreman-tick146-e2e | 1 | go |
-| 157 | foreman-tick147-e2e | 1 | go |
 | 158 | selinger-join-optimizer | 1 | javascript |
-| 159 | foreman-tick150-e2e | 1 | go |
-| 160 | foreman-tick151-e2e | 1 | go |
-| 161 | foreman-tick153-e2e | 1 | go |
 | 162 | hm-type-inference-engine | 1 | python |
 | 163 | ct-merkle-proof-verifier | 1 | js |
 | 165 | observed-remove-crdt | 1 | js |
 | 166 | txn-serializability-validator | 1 | go |
-| 167 | foreman-tick168-e2e | 1 | go |
 | 168 | sscp-lattice-propagation | 1 | python |
 | 170 | vector-clock-merkle | 1 | go |
 | 171 | constraint-propagation-solver | 1 | python |
@@ -835,3 +814,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 880 | go-gin-noroute-json-404 | 1 | go |
 | 881 | python-click-subcommand-option-wiring | 1 | go |
 | 882 | go-ci-billing-block-monitoring | 1 | go |
+| 883 | gdscript-typed-array-in-operator | 1 | go |
