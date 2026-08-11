@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -106,14 +107,10 @@ func main() {
 			log.Printf("warning: bwrap not found at %s — solver disabled (use --skip-sandbox to suppress this)", *bwrapPath)
 		} else {
 			sandboxExec = &sandbox.Executor{
-				BwrapPath: *bwrapPath,
-				WorkDir:   os.TempDir(),
-				Timeout:   sandbox.DefaultBwrapTimeout,
-				ExtraReadOnlyPaths: []string{
-					"/home/kara/.local/bin",
-					"/tmp/pi",
-					"/etc",
-				},
+				BwrapPath:          *bwrapPath,
+				WorkDir:            os.TempDir(),
+				Timeout:            sandbox.DefaultBwrapTimeout,
+				ExtraReadOnlyPaths: extraReadOnlyPaths(),
 			}
 			runner := solver.NewBSandboxRunner(sandboxExec)
 			apiKey := os.Getenv("DEEPSEEK_API_KEY")
@@ -252,6 +249,24 @@ func main() {
 }
 
 // --- env helpers --------------------------------------------------------
+
+// extraReadOnlyPaths returns the host paths mounted read-only into the
+// bwrap sandbox. $HOME/.local/bin is resolved at startup and included
+// only when it actually exists, so the binary works for any user (a
+// bind-mount of a missing path would fail sandbox creation). /tmp/pi
+// (pi-agent tooling) and /etc (DNS/TLS config) are always included.
+func extraReadOnlyPaths() []string {
+	paths := []string{"/tmp/pi", "/etc"}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return paths
+	}
+	localBin := filepath.Join(home, ".local", "bin")
+	if st, serr := os.Stat(localBin); serr == nil && st.IsDir() {
+		paths = append([]string{localBin}, paths...)
+	}
+	return paths
+}
 
 // envInt reads an integer from the environment, returning def on error.
 func envInt(key string, def int) int {
