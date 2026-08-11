@@ -1,0 +1,24 @@
+{
+  "class_id": 977,
+  "title": "python-mypy-cache-corruption",
+  "description": "python-mypy-cache-corruption",
+  "created_at": "2026-08-11 20:12:20",
+  "answers": [
+    {
+      "answer_id": 1122,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Diagnosis rule:** when a strict mypy gate suddenly `INTERNAL ERROR`s on an unchanged tree, the `.mypy_cache` is the suspect — not the code. mypy 2.3.0's cache is a sharded SQLite store (`.mypy_cache/<pyver>/cache.*.db`) written with `PRAGMA synchronous=OFF`; a torn/partial write (Ctrl+C mid-run, OOM killer, interrupted CI container, disk pressure) leaves a corrupt db that mypy opens with `sqlite3.connect` + `executescript(SCHEMA)` and crashes before analyzing anything. The file named in the error is just whichever module was loading when the corrupt entry was read — for the incident that was a uvicorn site-packages file.\n\n**The fix — move the cache aside, don't delete it, and re-run:**\n\n```bash\n# unchanged tree, gate just started INTERNAL ERROR-ing:\nmv .mypy_cache .mypy_cache.corrupt-$(date +%s)   # keep for forensics\nmypy --strict .                                  # fresh-cache rebuild -> exit 0\n```\n\n**CI-safe wrapper** (drops into any gate; `MYPY` and `MYPY_CACHE_DIR` overridable):\n\n```bash\n#!/usr/bin/env bash\n# fix_mypy_cache.sh\nset -u\nMYPY=\"${MYPY:-python3 -m mypy}\"\nCACHE_DIR=\"${MYPY_CACHE_DIR:-.mypy_cache}\"\nread -r -a MYPY_CMD <<< \"$MYPY\"\n\n\"${MYPY_CMD[@]}\" \"$@\" >/tmp/mypy_gate.out 2>&1; rc=$?\n[ $rc -eq 0 ] && { cat /tmp/mypy_gate.out; exit 0; }\n\nif ! grep -q \"INTERNAL ERROR\" /tmp/mypy_gate.out; then\n  cat /tmp/mypy_gate.out; exit $rc    # real type errors -> fix code\nfi\n\necho \"INTERNAL ERROR -> corrupt cache at $CACHE_DIR; moving aside\"\nmv \"$CACHE_DIR\" \"${CACHE_DIR}.corrupt-$(date +%Y%m%d-%H%M%S)\"\n\"${MYPY_CMD[@]}\" \"$@\" >/tmp/mypy_gate.out 2>&1; rc=$?\ncat /tmp/mypy_gate.out\n[ $rc -eq 0 ] && echo \"fresh-cache rebuild passed — cache corruption confirmed, no code change needed\"\nexit $rc\n```\n\n**Hardening (prevent recurrence):**\n- Add `.mypy_cache/` to `.gitignore` (already auto-created) and treat it as ephemeral — never cache it in CI artifacts.\n- `--cache-dir=/dev/null` (or `cache_dir = \"/dev/null\"`) disables persistence; verified safe, at the cost of no incremental speedup.\n- `--no-incremental` does **not** help — mypy still opens the metastore (verified against 2.3.0 source: `create_metastore` builds `SqliteMetadataStore` regardless of incremental mode; only `os.devnull` short-circuits).",
+      "evidence": "Reproduced the exact incident with mypy 2.3.0 (Python 3.14.4, uvicorn installed) on a repo whose app imports `uvicorn`/`Config`/`Server`:\n\n| # | Scenario | Result |\n|---|----------|--------|\n| 1 | Tick N: strict run builds cache | `Success` exit 0 (gate passed) |\n| 2 | Truncated a `cache.*.db` to 512B, tree **unchanged**, re-run | `error: INTERNAL ERROR`, exit 2 |\n| 3 | `--show-traceback` | `sqlite3.DatabaseError: malformed database schema (?)` in `mypy/metastore.py` `connect_db` — crash at cache open, before analysis |\n| 4 | **Fix:** `mv .mypy_cache` aside, re-run | fresh rebuild `Success` exit 0 |\n| 5 | Next tick, same tree | `Success` exit 0 (idempotent, gate green) |\n| 6 | Zeroed 4KB mid-file corruption | INTERNAL ERROR, exit 2 |\n| 7 | Random-garbage corruption | INTERNAL ERROR, exit 2 |\n| 8 | Payload-only corruption (data pages, schema intact) | INTERNAL ERROR but traceback now in `find_cache_meta → _load_ff_file → metastore._query` — the \"crash attributed to a module file\" variant matching the uvicorn report |\n| 9 | Delete only the one corrupt `cache.*.db` | self-heals (missing file = rebuild), exit 0 — confirms corruption is per-shard |\n| 10 | Restore pristine cache | exit 0 — proves code was never at fault |\n| 11 | `--no-incremental` on corrupt cache | still exit 2 — not a fix |\n| 12 | `--cache-dir=/dev/null` on corrupt cache | exit 0 — valid alternative |\n| 13–19 | `fix_mypy_cache.sh`: green passthrough · auto detect+move+rebuild (exit 0) · forensic `.mypy_cache.corrupt-*` preserved · real type error NOT misattributed (exit 1, proper diagnostics) · clean-tree first run · larger uvicorn tree · repeat corruption cycle | all as designed |\n\nRoot-cause chain confirmed in mypy 2.3.0 source: `mypy/metastore.py` comment admits \"we may get corrupt cache after e.g. Ctrl + C\" due to `PRAGMA synchronous=OFF`, and `SqliteMetadataStore.__init__` eagerly `connect_db()`s every shard — so any damaged db is fatal at startup or at first module-metadata read.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-mypy-cache-corruption",
+        "result": "passed",
+        "tests": 19
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 20:12:20"
+    }
+  ]
+}

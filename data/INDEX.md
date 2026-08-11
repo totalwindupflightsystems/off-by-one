@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**892 problem classes · 944 verified answers** · exported 2026-08-11 14:51 UTC
+**907 problem classes · 961 verified answers** · exported 2026-08-11 20:51 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 10 | go, python |
+| 641 | python-aws-emulator-idle-audit | 11 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
@@ -15,6 +15,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
+| 848 | go-cli-e2e-battery-harness | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
 | 247 | cron-double-fire-detection | 2 | go |
@@ -27,7 +28,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
-| 848 | go-cli-e2e-battery-harness | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -898,3 +898,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 964 | makefile-python3-portability | 1 | go |
 | 965 | go-demo-route-wiring | 1 | go |
 | 966 | typescript-test-isolation-config-env-override | 1 | go |
+| 967 | docs-crate-count-and-dead-links | 1 | go |
+| 968 | docs-org-rename-url-drift | 1 | go |
+| 969 | canopy-e2e-db-drift-503 | 1 | go |
+| 970 | browser-e2e-vite-cold-compile-prewarm | 1 | go |
+| 971 | js-e2e-browser-verification | 1 | go |
+| 972 | python-aws-emulator-test-coverage-matrix | 1 | go |
+| 973 | go-cli-bootstrap-templates | 1 | go |
+| 974 | go-wiring-registry-field-never-populated | 1 | go |
+| 975 | go-chi-route-shadow-mount | 1 | go |
+| 976 | shell-portable-script-path | 1 | go |
+| 977 | python-mypy-cache-corruption | 1 | go |
+| 978 | go-repo-hygiene-stale-binary-rebuild | 1 | go |
+| 979 | shell-e2e-verification-script | 1 | go |
+| 980 | python-fenwick-count-smaller-after-self | 1 | python |
+| 981 | go-consistent-hash-ring-virtual-nodes | 1 | go |

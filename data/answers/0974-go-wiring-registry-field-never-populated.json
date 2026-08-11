@@ -1,0 +1,24 @@
+{
+  "class_id": 974,
+  "title": "go-wiring-registry-field-never-populated",
+  "description": "go-wiring-registry-field-never-populated",
+  "created_at": "2026-08-11 18:08:45",
+  "answers": [
+    {
+      "answer_id": 1119,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (U-GAP-024):** the target field `ApplicationConfig.Workflows` existed and the admin handler *collected* the workflow names — but the update DTO `AppConfigUpdate` had no `Workflows` field. So `Service.Update(AppConfigUpdate{})` was a no-op and the collected names were silently dropped. The router (`workflowForEndpoint`) was already wired correctly; the gap was in the update path, not the router.\n\n**Fix — three targeted changes:**\n\n**1. Add the missing field to the update struct** (pointer = \"unset\" vs \"set to empty\", mirroring the existing `APIKeys` convention):\n\n```go\ntype AppConfigUpdate struct {\n    Workflows *[]string // FIX: was missing — the wiring gap\n    APIKeys   *[]string\n}\n```\n\n**2. Clone-apply it in `Service.Update`** (same `append([]string(nil), ...)` defensive-copy pattern as `APIKeys`):\n\n```go\nfunc (s *Service) Update(u AppConfigUpdate) {\n    if u.APIKeys != nil {\n        s.cfg.APIKeys = append([]string(nil), (*u.APIKeys)...)\n    }\n    if u.Workflows != nil { // FIX: clone-apply, mirrors APIKeys\n        s.cfg.Workflows = append([]string(nil), (*u.Workflows)...)\n    }\n}\n```\n\n**3. Pass the collected names from the handlers:**\n\n```go\n// BEFORE (bug): names collected, then dropped\nnames, _ := collectWorkflowNames(r)\ns.Update(AppConfigUpdate{})\n\n// AFTER (fix): attach and pass a pointer\nnames, _ := collectWorkflowNames(r)\ns.Update(AppConfigUpdate{Workflows: &names})   // create\n// update handler: s.Update(AppConfigUpdate{Workflows: &names}) — explicit empty clears\n```\n\nRouter, engine, and DAG code untouched. **Pattern:** when a config field is collected but never lands, check the UPDATE STRUCT for the missing field before blaming the router.",
+      "evidence": "Built a self-contained reproduction (`/home/kara/gap024`, Go 1.26) with the registry, update struct, handlers, router, DAG engine, and an OpenAI-compatible LLM client. `gofmt`/`go vet` clean; **7/7 tests pass with `-race`**:\n\n- **Bug repro pinned** — `brokenAdminCreate` (pre-fix handler passing `AppConfigUpdate{}`) leaves `Workflows` empty; `workflowForEndpoint` returns `ErrUnknownWorkflow`.\n- **Fix proven** — `adminCreate`/`adminUpdate` with `&names` populate the registry; the already-wired router resolves `summarize`/`translate`; unregistered names still 404.\n- **Live proof (mock provider via `llm.base_url`)** — `httptest` server records every request body; `NewOpenAIClient(mock.URL)` runs `summarize` end-to-end. Recorded body (asserted verbatim):\n\n  `{\"model\":\"mock-gpt\",\"messages\":[{\"role\":\"user\",\"content\":\"Given these inputs {\\\"condense\\\":\\\"a 3-bullet summary\\\",\\\"extract\\\":\\\"key points of the document\\\"}, produce a final answer.\"}]}`\n\n  Asserted: `{{inputs}}` placeholder fully rendered, both DAG node outputs present, exactly 1 provider call. Counterfactual: broken handler → engine fails at router resolution with **zero** provider calls.\n- **Counterfactual regression** — reverting the two-line fix makes the suite fail to compile against the old struct (`unknown field Workflows in struct literal of type AppConfigUpdate`): the tests are coupled to the fixed shape, so the gap can't silently regress.\n- **Edge cases** — caller mutating its slice after `Update` cannot corrupt the registry (clone-apply, same as `APIKeys`); `Workflows: nil` = no change (nil-vs-empty distinction); explicit empty list clears the field; unknown workflow misses cleanly.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-wiring-registry-field-never-populated",
+        "result": "passed",
+        "tests": 7
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 18:08:45"
+    }
+  ]
+}

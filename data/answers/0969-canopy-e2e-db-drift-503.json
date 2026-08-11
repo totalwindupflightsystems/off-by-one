@@ -1,0 +1,24 @@
+{
+  "class_id": 969,
+  "title": "canopy-e2e-db-drift-503",
+  "description": "canopy-e2e-db-drift-503",
+  "created_at": "2026-08-11 15:48:40",
+  "answers": [
+    {
+      "answer_id": 1114,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** canopyd was started against `localhost:5432` (empty fresh PG) instead of the canonical compose `canopy-pg:5437`. The fresh DB had schema (trees, tree_members, FK `tree_members_user_id_fkey`) but **no seeded dev JWT user**, so the `CreateTree` transaction did: `INSERT tree` ✅ → `INSERT tree_members` ❌ FK 23503 → tx rollback → error mapped to `ErrDatabaseUnavailable` → 503.\n\n**Fix (primary): idempotent dev-user seed.** Seed the dev JWT user as part of schema bootstrap so any fresh DB converges to the canonical state.\n\n`migrations/0003_seed_dev_user.sql`:\n```sql\n-- Dev JWT user must exist before tree_members rows can reference it.\n-- ON CONFLICT makes the seed idempotent: fresh DB inserts, existing DB no-ops.\nINSERT INTO users (id, email, display_name, role, jwt_sub)\nVALUES (\n  '00000000-0000-0000-0000-00000000dead', -- dev JWT user id E2E tokens resolve to\n  'dev@canopy.local',\n  'Dev User',\n  'admin',\n  'dev-jwt-subject'\n)\nON CONFLICT (jwt_sub) DO NOTHING;\n```\n\nGo bootstrap (pgx/v5), run after migrations, before serving:\n```go\n// seedDevUser is safe to call on every boot and on both fresh and canonical DBs.\nfunc seedDevUser(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {\n\t_, err := pool.Exec(ctx, `\n\t\tINSERT INTO users (id, email, display_name, role, jwt_sub)\n\t\tVALUES ($1, $2, $3, $4, $5)\n\t\tON CONFLICT (jwt_sub) DO NOTHING`,\n\t\tcfg.DevUserID, cfg.DevEmail, \"Dev User\", \"admin\", cfg.DevJWTSub)\n\treturn err\n}\n```\n\n**Fix (hardening): stop masking constraint errors as \"db unavailable.\"** In the error mapper, inspect the pgx error before classifying:\n```go\nfunc classifyDBError(err error) error {\n\tif err == nil {\n\t\treturn nil\n\t}\n\tvar pgErr *pgconn.PgError\n\tif errors.As(err, &pgErr) {\n\t\t// 23xxx constraint class — the DB is UP; the data is wrong. Not a 503.\n\t\tif strings.HasPrefix(pgErr.Code, \"23\") {\n\t\t\treturn &APIError{Status: http.StatusConflict, Code: \"constraint_violation\",\n\t\t\t\tConstraint: pgErr.ConstraintName, Err: err}\n\t\t}\n\t\treturn &APIError{Status: http.StatusBadRequest, Code: pgErr.Code, Err: err}\n\t}\n\t// Only real connectivity failures are ErrDatabaseUnavailable -> 503.\n\tif errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) ||\n\t\tstrings.Contains(err.Error(), \"connection refused\") {\n\t\treturn ErrDatabaseUnavailable\n\t}\n\treturn err\n}\n```\n\n**Fix (prevention):** (a) bind `DATABASE_URL` explicitly from the compose config — no default `localhost:5432` that silently points at the wrong PG; (b) add a boot-time probe that replays the `CreateTree`-shaped tx (insert tree → insert tree_members) and fails startup loudly on FK drift instead of surfacing in E2E as a 503.",
+      "evidence": "Verification (all against the local `:5432` PG, cross-checked with docker `canopy-pg:5437`):\n\n1. **pgx probe replicated the tx and isolated the failure** — `INSERT INTO trees …` succeeded; `INSERT INTO tree_members (tree_id, user_id, role) …` failed with `violates foreign key constraint \"tree_members_user_id_fkey\" (SQLSTATE 23503)`. Same probe against docker PG committed cleanly → drift was data (missing user), not connectivity.\n2. **Table comparison confirmed missing seed** — `SELECT id, email, jwt_sub FROM users` on both DBs: docker PG returned the dev JWT user row(s); local PG returned zero rows. The FK target simply did not exist.\n3. **Fix validated** — applied `INSERT … ON CONFLICT (jwt_sub) DO NOTHING` to local PG, re-ran the probe tx: both inserts committed; E2E `POST /trees` returned 201 instead of 503.\n4. **Edge cases tested:**\n   - **Fresh DB:** seed inserts the user, FK satisfied, tx commits.\n   - **Idempotency:** re-running the seed on the same DB is a no-op (no duplicate, no 23505).\n   - **Canonical DB:** `ON CONFLICT` no-ops; canonical state untouched.\n   - **Concurrency:** two canopyd workers seeding simultaneously — `DO NOTHING` is atomic, no unique-violation race.\n   - **Genuine outage:** PG down (connection refused) still classifies as `ErrDatabaseUnavailable` → 503 via the connectivity check; constraint errors no longer mask as 503.\n   - **Other FK targets:** a real FK violation on a different column now surfaces as 409 constraint_violation with the constraint name, preserving diagnosability.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "canopy-e2e-db-drift-503",
+        "result": "passed",
+        "tests": 6
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 15:48:40"
+    }
+  ]
+}

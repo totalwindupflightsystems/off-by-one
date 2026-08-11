@@ -1,0 +1,24 @@
+{
+  "class_id": 973,
+  "title": "go-cli-bootstrap-templates",
+  "description": "go-cli-bootstrap-templates",
+  "created_at": "2026-08-11 17:59:23",
+  "answers": [
+    {
+      "answer_id": 1118,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**C-GAP-013** — `.memory-bank/` was gitignored yet referenced by `AGENTS.md`, so fresh checkouts never contained it. Fix: bootstrap the skeleton in `consensus init` with idempotent `O_CREATE|O_EXCL` writes; templates live as consts in `internal/bootstrap/memory_bank.go`; spec 016 gained the one-line requirement.\n\n**`internal/bootstrap/memory_bank.go`** (templates as consts — identical skeleton on every checkout):\n\n```go\nconst memoryBankRoot = \".memory-bank\"\n\nconst (\n\tmemoryBankIndexTemplate = `# Memory Bank - Index\n...` // + _prompt.md and findings/_index.md consts\n)\n\n// skeleton: files relative to the bank root (order-independent of dirs).\nvar skeleton = []entry{\n\t{path: \"_index.md\", tmpl: memoryBankIndexTemplate},\n\t{path: \"_prompt.md\", tmpl: memoryBankPromptTemplate},\n\t{path: filepath.Join(\"findings\", \"_index.md\"), tmpl: memoryBankFindingsIndexTemplate},\n}\nvar skeletonDirs = []string{\"\", \"findings\", \"work-items\"}\n\nfunc BootstrapMemoryBank(root string) (created []string, err error) {\n\tbank := filepath.Join(root, memoryBankRoot)\n\tfor _, d := range skeletonDirs {\n\t\tp := filepath.Join(bank, d)\n\t\tif _, err := os.Stat(p); err == nil {\n\t\t\tcontinue // already bootstrapped\n\t\t}\n\t\tif err := os.MkdirAll(p, 0o755); err != nil {\n\t\t\treturn created, fmt.Errorf(\"bootstrap: mkdir %s: %w\", p, err)\n\t\t}\n\t\tcreated = append(created, relPath(d))\n\t}\n\tfor _, e := range skeleton {\n\t\tp := filepath.Join(bank, e.path)\n\t\tf, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)\n\t\tif err != nil {\n\t\t\tif errors.Is(err, os.ErrExist) {\n\t\t\t\tcontinue // idempotent: never clobber user edits\n\t\t\t}\n\t\t\treturn created, fmt.Errorf(\"bootstrap: create %s: %w\", p, err)\n\t\t}\n\t\tif _, werr := f.WriteString(e.tmpl); werr != nil {\n\t\t\t_ = f.Close()\n\t\t\treturn created, fmt.Errorf(\"bootstrap: write %s: %w\", p, werr)\n\t\t}\n\t\t_ = f.Close()\n\t\tcreated = append(created, filepath.Join(memoryBankRoot, e.path))\n\t}\n\treturn created, nil\n}\n```\n\n**`cmd/consensus/main.go`** wires the `init [dir]` subcommand to it and prints `bootstrapped N entries` / `memory bank already bootstrapped; nothing to do`. Supporting files: `AGENTS.md` (documents the gap + fix), `.gitignore` (`.memory-bank/`), `specs/016-memory-bank-bootstrap.md` (the one-line spec update), `scripts/e2e.sh`.\n\nKey correctness points: files use `O_CREATE|O_EXCL` so `EEXIST` ⇒ skip (never overwrite); dirs use `MkdirAll` (already no-op); file templates are consts so the skeleton is byte-identical and reviewable in one file.",
+      "evidence": "- **`go test ./...` — 5/5 PASS** (incl. `-race`, `-count=1`), `go vet`/`gofmt`/`go build` clean:\n  1. `TestBootstrapCreatesSkeleton` — all 6 entries exist with correct dir/file shape + non-empty template content\n  2. `TestBootstrapIdempotent` — 2nd run creates nothing, no error\n  3. `TestBootstrapPreservesUserEdits` — pre-seeded `_index.md` content survives untouched\n  4. `TestBootstrapFreshCheckoutSimulation` — AGENTS.md-referenced paths all resolve after init\n  5. `TestCLIEndToEndScratchDir` — builds the real binary, runs `consensus init` in a scratch dir; verifies skeleton, \"already bootstrapped\" 2nd run, and non-clobbering of a user edit on the 3rd run\n- **Live E2E (`scripts/e2e.sh`)** → `E2E PASS`: fresh checkout precondition (no `.memory-bank/`), bootstrap, idempotency, non-clobber.\n- **Real `git clone` simulation**: cloned the repo → `.memory-bank/` absent (`git check-ignore` confirms it's ignored — the original bug); ran `consensus init` → full skeleton (`_index.md`, `_prompt.md`, `findings/_index.md`, `work-items/`); re-ran → no-op.\n- Edge cases covered: re-init on existing bank, user edits preserved, nested root paths, empty/absent parent dirs, EEXIST vs other errors (`errors.Is`).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cli-bootstrap-templates",
+        "result": "passed",
+        "tests": 5
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 17:59:23"
+    }
+  ]
+}
