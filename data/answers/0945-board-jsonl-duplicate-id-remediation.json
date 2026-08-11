@@ -1,0 +1,24 @@
+{
+  "class_id": 945,
+  "title": "board-jsonl-duplicate-id-remediation",
+  "description": "board-jsonl-duplicate-id-remediation",
+  "created_at": "2026-08-11 05:47:20",
+  "answers": [
+    {
+      "answer_id": 1089,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The fix is a deterministic, zero-loss remediation pass over the JSONL board — `remediate_board.py` (`/home/kara/remediate_board.py`):\n\n**Algorithm** (rename-older, keep pending canonical):\n\n1. **Parse** the JSONL board; malformed/non-object lines are preserved verbatim (zero-loss, reported).\n2. **Group rows by `id`**; only groups with >1 row are touched.\n3. **Order each group oldest→newest** via `row_sort_key`: `created_at`/`created`/`created_ts`/`ts`/`timestamp`/`date` if present (ISO strings sort lexicographically, numerics numerically), else fall back to file line order.\n4. **Select canonical** = newest *pending* row (`status` ∈ pending/open/todo/wip/…); if none, the newest row overall. It keeps its id untouched.\n5. **Rename every other row** in the group to `<id>-OLD` (collision-safe: `-OLD-2`, `-OLD-3`, …), keeping **all original fields intact** — the complete row's history (`done_at`, `notes`, etc.) is fully preserved — and adding `renamed_from: <old-id>` for provenance (`--no-annotate` to skip).\n6. **Validate**: re-scan output; exit 0 only if zero duplicate ids remain. Query-by-id then returns exactly one row per id.\n\n```python\n# core decision: which row keeps the id?\ndef choose_canonical(idxs_oldest_first, entries):\n    for i in reversed(idxs_oldest_first):      # newest first\n        if _is_pending(entries[i]):\n            return i                            # keep pending canonical\n    return idxs_oldest_first[-1]                # else newest row\n\n# core rename (zero-loss: full row retained, id + provenance changed)\nfor i in oldest_first:\n    if i == canonical: continue\n    new_id = _unique_renamed_id(rid, existing)  # SCHED-GAP-012-OLD, -OLD-2, ...\n    row = dict(entries[i])                      # copy: original never mutated\n    row[\"id\"] = new_id\n    row.setdefault(\"renamed_from\", rid)         # audit trail\n    entries[i] = row\n```\n\nUsage: `python3 remediate_board.py board.jsonl [-o board.fixed.jsonl] [--dry-run]`\n\nApplied to the incident board, the older complete row became:\n\n```jsonl\n{\"assignee\":\"kara\",\"created_at\":\"2025-06-10T08:00:00Z\",\"done_at\":\"2025-06-12T09:30:00Z\",\n \"id\":\"SCHED-GAP-012-OLD\",\"notes\":\"Root cause found: resource contention at 2am batch. Fix shipped in v1.4.\",\n \"renamed_from\":\"SCHED-GAP-012\",\"status\":\"complete\",\"title\":\"Investigate scheduling gap\"}\n{\"assignee\":\"kara\",\"created_at\":\"2025-06-20T11:00:00Z\",\"id\":\"SCHED-GAP-012\",\"status\":\"pending\",\n \"title\":\"Re-run gap analysis for Q3\"}\n```",
+      "evidence": "**Exact incident scenario** (`board.jsonl` → `board.fixed.jsonl`): 4 rows, 1 duplicate group, rename `SCHED-GAP-012 → SCHED-GAP-012-OLD` (line 1, complete), pending row canonical, `dups_after=[]`, exit 0. Query-by-id returns exactly 1 row for every id in the board, and the old complete row's full history (`done_at`, `notes`) survives under the new id.\n\n**Test suite** — 14 tests, all passing (`python3 -m unittest test_remediate_board -v` → `OK`, 14/14):\n\n| Edge case | Result |\n|---|---|\n| Older complete + newer pending (the incident) | older → `-OLD`, pending canonical, history intact |\n| No duplicates | no-op, ids unchanged |\n| Triple duplicate (2 complete + 1 pending) | both complete renamed `-OLD`, `-OLD-2` |\n| `-OLD` suffix already exists | uses `-OLD-2`; pre-existing row untouched |\n| Both rows complete | only older renamed, newer kept |\n| Empty file | clean, no error |\n| Malformed / non-object / blank lines | preserved verbatim; parsed rows still unique |\n| Missing-id rows | untouched, counted in report |\n| Numeric timestamps | ordered numerically, correct rename |\n| No timestamps at all | falls back to line order (older = earlier line) |\n| Idempotency | re-running on fixed file: `renamed=0`, byte-identical diff |\n| `--no-annotate` | renames without `renamed_from` |\n| Numeric ids (e.g. `7`) | → `7-OLD`, uniqueness holds |\n\nIdempotency check: `remediate_board.py board.fixed.jsonl` reports `duplicate_groups=0 renamed=0` and `diff` of the outputs is empty.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "board-jsonl-duplicate-id-remediation",
+        "result": "passed",
+        "tests": 14
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 05:47:20"
+    }
+  ]
+}

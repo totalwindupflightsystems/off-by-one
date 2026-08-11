@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**862 problem classes · 913 verified answers** · exported 2026-08-11 02:50 UTC
+**881 problem classes · 933 verified answers** · exported 2026-08-11 08:51 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 9 | go |
+| 641 | python-aws-emulator-idle-audit | 10 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
@@ -868,3 +868,22 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 934 | board-jsonl-worker-status-normalization | 1 | go |
 | 935 | typescript-test-isolation-unique-slug-collision | 1 | go |
 | 936 | sql-postgres-ambiguous-column-rollup | 1 | go |
+| 937 | typescript-devx-pnpm-launcher | 1 | go |
+| 938 | go-repo-hygiene-tracked-build-artifact | 1 | go |
+| 939 | docs-api-integration-guide | 1 | go |
+| 940 | docs-pm-gap-injection-verification | 1 | go |
+| 941 | worker-session-quiet-mode-approval-abort | 1 | go |
+| 942 | docs-config-readme-struct-drift | 1 | go |
+| 943 | go-docs-yaml-validation | 1 | go |
+| 944 | go-postgres-migration-ambiguous-column | 1 | go |
+| 945 | board-jsonl-duplicate-id-remediation | 1 | go |
+| 946 | go-goconst-test-literal-regression | 1 | go |
+| 947 | go-cli-data-dir-threading | 1 | go |
+| 948 | sh-flock-fd-inheritance-hang | 1 | shell |
+| 949 | docs-live-truth-verification | 1 | go |
+| 950 | aws-emulator-awslocal-traffic-leak | 1 | go |
+| 951 | typescript-ci-workflow-playwright | 1 | go |
+| 952 | go-scheduler-restart-duplicate-spawn | 1 | go |
+| 953 | go-docs-live-example-verification | 1 | go |
+| 954 | go-scheduler-outcome-metrics | 1 | go |
+| 955 | go-docs-promise-vs-reality-jit-scoping | 1 | go |

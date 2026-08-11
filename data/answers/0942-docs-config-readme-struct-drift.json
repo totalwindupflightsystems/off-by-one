@@ -1,0 +1,24 @@
+{
+  "class_id": 942,
+  "title": "docs-config-readme-struct-drift",
+  "description": "docs-config-readme-struct-drift",
+  "created_at": "2026-08-11 04:05:36",
+  "answers": [
+    {
+      "answer_id": 1085,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The README \"Configuration Reference\" documented 11 YAML keys that have no matching `yaml` struct tag in `internal/config/config.go`. Because the decoder runs with `yaml.v3` `KnownFields(true)`, any such key turns into `CONFIG_LOAD_ERROR` at startup — reproduced before the fix: `exit=1` with 11 `field not found in type config.*` errors, so copy-pasting the README sample crashed the server on first run.\n\n**Fix.** The struct tags in `internal/config/config.go` are the single source of truth. I synced the README sample to them:\n- **Removed the 11 phantom keys:** `server.keep_alive_timeout`, `server.max_header_bytes`, `database.ssl_mode`, `database.pool_size`, `redis.default_ttl`, `redis.pipeline_window`, `queue.retry_delay`, `queue.batch_size`, `logging.format`, `metrics.push_gateway`, `auth.jwt_issuer`.\n- **Added the missing `llm` section** (`provider`, `model`, `api_key`, `base_url`, `timeout`, `max_tokens`, `temperature`, `retries`).\n- **Kept the legit substring-collision key** `redis.runtime_default_ttl` (which a bare `default_ttl` grep would false-positive on).\n\nThe strict loader (unchanged, already correct):\n\n```go\nfunc Decode(r io.Reader) (*Config, error) {\n\tdec := yaml.NewDecoder(r)\n\tdec.KnownFields(true) // unknown key -> error -> CONFIG_LOAD_ERROR\n\tcfg := Defaults()\n\tif err := dec.Decode(cfg); err != nil {\n\t\treturn nil, fmt.Errorf(\"%w: %v\", ErrLoad, err)\n\t}\n\treturn cfg, nil\n}\n```\n\nI also added a regression test that enforces the single-source-of-truth rule mechanically — a reflection walker collects dotted paths from the struct tags, a YAML walker collects dotted paths from the README block, and they must match exactly (map-field children allowed):\n\n```go\nfor p := range structPaths {            // every struct tag path\n\tif !readme[p] {\n\t\tt.Errorf(\"struct tag path %q is missing from the README sample\", p)\n\t}\n}\nfor p := range readme {                 // every README path\n\tif structPaths[p] { continue }\n\tif !descendantOfMapField(p, mapFields) {\n\t\tt.Errorf(\"README sample declares phantom key %q ...\", p)\n\t}\n}\n```",
+      "evidence": "| Check | Result |\n|---|---|\n| `go test ./...` — `TestReadmeMatchesStruct` (struct tags ↔ README exact sync) | PASS |\n| `go test ./...` — `TestReadmeSampleLoads` (strict `KnownFields` decode of README block) | PASS |\n| `go test ./...` — `TestDottedPathGrepSemantics` (phantom absent / legit present by dotted path) | PASS |\n| Extract README yaml block (71 lines) → `timeout 5 ./gateway -config block.yaml` | **exit=124** (server kept running; no startup crash) |\n| `CONFIG_LOAD_ERROR` occurrences in run log | **0** |\n| `/healthz` probe while running | `ok` |\n| Gotcha: bare grep `default_ttl` | 1 match — false positive on `runtime_default_ttl` (not decisive) |\n| Anchored `  default_ttl:` | 0 (phantom gone) |\n| Anchored `  runtime_default_ttl:` | 1 (legit present) |\n| `^llm:` section | present |\n| Each of the 11 phantom dotted paths in the sample | absent (0 each) |\n\n**Before fix** (drifted README): `timeout 5 ./gateway -config block.yaml` → `exit=1`, log: `CONFIG_LOAD_ERROR: yaml: unmarshal errors: field keep_alive_timeout not found in type config.ServerConfig` … (all 11).\n\n**Edge cases handled:** pointer root dereferenced in the reflection walker (`Defaults()` returns `*Config`); custom `Duration` type not treated as a nested struct; `metrics.labels` map marked as a map field so dynamic values (`env`, `region`) are legal; `DocumentNode` root in the YAML path walker; port 18080 was already held by an environment daemon, so the sample/defaults use 18081 (free, verified).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "docs-config-readme-struct-drift",
+        "result": "passed",
+        "tests": 20
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 04:05:36"
+    }
+  ]
+}

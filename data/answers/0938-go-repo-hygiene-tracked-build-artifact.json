@@ -1,0 +1,24 @@
+{
+  "class_id": 938,
+  "title": "go-repo-hygiene-tracked-build-artifact",
+  "description": "go-repo-hygiene-tracked-build-artifact",
+  "created_at": "2026-08-11 03:38:38",
+  "answers": [
+    {
+      "answer_id": 1081,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `.gitignore` only applies to *untracked* files. `bin/server` was committed before the ignore (or force-added with `git add -f`), so git keeps comparing each rebuilt binary blob against the committed one — every `make` produces a fresh `M bin/server`. Same class as DM-GAP-019 (root-level `./server` macOS Mach-O).\n\n**Fix:** drop the artifact from the index only (`--cached` keeps the file on disk for builds), commit the removal, and confirm the ignore now applies:\n\n```bash\ngit rm --cached bin/server\n# optional: ensure bin/ is in .gitignore (prevents accidental re-add)\ngrep -q '^bin/$' .gitignore || echo 'bin/' >> .gitignore\ngit commit -m \"chore: untrack bin/server build artifact (bin/ is gitignored)\"\n```\n\n**Verification commands (all must pass):**\n\n```bash\n# 1. untracked: exit code 1 + error message\ngit ls-files --error-unmatch bin/server   # => exit 1, \"did not match any file(s) known to git\"\n# 2. gone from HEAD tree\ngit cat-file -e HEAD:bin/server 2>/dev/null   # => exit non-zero (absent)\ngit ls-tree HEAD bin/server                   # => empty output\n# 3. still on disk, builds unaffected\nls -l bin/server && make && ./bin/server\n# 4. no more dirtying\ngit status --short          # => clean (only legit source changes)\ngit status --ignored --short # => \"!! bin/\" (ignore now applies)\n```\n\nFor the DM-GAP-019 class (root `./server`): same fix — `git rm --cached server`, add `server` to `.gitignore`, commit. The binary format (Mach-O vs ELF) is irrelevant; only tracking state matters.\n\n---",
+      "evidence": "Reproduced and fixed in a throwaway repo (`/tmp/hygiene-test`, git 2.53.0, go 1.26.0):\n\n**Bug reproduced:** committed `bin/server` with `git add -f`, added `.gitignore` with `bin/`, edited source + rebuilt → `git status --short` showed ` M bin/server` despite the ignore (tracked files bypass ignore).\n\n**Fix verified:**\n| Check | Result |\n|---|---|\n| `git rm --cached bin/server` keeps file on disk | ✅ 1.8MB `bin/server` present, runs (`v2-CHANGED`) |\n| `git ls-files --error-unmatch bin/server` → exit 1 | ✅ |\n| HEAD tree absent after committing removal (`cat-file -e` fails, `ls-tree` empty) | ✅ |\n| Rebuild after fix → `git status` clean (no `M bin/server`) | ✅ |\n| `git status --ignored` shows `!! bin/` | ✅ |\n| Edge: 3 consecutive rebuilds incl. `go build -a` → all clean | ✅ |\n| Edge: fresh `git clone` has no `bin/server` | ✅ |\n| Edge: fresh clone + `make` → status clean | ✅ |\n| Edge (DM-GAP-019 class): root `./server` — repro `M server`, then untracked+ignored+HEAD-absent+rebuild-clean+on-disk | ✅ (binary format here is ELF; class mechanics identical for Mach-O) |\n\n**Edge cases covered:** repeated/full rebuilds (`-a`) stay clean; fresh clones contain no artifacts; `git clean -fdx` won't resurrect tracked state since the path is untracked + ignored; root-level binary variant; staged-then-committed removal leaves working-tree file intact.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-repo-hygiene-tracked-build-artifact",
+        "result": "passed",
+        "tests": 11
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 03:38:38"
+    }
+  ]
+}
