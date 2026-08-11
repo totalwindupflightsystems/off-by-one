@@ -1,0 +1,22 @@
+{
+  "class_id": 960,
+  "title": "go-cli-direct-db-bypass-daemon-api",
+  "description": "unknown",
+  "created_at": "2026-08-11 10:21:58",
+  "answers": [
+    {
+      "answer_id": 1104,
+      "language": "go",
+      "environment": "go",
+      "version": "",
+      "solution": "**Problem:** The CLI could only mutate/read data through the daemon's HTTP API. That created a hard runtime dependency: daemon down → CLI dead (connection refused), plus a network hop and JSON serialization for every operation.\n\n**Fix:** Extract a shared database layer (`store`), give the CLI a second backend (`DirectStore`) that opens the SQLite file in-process — completely bypassing the daemon API — and make both backends implement one interface so command logic is backend-agnostic. Direct mode is the new default; API mode is kept for remote use.\n\nProject layout (`/home/kara/godirect`):\n\n```\nstore/store.go        single source of truth: SQLite CRUD (Put/Get/List/Delete)\napi/server.go         daemon HTTP API wrapping store (unchanged role)\nclient/client.go      KV interface + DaemonClient (legacy) + DirectStore (the fix)\ncmd/daemon/main.go    daemon binary\ncmd/cli/main.go       CLI: --mode direct|api\n```\n\nKey code — the bypass lives in `client.DirectStore`:\n\n```go\n// client/client.go\ntype KV interface {\n\tPut(name, value string) error\n\tGet(name string) (string, error)\n\tList() (map[string]string, error)\n\tDelete(name string) error\n\tClose() error\n}\n\n// Fixed backend: bypasses the daemon, talks to the DB directly.\ntype DirectStore struct{ st *store.Store }\n\nfunc NewDirectStore(path string) (*DirectStore, error) {\n\tst, err := store.Open(path) // sql.Open(\"sqlite\", ...) + CREATE TABLE IF NOT EXISTS\n\tif err != nil {\n\t\treturn nil, err\n\t}\n\treturn &DirectStore{st: st}, nil\n}\n\nfunc (d *DirectStore) Put(name, value string) error {\n\t_, err := d.st.Put(name, value)\n\treturn err\n}\nfunc (d *DirectStore) Get(name string) (string, error) {\n\trec, err := d.st.Get(name)\n\tif err != nil {\n\t\treturn \"\", err\n\t}\n\treturn rec.Value, nil\n}\n```\n\nCLI wiring — `--mode direct` (default) opens the DB itself; `--mode api` still uses the daemon:\n\n```go\n// cmd/cli/main.go\nvar kv client.KV\nvar err error\nswitch *mode {\ncase \"direct\":\n\tkv, err = client.NewDirectStore(*dbPath) // bypasses the daemon API\ncase \"api\":\n\tkv = client.NewDaemonClient(*apiURL)     // legacy path, needs daemon up\n}\n```\n\nParity details that make the swap invisible to callers:\n- 404 from the daemon maps to `store.ErrNotFound`, so `errors.Is(err, client.ErrNotFound)` works for both backends.\n- Shared sentinel: `var ErrNotFound = store.ErrNotFound`.\n- SQLite opened with `busy_timeout` + WAL so concurrent daemon and CLI processes can safely share one DB file; `sync.Mutex` serializes in-process mutations.",
+      "evidence": "Verified three ways:\n\n1. **Unit tests (6/6 passing, `go test -race` clean):**\n   - `store`: CRUD + not-found sentinel, sorted List, 8-goroutine concurrent writes.\n   - `client`: `TestDirectAndDaemonBackendsAgree` — same command sequence against DirectStore and DaemonClient (both on the **same DB file**) yields identical data; `TestDirectWorksWhenDaemonIsDown` — direct mode succeeds with no daemon; `TestDaemonClientFailsWhenDaemonIsDown` — legacy mode fails fast with connection refused.\n   - `go vet ./...` and `gofmt -l .` clean.\n\n2. **End-to-end binary test** (`go build` of both commands):\n   - Daemon **down**: `cli -mode api put` → `daemon unreachable ... connection refused` (exit 1, the original failure); `cli -mode direct put/get` → works.\n   - Daemon **up** on the same file: `api get k` → `v` (data written by direct mode), `api put k=v2`, then `direct get k` → `v2` and `api list` → `k=v2`. Both modes interoperate on shared state.\n\n3. **Edge cases tested:** missing record via both backends returns `ErrNotFound`; idempotent upsert keeps one row per name; delete of missing key errors; flags accepted before or after the subcommand (`cli -mode direct -db r.db put -name k -value v` and `cli put -name k -value v -mode direct` both parse); concurrent writer processes via WAL+busy_timeout.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "result": "completed"
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 10:21:58"
+    }
+  ]
+}

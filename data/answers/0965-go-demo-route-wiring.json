@@ -1,0 +1,24 @@
+{
+  "class_id": 965,
+  "title": "go-demo-route-wiring",
+  "description": "go-demo-route-wiring",
+  "created_at": "2026-08-11 14:09:29",
+  "answers": [
+    {
+      "answer_id": 1109,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause (IM-GAP-010):** `cmd/demo/main.go` had three defects vs. the full server:\n1. The two BOQ routes (`GET /boq`, `GET /boq/history`) that `serve.go:104-106` registers were never registered, so requests fell through to the SPA shell (HTML).\n2. `api.SetBOQStore` was never called, so the package-level `BOQSt` stayed nil and any BOQ handler would 503 with `BOQ-ERR-001`.\n3. No demo data was seeded, so even a wired store would 404.\n\n**Fix — three parts:**\n\n**1. `internal/store/memory/boq_store.go` (new):** mutex-guarded `map[projectID][]BOQ` kept newest-first (index 0 = latest).\n\n```go\nvar ErrBOQNotFound = errors.New(\"boq: not found\")\n\ntype BOQStore struct {\n\tmu        sync.Mutex\n\tbyProject map[string][]BOQ // newest-first per project\n}\n\nfunc (s *BOQStore) SaveBOQ(b BOQ) error {          // dedupes same revision, prepends\n\ts.mu.Lock(); defer s.mu.Unlock()\n\trevs := s.byProject[b.ProjectID]\n\tfiltered := revs[:0]\n\tfor _, e := range revs { if e.Revision != b.Revision { filtered = append(filtered, e) } }\n\ts.byProject[b.ProjectID] = append([]BOQ{b}, filtered...)\n\treturn nil\n}\n\nfunc (s *BOQStore) GetBOQ(projectID string, revision int) (BOQ, error) {\n\t// revision==0 -> revs[0] (O(1) newest); else linear revision match\n\t// unknown -> ErrBOQNotFound\n}\n\nfunc (s *BOQStore) ListBOQs(projectID string) ([]BOQ, error) { /* defensive copy */ }\n\nfunc (s *BOQStore) SeedDemo(projectID string) { // idempotent: one seeded revision\n\ts.SaveBOQ(BOQ{ProjectID: projectID, Revision: 1, Lines: []BOQLine{...3 demo lines...}})\n}\n```\n\n**2. `cmd/demo/server.go` (the wiring gap fix, factored out of main for testability):**\n\n```go\nfunc newHandler() http.Handler {\n\tboqStore := memory.NewBOQStore()\n\tboqStore.SeedDemo(demoProjectID)          // fix part 2: GET /boq returns 200\n\tapi.SetBOQStore(boqStore)                 // fix part 1: no more nil store (503)\n\tmux := http.NewServeMux()\n\t// fix part 3: mirror serve.go:104-106, registered BEFORE the SPA fallback\n\tmux.HandleFunc(\"GET /boq\", api.HandleBOQ)\n\tmux.HandleFunc(\"GET /boq/history\", api.HandleBOQHistory)\n\tmux.HandleFunc(\"GET /healthz\", ...)\n\tmux.HandleFunc(\"/\", spaFallback)          // catch-all, last\n\treturn mux\n}\n```\n\n**3. Handlers (`internal/api/boq.go`, pre-existing per the report) were kept and now receive a live store.** Errors are RFC 7807 `application/problem+json` with machine-readable codes: `BOQ-ERR-001` (503, nil store), `BOQ-ERR-002` (400, missing projectId), `BOQ-ERR-003` (400, bad revision), `BOQ-ERR-004` (404, not found), `BOQ-ERR-005` (500, store error). `cmd/demo/verify_test.go` implements `verifyBOQRoutes` as the regression guard.",
+      "evidence": "Reconstructed the codebase (`go 1.26`), applied the fix, and verified:\n\n- **`go build ./... && go vet ./... && gofmt -l .`** — clean.\n- **`go test -race -count=1 ./...`** — **10/10 tests pass** (6 `verifyBOQRoutes` subtests + nil-store 503 API test + wired-store API test + 7 store unit tests incl. concurrent-save race check).\n- **Live server on a free port** (`:19090`; sandbox's `:8080`/`:18080` are pre-bound by a gateway):\n  - `GET /boq?projectId=demo-project` → **200** `application/json` with 3 lines (seeded revision 1)\n  - `GET /boq/history?projectId=demo-project` → **200** JSON array, newest-first\n  - `GET /boq?projectId=nope` → **404** `application/problem+json` `{\"code\":\"BOQ-ERR-004\",...}`\n  - `GET /boq` (no projectId) → **400** `BOQ-ERR-002`; `revision=abc` → **400** `BOQ-ERR-003`; `revision=99` → **404** `BOQ-ERR-004`\n  - `GET /unknown-path` → **200** `text/html` SPA shell — fallback only for non-API paths; no `/boq` path ever returns HTML.\n- **Regression proof:** simulated the pre-fix state (no routes, no `SetBOQStore`, no seed) — `verifyBOQRoutes` fails all 6 subtests with `got SPA fallback ... — /boq route not wired`; restored, the suite is green again. `TestNilStoreIs503` documents the other pre-fix symptom (nil store → 503 `BOQ-ERR-001`).\n- **Edge cases covered:** newest-first ordering, exact-revision lookup, `errors.Is(ErrBOQNotFound)` sentinel, defensive copy from `ListBOQs`, revision dedupe, idempotent `SeedDemo` (no cross-project leakage), concurrent saves under `-race`.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-demo-route-wiring",
+        "result": "passed",
+        "tests": 10
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 14:09:29"
+    }
+  ]
+}

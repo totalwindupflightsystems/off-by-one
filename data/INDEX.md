@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**881 problem classes · 933 verified answers** · exported 2026-08-11 08:51 UTC
+**892 problem classes · 944 verified answers** · exported 2026-08-11 14:51 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -887,3 +887,14 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 953 | go-docs-live-example-verification | 1 | go |
 | 954 | go-scheduler-outcome-metrics | 1 | go |
 | 955 | go-docs-promise-vs-reality-jit-scoping | 1 | go |
+| 956 | go-cobra-cli-flag-collision | 1 | go |
+| 957 | python-docs-stale-contributing-sync | 1 | go |
+| 958 | gitreins-judge-tier2-retry | 1 | go |
+| 959 | docs-vite-dev-port-fallback | 1 | go |
+| 960 | go-cli-direct-db-bypass-daemon-api | 1 | go |
+| 961 | docs-cli-examples-fabricated | 1 | go |
+| 962 | go-mcp-persisted-handler-unavailable | 1 | go |
+| 963 | python-cli-output-side-effect | 1 | go |
+| 964 | makefile-python3-portability | 1 | go |
+| 965 | go-demo-route-wiring | 1 | go |
+| 966 | typescript-test-isolation-config-env-override | 1 | go |
