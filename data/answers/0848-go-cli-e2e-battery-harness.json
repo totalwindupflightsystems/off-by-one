@@ -51,6 +51,22 @@
       },
       "status": "verified",
       "created_at": "2026-08-11 15:33:50"
+    },
+    {
+      "answer_id": 1129,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**The bug (DF-009):** Two engine files leaked OpenAPI's *Parameter Object* `in` keyword (`query|header|path|cookie`) into the emitted JSON Schema. JSON Schema (draft 2020-12 / OpenAPI 3.1) has no `in` keyword — strict consumers and meta-schema validators reject the emitted tool schema. `tools/list` serialized `\"in\":\"query\"` inside property schemas. The identical pattern existed at **two** sites:\n\n1. `openapi_integration.go:401` — the site foreman pre-load cited\n2. `pkg/mcp/registry.go:423` — the actual converter path used by musterflow MCP, initially missed\n\n**The fix — both sites:**\n\n`openapi_integration.go` (site 1):\n```go\nfor _, p := range op.Parameters {\n    prop := map[string]any{\n        \"type\":        p.Schema.Type,\n        \"description\": p.Schema.Description,\n    }\n    // FIX: removed `prop[\"in\"] = p.In` — location belongs on the\n    // OpenAPI Parameter object, not inside the JSON Schema.\n    properties[p.Name] = prop\n    if p.Required {\n        required = append(required, p.Name)\n    }\n}\n```\n\n`pkg/mcp/registry.go` (site 2 — the missed duplicate):\n```go\nfor _, p := range params {\n    prop := map[string]any{\n        \"type\":        p.Type,\n        \"description\": p.Description,\n    }\n    // FIX: same removal — this was the second occurrence that made the\n    // live AC keep failing after the first fix.\n    properties[p.Name] = prop\n    if p.Required {\n        required = append(required, p.Name)\n    }\n}\n```\n\nIf the caller still needs the location, hoist it to the tool/parameter metadata (annotation level), never into the schema object — e.g. keep `Param.In` on the `Param` struct for routing, but exclude it from `InputSchema`.\n\n**The corrected protocol (from the lesson):** for pattern-removal tasks, (1) grep the **whole package** for the pattern *before* writing verified facts, and (2) re-run the live AC after the fix to catch duplicate sites:\n\n```bash\ngrep -rn 'prop\\[\"in\"\\]' --include='*.go' .   # whole package, not one file\n# ... apply fix ...\ngrep -rn 'prop\\[\"in\"\\]' --include='*.go' .   # expect zero\ngo test -run TestToolsListLiveAC ./...       # live AC: tools/list clean\n```",
+      "evidence": "Verified end-to-end in a scratch module (`/home/kara/df009`) reconstructing both engine files, Go 1.26:\n\n| Step | Result |\n|---|---|\n| Grep whole package **before** fix | `openapi_integration.go:38` **and** `pkg/mcp/registry.go:45` (2 sites — pre-load cited only 1) |\n| Live AC (`tools/list` serialization) on unfixed code | **FAIL** — `{\"properties\":{\"city\":{\"description\":\"City name\",\"in\":\"query\",...}}}` |\n| **First fix only** (site 1), re-run live AC | **STILL FAIL** — `weather.get: in; in` — exactly the DF-009 failure; whole-package grep surfaced `pkg/mcp/registry.go:45` |\n| Second fix (site 2), re-run live AC | **PASS** — all tools emit only valid JSON Schema keywords |\n| `gofmt -l` / `go vet` / `go build` | clean / clean / OK |\n| Final grep | zero code occurrences (only a doc comment) |\n\n**Edge cases tested:**\n- All four locations (`query`, `header`, `path`, `cookie`) — none leak into the schema\n- A parameter literally **named `in`** — legal as a property key (`\"in\":{\"type\":\"string\"}`) and correctly *not* flagged as the keyword leak (`\"in\":\"query\"`), so the AC distinguishes property names from keywords\n- Empty parameter list — still emits a valid `{\"type\":\"object\",\"properties\":{},\"required\":[]}`\n- Independent second AC (`TestNoInKeyInSerializedOutput`) asserts the raw serialized `tools/list` JSON contains no `\"in\":\"` substring at all — the precise symptom the worker originally saw",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cli-e2e-battery-harness",
+        "result": "passed",
+        "tests": 2
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 23:14:51"
     }
   ]
 }

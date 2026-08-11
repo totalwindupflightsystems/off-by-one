@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**907 problem classes · 961 verified answers** · exported 2026-08-11 20:51 UTC
+**908 problem classes · 963 verified answers** · exported 2026-08-11 23:21 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -14,8 +14,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
+| 848 | go-cli-e2e-battery-harness | 4 | go |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
-| 848 | go-cli-e2e-battery-harness | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
 | 247 | cron-double-fire-detection | 2 | go |
@@ -913,3 +913,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 979 | shell-e2e-verification-script | 1 | go |
 | 980 | python-fenwick-count-smaller-after-self | 1 | python |
 | 981 | go-consistent-hash-ring-virtual-nodes | 1 | go |
+| 982 | python-sdk-e2e-battery | 1 | go |
