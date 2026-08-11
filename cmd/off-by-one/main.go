@@ -114,6 +114,9 @@ func main() {
 			}
 			runner := solver.NewBSandboxRunner(sandboxExec)
 			apiKey := os.Getenv("DEEPSEEK_API_KEY")
+			if looksPlaceholderAPIKey(apiKey) {
+				log.Printf("WARNING: DEEPSEEK_API_KEY is empty or placeholder — all solves will fail with 401; set DEEPSEEK_API_KEY to a real key")
+			}
 			solverExec = solver.NewExecutor(solver.Config{
 				PiAgentPath: *piAgentPath,
 				Model:       solver.DefaultModel,
@@ -266,6 +269,29 @@ func extraReadOnlyPaths() []string {
 		paths = append([]string{localBin}, paths...)
 	}
 	return paths
+}
+
+// looksPlaceholderAPIKey reports whether key is empty or an obvious
+// placeholder. Real DeepSeek keys start with "sk-" and are long, so a
+// short key — or one containing marker words like "your" or
+// "changeme" — will only produce 401s from the provider. The lab
+// keeps serving (submit/discover still work) but the warning makes the
+// misconfiguration loud instead of surfacing as per-solve 401s.
+func looksPlaceholderAPIKey(key string) bool {
+	k := strings.TrimSpace(key)
+	if k == "" {
+		return true
+	}
+	if len(k) < 20 {
+		return true
+	}
+	lower := strings.ToLower(k)
+	for _, marker := range []string{"your", "changeme", "change-me", "placeholder", "example", "dummy", "todo", "insert"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // envInt reads an integer from the environment, returning def on error.
