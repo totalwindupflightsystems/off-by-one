@@ -166,10 +166,11 @@ func main() {
 
 	// --- 6. WebSocket chat handler ------------------------------------
 	// The chat handler requires an AgentRunner. When the solver is available
-	// we wire it through; otherwise chat returns an "offline" message.
+	// it serves as the runner (it implements web.AgentRunner); otherwise
+	// chat returns an "offline" message.
 	var chatHandler http.Handler
 	if solverExec != nil {
-		chatHandler = web.NewChatHandler(nil) // nil runner = offline mode
+		chatHandler = web.NewChatHandler(solverExec)
 	} else {
 		chatHandler = web.NewChatHandler(nil)
 	}
