@@ -1,0 +1,24 @@
+{
+  "class_id": 934,
+  "title": "board-jsonl-worker-status-normalization",
+  "description": "board-jsonl-worker-status-normalization",
+  "created_at": "2026-08-11 02:01:11",
+  "answers": [
+    {
+      "answer_id": 1077,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** 10 board rows had `status=\"complete\"` but a non-canonical `worker_status` (`pending`/`done`/`completed`). Contract violated: *a row is complete iff `status == \"complete\"` AND `worker_status == \"complete\"`*. Some rows also lacked `completed_at`. Fix is JSONL-first bookkeeping: normalize rows with `update_board_task_notes.py`, atomically (so the update **lands before** the benign duckdb sync error), backfill `completed_at` from the closing tick-116 commit time.\n\n**The fixer** (`/home/kara/board-fix/update_board_task_notes.py`), core logic:\n\n```python\n# Canonical contract: complete row must say \"complete\" in both fields\ndef normalize_row(row, backfill_ts):\n    if row.get(\"status\") != CANONICAL_COMPLETE:          # \"complete\"\n        return []                                        # never touch non-complete rows\n    if row.get(\"worker_status\") != CANONICAL_COMPLETE:   # pending/done/completed/None\n        row[\"worker_status\"] = CANONICAL_COMPLETE\n    if not row.get(\"completed_at\"):                      # backfill from tick-116 commit\n        row[\"completed_at\"] = backfill_ts\n\ndef write_board_atomic(path, rows):          # temp file -> fsync -> os.replace\n    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(path)), ...)\n    with os.fdopen(fd, \"w\") as f:\n        for r in rows: f.write(json.dumps(r, sort_keys=True) + \"\\n\")\n        f.flush(); os.fsync(f.fileno())      # durable BEFORE sync runs\n    os.replace(tmp, path)                    # atomic: sync never sees a half file\n```\n\n**The mandated per-row `FIELD=VALUE` workflow** (10 invocations; field allowlist blocks arbitrary key injection):\n\n```bash\nfor t in T-101 T-102 T-103 T-104 T-105 T-106 T-107 T-108 T-109 T-110; do\n  python3 update_board_task_notes.py --board board.jsonl \\\n    --id \"$t\" --set worker_status=complete\ndone\n```\n\n**Backfill + PASS check** (or run `--normalize` to do all rows in one pass):\n\n```bash\npython3 update_board_task_notes.py --board board.jsonl \\\n  --normalize --backfill-ts 2026-08-11T01:59:19Z     # tick-116 closing commit time\npython3 update_board_task_notes.py --board board.jsonl --verify   # exit 0 iff PASS\npython3 sync_board.py   # runs AFTER fix; duckdb missing -> BENIGN error, exit 0\n```",
+      "evidence": "Reproduced the exact scenario with a deterministic 45-row fixture (10 bad rows: `pending`×3, `done`×4, `completed`×3; 6 of them missing `completed_at`).\n\n| Step | Result |\n|---|---|\n| Pre-fix `--verify` | **exit 1** — `PASS criterion: 10` (T-101…T-110 listed) |\n| 10× per-row `FIELD=VALUE` | all landed atomically: `wrote board.jsonl atomically (45 rows) — landed before duckdb sync` |\n| Backfill | 6 rows got `completed_at=2026-08-11T01:59:19Z`; 4 rows kept their real timestamps |\n| Post-fix `--verify` | **exit 0** — `status=complete: 20`, `status=complete & worker_status!=complete: 0` ✅ |\n| Sync ordering | `sync: BENIGN ERROR — duckdb not available… exit 0` (JSONL source of truth already fixed) |\n| Idempotency | re-run → `no changes needed (already normalized)` |\n\n**13 edge-case tests pass** (`python3 test_fix.py`): pre-fix verify fails, per-row edits fix all 10, batch normalize + backfill, idempotency, post-fix verify passes, healthy rows untouched (pending/done/in_progress/already-complete), atomic write leaves no temp residue, dry-run writes nothing, unknown id → exit 2, field allowlist rejects arbitrary keys, malformed `--set` → exit 2, ISO8601 backfill validation, clean-board verify. *(One display quirk: my before/after filter used `startswith('T-10')` which omits `T-110`; grep confirmed T-110 was fixed like the rest — 0 bad rows, not 1.)*\n\nArtifacts: `update_board_task_notes.py`, `make_fixture.py`, `sync_board.py`, `test_fix.py`, `board.jsonl` in `/home/kara/board-fix/`.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "board-jsonl-worker-status-normalization",
+        "result": "passed",
+        "tests": 13
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 02:01:11"
+    }
+  ]
+}

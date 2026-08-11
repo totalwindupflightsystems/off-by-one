@@ -1,0 +1,24 @@
+{
+  "class_id": 918,
+  "title": "docs-authority-model-reconciliation",
+  "description": "docs-authority-model-reconciliation",
+  "created_at": "2026-08-10 23:06:30",
+  "answers": [
+    {
+      "answer_id": 1060,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Premise correction (code-first).** The task premise claimed `fleet.toml` is *create-only on restart*. Reading `loader.go` first showed the opposite: `ApplyFleetConfig` is an **upsert that re-pins existing projects (`cooldown`/`model`/`provider`/`enabled`) at every startup**. The code is the behavior authority; the docs and two doc comments were the stale party. Fix = reconcile all artifacts to the verified model, and lock it in with tests.\n\n**Fix 1 — loader.go doc comment on `ApplyFleetConfig` (was lying):**\n\n```diff\n- // ApplyFleetConfig applies fleet.toml at startup. It is create-only:\n- // existing projects keep their runtime values across restarts.\n+ // ApplyFleetConfig reconciles the project store against fleet.toml.\n+ // It is NOT create-only. Existing projects are RE-PINNED on every\n+ // startup: Cooldown, Model, Provider and Enabled are overwritten from\n+ // the file, and LastPin is advanced. Projects that exist in the store\n+ // but not in fleet.toml are left untouched (fleet.toml never deletes).\n```\n\n**Fix 2 — loader.go field comment on `ProjectConfig.Cooldown` (was lying):**\n\n```diff\n- // Cooldown is applied only at project creation; existing projects\n- // keep their runtime value.\n+ // Cooldown is authoritative on every startup: ApplyFleetConfig\n+ // re-pins this value onto the existing project record, overwriting\n+ // any runtime adjustment made since the previous boot. Empty means\n+ // \"preserve the current value\" for existing projects.\n```\n\n**Fix 3 & 4 — the two docs** (`docs/cooldown-authority.md`, `docs/fleet-config.md`) rewritten from \"create-only / runtime mutations persist\" to the verified model: *fleet.toml is the startup authority; runtime mutations are overwritten on boot; the file never deletes store-only projects; absent `enabled`/empty `cooldown` preserve current values.*\n\n**The authoritative code path (re-pin branch, kept as-is from verified behavior):**\n\n```go\nif p, ok := s.Get(pc.ID); ok {\n\t// Re-pin: fleet.toml wins over any runtime mutation made\n\t// since the previous boot.\n\tif present {\n\t\tp.Cooldown = cooldown\n\t}\n\tp.Model = pc.Model\n\tp.Provider = pc.Provider\n\tif pc.Enabled != nil {\n\t\tp.Enabled = *pc.Enabled\n\t}\n\tp.LastPin = now\n\tif err := s.Put(p); err != nil {\n\t\treturn stats, err\n\t}\n\tstats.RePinned++\n\tcontinue\n}\n```\n\nPlus a **drift guard** in `loader_test.go` that embeds all three source files and fails if any stale phrase (`\"create-only on restart\"`, `\"create-only upsert\"`, …) reappears, and requires the \"re-pin\" model to stay stated — so docs cannot silently lie again.",
+      "evidence": "Built `example.com/sched-gap-025` (Go 1.26, real `BurntSushi/toml` decode) and ran the suite — **8/8 PASS** (`go vet` clean):\n\n| Test | Verifies |\n|---|---|\n| `TestApplyFleetConfigRepinsExistingProject` | runtime-mutated project (10m/legacy/bedrock/disabled) re-pinned to file (24h/gpt-4o/openai/enabled) + `LastPin` advanced — the exact premise correction |\n| `TestApplyFleetConfigCreatesMissingProject` | missing project created with all fields |\n| `TestApplyFleetConfigLeavesStoreOnlyProjectsAlone` | store-only project untouched (`LastPin` stays zero) — authority, not deletion |\n| `TestApplyFleetConfigEnabledAbsentPreservesCurrent` | absent `enabled` preserves both `true` and `false`; no forced disable |\n| `TestEmptyCooldownPreservesCurrent` | empty `cooldown` keeps existing value on re-pin, zero on create |\n| `TestInvalidCooldownRejected` | `\"soon\"` duration and empty `id` rejected with errors |\n| `TestEndToEndFromFleetToml` | decodes real `testdata/fleet.toml`; re-pins 2 existing, creates 0, leaves 1 orphan untouched |\n| `TestDocsAndCommentsMatchVerifiedCode` | embedded docs+loader contain no stale phrase, do state the re-pin model |\n\n**Negative control:** injected `// legacy note: ApplyFleetConfig is create-only on restart.` into `loader.go` → `TestDocsAndCommentsMatchVerifiedCode` fails with `loader.go still contains stale phrase \"create-only on restart\"`; reverted → full suite green again. The guard demonstrably catches the lie it replaced.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "docs-authority-model-reconciliation",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 23:06:30"
+    }
+  ]
+}

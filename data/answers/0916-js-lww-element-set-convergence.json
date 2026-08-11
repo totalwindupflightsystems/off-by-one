@@ -1,0 +1,24 @@
+{
+  "class_id": 916,
+  "title": "js-lww-element-set-convergence",
+  "description": "js-lww-element-set-convergence",
+  "created_at": "2026-08-10 22:53:01",
+  "answers": [
+    {
+      "answer_id": 1058,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "**Key insight:** a single \"last-writer-wins\" timestamp per value is broken for LWW sets — it lets an older `remove` clobber a newer `add`, and lets a stale `add` resurrect a tombstoned value. The correct LWW-Element-Set keeps **two monotonic maps per value** (add-timestamps and remove-timestamps), and every operation/merge is a *per-key max*. Membership is decided by comparing the two timestamps.\n\nFile: `/home/kara/js-lww-element-set-convergence/lww.js`\n\n```js\nclass LWWElementSet {\n  constructor() {\n    this._adds = new Map(); // value -> highest add timestamp\n    this._rems = new Map(); // value -> highest remove timestamp (tombstone)\n  }\n\n  add(value, ts) {                    // idempotent: only raises the timestamp\n    const cur = this._adds.get(value);\n    if (cur === undefined || ts > cur) this._adds.set(value, ts);\n  }\n\n  remove(value, ts) {                 // tombstone: only raises the timestamp\n    const cur = this._rems.get(value);\n    if (cur === undefined || ts > cur) this._rems.set(value, ts);\n  }\n\n  has(value) {                        // present iff newest add beats newest tombstone\n    const a = this._adds.get(value);\n    if (a === undefined) return false;\n    const r = this._rems.get(value);\n    return r === undefined || a > r;\n  }\n\n  values() {\n    const out = new Set();\n    for (const [v, a] of this._adds) {\n      const r = this._rems.get(v);\n      if (r === undefined || a > r) out.add(v);\n    }\n    return out;\n  }\n\n  merge(other) {                      // pointwise join: commutative, associative, idempotent\n    for (const [v, ts] of other._adds) {\n      const cur = this._adds.get(v);\n      if (cur === undefined || ts > cur) this._adds.set(v, ts);\n    }\n    for (const [v, ts] of other._rems) {\n      const cur = this._rems.get(v);\n      if (cur === undefined || ts > cur) this._rems.set(v, ts);\n    }\n    return this;\n  }\n\n  static merge(a, b) { return new LWWElementSet().merge(a).merge(b); }\n  // equals() compares both maps for exact state equality\n}\n```\n\n**Why it's correct:** `add`, `remove`, and `merge` all reduce to `max` per `(set, value)` key. Max is commutative, associative, and idempotent, so any interleaving of the same operation multiset yields identical internal maps — convergence follows directly.\n\n- **Older remove can't delete a newer add:** `remove('x',10)` stores tombstone `10`, but `add('x',30)` keeps `30`, and `30 > 10` → `has('x') === true`.\n- **Stale re-add can't resurrect:** after `add('x',10); remove('x',20)`, a re-add `add('x',15)` leaves the tombstone dominant (`15 < 20`) → still absent. Only `add('x', ts > 20)` resurrects.",
+      "evidence": "Verified in `/home/kara/js-lww-element-set-convergence/test.js` with Node v22 (Node 20-compatible), **510/510 tests passing**:\n\n1. **Subtle cases (explicit, 9 tests)** — demonstrated above, including cross-replica merge forms, remove→re-add→remove cycles, tombstones for never-locally-added values, deterministic tie-breaking (`add`/`remove` at equal timestamp → removed), and `values()` accuracy.\n2. **Algebraic laws (150 seeds)** — random sets A, B, C; asserts `merge(A,B) == merge(B,A)` (commutative), `merge(merge(A,B),C) == merge(A,merge(B,C))` (associative), `merge(A,A) == A` and 4× repeated self-merge unchanged (idempotent), checked on *internal state*, not just visible membership.\n3. **Interleaving convergence (200 seeds)** — 300 ops each (5 values, overlapping timestamps, mixed add/remove) applied to 3 replicas in three different Fisher–Yates-shuffled orders; all replicas equal the ground-truth state and each other.\n4. **Merge-graph convergence (150 seeds)** — each op delivered to a random subset of replicas (partial replication), 40 randomized directed merges, then full fan-in; all replicas converge to the join of delivered ops.\n5. **Large stress (1 test)** — 5000 ops, each delivered to 1–3 replicas, 200 random merges; full convergence and state equality.\n\nOne test-harness bug was caught and fixed during verification (the merge-graph reference originally included ops delivered to *zero* replicas — the replicas themselves converged correctly), confirming the assertions are meaningful.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "js-lww-element-set-convergence",
+        "result": "passed",
+        "tests": 510
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 22:53:01"
+    }
+  ]
+}

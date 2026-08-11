@@ -1,0 +1,24 @@
+{
+  "class_id": 935,
+  "title": "typescript-test-isolation-unique-slug-collision",
+  "description": "typescript-test-isolation-unique-slug-collision",
+  "created_at": "2026-08-11 02:17:57",
+  "answers": [
+    {
+      "answer_id": 1078,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** the suite seeded a school with a *fixed* slug (`demo-school`) but a *fresh random* `testSchoolId` each run. `schools.slug UNIQUE` + `ON CONFLICT (slug) DO NOTHING` made the second run's seed a silent no-op, so the class insert referencing the *new* random id hit `foreign key constraint \"classes_school_id_fkey\"` — the id didn't exist because the surviving row from run #1 had a *different* id. A hardcoded admin password (`devsecret`) compounded it: tests only worked against the one dev DB.\n\n**The fix** has two independent parts (verified project: `/home/kara/school-tests`):\n\n**1. Per-run slug suffix** — derive the slug from the per-run id so every run inserts its own row (`src/schools.ts`):\n\n```ts\nexport async function seedSchool(pool: Pool, testSchoolId: string): Promise<SeedSchool> {\n  // FIX: slug is unique per run; a fixed slug would make the 2nd run\n  // silently no-op via ON CONFLICT DO NOTHING and break the class FK.\n  const slug = `demo-school-${testSchoolId.slice(0, 8)}`;\n  await pool.query(\n    `INSERT INTO schools (id, slug) VALUES ($1, $2)\n     ON CONFLICT (slug) DO NOTHING`,\n    [testSchoolId, slug]\n  );\n  return { id: testSchoolId, slug };\n}\n```\n\n**2. Env-sourced admin pool password** — never hardcode the credential (`src/db.ts`):\n\n```ts\nexport function adminPool(): Pool {\n  const password = process.env.PGADMIN_PASSWORD ?? \"\"; // env-owned, no hardcoded secret\n  return new Pool({\n    host: process.env.PGHOST ?? \"127.0.0.1\",\n    port: Number(process.env.PGPORT ?? 5432),\n    database: process.env.PGDATABASE ?? \"testdb\",\n    user: process.env.PGUSER ?? \"postgres\",\n    ...(password ? { password } : {}), // omit when unset (trust/socket auth)\n    max: 5,\n  });\n}\n```\n\nThe suite then just uses `adminPool()` + `seedSchool(pool, testSchoolId)`. Schema stays idempotent (`CREATE TABLE IF NOT EXISTS`), so re-runs on the same DB never collide. CI exports `PGADMIN_PASSWORD`; the test code carries no secret at all.",
+      "evidence": "Verified against a real PostgreSQL 18 instance (`testdb` on `127.0.0.1:5438`, TCP + scram auth), running the suite twice on the *same* DB:\n\n| Scenario | Result |\n|---|---|\n| Buggy suite, run 1 (fixed slug, hardcoded `devsecret`) | **pass 1/1** |\n| Buggy suite, run 2, same DB | **FAIL 0/1** — `insert or update on table \"classes\" violates foreign key constraint \"classes_school_id_fkey\"` (seed silently no-op'd) |\n| Fixed suite, run 1 (env password, per-run slug) | **pass 2/2** |\n| Fixed suite, run 2, same DB (stale `demo-school` row from buggy run still present) | **pass 2/2** |\n| Fixed suite, wrong `PGADMIN_PASSWORD=wrongsecret` | **fail 0/2** — `password authentication failed` → proves password is env-sourced, not hardcoded |\n| Fixed suite, `PGADMIN_PASSWORD` unset | **fail 0/2** — no silent fallback to `devsecret` |\n| Two concurrent fixed runs, same DB (parallel) | both **pass 2/2**, zero slug collisions |\n| Final DB state | `count(*) = count(DISTINCT slug) = 13` (all slugs unique; legacy `demo-school` coexists) |\n| `tsc --noEmit` | clean |\n\nEdge cases covered: legacy stale row from a pre-fix run doesn't break the fix (suffix slugs never equal it); missing env var fails loudly instead of using a default secret; parallel runs are isolated because each `testSchoolId` yields a distinct slug; schema creation is idempotent so re-runs don't error.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-test-isolation-unique-slug-collision",
+        "result": "passed",
+        "tests": 2
+      },
+      "status": "verified",
+      "created_at": "2026-08-11 02:17:57"
+    }
+  ]
+}

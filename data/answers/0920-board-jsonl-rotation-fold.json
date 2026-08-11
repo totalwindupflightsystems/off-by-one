@@ -1,0 +1,24 @@
+{
+  "class_id": 920,
+  "title": "board-jsonl-rotation-fold",
+  "description": "board-jsonl-rotation-fold",
+  "created_at": "2026-08-10 23:40:15",
+  "answers": [
+    {
+      "answer_id": 1062,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** the B2F rotation-battery re-execution leaves `test-state.toml`, `b2f/*.md`, and `_index.md` dirty after the light-audit tick, and nothing appends the corresponding audit event — so the board header's `last_commit` goes stale and the jsonl/db mirrors drift. The fix is a deterministic **fold** run after each tick, in exactly this order:\n\n1. **content commit** — `test-state.toml`, `b2f/*.md`, `_index.md` → `test(board): fold B2F rotation battery output`\n2. **event append** — `append_board_event.py --set ticks_total=<n> --set ticks_idle=0 --set last_commit=<content-hash>` (FAT-shape `audit_tick` row; header `last_commit` = content hash; `ticks_idle` always 0 because light-audit ticks never idle)\n3. **chore commit** — `board/board.jsonl` + `board/board.db` → `chore(board): append rotation audit tick`\n\nImplementation (`/tmp/fold-fix/fold_rotation.py`, the fix):\n\n```python\n# 1) classify the dirty tree: content paths vs board paths\nproc = git(repo, \"status\", \"--porcelain\", \"--untracked-files=all\")\nfor line in proc.stdout.splitlines():\n    status, path = line[:2].strip(), line[3:]\n    if status:\n        if is_content(path): content.append(path)      # test-state.toml, b2f/, _index.md\n        elif path.startswith(\"board/\"): board.append(path)\n\n# 2) content commit FIRST (its hash is the event's last_commit)\nif content:\n    git(repo, \"add\", \"--\", *content)\n    git(repo, \"commit\", \"-m\", \"test(board): fold B2F rotation battery output\")\ncontent_hash = git(repo, \"rev-parse\", \"HEAD\").stdout.strip()\n\n# 3) FAT-shape audit event; header last_commit = content hash, ticks_idle = 0\ncmd = [sys.executable, APPEND_BOARD_EVENT, \"--board\", board_jsonl_abs, \"--db\", board_db_abs,\n       \"--set\", \"event=audit_tick\", \"--set\", \"battery=B2F\", \"--set\", \"rotation=true\",\n       \"--set\", \"ticks_total=%d\" % ticks_total, \"--set\", \"ticks_idle=0\",\n       \"--set\", \"last_commit=%s\" % content_hash]\nsubprocess.run(cmd, check=True)\n\n# 4) chore(board) commit for jsonl + db mirror\ngit(repo, \"add\", \"--\", board_jsonl_rel, board_db_rel)\ngit(repo, \"commit\", \"-m\", \"chore(board): append rotation audit tick\")\n```\n\nSupporting `append_board_event.py` keeps jsonl and SQLite db in lock-step: line 1 of the jsonl is the header record (`last_commit`/`ticks_total`/`ticks_idle`), each later line is an event; the db mirror is **rebuilt from the jsonl** on every append so parity holds even after a torn fold. It also exposes `--parity-check` (exit 1 on jsonl-vs-db mismatch).",
+      "evidence": "Verified with a 39-assertion end-to-end harness (`/tmp/fold-fix/tests/test_fold.py`) that builds a real git repo, seeds the board, re-executes the rotation battery, and runs the fold — plus manual runs from different cwds. **39/39 assertions pass.** Confirmed:\n\n- **Fold order:** `git log` shows `test(board): …` then `chore(board): …` on top (content commit is always first). ✔\n- **Commit split:** content commit touches exactly `{test-state.toml, b2f/grades.md, b2f/grades-r2.md, _index.md}`; chore commit touches exactly `{board/board.jsonl, board/board.db}`. ✔\n- **Header contract:** `last_commit == <content hash>` (e.g. `9f0feb784937…`), `ticks_idle == 0`, `ticks_total` increments 0→1→2 across consecutive ticks. ✔\n- **FAT event shape:** `{\"event\":\"audit_tick\",\"battery\":\"B2F\",\"rotation\":true,\"ticks_total\":1,\"ticks_idle\":0,\"last_commit\":\"9f0feb78…\"}`. ✔\n- **Parity:** jsonl-vs-db check returns OK after every fold; returns 1 when a header/event is corrupted by hand, then the fold heals it. ✔\n- **Edge cases:** clean tree → no-op (no new commits); board-only drift (torn fold) → healed with a `chore(board)` commit, no spurious content commit, `ticks_total` not advanced; untracked-collapsed dirs handled via `--untracked-files=all`; relative/absolute board paths and running from the repo cwd both work.\n\nTwo real bugs were caught and fixed by the harness: (a) board paths were passed relative to the tool's cwd, writing events outside the repo; (b) the db mirror only appended instead of rebuilding, breaking parity after drift.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "board-jsonl-rotation-fold",
+        "result": "passed",
+        "tests": 39
+      },
+      "status": "verified",
+      "created_at": "2026-08-10 23:40:15"
+    }
+  ]
+}

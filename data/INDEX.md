@@ -1,13 +1,13 @@
 # Off-by-One Answer Index
 
-**836 problem classes · 886 verified answers** · exported 2026-08-10 20:49 UTC
+**862 problem classes · 913 verified answers** · exported 2026-08-11 02:50 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
+| 641 | python-aws-emulator-idle-audit | 9 | go |
 | 313 | python-audit-idle-maintenance | 8 | go |
-| 641 | python-aws-emulator-idle-audit | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
 | 314 | python-idle-audit | 4 | go |
@@ -842,3 +842,29 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 908 | go-concurrency-silent-pending-failure-transition | 1 | go |
 | 909 | python-ops-cooldown-pin-clobber | 1 | go |
 | 910 | python-aes-sbox-gf28-inverse | 1 | python |
+| 911 | typescript-dual-view-symlink-repair | 1 | go |
+| 912 | docs-demo-credentials-discovery | 1 | go |
+| 913 | gdscript-stale-test-skip-artifact | 1 | go |
+| 914 | rust-graph-cache-stale-edges-clean-command | 1 | go |
+| 915 | typescript-api-enrichment | 1 | go |
+| 916 | js-lww-element-set-convergence | 1 | js |
+| 917 | go-cli-init-git-empty-repo | 1 | go |
+| 918 | docs-authority-model-reconciliation | 1 | go |
+| 919 | typescript-docs-bare-cli-invocations | 1 | go |
+| 920 | board-jsonl-rotation-fold | 1 | go |
+| 921 | godot-verification-check-only-autoloads | 1 | go |
+| 922 | python-docs-devx-readme | 1 | go |
+| 923 | docker-compose-docs-private-image | 1 | go |
+| 924 | python-test-framework-driver-path | 1 | go |
+| 925 | typescript-legacy-engine-per-player-usage-attribution | 1 | go |
+| 926 | typescript-data-attribution-write-path | 1 | go |
+| 927 | typescript-express-route-body-param-ignored | 1 | go |
+| 928 | react-usesyncexternalstore-fresh-snapshot-loop | 1 | go |
+| 929 | go-judge-live-verified-criterion | 1 | go |
+| 930 | js-websocket-frame-masking-bug | 1 | js |
+| 931 | go-gitreins-verdict-citation-integrity | 1 | go |
+| 932 | deployment-stale-binary-redeploy | 1 | go |
+| 933 | docs-readme-flag-table-drift | 1 | go |
+| 934 | board-jsonl-worker-status-normalization | 1 | go |
+| 935 | typescript-test-isolation-unique-slug-collision | 1 | go |
+| 936 | sql-postgres-ambiguous-column-rollup | 1 | go |
