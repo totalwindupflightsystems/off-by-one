@@ -93,7 +93,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
 
 ```json
 {
-  "submission_id": "sub-...",
+  "submission_id": "sub_...",
   "problem_class": "so-nil-pointer-deref",
   "status": "queued",
   "position": 1,
@@ -114,12 +114,12 @@ Use the submission ID returned by `submit` to track progress.
 ### Check one submission
 
 ```bash
-curl -s http://localhost:8766/api/v1/queue/sub-...
+curl -s http://localhost:8766/api/v1/queue/sub_...
 ```
 
 ```json
 {
-  "submission_id": "sub-...",
+  "submission_id": "sub_...",
   "problem_class": "so-nil-pointer-deref",
   "status": "in_progress",
   "stage": "sandbox_solve",
@@ -293,7 +293,7 @@ When a duplicate is detected, the API returns HTTP `409 Conflict` with a body li
 
 ```json
 {
-  "submission_id": "sub-...",
+  "submission_id": "sub_...",
   "problem_class": "so-nil-pointer-deref",
   "status": "deduplicated",
   "position": 1,

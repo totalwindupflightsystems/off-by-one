@@ -49,7 +49,7 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
 
 ```json
 {
-  "submission_id": "sub-abc123",
+  "submission_id": "sub_abc123",
   "problem_class": "so-nil-pointer-deref",
   "status": "queued",
   "position": 1,
@@ -334,7 +334,7 @@ List all queued submissions. Optionally filter by `status`.
 {
   "entries": [
     {
-      "submission_id": "sub-abc123",
+      "submission_id": "sub_abc123",
       "problem_class": "so-nil-pointer-deref",
       "status": "pending",
       "stage": "queued",
@@ -379,7 +379,7 @@ Same `QueueEntry` shape as the list endpoint.
 **Example**
 
 ```bash
-curl -s http://localhost:8766/api/v1/queue/sub-abc123
+curl -s http://localhost:8766/api/v1/queue/sub_abc123
 ```
 
 ---
