@@ -1,0 +1,24 @@
+{
+  "class_id": 1012,
+  "title": "typescript-cli-error-handling",
+  "description": "typescript-cli-error-handling",
+  "created_at": "2026-08-12 14:42:31",
+  "answers": [
+    {
+      "answer_id": 1163,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The Mythos CLI had three related defects in the `batch` path, all reproduced and fixed in `/home/kara/mythos-cli` (commits `abb91ab` → `9f667cb`):\n\n**Before** — `mythos batch` outside a project:\n```\n[provider:fs] version=1.0.0 module=/tmp/mythos-repro/outside-project/providers/fs.js   ← absolute path leak\nFatal error: No project loaded: cannot find mythos.json in /tmp/... or any parent.      ← bare, no guidance\nEXIT=2                                                                                   ← wrong exit code\n```\n\n**1. Gate ProviderRegistry diagnostics behind verbosity** — the registry's diagnostics include absolute on-disk module paths, so they're only emitted when the user opted in (`--verbose` or `MYTHOS_VERBOSE=1`):\n\n```ts\n// src/provider.ts\nprivate logDiagnostics(verbose: boolean): void {\n  if (!verbose) return;                    // gate: default runs never leak paths\n  for (const p of this.providers.values()) {\n    console.error(`[provider:${p.name}] version=${p.version} module=${p.modulePath}`);\n  }\n}\ninitialize(verbose: boolean): void { this.logDiagnostics(verbose); }\n```\n\n**2. Propagate `MYTHOS_VERBOSE` to backend services** — spawned children get an explicit normalized env var (never stale/missing), from the CLI's resolved verbosity (`--verbose` wins over env fallback via `src/config.ts`):\n\n```ts\n// src/backend.ts\nexport function spawnBackend(command: string, args: string[], opts: BackendOptions): Promise<number> {\n  const env: NodeJS.ProcessEnv = { ...process.env, MYTHOS_VERBOSE: opts.verbose ? '1' : '0' };\n  return new Promise((resolve, reject) => {\n    const child = spawn(command, args, { env, stdio: 'inherit' });\n    child.on('error', reject);\n    child.on('exit', (code) => resolve(code ?? 1));\n  });\n}\n```\n\n**3. Remap `StorageError` in the CLI catch-all + exit 1** — instead of a bare `Fatal error:` line, the catch-all detects the storage failure and gives actionable guidance, always exiting 1:\n\n```ts\n// src/cli.ts — main().catch(...)\nif (e instanceof StorageError || e.name === 'StorageError') {\n  console.error(\n    `mythos: ${e.message}\\n` +\n    'No project is loaded in this directory.\\n' +\n    'Run `mythos init` to create a project here, then try again.',\n  );\n} else {\n  console.error(`Fatal error: ${e.message}`);   // unrelated errors keep the prefix\n}\nprocess.exitCode = 1;\n```\n\n**After** — `mythos batch` outside a project:\n```\nmythos: No project loaded: cannot find mythos.json in /tmp/... or any parent directory.\nNo project is loaded in this directory.\nRun `mythos init` to create a project here, then try again.\nEXIT=1\n```",
+      "evidence": "Reproduced the bug against the committed buggy baseline (`git worktree` at `abb91ab`), applied the fix, and verified with a child-process harness (`test/run-tests.mjs`, 21 assertions) run via `npm test`:\n\n| Check | Buggy | Fixed |\n|---|---|---|\n| Harness result | **10 failed** | **21/21 passed** |\n| Outside-project exit code | 2 | 1 |\n| `mythos init` hint on stderr | missing | present |\n| Absolute provider path (`/providers/fs.js`) leak | leaked | absent by default, shown only under `--verbose`/`MYTHOS_VERBOSE=1` |\n| Backend service sees `MYTHOS_VERBOSE` | undefined | `1` with flag, `0` without |\n| In-project `init`+`batch` | n/a | exit 0, \"Batch finished\" |\n| Unrelated fatal (unknown command) | exit 2 | exit 1, `Fatal error:` prefix kept |\n\nEdge cases covered: env-only verbosity (`MYTHOS_VERBOSE=1` without flag gates diagnostics on — T5), stale parent env normalized to explicit `1`/`0` rather than pass-through (T7), verbose outside-project still exits 1 with hint (T2), StorageError detection via `name` as well as `instanceof` to survive module duplication. Verified from clean state: `rm -rf dist && npm test` → `21 passed, 0 failed`.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-cli-error-handling",
+        "result": "passed",
+        "tests": 21
+      },
+      "status": "verified",
+      "created_at": "2026-08-12 14:42:31"
+    }
+  ]
+}

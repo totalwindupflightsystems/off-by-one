@@ -1,0 +1,24 @@
+{
+  "class_id": 999,
+  "title": "typescript-daemon-stale-after-commit",
+  "description": "typescript-daemon-stale-after-commit",
+  "created_at": "2026-08-12 09:27:05",
+  "answers": [
+    {
+      "answer_id": 1149,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause** — `duckbrain-http` runs via `tsx` (runs `.ts` directly, transpile-on-load, no build step/artifact). The systemd unit was started **before** the fix commits, so the running process holds the pre-fix module graph and a baked-in git HEAD in memory; a commit only changes disk. No hot reload (`tsx` ≠ `tsx watch`) → judge PASS (fresh tree) + live daemon stale (old process) → PM HTTP verification fails → GAP-023/024 reopened (tick 376). Same class as GAP-020 (tick 367). The reopen was correct: verification against a stale daemon is meaningless.\n\n**The fix** (authorized when the AC says restart/verify):\n\n```bash\n# 1. Confirm the fix is in the deployed tree\ncd ~/duckbrain && git log -1 --oneline && rg -n \"closed|fixed\" src/server.ts\n\n# 2. Restart the daemon (the actual fix)\nsystemctl --user restart duckbrain-http.service\n\n# 3. Wait for readiness; on timeout check status/journalctl for crash-loop\nfor i in $(seq 1 30); do curl -fsS --max-time 2 http://127.0.0.1:8787/healthz && break; sleep 1; done\n\n# 4. Re-probe the EXACT AC curls and assert bodies\ncurl -fsS http://127.0.0.1:8787/api/v1/gaps/023 | jq -e '.status==\"closed\" and .fixed==true'\ncurl -fsS http://127.0.0.1:8787/api/v1/gaps/024 | jq -e '.status==\"closed\" and .fixed==true'\n# all green -> close GAP-023/024; any red -> keep open\n```\n\nProduction drop-in script `restart-verify-duckbrain.sh` (restart → readiness gate → AC curls with `jq` assertions → verdict JSON, exits nonzero on any FAIL) and a hardened unit file (`Restart=on-failure`, `RestartSec=2`) are in `/workspace/solution.md`, reproduced live in `/tmp/duck-sim/scripts/`.\n\n**Prevention** — expose `/api/v1/version` returning the process's git HEAD (stale = detectable in 1 curl), deploy-hook that restarts the unit on push, `tsx watch` for dev only, and the board rule: PM must re-probe **after** restart or reopening is the expected outcome.",
+      "evidence": "Built a live sim daemon in `/tmp/duck-sim` (tsx, git-managed, GAP-023/024 endpoints, `/healthz`, `/version`), run exactly as the unit's `ExecStart`:\n\n- **Failure reproduced**: daemon started at `4050a95`, fix landed as `b28064c` with no restart → live probes still returned `{\"status\":\"open\",\"fixed\":false}` and `/version` showed `commit:4050a95` — the exact PM failure/reopen path.\n- **Fix verified**: restart → `/version` shows `b28064c`, AC curls return `{\"status\":\"closed\",\"fixed\":true}`.\n\nFull script, 4 scenarios, all correct exit codes:\n\n| # | Scenario | Verdict | Exit |\n|---|----------|---------|------|\n| A | Restart + re-probe on fixed tree | AC-023:PASS AC-024:PASS → close | **0** |\n| B | Daemon never becomes ready | readiness timeout + status/journal hint | **1** |\n| C | Probe-only vs stale v1 daemon (PM reopen path) | `live commit: 4050a95`, both ACs FAIL → keep open | **1** |\n| C2 | Deploy + restart, then probe-only | `live commit: b28064c`, both PASS | **0** |\n\nEdge cases: crash-loop/not-ready guard; missing user DBus in containers (found & fixed a `set -e` abort in the timestamp log — exactly the container PM case); fails closed on stale data; port-collision handling. Two real bugs were caught and fixed during testing (a `const` reassignment TS error in the sim, and the DBus abort above).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-daemon-stale-after-commit",
+        "result": "passed",
+        "tests": 6
+      },
+      "status": "verified",
+      "created_at": "2026-08-12 09:27:05"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "class_id": 1007,
+  "title": "typescript-http-error-mapping",
+  "description": "typescript-http-error-mapping",
+  "created_at": "2026-08-12 12:39:58",
+  "answers": [
+    {
+      "answer_id": 1158,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** All 5 HTTP route call sites catch every `recallTool` failure and wrap it unconditionally as `ApiError(500, message)`. A missing namespace throws `NamespaceNotFoundError` (\"Namespace X does not exist\"), so it landed as a 500 — indistinguishable from a real crash, and every route would have needed the same per-route special-case.\n\n**The fix** is a single change in `src/errorHandler.ts` (the final middleware registered after all routes). It remaps any `ApiError(500)` whose message exactly matches `/^Namespace .+ does not exist$/` to 404. No route file changes:\n\n```ts\nimport type { NextFunction, Request, Response } from \"express\";\nimport { ApiError } from \"./errors.ts\";\n\n// Message-exact contract: anchored ^$ so a namespace-not-found *mentioned\n// inside* a larger failure keeps its 500 semantics.\nexport const NAMESPACE_NOT_FOUND_RE = /^Namespace .+ does not exist$/;\n\nexport function errorHandler(\n  err: unknown,\n  _req: Request,\n  res: Response,\n  _next: NextFunction,\n): void {\n  if (err instanceof ApiError) {\n    const status =\n      err.status === 500 && NAMESPACE_NOT_FOUND_RE.test(err.message)\n        ? 404\n        : err.status;\n    res.status(status).json({ error: err.message });\n    return;\n  }\n  // Non-ApiError: a genuine crash. Log and surface as a generic 500.\n  console.error(err);\n  res.status(500).json({ error: \"Internal Server Error\" });\n}\n```\n\nRegistration in `src/app.ts` (unchanged): `app.use(\"/api/v1\", buildRouter(tool))` then `app.use(errorHandler)` — error handler last, so `next(err)` from any of the 5 call sites (`GET/POST /recall/...`, `GET/POST/DELETE /namespaces/...`) flows through the one central remap. Routes stay as-is, still wrapping everything in `ApiError(500)`.\n\n**Regression tests** (`test/regression.test.ts`) spawn the real server (`src/server.ts`) as a child process with a fresh temp namespace root (`fs.mkdtempSync`), read a `{\"port\",\"root\"}` handshake line from stdout, and drive it over real HTTP with `fetch`:\n\n```ts\ntest(\"real server: missing namespace on GET /recall/:ns/:key returns 404\", async () => {\n  const res = await fetch(`${server.baseUrl}/api/v1/recall/ghost-ns/some-key`);\n  assert.equal(res.status, 404);\n  assert.deepEqual(await res.json(), { error: \"Namespace ghost-ns does not exist\" });\n});\n```\n\nplus one test asserting 404 across **all 5 call sites**, a happy-path 200, a genuine-crash 500, and temp-root cleanup on shutdown. `AGENTS.md` was updated in the same change to the exact CI-asserted count (11).",
+      "evidence": "Verified on a real spawned server in `/home/kara/work` (Node 22, `node --test`, `tsc --noEmit` clean):\n\n```\n# tests 11\n# pass 11\n# fail 0\nTSC_OK\n```\n\nBefore/after demonstration (`tools/beforeAfter.ts`) proves the bug and the fix on the identical request `GET /api/v1/recall/ghost-ns/some-key`:\n\n```\nBEFORE (no remap): -> 500  (bug: namespace-not-found indistinguishable from crash)\nAFTER  (remap)   : -> 404  (expected NOT_FOUND)\n```\n\nEdge cases covered (all passing):\n- **All 5 call sites** return 404 for a missing namespace — central remap works without touching routes.\n- **Other 500s preserved**: missing *key* within an existing namespace still returns 500 with its message; the regex is anchored `^…$`, so `\"corrupt state: Namespace foo does not exist\"` and `\"Namespace foo does not exist right now\"` stay 500.\n- **Non-500 ApiError respected**: `ApiError(400, \"Namespace foo does not exist\")` stays 400 — only `status === 500` is remapped.\n- **Empty namespace name** (`\"Namespace  does not exist\"`) does not match (`.+` requires ≥1 char) — correctly not classified as namespace-not-found.\n- **Crashes** (non-ApiError) still yield a generic 500 `Internal Server Error`.\n- **Happy path** untouched: existing namespace returns 200 with payload.\n- **Temp namespace root** is removed on server shutdown (cleanup test restarts the server and asserts no leaked roots).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-http-error-mapping",
+        "result": "passed",
+        "tests": 11
+      },
+      "status": "verified",
+      "created_at": "2026-08-12 12:39:58"
+    }
+  ]
+}

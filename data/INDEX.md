@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**923 problem classes · 981 verified answers** · exported 2026-08-12 08:58 UTC
+**938 problem classes · 997 verified answers** · exported 2026-08-12 14:58 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 13 | go, python |
+| 641 | python-aws-emulator-idle-audit | 14 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 5 | go |
@@ -929,3 +929,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 995 | go-docs-toolchain-version-drift | 1 | go |
 | 996 | go-async-node-promise-swallow | 1 | go |
 | 997 | formal-buchi-emptiness-scc | 1 | python |
+| 998 | go-tests-lock-blocked-ddl-hang | 1 | go |
+| 999 | typescript-daemon-stale-after-commit | 1 | go |
+| 1000 | distributed-systems-iteration-budget-design-handoff | 1 | go |
+| 1001 | python-driver-cursor-timeout-kwarg | 1 | go |
+| 1002 | typescript-cli-event-loop-hang | 1 | go |
+| 1003 | go-config-schema-default-drift | 1 | go |
+| 1004 | go-cli-flag-parser-unknown-flags | 1 | go |
+| 1005 | crypto-ecdsa-reused-nonce-private-key-recovery | 1 | python |
+| 1006 | python-cli-entrypoint-package-execution | 1 | go |
+| 1007 | typescript-http-error-mapping | 1 | go |
+| 1008 | go-startup-connection-error-handling | 1 | go |
+| 1009 | algo-kth-smallest-pair-distance | 1 | go |
+| 1010 | db-btree-min-degree-operations | 1 | python |
+| 1011 | go-test-hang-tickdt-zero-frozen-simtime | 1 | go |
+| 1012 | typescript-cli-error-handling | 1 | go |
