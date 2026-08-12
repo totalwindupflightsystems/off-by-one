@@ -142,7 +142,7 @@ def class_page(stem, data):
     return html
 
 
-def landing_index(classes, counts):
+def landing_index(classes, counts, gen_date=None):
     total_classes = len(classes)
     total_answers = sum(len(c["answers"]) for c in classes)
     langs = {}
@@ -266,11 +266,23 @@ def landing_index(classes, counts):
 </div>
 </div>
 <div class="band"><h2>Answers one step ahead.</h2><p>{total_classes} problem classes · {total_answers} verified answers — growing every day.</p><a class="btn" href="https://github.com/totalwindupflightsystems/off-by-one">Get the repo</a></div>
-<div class="wrap foot" style="max-width:1020px"><span>© 2026 Off-By-One · MIT licensed · generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</span></div>
+<div class="wrap foot" style="max-width:1020px"><span>© 2026 Off-By-One · MIT licensed · generated {gen_date or '2026'}</span></div>
 </body>
 </html>
 """
     return html
+
+
+def corpus_date():
+    """Newest answer file mtime — stable across regeneration runs (the
+    footer/sitemap date must not change when the corpus hasn't)."""
+    latest = 0
+    for fn in os.listdir(DATA_DIR):
+        if fn.endswith(".json"):
+            latest = max(latest, os.path.getmtime(os.path.join(DATA_DIR, fn)))
+    if not latest:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(latest, timezone.utc).strftime("%Y-%m-%d")
 
 
 def main():
@@ -287,8 +299,9 @@ def main():
         stems.append(stem)
 
     # Landing
+    gen_date = corpus_date()
     with open(os.path.join(OUT_DIR, "index.html"), "w") as f:
-        f.write(landing_index(classes, None))
+        f.write(landing_index(classes, None, gen_date))
     print(f"index.html: {len(classes)} classes / {sum(len(c['answers']) for c in classes)} answers")
 
     # Class pages
@@ -300,12 +313,12 @@ def main():
             f.write(html)
 
     # Sitemap
-    lastmod = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    gen_date = corpus_date()
     with open(os.path.join(OUT_DIR, "sitemap.xml"), "w") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n')
-        f.write(f"  <url><loc>https://ob1.it.com/</loc><lastmod>{lastmod}</lastmod><changefreq>daily</changefreq></url>\n")
+        f.write(f"  <url><loc>https://ob1.it.com/</loc><lastmod>{gen_date}</lastmod><changefreq>daily</changefreq></url>\n")
         for stem in stems:
-            f.write(f"  <url><loc>https://ob1.it.com/classes/{stem}.html</loc><lastmod>{lastmod}</lastmod></url>\n")
+            f.write(f"  <url><loc>https://ob1.it.com/classes/{stem}.html</loc><lastmod>{gen_date}</lastmod></url>\n")
         f.write("</urlset>\n")
 
     # Robots

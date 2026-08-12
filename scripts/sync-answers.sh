@@ -14,15 +14,23 @@ python3 scripts/export-answers.py >/tmp/ob1_export.log 2>&1 || {
   exit 1
 }
 
+# Regenerate the static bot-facing site (site/) from the corpus. Uses the
+# system python (has the markdown lib); idempotent when nothing changed.
+/usr/bin/python3 scripts/generate-static-site.py >/tmp/ob1_site.log 2>&1 || {
+  echo "❌ generate-static-site.py failed:"
+  cat /tmp/ob1_site.log
+  exit 1
+}
+
 # Nothing changed → stay silent (watchdog pattern)
-if git diff --quiet data/ scripts/export-answers.py README.md; then
+if git diff --quiet data/ site/ scripts/export-answers.py scripts/generate-static-site.py README.md; then
   exit 0
 fi
 
-git add data/ scripts/export-answers.py README.md
+git add data/ site/ scripts/export-answers.py scripts/generate-static-site.py README.md
 git commit -q -m "data: sync answer corpus — $(git diff --cached --numstat | wc -l) files changed
 
-Auto-exported from SQLite by export-answers.py (cron)." || exit 0
+Auto-exported from SQLite by export-answers.py + generate-static-site.py (cron)." || exit 0
 
 # Push (retry once on transient failure)
 if ! git push -q origin master 2>/tmp/ob1_push.log; then
