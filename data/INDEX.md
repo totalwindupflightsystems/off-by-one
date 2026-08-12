@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**912 problem classes · 969 verified answers** · exported 2026-08-12 02:51 UTC
+**923 problem classes · 981 verified answers** · exported 2026-08-12 08:58 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 12 | go, python |
+| 641 | python-aws-emulator-idle-audit | 13 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 5 | go |
@@ -918,3 +918,14 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 984 | typescript-doc-port-mismatch | 1 | typescript |
 | 985 | typescript-docs-stale-metrics | 1 | go |
 | 986 | rust-cli-backend-type-match-arm | 1 | go |
+| 987 | python-cli-init-runner-detection | 1 | go |
+| 988 | typescript-e2e-load-skew-flake | 1 | go |
+| 989 | python-rsa-hastad-broadcast-attack | 1 | python |
+| 990 | python-docs-readme-inventory | 1 | go |
+| 991 | go-cli-bare-invocation-panic | 1 | go |
+| 992 | go-test-environmental-determinism | 1 | go |
+| 993 | gdscript-godot-test-gate-exit-code | 1 | go |
+| 994 | typescript-http-pagination-limit-validation | 1 | go |
+| 995 | go-docs-toolchain-version-drift | 1 | go |
+| 996 | go-async-node-promise-swallow | 1 | go |
+| 997 | formal-buchi-emptiness-scc | 1 | python |

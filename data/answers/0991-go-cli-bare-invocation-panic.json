@@ -1,0 +1,24 @@
+{
+  "class_id": 991,
+  "title": "go-cli-bare-invocation-panic",
+  "description": "go-cli-bare-invocation-panic",
+  "created_at": "2026-08-12 05:50:11",
+  "answers": [
+    {
+      "answer_id": 1140,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** `main()` defaulted `cmd` to `\"run\"` and then unconditionally evaluated `os.Args[2:]`. On a bare invocation `os.Args` has length 1, so `os.Args[2:]` computes high=2, low-cap=1 → `panic: runtime error: slice bounds out of range [2:1]`.\n\n**Buggy code (before):**\n\n```go\nfunc main() {\n\tcmd := \"run\" // default\n\tif len(os.Args) > 1 {\n\t\tcmd = os.Args[1]\n\t}\n\tswitch cmd {\n\tcase \"run\":\n\t\trun(os.Args[2:]) // panic when os.Args has length 1\n\tcase \"help\", \"-h\", \"--help\":\n\t\tusage()\n\tdefault:\n\t\tusage()\n\t}\n}\n```\n\n**Fix 1 — guard bare invocation (Go):** check `len(os.Args) < 2` before touching `os.Args[2:]`, slice the args once, and print usage with a non-zero exit:\n\n```go\nfunc main() {\n\tif len(os.Args) < 2 {\n\t\tusage()\n\t\tos.Exit(2)\n\t}\n\tcmd := os.Args[1]\n\targs := os.Args[2:] // safe: len(os.Args) >= 2\n\tswitch cmd {\n\tcase \"run\":\n\t\trun(args)\n\tcase \"help\", \"-h\", \"--help\":\n\t\tusage()\n\tdefault:\n\t\tfmt.Fprintf(os.Stderr, \"dagger: unknown command %q\\n\\n\", cmd)\n\t\tusage()\n\t\tos.Exit(2)\n\t}\n}\n```\n\n**Fix 2 — correct the help wording:** the first line previously claimed bare invocation *resumes incomplete runs*. That was false — bare `dagger` (and `dagger help`) only prints help. The wording now states the truth:\n\n```text\nUsage: dagger <command> [options]\n\nCommands:\n  run      Execute a command inside the Dagger engine\n  help     Show this help\n\nBare invocation with no arguments prints this help.\n```\n\n**Fix 3 — templates `run` subcommand via params injection (JS):** adding the subcommand by emitting a `const run = {...}` into the template file caused `SyntaxError: Identifier 'run' has already been declared` (the template scope already had that binding). The executor now injects a `params` global, and the template mutates it with `Object.assign`, which never redeclares a binding:\n\n```js\n// Executor-injected global; template adds subcommands onto it:\nconst params = globalThis.__executorInjected = { hello: \"world\" };\n\n// Template body (fix): Object.assign, no new const -> no duplicate-const error.\nObject.assign(params, {\n  run: { cmd: \"execute\", args: [\"build\"] },\n});\n```\n\nThis composes safely even when a `run` (or any other) binding already exists in the template scope.\n\n---",
+      "evidence": "Verified by building and running a minimal reproduction with Go 1.26 and Node 22.\n\n**1. Bug reproduced exactly as reported (before fix):**\n\n```\n$ ./dagger        # bare invocation\npanic: runtime error: slice bounds out of range [2:1]\n\ngoroutine 1 [running]:\nmain.main()\n\tbuggy/main.go:27 +0x1b0\nexit=2\n```\n\n**2. Fixed binary — edge cases (all passed):**\n\n| Invocation | Result | Exit |\n|---|---|---|\n| `dagger` (bare) | usage printed, no panic | 2 |\n| `dagger run` | `dagger run: args=[]` | 0 |\n| `dagger run a b c` | `dagger run: args=[a b c]` | 0 |\n| `dagger help` / `-h` / `--help` | usage printed | 0 |\n| `dagger bogus` | `dagger: unknown command \"bogus\"` + usage | 2 |\n\n**3. Templates params injection (Node vm test):**\n\n```\nbuggy -> SyntaxError: Identifier 'run' has already been declared\nfixed -> params: {\"hello\":\"world\",\"run\":{\"cmd\":\"execute\",\"args\":[\"build\"]}}\nfixed -> params.run: {\"cmd\":\"execute\",\"args\":[\"build\"]}\nfixed -> no SyntaxError, run subcommand available: true\n```\n\nNo panics, no SyntaxError; bare invocation degrades to a clean usage message.\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cli-bare-invocation-panic",
+        "result": "passed",
+        "tests": 8
+      },
+      "status": "verified",
+      "created_at": "2026-08-12 05:50:11"
+    }
+  ]
+}
