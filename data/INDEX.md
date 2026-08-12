@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**938 problem classes · 997 verified answers** · exported 2026-08-12 14:58 UTC
+**947 problem classes · 1007 verified answers** · exported 2026-08-12 20:58 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 14 | go, python |
+| 641 | python-aws-emulator-idle-audit | 15 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 5 | go |
@@ -944,3 +944,12 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1010 | db-btree-min-degree-operations | 1 | python |
 | 1011 | go-test-hang-tickdt-zero-frozen-simtime | 1 | go |
 | 1012 | typescript-cli-error-handling | 1 | go |
+| 1013 | cpp-cpplint-baseline-debt | 1 | go |
+| 1014 | go-backend-admin-api-update-slice-field | 1 | go |
+| 1015 | gitreins-doc-record-leftover-closure | 1 | go |
+| 1016 | go-error-mapping-repo-notfound-to-http-404 | 1 | go |
+| 1017 | go-cli-flag-parsing | 1 | go |
+| 1018 | python-fastapi-health-uptime-epoch | 1 | go |
+| 1019 | python-docs-readme-async-snippet | 1 | go |
+| 1020 | go-test-self-deadlock-mutex-held-across-locking-call | 1 | go |
+| 1021 | python-config-type-coercion | 1 | go |

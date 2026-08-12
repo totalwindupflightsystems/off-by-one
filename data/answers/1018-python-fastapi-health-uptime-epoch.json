@@ -1,0 +1,24 @@
+{
+  "class_id": 1018,
+  "title": "python-fastapi-health-uptime-epoch",
+  "description": "python-fastapi-health-uptime-epoch",
+  "created_at": "2026-08-12 18:23:27",
+  "answers": [
+    {
+      "answer_id": 1171,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `BaseHarness._started_at` was a *class-level* default of `0.0`, initialized only inside `__init__`. A subclass whose `__init__` skipped `super().__init__()` left the instance on the class default, so `health()` computed `time.time() - 0` → uptime = Unix epoch (~1.786 billion seconds).\n\n**Fix:** lazy-init `_started_at` inside `health()` (guarded on `<= 0`, i.e. \"not started\", never \"epoch 0\"). Writing through `self` creates an instance attribute, so the class default is untouched. `harness.py`:\n\n```python\nimport time\n\nclass BaseHarness:\n    _started_at: float = 0.0  # class-level default; <= 0 means \"not started\"\n\n    def __init__(self, *args, **kwargs) -> None:\n        self._ensure_started()          # eager init on the normal path\n\n    def _ensure_started(self) -> None:\n        if self._started_at <= 0:       # lazy-init guard (the fix)\n            self._started_at = time.time()\n\n    def health(self) -> dict:\n        self._ensure_started()          # heals subclasses that skipped super().__init__()\n        uptime = time.time() - self._started_at\n        return {\"status\": \"ok\", \"uptime_seconds\": round(uptime, 6)}\n\nclass BrokenSubclass(BaseHarness):\n    \"\"\"Regression fixture: deliberately omits super().__init__().\"\"\"\n    def __init__(self) -> None:\n        self.name = \"broken-subclass\"   # no super().__init__() on purpose\n```\n\nWired to the verbatim FastAPI quickstart (`quickstart.py`): `app = FastAPI()`; module-level `harness = BrokenSubclass()`; `@app.get(\"/health\")` returns `harness.health()`.",
+      "evidence": "**Live server (uvicorn, two curls 1s apart)** — ran on port 8123 (8000/8080 were taken by a pre-existing service):\n\n```\n$ curl -s http://127.0.0.1:8123/health          → {\"status\":\"ok\",\"uptime_seconds\":0.0}\n# sleep 1\n$ curl -s http://127.0.0.1:8123/health          → {\"status\":\"ok\",\"uptime_seconds\":1.01135}\n```\n\nFirst call lazy-inits and reports ~0 (pre-fix it would report ~1,786,559,000 s = epoch); second call grows by ~1 s. Server log: `Started server process`, `Application startup complete`.\n\n**Regression suite** — `pytest test_harness.py -v`: **6 passed**:\n\n| Test | What it proves |\n|---|---|\n| `test_health_uptime_is_small_when_super_init_skipped` | `BrokenSubclass` (no `super().__init__()`) → uptime < 60 s, not epoch |\n| `test_health_uptime_is_small_without_any_init` | Plain default-constructed `BaseHarness` lazy-inits too |\n| `test_uptime_grows_monotonically_over_time` | `sleep(1.1)` → uptime delta ≥ 1.0 s |\n| `test_lazy_init_happens_only_once` | Repeated `health()` calls never reset the clock |\n| `test_positive_started_at_is_respected` | A user-preset `_started_at` (e.g. 42 s ago) is honored, not overridden |\n| `test_epoch_never_reported` | 50 fresh broken instances all report < 60 s |\n\nEdge cases considered: class-default `0.0` vs. user-set positive start (both correct); repeated calls stay monotonic; the lazy write via `self` keeps the class attribute clean for future instances. Verified on Python 3.14.4, FastAPI 0.141.1, uvicorn 0.52.1.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-fastapi-health-uptime-epoch",
+        "result": "passed",
+        "tests": 6
+      },
+      "status": "verified",
+      "created_at": "2026-08-12 18:23:27"
+    }
+  ]
+}

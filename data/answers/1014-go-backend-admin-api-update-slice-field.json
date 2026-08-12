@@ -1,0 +1,24 @@
+{
+  "class_id": 1014,
+  "title": "go-backend-admin-api-update-slice-field",
+  "description": "go-backend-admin-api-update-slice-field",
+  "created_at": "2026-08-12 15:07:13",
+  "answers": [
+    {
+      "answer_id": 1165,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Reference implementation at `/home/kara/appconfig` (Go 1.26, zero external deps). Two gaps closed:\n\n### U-GAP-032 — `Handlers *[]HandlerDef` on the update struct\n\n**Before:** `AppConfigUpdate` had only `Name`; the admin PUT could not touch handlers, forcing callers to delete+recreate the whole app config.\n\n**After — `model.go`:** every field is a pointer so \"absent\" (`nil`) is distinguishable from \"explicitly set\" (`non-nil`):\n\n```go\ntype AppConfigUpdate struct {\n\tName     *string       `json:\"name,omitempty\"`\n\tHandlers *[]HandlerDef `json:\"handlers,omitempty\"` // pointer-to-slice: the fix\n}\n```\n\n**After — `service.go`:** nil-preserving partial update; deep-copy exactly via `append([]HandlerDef(nil), ...)`:\n\n```go\nfunc (s *Service) Update(id string, req AppConfigUpdate) (AppConfig, error) {\n\ts.mu.Lock()\n\tdefer s.mu.Unlock()\n\tcfg, ok := s.configs[id]\n\tif !ok {\n\t\treturn AppConfig{}, ErrNotFound\n\t}\n\tif req.Name != nil {\n\t\tcfg.Name = *req.Name\n\t}\n\tif req.Handlers != nil { // nil pointer -> preserve; non-nil -> replace (even empty)\n\t\tcfg.Handlers = copyHandlers(*req.Handlers) // append([]HandlerDef(nil), hs...) + nested Args copies\n\t}\n\tcfg.UpdatedAt = time.Now().UTC()\n\ts.configs[id] = cfg\n\treturn cloneConfig(cfg), nil // returned value must not alias the store\n}\n\nfunc copyHandlers(hs []HandlerDef) []HandlerDef {\n\tout := append([]HandlerDef(nil), hs...) // the prescribed pattern\n\tfor i := range out {\n\t\tif out[i].Args != nil {\n\t\t\tout[i].Args = append([]string(nil), out[i].Args...)\n\t\t}\n\t}\n\treturn out\n}\n```\n\n**Contract (verified empirically against `encoding/json`):** JSON `null` and absent both decode to a **nil pointer** → preserve; `{\"handlers\":[]}` decodes to a non-nil pointer to an empty slice → clear; `{\"handlers\":[...]}` → replace. Wire demo:\n\n```\nPUT {\"handlers\":[{\"name\":\"worker\",...}]}   -> replaces web handler in place\nPUT {\"name\":\"demo-v2\"}                     -> worker preserved, name updated\nPUT {\"handlers\":null}                      -> worker preserved (nil pointer)\nPUT {\"handlers\":[]}                        -> handlers cleared\n```\n\n### U-GAP-031 — `-version` flag with ldflags injection\n\n```go\n// main.go\nvar version = \"devel\" // default; injected via -ldflags \"-X main.version=...\"\n\nfunc main() {\n\tshowVersion := flag.Bool(\"version\", false, \"print version and exit\")\n\tflag.Parse()\n\tif *showVersion {\n\t\tfmt.Println(version)\n\t\tos.Exit(0)\n\t}\n\trunServer()\n}\n```\n\n```makefile\n# Makefile\nVERSION ?= devel\nLDFLAGS := -X main.version=$(VERSION)\nbuild:   go build -ldflags \"$(LDFLAGS)\" -o bin/appconfig .\nversion: go run -ldflags \"$(LDFLAGS)\" . -version\n```",
+      "evidence": "Verified by running the code in `/home/kara/appconfig`:\n\n- **`go test -race -count=1 ./...` — PASS, 9/9 tests**, covering:\n  - **Way 1 (preserve):** `Handlers == nil` (name-only update) leaves handlers and their `Args` bit-identical; JSON `null` also preserves.\n  - **Way 2 (replace):** non-nil pointer replaces the set — old handler gone; `[]` clears; non-nil pointer to a nil slice (programmatic caller) clears.\n  - **Deep copy:** mutating the caller's slice/`Args` after `Update` and mutating the *returned* config both fail to leak into the store (store returns a clone; no shared backing arrays).\n  - `ErrNotFound`, and HTTP-level `TestAdminPUTNilAndSetHandlers`/`TestAdminPUTNotFound` (httptest).\n- **`gofmt`/`go vet` clean.**\n- **Live server smoke test** on `ADDR=:18081` via curl confirmed all four wire cases (replace / preserve-on-omit / preserve-on-null / clear-on-empty) against the real `net/http` server.\n- **Version flag:** plain `go build` → `devel`; `go build -ldflags \"-X main.version=v2.0.0-rc1\"` → `v2.0.0-rc1`; `make version VERSION=v9.9.9` → `v9.9.9`; `make build` defaults to `devel`.\n\nEdge cases handled: `append(nil, empty...)` yields nil (documented in test — observable contract is `len == 0`, i.e. \"cleared\"); JSON `null` ≡ absent at the Go level (both nil pointer → preserve) since `encoding/json` nils the pointer for `null`; returned/GET configs are deep-cloned so no aliasing with the store or callers.",
+      "signatures": {
+        "model": "gpt-5.6-sol/openai-codex",
+        "problem_class": "go-backend-admin-api-update-slice-field",
+        "result": "passed",
+        "tests": 9
+      },
+      "status": "verified",
+      "created_at": "2026-08-12 15:07:13"
+    }
+  ]
+}
