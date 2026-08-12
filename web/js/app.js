@@ -60,6 +60,24 @@
   const valid = Array.from(tabs).some((t) => t.dataset.view === initial);
   activateView(valid ? initial : 'home');
 
+  // ---------- Theme toggle ----------
+  const themeBtn = document.getElementById('theme-toggle');
+  function paintThemeIcon() {
+    if (!themeBtn) return;
+    const dark = document.documentElement.getAttribute('data-theme') === 'dark';
+    themeBtn.textContent = dark ? '☀️' : '🌙';
+    themeBtn.title = dark ? 'Switch to light mode' : 'Switch to dark mode';
+  }
+  if (themeBtn) {
+    themeBtn.addEventListener('click', () => {
+      const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', next);
+      try { localStorage.setItem('ob1-theme', next); } catch (e) { /* private mode */ }
+      paintThemeIcon();
+    });
+  }
+  paintThemeIcon();
+
   // ---------- Chat sidebar toggle ----------
   const chatToggle = document.getElementById('chat-toggle');
   if (chatToggle) {
@@ -67,6 +85,11 @@
       const collapsed = document.body.classList.toggle('chat-collapsed');
       chatToggle.textContent = collapsed ? '»' : '«';
     });
+  }
+
+  // On phones/tablets the chat strip eats vertical space — start collapsed.
+  if (window.matchMedia('(max-width: 1024px)').matches) {
+    document.body.classList.add('chat-collapsed');
   }
 
   // ---------- Status bar poller ----------
