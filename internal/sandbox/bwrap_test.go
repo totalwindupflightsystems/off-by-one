@@ -474,7 +474,7 @@ func TestRunWithEnv_EnvNotInArgv(t *testing.T) {
 	}
 	defer func() { _ = s.Destroy() }()
 
-	const secret = "sk-obgap015-test-secret"
+	const secret = "test-api-key-fixture"
 	env := []string{"DEEPSEEK_API_KEY=" + secret, "LLM_API_KEY=" + secret}
 	if _, _, err := s.RunWithEnv(context.Background(), "/bin/echo", []string{"hello"}, env); err != nil {
 		t.Fatalf("RunWithEnv: %v", err)

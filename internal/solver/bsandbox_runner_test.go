@@ -142,7 +142,7 @@ func TestExecEnvNotInArgv(t *testing.T) {
 		}
 		defer func() { _ = handle.Destroy() }()
 
-		const secret = "sk-obgap015-test-secret"
+		const secret = "test-api-key-fixture"
 		env := []string{"DEEPSEEK_API_KEY=" + secret, "LLM_API_KEY=" + secret}
 		if _, err := handle.Exec(context.Background(), "/bin/echo", []string{"hello"}, env); err != nil {
 			t.Fatalf("Exec: %v", err)

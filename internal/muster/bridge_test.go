@@ -255,6 +255,25 @@ func TestBridge_CallLogRingBuffer(t *testing.T) {
 	}
 }
 
+func TestMusterToolNames(t *testing.T) {
+	// The full MCP tool surface Muster auto-generates from the spec.
+	// Keep in lockstep with pkg/api/openapi.yaml operationIds and
+	// muster-config.yaml tools.
+	want := []string{
+		"submit_problem", "discover_solution", "list_problems",
+		"get_queue_status", "export_to_git", "import_from_git",
+		"get_taxonomy", "get_stats", "get_related", "list_queue",
+	}
+	if len(musterToolNames) != len(want) {
+		t.Fatalf("musterToolNames has %d tools, want %d", len(musterToolNames), len(want))
+	}
+	for i, name := range want {
+		if musterToolNames[i] != name {
+			t.Errorf("musterToolNames[%d] = %q, want %q", i, musterToolNames[i], name)
+		}
+	}
+}
+
 func TestBridge_HealthCheck_ServerDown(t *testing.T) {
 	b := NewBridge("http://localhost:1") // port 1 will fail to connect
 	result := b.HealthCheck(context.Background())

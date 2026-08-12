@@ -1,8 +1,9 @@
 // Package muster provides the bridge between Off-by-One and the Muster MCP
 // server. Muster reads the OpenAPI spec at /openapi.json, auto-generates
 // MCP tools (submit_problem, discover_solution, list_problems,
-// get_queue_status), and relays calls between AI agents and the Off-by-One
-// REST API.
+// get_queue_status, export_to_git, import_from_git, get_taxonomy,
+// get_stats, get_related, list_queue), and relays calls between AI agents
+// and the Off-by-One REST API.
 //
 // The Bridge validates that the spec is Muster-compatible, provides health
 // check (is Muster connected? are tools live?), and logs tool calls for
@@ -69,11 +70,21 @@ func NewBridge(baseURL string) *Bridge {
 	}
 }
 
+// musterToolNames is the full MCP tool surface Muster auto-generates from
+// the OpenAPI spec. Keep in lockstep with pkg/api/openapi.yaml operationIds
+// and the tools list in muster-config.yaml (see also the ten-tool check in
+// ValidateSpec).
+var musterToolNames = []string{
+	"submit_problem", "discover_solution", "list_problems",
+	"get_queue_status", "export_to_git", "import_from_git",
+	"get_taxonomy", "get_stats", "get_related", "list_queue",
+}
+
 // ValidateSpec fetches the OpenAPI spec from the server and checks that it
 // has the minimum structure Muster needs to generate MCP tools:
 //   - Every path operation has an operationId
 //   - POST operations have a requestBody with JSON content
-//   - At least the four core tools are present
+//   - All ten Muster tools (operationIds) are present
 //
 // Returns nil if valid, or a descriptive error listing all issues found.
 func (b *Bridge) ValidateSpec(ctx context.Context) error {
@@ -257,10 +268,7 @@ func (b *Bridge) HealthCheck(ctx context.Context) *HealthResult {
 	}
 
 	if result.MusterUp {
-		result.Tools = []string{
-			"submit_problem", "discover_solution",
-			"list_problems", "get_queue_status",
-		}
+		result.Tools = musterToolNames
 	}
 
 	return result
