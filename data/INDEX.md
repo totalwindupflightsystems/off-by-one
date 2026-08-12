@@ -1,20 +1,20 @@
 # Off-by-One Answer Index
 
-**908 problem classes · 963 verified answers** · exported 2026-08-11 23:21 UTC
+**912 problem classes · 969 verified answers** · exported 2026-08-12 02:51 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 11 | go, python |
+| 641 | python-aws-emulator-idle-audit | 12 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
+| 848 | go-cli-e2e-battery-harness | 5 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
-| 848 | go-cli-e2e-battery-harness | 4 | go |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
@@ -914,3 +914,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 980 | python-fenwick-count-smaller-after-self | 1 | python |
 | 981 | go-consistent-hash-ring-virtual-nodes | 1 | go |
 | 982 | python-sdk-e2e-battery | 1 | go |
+| 983 | docs-legacy-store-reconciliation | 1 | go |
+| 984 | typescript-doc-port-mismatch | 1 | typescript |
+| 985 | typescript-docs-stale-metrics | 1 | go |
+| 986 | rust-cli-backend-type-match-arm | 1 | go |
