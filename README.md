@@ -225,6 +225,8 @@ go build ./cmd/off-by-one
 ./off-by-one
 ```
 
+> **Submissions need a solver:** without `bwrap` + `pi-agent` configured, `POST /api/v1/problems/submit` is rejected with `503 solver_unavailable` — the cron loop cannot process queued work, so nothing is accepted silently. Pre-verified answers remain discoverable via `POST /api/v1/problems/discover`.
+
 ### Build, Test, Lint
 
 ```bash

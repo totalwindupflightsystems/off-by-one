@@ -36,7 +36,9 @@ func newTestServer(t *testing.T) (*Server, *graph.Store, *ingest.Queue) {
 	if err != nil {
 		t.Fatalf("open queue: %v", err)
 	}
-	return New(store, queue, []byte("openapi: 3.0.3\ninfo: {title: test}\n")), store, queue
+	srv := New(store, queue, []byte("openapi: 3.0.3\ninfo: {title: test}\n"))
+	srv.SolverAvailable = true
+	return srv, store, queue
 }
 
 // do is a small helper that runs an HTTP request against the test
@@ -132,6 +134,40 @@ func TestSubmit_Queued(t *testing.T) {
 	}
 	if resp.SubmissionID == "" {
 		t.Error("submission_id is empty")
+	}
+}
+
+func TestSubmit_SolverUnavailable(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	s.SolverAvailable = false
+	body := submitProblemRequest{
+		ProblemClass: "docker-volume-permissions",
+		Environment:  "docker",
+		Language:     "go",
+		Cadence:      ingest.CadencePrePhase,
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503, body = %s", rr.Code, rr.Body.String())
+	}
+	var e struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &e); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if e.Error != "solver_unavailable" {
+		t.Errorf("error = %q, want solver_unavailable", e.Error)
+	}
+	if e.Message == "" {
+		t.Error("message is empty")
+	}
+	// Nothing may be enqueued — the rejection must happen before any
+	// queue write so no pending row is stranded without a solver.
+	depth, _ := s.Queue.Depth(context.Background())
+	if depth != 0 {
+		t.Errorf("queue depth = %d, want 0 (no submission enqueued)", depth)
 	}
 }
 
@@ -753,6 +789,7 @@ func TestStats_Populated(t *testing.T) {
 // signal that tells users why their submissions sit queued forever.
 func TestStats_SolverAvailable(t *testing.T) {
 	s, _, _ := newTestServer(t)
+	s.SolverAvailable = false
 
 	rr := do(t, s, "GET", "/api/v1/stats", nil)
 	if rr.Code != http.StatusOK {

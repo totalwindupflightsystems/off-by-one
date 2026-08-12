@@ -183,6 +183,17 @@ type importResponse struct {
 // the JSON body, and any additional file parts are stored in AttachmentsDir
 // and their paths added to the submission Context.
 func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
+	// Reject submissions up front when no solver is wired up (bwrap +
+	// pi-agent missing): the cron loop is not running, so a queued
+	// submission would sit pending forever with no user-visible signal
+	// beyond a startup WARN. The discover endpoint stays available for
+	// read-only lookups of pre-verified answers.
+	if !s.SolverAvailable {
+		writeError(w, http.StatusServiceUnavailable, "solver_unavailable",
+			"solver is not available (bwrap + pi-agent not configured); submissions cannot be queued — use POST /api/v1/problems/discover to look up existing answers")
+		return
+	}
+
 	var req submitProblemRequest
 	var attachmentPaths []string
 

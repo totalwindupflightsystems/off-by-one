@@ -56,6 +56,7 @@ func newMustermock(t *testing.T) *mustermock {
 		t.Fatalf("open queue: %v", err)
 	}
 	apiSrv := api.New(store, q, []byte(testOpenAPISpec()))
+	apiSrv.SolverAvailable = true
 	srv := httptest.NewServer(apiSrv.Handler())
 	t.Cleanup(srv.Close)
 
