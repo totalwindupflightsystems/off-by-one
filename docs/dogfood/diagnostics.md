@@ -37,8 +37,8 @@ that answers "does it work and why" without re-running the world.
   implemented; they were documented as functional before the gate existed, fixed in
   OB1-GAP-003).
 - **Readonly mode** (`--readonly` / `OFF_BY_ONE_READONLY`): public catalog — all
-  POSTs 403, chat disabled, GETs work. **Known gap: POST discover is a POST → also
-  403 (OB-GAP-020).**
+  POSTs 403, chat disabled, GETs work. POST discover is allowed (read-only
+  catalog op) since OB-GAP-020 (tick 285).
 - **Board** (`.coding-hermes/`): JSONL-canonical since 2026-08-07
   (JSONL-NORM-001) — `board/tasks.jsonl` is the live board; `tasks.md` is a frozen
   legacy log; `board/events.jsonl` is the audit trail; `board.db` is derived and
@@ -50,12 +50,12 @@ that answers "does it work and why" without re-running the world.
 |---|---|---|
 | `404 not_found` on discover `go-nil-pointer-deref` | Example class never existed in the corpus | Query classes that exist (`q=` search or INDEX.md) — tracked as OB-GAP-022 |
 | `{"found":false}` for a class WITH a verified answer | env/lang/version are exact filters; queried with non-matching env | Discover class-only first; refine only if you need tuple-specific answers — OB-GAP-023 |
-| `403 read_only` on discover from a catalog instance | Readonly guard blocks all POSTs, incl. the read-only discover | Don't deploy a catalog instance expecting agent discovery yet — OB-GAP-020 (P1) |
+| `403 read_only` on discover from a catalog instance | Readonly guard blocked all POSTs | FIXED (OB-GAP-020, tick 285) — discover returns 200 in readonly mode; submit/export/import stay 403 |
 | `501 not_configured` on export/import | Feature is config-gated; lab runs without `-export-dir` | Expected; enable via env/flag if you need git distribution |
 | `426 WebSocket protocol violation` on `/ws/chat` | Plain curl without upgrade headers | Use a WS client; or accept that the endpoint is WS-only |
 | Submission stuck `pending` on scratch instance | No solver (no keys / `--skip-sandbox`) → cron loop not started (WARN at boot) | Check `/api/v1/stats` → `solver_available` before relying on the queue |
 | Solves failing at exactly 300s | Known bwrap-cap fleet pattern (`signal: killed` at 5m) | Not a regression; tuning candidate `DefaultBwrapTimeout` (needs restart, out of cron scope) |
-| Detail endpoint `"status":""` | Detail handler doesn't populate status (list does) | Read status from list/discover; fix tracked as OB-GAP-024 |
+| Detail endpoint `"status":""` | Detail handler didn't populate status (list does) | FIXED (OB-GAP-024, tick 285) — detail response populates status |
 
 ## 3. The project's own error history (from the board, ticks 254-284)
 
@@ -91,7 +91,7 @@ that answers "does it work and why" without re-running the world.
    (rebuild recipe above); restarts are safe (SQLite WAL, data persists).
 4. **Test locally:** `go build ./cmd/off-by-one && ./off-by-one --skip-sandbox
    --db /tmp/x.db --port 8877` — full API without bwrap/keys.
-5. **Read-only catalog deployments:** fine for humans browsing; agent discovery is
-   blocked until OB-GAP-020 lands.
+5. **Read-only catalog deployments:** fine for humans browsing; agent discovery
+   works since OB-GAP-020 (discover is 200 in readonly mode).
 6. **Commit hygiene:** GitReins guard blocks on secrets/build/tests; docs-only
    commits pass. Never commit API keys.

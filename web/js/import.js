@@ -10,8 +10,9 @@
 //   4. Conflict resolution UI for same class+version, different answer.
 //   5. POST /api/v1/import — show progress, then import summary.
 //
-// When the import API is not yet implemented (WI-015 pending), the
-// view shows a clear "not available" message.
+// When the import directory is not configured (--import-dir or
+// OFF_BY_ONE_IMPORT_DIR), the server returns 501 not_configured; the
+// view shows a clear message.
 //
 // No build step: pure ES2020, no framework.
 
@@ -194,8 +195,9 @@
 
     // The preview endpoint is the same as import but with a dry_run
     // flag. Since the API spec doesn't define dry_run, we call import
-    // and handle the result. When WI-015 implements the engine, this
-    // will return a diff. For now, the endpoint returns 501.
+    // and handle the result. When the import directory is configured
+    // (--import-dir / OFF_BY_ONE_IMPORT_DIR), this will return a diff.
+    // Until then, the endpoint returns 501.
     var body = {
       source_repo: repoUrl,
       branch: branchInput.value.trim() || 'main',
@@ -238,8 +240,8 @@
         ? res.data.detail
         : 'Preview failed (HTTP ' + res.status + ')';
       if (res.status === 501) {
-        msg = 'Import engine not yet implemented (WI-015). ' +
-          'The import API endpoint exists but the git engine is pending.';
+        msg = 'Import directory not configured — set --import-dir or ' +
+          'OFF_BY_ONE_IMPORT_DIR to enable git import.';
       }
       var e = el('div', 'import-error');
       e.textContent = msg;
@@ -374,8 +376,8 @@
         ? res.data.detail
         : 'Import failed (HTTP ' + res.status + ')';
       if (res.status === 501) {
-        msg = 'Import engine not yet implemented (WI-015). ' +
-          'The import API endpoint exists but the git engine is pending.';
+        msg = 'Import directory not configured — set --import-dir or ' +
+          'OFF_BY_ONE_IMPORT_DIR to enable git import.';
       }
       var e = el('div', 'import-error-msg');
       e.textContent = msg;

@@ -71,7 +71,7 @@ func newMustermock(t *testing.T) *mustermock {
 
 // testOpenAPISpec returns a minimal Muster-compatible OpenAPI 3.0.3
 // spec (as JSON — the bridge decodes with json.NewDecoder) with the
-// four core operationIds. We embed it as a string so the test doesn't
+// ten Muster operationIds. We embed it as a string so the test doesn't
 // depend on the on-disk pkg/api/openapi.yaml.
 func testOpenAPISpec() string {
 	return `{
@@ -107,6 +107,38 @@ func testOpenAPISpec() string {
     },
     "/api/v1/queue/{submission_id}": {
       "get": {"operationId": "getQueueStatus"}
+    },
+    "/api/v1/problems/{class}/related": {
+      "get": {"operationId": "getRelated"}
+    },
+    "/api/v1/queue": {
+      "get": {"operationId": "listQueue"}
+    },
+    "/api/v1/export": {
+      "post": {
+        "operationId": "exportToGit",
+        "requestBody": {
+          "content": {
+            "application/json": {}
+          }
+        }
+      }
+    },
+    "/api/v1/import": {
+      "post": {
+        "operationId": "importFromGit",
+        "requestBody": {
+          "content": {
+            "application/json": {}
+          }
+        }
+      }
+    },
+    "/api/v1/taxonomy": {
+      "get": {"operationId": "getTaxonomy"}
+    },
+    "/api/v1/stats": {
+      "get": {"operationId": "getStats"}
     }
   }
 }`

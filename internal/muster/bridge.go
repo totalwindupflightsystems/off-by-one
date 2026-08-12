@@ -145,12 +145,19 @@ func ValidateSpecDoc(raw map[string]any) error {
 		}
 	}
 
-	// Check for the four core Muster tools (operationIds).
+	// Check for the ten Muster tools (operationIds). All must be present
+	// in the spec so Muster can auto-generate the full MCP tool surface.
 	requiredTools := map[string]bool{
 		"submitProblem":    false,
 		"discoverSolution": false,
 		"listProblems":     false,
 		"getQueueStatus":   false,
+		"exportToGit":      false,
+		"importFromGit":    false,
+		"getTaxonomy":      false,
+		"getStats":         false,
+		"getRelated":       false,
+		"listQueue":        false,
 	}
 	for _, pathVal := range paths {
 		pathItem, ok := pathVal.(map[string]any)

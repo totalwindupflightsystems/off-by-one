@@ -51,6 +51,52 @@ func validSpec() map[string]any {
 					"summary":     "Check status",
 				},
 			},
+			"/api/v1/problems/{class}/related": map[string]any{
+				"get": map[string]any{
+					"operationId": "getRelated",
+					"summary":     "Related problems",
+				},
+			},
+			"/api/v1/queue": map[string]any{
+				"get": map[string]any{
+					"operationId": "listQueue",
+					"summary":     "List queue",
+				},
+			},
+			"/api/v1/export": map[string]any{
+				"post": map[string]any{
+					"operationId": "exportToGit",
+					"summary":     "Export to git",
+					"requestBody": map[string]any{
+						"content": map[string]any{
+							"application/json": map[string]any{},
+						},
+					},
+				},
+			},
+			"/api/v1/import": map[string]any{
+				"post": map[string]any{
+					"operationId": "importFromGit",
+					"summary":     "Import from git",
+					"requestBody": map[string]any{
+						"content": map[string]any{
+							"application/json": map[string]any{},
+						},
+					},
+				},
+			},
+			"/api/v1/taxonomy": map[string]any{
+				"get": map[string]any{
+					"operationId": "getTaxonomy",
+					"summary":     "Browse taxonomy",
+				},
+			},
+			"/api/v1/stats": map[string]any{
+				"get": map[string]any{
+					"operationId": "getStats",
+					"summary":     "Stats",
+				},
+			},
 		},
 	}
 }

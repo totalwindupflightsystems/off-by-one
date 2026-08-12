@@ -10,9 +10,10 @@
 //   4. Preview shows the files that will be generated.
 //   5. POST /api/v1/export — show progress, then commit SHA + PR URL.
 //
-// When the export API is not yet implemented (WI-014 pending), the
-// view shows a clear "not available" message but the selection and
-// preview UI still render so the user can see what's ready.
+// When the export directory is not configured (--export-dir or
+// OFF_BY_ONE_EXPORT_DIR), the server returns 501 not_configured; the
+// view shows a clear message but the selection and preview UI still
+// render so the user can see what's ready.
 //
 // No build step: pure ES2020, no framework.
 
@@ -468,8 +469,8 @@
         ? res.data.detail
         : 'Export failed (HTTP ' + res.status + ')';
       if (res.status === 501) {
-        msg = 'Export engine not yet implemented (WI-014). ' +
-          'The export API endpoint exists but the git engine is pending.';
+        msg = 'Export directory not configured — set --export-dir or ' +
+          'OFF_BY_ONE_EXPORT_DIR to enable git export.';
       }
       showError(area, msg);
       return;
