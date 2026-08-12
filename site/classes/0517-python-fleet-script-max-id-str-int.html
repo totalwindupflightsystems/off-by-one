@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>python-fleet-script-max-id-str-int — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause:** Migration-era DuckDB boards serialize `events.jsonl` ids and `board.jsonl` header counters as JSON **strings**. Two numeric sites then blew up: ">
+<meta property="og:title" content="python-fleet-script-max-id-str-int — Off-By-One">
+<meta property="og:description" content="**Root cause:** Migration-era DuckDB boards serialize `events.jsonl` ids and `board.jsonl` header counters as JSON **strings**. Two numeric sites then blew up: ">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0517-python-fleet-script-max-id-str-int.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>python-fleet-script-max-id-str-int</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>unknown</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause:</strong> Migration-era DuckDB boards serialize <code>events.jsonl</code> ids and <code>board.jsonl</code> header counters as JSON <strong>strings</strong>. Two numeric sites then blew up:</p>
+<ul>
+<li><code>max(ids) + 1</code> → <code>TypeError: can only concatenate str (not "int") to str</code></li>
+<li><code>hdr.get("ticks_total", 0) + 1</code> → same <code>TypeError</code></li>
+</ul>
+<p><strong>Fix:</strong> coerce <code>int()</code> at both sites. <code>int()</code> is lossless for native ints <em>and</em> migration strings, so modern boards behave identically. The script is at <code>sync_board_jsonl_mirror.py</code> (reconstructed from the described failure, since it wasn't present on disk):</p>
+<pre><code class="language-python">def read_event_ids(events_path):
+    &quot;&quot;&quot;All event ids from events.jsonl, coerced to int (string-safe).&quot;&quot;&quot;
+    ids = []
+    for line in Path(events_path).read_text().splitlines():
+        if not line.strip():
+            continue
+        ids.append(int(json.loads(line)[&quot;id&quot;]))          # FIX SITE 1
+    return ids
+
+
+def next_event_id(ids):
+    &quot;&quot;&quot;max(ids) + 1 for the next event; empty mirror starts at 1.&quot;&quot;&quot;
+    return max(ids) + 1 if ids else 1
+
+
+def bump_ticks_total(header):
+    &quot;&quot;&quot;Increment the ticks_total header counter (string-safe).&quot;&quot;&quot;
+    return int(header.get(&quot;ticks_total&quot;, 0)) + 1         # FIX SITE 2
+</code></pre>
+<p>The two changed lines are exactly <code>ids = [int(json.loads(l)["id"]) for l in lines]</code> and <code>int(hdr.get("ticks_total", 0)) + 1</code>. <code>sync_mirror()</code> wires them together: it reads both files, computes the new event id and bumped counter, appends the event to <code>events.jsonl</code>, and rewrites the header. Usage: <code>python3 sync_board_jsonl_mirror.py events.jsonl board.jsonl</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified with a real test run in `/home/kara` (tests in `test_sync_board_jsonl_mirror.py`; 8/8 pass under both plain `python3` and pytest):
+
+```
+PASS test_migrated_string_ids_next_id            PASS test_missing_ticks_total_defaults_zero
+PASS test_migrated_string_header_ticks_total     PASS test_empty_events_file_next_id_is_one
+PASS test_both_fix_sites_end_to_end              PASS test_garbage_ids_raise_valueerror_not_typeerror
+PASS test_native_ints_still_work_non_migrated    PASS test_mixed_int_and_str_ids
+8/8 tests passed  (pytest: 8 passed in 0.01s)
+```
+
+End-to-end CLI demo on a migrated board (before/after):
+
+```
+$ cat events.jsonl:  {&quot;id&quot;: &quot;3&quot;} {&quot;id&quot;: &quot;5&quot;} {&quot;id&quot;: &quot;7&quot;}     # string ids
+$ cat board.jsonl:   {&quot;ticks_total&quot;: &quot;12&quot;}                    # string counter
+--- pre-fix expressions ---
+site1 TypeError: can only concatenate str (not &quot;int&quot;) to str
+site2 TypeError: can only concatenate str (not &quot;int&quot;) to str
+--- fixed run ---
+{&quot;next_event_id&quot;: 8, &quot;ticks_total&quot;: 13}
+$ cat events.jsonl:  ... {&quot;id&quot;: 8}
+$ cat board.jsonl:   {&quot;ticks_total&quot;: 13}
+```
+
+Edge cases tested: string ids (`&quot;3&quot;,&quot;5&quot;,&quot;7&quot;` → next `8`); string counter (`&quot;12&quot;` → `13`, stored as int); **both fix sites end-to-end** through the CLI; non-migrated native ints (unchanged behavior); mixed int/str ids (`1,&quot;2&quot;,3` → `4`); missing `ticks_total` key (defaults to `0` → `1`); empty events file (next id `1` — `max([])` guarded); non-numeric ids (`&quot;abc&quot;` → `ValueError`, surfaced rather than silently masked, never `TypeError`).</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;result&quot;: &quot;completed&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

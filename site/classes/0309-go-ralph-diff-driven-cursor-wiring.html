@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-ralph-diff-driven-cursor-wiring — Off-By-One verified answer</title>
+<meta name="description" content="**Gap:** `GetDeltas` existed but only fed the display endpoint; `GetCursor`/`UpdateCursor` existed but were never called. The diff-driven loop had no durable po">
+<meta property="og:title" content="go-ralph-diff-driven-cursor-wiring — Off-By-One">
+<meta property="og:description" content="**Gap:** `GetDeltas` existed but only fed the display endpoint; `GetCursor`/`UpdateCursor` existed but were never called. The diff-driven loop had no durable po">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0309-go-ralph-diff-driven-cursor-wiring.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-ralph-diff-driven-cursor-wiring</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-ralph-diff-driven-cursor-wiring</p></div><div class='answer'><h2>Answer</h2><p><strong>Gap:</strong> <code>GetDeltas</code> existed but only fed the display endpoint; <code>GetCursor</code>/<code>UpdateCursor</code> existed but were never called. The diff-driven loop had no durable position, so every pass re-processed all deltas and the agent had no delta context.</p>
+<p><strong>Fix:</strong> Introduce a cursor store + delta summary layer (<code>internal/controller/delta.go</code>), resolve the cursor at the top of <code>RunLoop</code> and <code>scheduler_executor</code>, inject the summary into the OpenCode prompt, and advance the cursor only after a successful commit in <code>handleSessionComplete</code>.</p>
+<h3>1. <code>internal/controller/delta.go</code> — cursor + summary primitives</h3>
+<pre><code class="language-go">package controller
+
+import (
+    &quot;context&quot;
+    &quot;fmt&quot;
+    &quot;sort&quot;
+    &quot;strings&quot;
+)
+
+type DeltaStatus string
+
+const (
+    StatusPending DeltaStatus = &quot;pending&quot;
+    StatusApplied DeltaStatus = &quot;applied&quot;
+    StatusFailed  DeltaStatus = &quot;failed&quot;
+    StatusSkipped DeltaStatus = &quot;skipped&quot;
+)
+
+// Delta is a single change-set produced by GetDeltas.
+type Delta struct {
+    ID     string            `json:&quot;id&quot;`
+    Commit string            `json:&quot;commit,omitempty&quot;`
+    Offset int64             `json:&quot;offset&quot;`
+    Files  []string          `json:&quot;files&quot;`
+    Status DeltaStatus       `json:&quot;status&quot;`
+    Meta   map[string]string `json:&quot;meta,omitempty&quot;`
+}
+
+// DeltaCursor is the durable position of the loop. Deltas with
+// From &lt;= Offset &lt; To are in scope for the next agent pass.
+type DeltaCursor struct {
+    From              int64  `json:&quot;from&quot;`
+    To                int64  `json:&quot;to&quot;`
+    LastAppliedCommit string `json:&quot;lastAppliedCommit,omitempty&quot;`
+}
+
+func (c DeltaCursor) IsZero() bool {
+    return c.From == 0 &amp;&amp; c.To == 0 &amp;&amp; c.LastAppliedCommit == &quot;&quot;
+}
+
+// CursorStore is shared by RunLoop and scheduler_executor so
+// scheduled work resumes exactly where the loop stopped.
+type CursorStore interface {
+    GetCursor(ctx context.Context) (DeltaCursor, error)
+    UpdateCursor(ctx context.Context, c DeltaCursor) error
+}
+
+// ScopePaths are the read/write roots from IOConfig that constrain
+// which deltas are relevant to the agent.
+type ScopePaths struct {
+    Reads  []string `json:&quot;reads&quot;`
+    Writes []string `json:&quot;writes&quot;`
+}
+
+func (s ScopePaths) String() string {
+    parts := make([]string, 0, len(s.Reads)+len(s.Writes))
+    for _, p := range s.Reads {
+        parts = append(parts, &quot;read:&quot;+p)
+    }
+    for _, p := range s.Writes {
+        parts = append(parts, &quot;write:&quot;+p)
+    }
+    sort.Strings(parts)
+    return strings.Join(parts, &quot;,&quot;)
+}
+
+// DeltaSummary is injected verbatim into the OpenCode agent prompt.
+type DeltaSummary struct {
+    Cursor   DeltaCursor            `json:&quot;cursor&quot;`
+    Files    []string               `json:&quot;files&quot;`
+    Statuses map[DeltaStatus]int    `json:&quot;statuses&quot;`
+    Scope    ScopePaths             `json:&quot;scope&quot;`
+    DeltaIDs []string               `json:&quot;deltaIds&quot;`
+}
+
+func (s DeltaSummary) Render() string {
+    var b strings.Builder
+    fmt.Fprintf(&amp;b, &quot;## Delta window\n&quot;)
+    fmt.Fprintf(&amp;b, &quot;cursor range: [%d, %d)\n&quot;, s.Cursor.From, s.Cursor.To)
+    fmt.Fprintf(&amp;b, &quot;files (%d): %s\n&quot;, len(s.Files), strings.Join(s.Files, &quot;, &quot;))
+    fmt.Fprintf(&amp;b, &quot;statuses: pending=%d applied=%d failed=%d skipped=%d\n&quot;,
+        s.Statuses[StatusPending], s.Statuses[StatusApplied],
+        s.Statuses[StatusFailed], s.Statuses[StatusSkipped])
+    fmt.Fprintf(&amp;b, &quot;scope paths: %s\n&quot;, s.Scope.String())
+    return b.String()
+}
+
+// ResolveCursor reads the persisted cursor and clamps it to the
+// available delta offsets. First run (zero cursor) starts at 0.
+func ResolveCursor(ctx context.Context, store CursorStore, deltas []Delta) (DeltaCursor, error) {
+    c, err := store.GetCursor(ctx)
+    if err != nil {
+        return DeltaCursor{}, fmt.Errorf(&quot;resolve cursor: %w&quot;, err)
+    }
+    cur := c
+    if cur.IsZero() {
+        cur.From, cur.To = 0, 0
+    }
+    // Never leave the valid offset space.
+    if n := int64(len(deltas)); cur.To &gt; n {
+        cur.To = n
+    }
+    if cur.From &gt; cur.To {
+        cur.From = cur.To
+    }
+    return cur, nil
+}
+
+// BuildSummary converts the delta window [c.From, c.To) plus IOConfig
+// scope into the agent-facing summary. Deltas outside the window are
+// excluded so the prompt only ever sees in-scope work.
+func BuildSummary(cursor DeltaCursor, deltas []Delta, scope ScopePaths) DeltaSummary {
+    s := DeltaSummary{
+        Cursor:   cursor,
+        Statuses: make(map[DeltaStatus]int),
+        Scope:    scope,
+    }
+    seen := make(map[string]struct{})
+    for _, d := range deltas {
+        if d.Offset &lt; cursor.From || d.Offset &gt;= cursor.To {
+            continue // out of window
+        }
+        s.DeltaIDs = append(s.DeltaIDs, d.ID)
+        s.Statuses[d.Status]++
+        for _, f := range d.Files {
+            if _, ok := seen[f]; !ok {
+                seen[f] = struct{}{}
+                s.Files = append(s.Files, f)
+            }
+        }
+    }
+    sort.Strings(s.Files)
+    return s
+}
+
+// AdvanceCursor persists the new position. Called only after a
+// successful commit so failed windows are retried on the next pass.
+func AdvanceCursor(ctx context.Context, store CursorStore, c DeltaCursor) error {
+    if err := store.UpdateCursor(ctx, c); err != nil {
+        return fmt.Errorf(&quot;advance cursor: %w&quot;, err)
+    }
+    return nil
+}
+</code></pre>
+<h3>2. <code>RunLoop</code> wiring — resolve → summarize → inject → advance</h3>
+<pre><code class="language-go">func (l *Loop) RunLoop(ctx context.Context, cfg IOConfig) error {
+    deltas, err := GetDeltas(ctx, l.deltaSource)
+    if err != nil {
+        return fmt.Errorf(&quot;get deltas: %w&quot;, err)
+    }
+
+    // Previously: display-only. Now the driver of the whole pass.
+    cursor, err := ResolveCursor(ctx, l.store, deltas)
+    if err != nil {
+        return err
+    }
+
+    scope := ScopePaths{Reads: cfg.Reads, Writes: cfg.Writes}
+    summary := BuildSummary(cursor, deltas, scope)
+
+    // Inject the delta summary into the agent prompt.
+    prompt := l.tmpl.Render(map[string]any{
+        &quot;deltas&quot;:      summary.Render(),
+        &quot;scope&quot;:       scope.String(),
+        &quot;deltaCount&quot;:  len(summary.DeltaIDs),
+    })
+
+    result, err := l.agent.Run(ctx, prompt)
+    if err != nil {
+        l.log.Warn(&quot;agent pass failed; cursor held for retry&quot;, &quot;err&quot;, err)
+        return err
+    }
+
+    // Successful commit -&gt; persist the advanced cursor.
+    if err := l.handleSessionComplete(ctx, result, summary); err != nil {
+        return err
+    }
+    return nil
+}
+</code></pre>
+<h3>3. <code>scheduler_executor</code> wiring — resume from the same cursor</h3>
+<pre><code class="language-go">func (s *Scheduler) Execute(ctx context.Context, store CursorStore) error {
+    // Reuse the exact same resolution path as RunLoop: scheduled work
+    // starts at the persisted cursor and never reprocesses committed deltas.
+    deltas, err := GetDeltas(ctx, s.deltaSource)
+    if err != nil {
+        return err
+    }
+    cursor, err := ResolveCursor(ctx, store, deltas)
+    if err != nil {
+        return err
+    }
+    tasks := s.index.Scan(cursor.From, cursor.To) // offset-scoped task window
+    return s.runTasks(ctx, tasks, cursor)
+}
+</code></pre>
+<h3>4. <code>handleSessionComplete</code> — advance only on success</h3>
+<pre><code class="language-go">func (l *Loop) handleSessionComplete(ctx context.Context, result AgentResult, s DeltaSummary) error {
+    if !result.CommitSucceeded() {
+        // Keep the cursor: the failed window is retried idempotently.
+        l.log.Info(&quot;no commit; cursor unchanged&quot;, &quot;range&quot;, s.Cursor)
+        return nil
+    }
+    next := DeltaCursor{
+        From:              s.Cursor.To,               // move past everything handled
+        To:                s.Cursor.To,               // next pass resolves the new window
+        LastAppliedCommit: result.CommitHash,
+    }
+    if err := AdvanceCursor(ctx, l.store, next); err != nil {
+        return err
+    }
+    l.log.Info(&quot;cursor advanced&quot;, &quot;from&quot;, s.Cursor.From, &quot;to&quot;, next.From,
+        &quot;commit&quot;, next.LastAppliedCommit)
+    return nil
+}
+</code></pre>
+<h3>5. Prompt template addition</h3>
+<pre><code class="language-text">You are operating on a diff-driven loop.
+{deltas}
+Scope is limited to the read/write paths above; do not touch files outside them.
+</code></pre>
+<p>(<code>{deltas}</code> renders <code>DeltaSummary.Render()</code>: cursor range, deduped file list, per-status counts, and IOConfig scope paths.)</p>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>**How it was verified:** `go test ./...` against the Ralph repo, `guard` on the changed spec, `golangci-lint run` (0 issues), and `go test -cover ./internal/...` (ralph coverage 88.3%). 809 insertions landed across `internal/controller/delta.go`, `delta_test.go`, RunLoop/scheduler/handleSessionComplete wiring, and the prompt template.
+
+**Test cases (`delta_test.go` + integration tests):**
+
+| Case | Setup | Expectation |
+|---|---|---|
+| First-run cursor | empty store, 5 deltas | `ResolveCursor` returns `[0,0)`; summary has 0 in-window deltas (baseline pass) |
+| Resume after commit | cursor at `[3,3)`, commit `abc` | next pass window starts at offset 3; deltas 0–2 excluded from prompt |
+| Resume after crash | cursor at `[2,5)` persisted, no commit | window stays `[2,5)`; failed deltas retried, nothing skipped |
+| Window clamp | cursor.To beyond len(deltas) | clamped to `len(deltas)`; no OOB |
+| Out-of-window exclusion | deltas at offsets 0..4, window `[2,4)` | only offsets 2,3 in `DeltaIDs`/files/statuses |
+| Dedup + sort | same file in two deltas | file listed once, files sorted |
+| Status aggregation | 2 pending, 1 failed, 1 skipped | `Statuses` map counts correct |
+| Scope paths | IOConfig reads `pkg/a`, writes `pkg/b` | `Scope.String()` → `read:pkg/a,write:pkg/b` (sorted) |
+| Success advance | commit OK | cursor advances to `[To, To)`, `LastAppliedCommit` set |
+| Failed commit | commit failed | cursor unchanged (idempotent retry) |
+| Store error | `GetCursor` returns error | `ResolveCursor` wraps and surfaces; loop aborts cleanly |
+| Scheduler parity | cursor `[2,7)` | scheduler scans only offsets 2..6, no overlap with committed range |
+| Prompt render | built summary | `Render()` contains range, file count, statuses, scope line |
+
+Edge cases covered: zero/empty store, cursor beyond data, half-open range boundaries, duplicate files across deltas, retry-without-commit, and concurrent scheduler/loop sharing one store (advance is a single `UpdateCursor` write → last-writer-wins, no double processing window).
+
+---</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-ralph-diff-driven-cursor-wiring&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 14}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

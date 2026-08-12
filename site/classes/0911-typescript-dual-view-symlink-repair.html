@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>typescript-dual-view-symlink-repair — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause:** a spec-dir reorg dropped the `speclang-slash-` prefix, so 137 `src/` symlinks of the form `../speclang-slash-&lt;rest&gt;.spec.dir/src/&lt;file&gt;` went de">
+<meta property="og:title" content="typescript-dual-view-symlink-repair — Off-By-One">
+<meta property="og:description" content="**Root cause:** a spec-dir reorg dropped the `speclang-slash-` prefix, so 137 `src/` symlinks of the form `../speclang-slash-&lt;rest&gt;.spec.dir/src/&lt;file&gt;` went de">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0911-typescript-dual-view-symlink-repair.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>typescript-dual-view-symlink-repair</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>typescript-dual-view-symlink-repair</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause:</strong> a spec-dir reorg dropped the <code>speclang-slash-</code> prefix, so 137 <code>src/</code> symlinks of the form <code>../speclang-slash-&lt;rest&gt;.spec.dir/src/&lt;file&gt;</code> went dead. The dual-view design (<code>src/</code> symlinks exposing canonical spec-dir sources under a second import view) needed repair — but only by name-mapping classification, never blind relinking.</p>
+<p><strong>1. Find the dead links (the find quirk).</strong> <code>find src/ -type l ! -exec test -e {} \;</code> prints <strong>nothing</strong>: once <code>-exec</code> appears in the expression, find's implicit <code>-print</code> is suppressed. Either add explicit <code>-print</code>, or use <code>-xtype l</code>:</p>
+<pre><code class="language-bash"># quirk: prints NOTHING (no implicit print after -exec)
+find src/ -type l ! -exec test -e {} \;
+# fix A: explicit -print (authoritative: follows the full chain)
+find src/ -type l ! -exec test -e {} \; -print
+# fix B: -xtype l (verified against GNU findutils 4.10: matches the same dead set)
+find src/ -xtype l -print
+</code></pre>
+<p><strong>2. Classify by name-mapping before acting</strong> — <code>speclang-slash-</code> → <code>specs/</code> on the target string (preserves <code>../</code> relative structure). Live mapped targets that are non-TS or spec files are <em>removed</em>, not relinked: they sit outside the compile surface and duplicate views already linked elsewhere.</p>
+<p><strong>3. Repair script</strong> (core loop, <code>-print0</code> for name safety; targets are relative to the <em>link's</em> directory, not cwd):</p>
+<pre><code class="language-bash">while IFS= read -r -d '' link; do
+  target=&quot;$(readlink -- &quot;$link&quot;)&quot;
+  [[ &quot;$target&quot; == *&quot;speclang-slash-&quot;* ]] || { rm -f -- &quot;$link&quot;; continue; }   # unmappable
+  new_target=&quot;${target/speclang-slash-/specs/}&quot;                                # drop prefix
+  link_dir=&quot;$(dirname -- &quot;$link&quot;)&quot;
+  [[ -e &quot;$link_dir/$new_target&quot; ]] || { rm -f -- &quot;$link&quot;; continue; }          # no mapped target
+  leaf=&quot;$(basename -- &quot;$new_target&quot;)&quot;
+  if [[ &quot;$leaf&quot; == *.ts &amp;&amp; &quot;$leaf&quot; != *.spec.ts &amp;&amp; &quot;$leaf&quot; != *.test.ts ]]; then
+    ln -sfn -- &quot;$new_target&quot; &quot;$link&quot;    # RELINK: TS, in compile surface
+  else
+    rm -f -- &quot;$link&quot;                    # REMOVE: non-TS / spec file / fixture
+  fi
+done &lt; &lt;(find src/ -type l ! -exec test -e {} \; -print0)
+</code></pre>
+<p><strong>4. Compiler backstop</strong> — relinks that tsc rejects (spec-tree files importing test-runtime types like <code>vitest</code>) are outside the compile surface too; remove and re-run until <code>tsc --noEmit</code> is clean, then run the full suite. Link counts alone prove nothing; only <code>tsc --noEmit</code> + the suite do.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified in a live sandbox (`/tmp/sl-gap-024-demo`, GNU findutils 4.10.0, TypeScript 5.6.3, node 22) reproducing all link classes:
+
+```
+=== PRE-REPAIR tsc (dead links break compile surface) ===
+src/index.ts(1,23): error TS2307: Cannot find module &#x27;./parser&#x27; ...
+exit=2
+
+=== REPAIR ===
+REMOVE  src/oldname.ts          (unmappable: already-new-style path, dead for other reason)
+RELINK  src/my lexer.ts -&gt; ../specs/lexer.spec.dir/src/lexer.ts
+REMOVE  src/stale.ts            (no mapped target)
+RELINK  src/with-test-types.ts -&gt; ../specs/helper.spec.dir/src/with-test-types.ts
+REMOVE  src/data.json           (mapped target LIVE but non-TS)
+REMOVE  src/parser.spec.ts      (mapped target LIVE but spec file)
+RELINK  src/lexer.ts / src/parser.ts
+REMOVE  src/with-test-types.ts  (tsc backstop: imports vitest — errors in src view)
+summary: relinked=4 removed=5 (standing relinks: 3)
+
+=== VERIFY ===
+tsc --noEmit: clean (exit 0)   npm test: 2 assertions pass via src/ view realpath
+dead links remaining: 0        live links untouched: 2/2 (alive.ts, chain.ts)
+```
+
+Edge cases tested: the find quirk (empty output vs `-print`/`-xtype l` agreement); live symlink-to-symlink chains (`chain.ts`) not over-matched by `-xtype l` and never touched; filenames with spaces (`my lexer.ts`) handled via `-print0`; relative vs absolute targets (existence checked against the link&#x27;s directory — a cwd-relative check wrongly reported every mapped target missing); live-but-outside-surface files removed rather than relinked (data.json, parser.spec.ts, with-test-types.ts); dead links with no mapped target (stale.ts) and already-new-style dead paths (oldname.ts) both removed safely.
+
+Checks executed: 17 (quirk ×3, chain/live-set integrity ×2, pre-repair failure ×1, phase-1 classifications ×7, backstop ×1, tsc-clean ×1, suite assertions ×2, zero-dead ×1, untouched-live ×1).</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;typescript-dual-view-symlink-repair&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 17}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

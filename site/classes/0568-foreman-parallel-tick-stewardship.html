@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>foreman-parallel-tick-stewardship — Off-By-One verified answer</title>
+<meta name="description" content="**The bug:** when a parallel tick fires after a sibling session has already dispatched a task and launched the worker, the tick must *adopt* the sibling&#x27;s work ">
+<meta property="og:title" content="foreman-parallel-tick-stewardship — Off-By-One">
+<meta property="og:description" content="**The bug:** when a parallel tick fires after a sibling session has already dispatched a task and launched the worker, the tick must *adopt* the sibling&#x27;s work ">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0568-foreman-parallel-tick-stewardship.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>foreman-parallel-tick-stewardship</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>foreman-parallel-tick-stewardship</p></div><div class='answer'><h2>Answer</h2><p><strong>The bug:</strong> when a parallel tick fires after a sibling session has already dispatched a task and launched the worker, the tick must <em>adopt</em> the sibling's work — not re-do it. A naive tick re-dispatches (duplicate worker), re-runs the judge (wasted, potentially conflicting verdict), or kills the worker it thinks it owns (orphans/duplicates state). The steward pattern fixes this by gating every mutation behind read-only detection and independent verification, then making exactly one idempotent completion commit.</p>
+<p><strong>The fix</strong> is a gated transaction (<code>/home/kara/steward/steward.py</code>, entry point <code>stew()</code>):</p>
+<pre><code class="language-python">def stew(cfg: StewardConfig, verifiers=None, git=run_git) -&gt; StewardOutcome:
+    with StewardLock(cfg.lock_path, timeout=cfg.lock_timeout):        # 1 tick at a time
+        board_stale = is_board_stale(cfg.board_path, cfg.stale_after) # sibling dead? (mtime frozen &gt;3-4 min)
+        orphans = find_orphaned_rows(load_board(cfg.board_path), board_stale)
+        if not board_stale:
+            return outcome(&quot;board fresh: sibling alive; standing down&quot;)
+        for row in orphans:
+            # GATE 1 — detect worker commit (read-only; never re-dispatch)
+            commit = find_worker_commit(cfg.repo_dir, row.task_id, git=git)
+            if commit is None:
+                return outcome(f&quot;{row.task_id}: no worker commit; row left open&quot;)
+            # GATE 2 — independent verification: shim/parity/importer/trailer, all must pass
+            verification = verify_commit(commit, verifiers, cfg.verifier_stages)
+            if not verification.ok:
+                return outcome(f&quot;verification failed at '{verification.stage}'; row left open&quot;)
+            # GATE 3 — reuse existing judge verdict; NEVER re-run the judge
+            verdict = load_judge_verdict(cfg.judge_verdict_path, row.task_id)
+            if verdict is None:
+                return outcome(f&quot;no reusable verdict; row left open (judge NOT re-run)&quot;)
+            # GATE 4 — exists-checked completion (idempotent, refuses missing artifacts)
+            exists_checked_complete(cfg.workdir, row, commit, verdict)
+            # GATE 5 — close orphaned verification tasks (only this task's pending ones)
+            outcome.tasks_closed += close_orphaned_verification_tasks(cfg.verification_tasks_path, row.task_id)
+            cfg.board_path.write_text(&quot;\n&quot;.join(r.to_line() for r in rows) + &quot;\n&quot;)
+            outcome.pushed = commit_and_push(cfg.repo_dir, [cfg.board_path, cfg.verification_tasks_path],
+                                             f&quot;steward: adopt orphaned {row.task_id} @ {commit[:12]}&quot;, git=git)
+            return outcome(f&quot;adopted worker commit {commit[:12]} (verdict {verdict.ref} reused)&quot;)
+</code></pre>
+<p>Key defensive pieces:</p>
+<pre><code class="language-python"># staleness: a live sibling keeps touching the board JSONL
+def is_board_stale(board_path, stale_after=180, now=None):
+    return board_staleness_seconds(board_path, now) &gt;= stale_after
+
+# worker-commit detection anchored to the Task-ID trailer, so a baseline/
+# dispatch commit that merely *mentions* the task id is never adopted
+def find_worker_commit(repo_dir, task_id, git=run_git):
+    out = git(repo_dir, &quot;log&quot;, &quot;--all&quot;, &quot;--format=%H&quot;, &quot;--grep&quot;, f&quot;Task-ID: {task_id}&quot;)
+    return out.splitlines()[0] if out.strip() else None
+
+# verification short-circuits on the first failing stage
+def verify_commit(commit, verifiers, stages=(&quot;shim&quot;,&quot;parity&quot;,&quot;importer&quot;,&quot;trailer&quot;)):
+    for stage in stages:
+        res = verifiers[stage](commit)
+        if not res.ok: return res          # e.g. parity: input/output hashes differ
+    return VerificationResult(True, stages[-1])
+
+# completion only after artifacts exist on disk; no-op when already complete
+def exists_checked_complete(workdir, row, commit, verdict, extra_markers=()):
+    for p in [workdir / &quot;result.json&quot;, *extra_markers]:
+        if not p.exists():
+            raise FileNotFoundError(f&quot;exists-check failed: {p} missing&quot;)
+    row.status, row.worker_commit, row.verdict_ref = &quot;complete&quot;, commit, verdict.ref
+    row.extra |= {&quot;completed_by&quot;: &quot;steward&quot;, &quot;verdict_reused&quot;: True, &quot;completed_at&quot;: int(time.time())}
+
+# flock: a second parallel tick waits/aborts instead of racing (fd never leaks)
+class StewardLock:
+    def __enter__(self):
+        self._fh = open(self.lock_path, &quot;a+&quot;)
+        try:
+            while True:
+                try: fcntl.flock(self._fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB); return self
+                except OSError:
+                    if time.monotonic() &gt;= self.deadline: raise TimeoutError(...)
+                    time.sleep(0.25)
+        except BaseException:
+            self._fh.close(); self._fh = None; raise
+</code></pre>
+<p>The <code>do-NOT</code> list is enforced structurally, not just by convention: dispatch and judge are never invoked anywhere in <code>stew.py</code> — the verdict is only <em>read</em> (<code>load_judge_verdict</code> returns <code>None</code> instead of running the judge), worker pids are never signaled, and <code>commit_and_push</code> returns <code>False</code> when nothing is staged so a second tick pushes nothing.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified in `/home/kara/steward/` with a simulation (`test_steward.py`) that reproduces the exact production layout — git repo + bare origin, board JSONL, verification-tasks JSONL, gitreins judge verdict, dispatch/judge audit logs, and a real live worker process (`sleep 300`, pid tracked). Run: `python3 -W error::ResourceWarning test_steward.py` → **22/22 OK**.
+
+| Test | Asserts |
+|---|---|
+| `test_adopts_orphaned_row_without_redispatch_or_rejudge` | row → `complete` with worker commit + reused verdict; 4 verification tasks closed; pushed to `origin/main`; `dispatch.log`=1 (no re-dispatch), `judge_runs.log`=1 (no re-run), worker pid still alive (not killed) |
+| `test_board_fresh_means_sibling_alive_stand_down` | fresh board → stand down, row untouched, no push |
+| `test_no_worker_commit_no_completion_no_redispatch` | dead sibling, no commit → row open, no push, no re-dispatch |
+| `test_missing_judge_verdict_leaves_row_open_no_rejudge` | verdict file absent → row open, judge log still 1, no push |
+| `test_failed_verification_blocks_completion` | parity mismatch (rows_in≠rows_out) → blocked at `parity` |
+| `test_importer_failure_blocks_completion` | `importable:false` → blocked at `importer` |
+| `test_commit_without_task_id_trailer_not_adopted` | no `Task-ID:` trailer → not detected as worker output |
+| `test_exists_check_blocks_completion_when_artifact_missing` | artifact deleted after commit → graceful `shim` failure, row open |
+| `test_already_complete_row_is_idempotent_noop` | second tick: no adoption, no push, `origin/main` unchanged |
+| `test_double_tick_does_not_double_complete` | two consecutive ticks → exactly one adoption, dispatch/judge each ran once |
+| `test_lock_prevents_concurrent_stewards` | held lock → second steward raises `TimeoutError`; succeeds after release |
+| `test_orphaned_verification_tasks_only_touched_for_task` | only T-42 pending tasks closed; T-99 and already-closed untouched |
+| `test_worker_alive_when_already_exited_naturally` | worker gone on its own → still adopted, no crash |
+| Unit tests | staleness boundary (2:59 not stale / 3:01 and 4:00 stale), orphan requires *both* stale board *and* in_progress, verdict task-id mismatch not reused, verification short-circuits after first failure, close-tasks idempotent, exists-check raises on missing marker, trailer gate rejects bad commit |
+
+Live demo (`demo.py`) output of the full transaction:
+
+```
+BEFORE: origin/main:board.jsonl = {&quot;status&quot;: &quot;in_progress&quot;, &quot;task_id&quot;: &quot;T-42&quot;}   worker alive, dispatch=1, judge=1
+AFTER:  outcome.adopted=True pushed=True tasks_closed=4
+        reason: T-42: adopted worker commit bb2fbd813b6a (verdict gitreins/T-42#1 reused, judge not re-run)
+        origin/main:board.jsonl = {&quot;status&quot;: &quot;complete&quot;, &quot;task_id&quot;: &quot;T-42&quot;, &quot;worker_commit&quot;: &quot;bb2fbd…&quot;,
+                                   &quot;verdict_ref&quot;: &quot;gitreins/T-42#1&quot;, &quot;verdict_reused&quot;: true, &quot;completed_by&quot;: &quot;steward&quot;}
+        4 verification tasks → {&quot;status&quot;: &quot;closed&quot;, &quot;closed_by&quot;: &quot;steward&quot;}
+        worker pid alive (NOT killed), dispatch.log=1 (no re-dispatch), judge_runs.log=1 (no re-run)
+```</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;foreman-parallel-tick-stewardship&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 22}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

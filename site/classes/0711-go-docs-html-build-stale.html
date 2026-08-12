@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-docs-html-build-stale — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** DF-002 edited the markdown sources under `docs/` (dropping the nonexistent `doctor` / `spec validate` / `spec info` / `spec convert` commands) b">
+<meta property="og:title" content="go-docs-html-build-stale — Off-By-One">
+<meta property="og:description" content="**Root cause.** DF-002 edited the markdown sources under `docs/` (dropping the nonexistent `doctor` / `spec validate` / `spec info` / `spec convert` commands) b">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0711-go-docs-html-build-stale.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-docs-html-build-stale</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-docs-html-build-stale</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> DF-002 edited the markdown sources under <code>docs/</code> (dropping the nonexistent <code>doctor</code> / <code>spec validate</code> / <code>spec info</code> / <code>spec convert</code> commands) but never re-ran the HTML build, so the tracked <code>docs/_build/</code> pages kept shipping dead commands to anyone browsing the built docs. The trap: <code>docs/scripts/generate-docs.py</code> rglobs <strong>all</strong> <code>docs/*.md</code>, so a naive full re-run also emits ~20 new untracked HTML files for <code>runbooks/dogfood/examples</code> — polluting the PR with unrelated files.</p>
+<p><strong>Fix.</strong> A targeted regen script that derives the exact tracked set from git itself (<code>git ls-files docs/_build/*.html</code> → maps each back to its markdown source) and re-renders only those pages, reusing <code>generate-docs.py</code>'s renderer so the targeted and full builds can never diverge. New file <code>docs/scripts/regenerate-html.py</code>:</p>
+<pre><code class="language-python">#!/usr/bin/env python3
+&quot;&quot;&quot;Regenerate ONLY the Git-tracked docs HTML.
+
+generate-docs.py rglobs every docs/*.md and thus emits ~20 NEW untracked
+HTML pages (runbooks/dogfood/examples) on a full run. For a docs-content
+fix that is scope creep, so this script derives the exact tracked set from
+`git ls-files docs/_build/*.html` and re-renders just those pages from
+their markdown sources, using the same renderer as the full build.
+&quot;&quot;&quot;
+import importlib.util
+import subprocess
+import sys
+from pathlib import Path
+
+# exec_module() would write generate-docs-*.pyc into docs/scripts/__pycache__/
+# and pollute the tree; the build must only touch the HTML files it owns.
+sys.dont_write_bytecode = True
+
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / &quot;docs&quot;
+OUT = ROOT / &quot;docs&quot; / &quot;_build&quot;
+
+
+def _load_generate_docs():
+    &quot;&quot;&quot;Load generate-docs.py by path: its hyphenated filename is not a valid
+    import name, so plain `from generate_docs import render` cannot work.&quot;&quot;&quot;
+    gen_path = Path(__file__).resolve().parent / &quot;generate-docs.py&quot;
+    spec = importlib.util.spec_from_file_location(&quot;generate_docs&quot;, gen_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f&quot;cannot load shared renderer: {gen_path}&quot;)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+render = _load_generate_docs().render  # single source of truth
+
+
+def tracked_html() -&gt; list[Path]:
+    &quot;&quot;&quot;Exact set of HTML files Git tracks under docs/_build/.&quot;&quot;&quot;
+    proc = subprocess.run([&quot;git&quot;, &quot;ls-files&quot;, &quot;docs/_build&quot;], cwd=ROOT,
+                          capture_output=True, text=True)
+    if proc.returncode != 0:
+        raise RuntimeError(&quot;not a git checkout. This script must run inside the repo.&quot;)
+    prefix = &quot;docs/_build/&quot;
+    return [OUT / rel[len(prefix):] for rel in proc.stdout.splitlines()
+            if rel.startswith(prefix) and rel.endswith(&quot;.html&quot;)]
+
+
+def main() -&gt; int:
+    html_pages = tracked_html()
+    if not html_pages:
+        print(&quot;ERROR: no tracked HTML pages found under docs/_build/&quot;, file=sys.stderr)
+        return 1
+    # Preflight all sources before writing anything (no half-rebuilds).
+    pairs = []
+    for html in sorted(html_pages):
+        md = SRC / html.relative_to(OUT).with_suffix(&quot;.md&quot;)
+        if not md.exists():
+            print(f&quot;ERROR: {html.relative_to(ROOT)} has no source {md.relative_to(ROOT)}&quot;,
+                  file=sys.stderr)
+            return 1
+        pairs.append((md, html))
+    print(f&quot;regenerating {len(pairs)} tracked pages:&quot;)
+    for md, html in pairs:
+        print(f&quot;  {md.relative_to(ROOT)} -&gt; {html.relative_to(ROOT)}&quot;)
+        render(md, html)
+    return 0
+
+
+if __name__ == &quot;__main__&quot;:
+    raise SystemExit(main())
+</code></pre>
+<p><strong>Run it and verify:</strong></p>
+<pre><code class="language-sh">python3 docs/scripts/regenerate-html.py      # rebuilds exactly the 15 tracked pages
+grep -rE 'doctor|spec validate|spec info|spec convert' docs/_build/   # → 0 matches
+</code></pre>
+<p>(Use <code>-E</code>: the bare <code>grep -r 'doctor|spec validate|...'</code> treats <code>|</code> literally and trivially matches nothing; <code>-E</code> makes the alternation a real check.)</p>
+<p><strong>CONTRIBUTING.md</strong> — replace the docs checklist's full-build step so future edits can't go stale again:</p>
+<pre><code class="language-markdown">- [ ] Edit the **markdown source** (`docs/*.md`); never hand-edit `docs/_build/`.
+- [ ] Regenerate the tracked HTML build so `docs/_build/` never goes stale:
+      `python3 docs/scripts/regenerate-html.py`
+      (rebuilds only the Git-tracked pages — run `generate-docs.py` only for a
+      deliberate full build, and clean up the untracked runbooks/dogfood/examples
+      output it emits).
+- [ ] Verify no dead commands leaked into the build:
+      `grep -rE 'doctor|spec validate|spec info|spec convert' docs/_build/`
+      must return zero matches.
+- [ ] Commit the markdown **and** the regenerated `docs/_build/` HTML in the
+      same PR, or the build goes stale exactly like it did after DF-002.
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>No repo exists in this environment, so I built a faithful simulation at `/tmp/godocs-fix-demo` (git repo; `docs/` with index + 14 command pages, runbooks/dogfood/examples pages, rglob `generate-docs.py`, stale `_build/`) and reproduced the exact scenario: initial commit → DF-002 markdown fix commit → stale tracked HTML with `git status` clean. Results:
+
+| # | Test | Result |
+|---|------|--------|
+| 1 | Stale build detected: `grep -rE &#x27;doctor\|spec validate\|spec info\|spec convert&#x27; docs/_build/` before fix | 6 matches (dead commands present) |
+| 2 | Naive full run (`generate-docs.py`) | 2 tracked HTML modified **+ 20 new untracked HTML** (runbooks 6, dogfood 7, examples 7) — the scope creep |
+| 3 | Targeted `regenerate-html.py` | regenerates exactly **15 tracked pages** (14 content + index); `git status`: 0 untracked, only the 2 genuinely-changed pages differ (13 others byte-identical) |
+| 4 | Dead-command grep after fix (both `-r` literal and `-rE`) | **0 matches** |
+| 5 | Fixed content present | committed `spec.html` contains `gdoc spec check` + `Exit codes`; no validate/info/convert |
+| 6 | Idempotency | re-run produces byte-identical `sha256sum` output |
+| 7 | Missing source md (moved `index.md`) | preflight error `docs/_build/index.html has no source docs/index.md`, exit 1, **nothing written** |
+| 8 | Not a git checkout | clear `RuntimeError: not a git checkout...`, exit 1 |
+| 9 | Tracked asset (`docs/_build/assets/docs.css`) | untouched by the script (filters `.html`) |
+| 10 | CONTRIBUTING.md checklist | diff applied; fix commit contains only: `CONTRIBUTING.md`, `regenerate-html.py`, `index.html`, `spec.html` |
+
+One real bug surfaced during verification: `generate-docs.py`&#x27;s hyphenated filename can&#x27;t be imported (`from generate_docs import ...` → `ModuleNotFoundError`), fixed with `importlib.util.spec_from_file_location`; and `exec_module` polluted the tree with `__pycache__/`, fixed with `sys.dont_write_bytecode = True`. Final commit `1aa1e07` has a clean 4-file diff and a fully clean working tree.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-docs-html-build-stale&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 10}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

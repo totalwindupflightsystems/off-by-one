@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sql-rls-secdefiner-lost-migration — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** The dashboard joined `users` inline (e.g., `enrollments e JOIN users u ON u.id = e.student_id`). Under the teacher&#x27;s role, the `users_select_sel">
+<meta property="og:title" content="sql-rls-secdefiner-lost-migration — Off-By-One">
+<meta property="og:description" content="**Root cause.** The dashboard joined `users` inline (e.g., `enrollments e JOIN users u ON u.id = e.student_id`). Under the teacher&#x27;s role, the `users_select_sel">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0613-sql-rls-secdefiner-lost-migration.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>sql-rls-secdefiner-lost-migration</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>sql-rls-secdefiner-lost-migration</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> The dashboard joined <code>users</code> inline (e.g., <code>enrollments e JOIN users u ON u.id = e.student_id</code>). Under the teacher's role, the <code>users_select_self_or_admin</code> policy filters <code>users</code> down to the teacher's own row, so the JOIN yields 0 rows and the UI faithfully renders <code>Active Students = 0</code>. The fix is a SECURITY DEFINER RPC that runs as the migration owner (bypasses RLS), wired into the repo as migration 027 and called from the client.</p>
+<p><strong>1. Migration 027 — SECURITY DEFINER function</strong> (<code>supabase/migrations/027_teacher_dashboard_active_students.sql</code>):</p>
+<pre><code class="language-sql">-- Runs as postgres/supabase_admin (migration runner) → SECURITY DEFINER bypasses
+-- the users_select_self_or_admin RLS that zeroed the inline join.
+create or replace function public.get_teacher_active_students(
+  p_teacher_id uuid default auth.uid()
+)
+returns table (
+  student_id    uuid,
+  student_name  text,
+  enrollment_id uuid,
+  enrolled_at   timestamptz
+)
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp          -- harden against search_path hijacking
+as $$
+declare
+  v_requester uuid := auth.uid();
+  v_is_admin  boolean;
+begin
+  if v_requester is null then
+    raise exception 'not authenticated';
+  end if;
+
+  -- Admins may inspect any teacher's roster; teachers only their own.
+  select exists (
+    select 1 from public.user_roles r
+    where r.user_id = v_requester and r.role = 'admin'
+  ) into v_is_admin;
+
+  if not v_is_admin and (p_teacher_id is distinct from v_requester) then
+    raise exception 'insufficient privilege: cannot query teacher %', p_teacher_id;
+  end if;
+
+  return query
+    select e.student_id,
+           u.name          as student_name,
+           e.id            as enrollment_id,
+           e.created_at    as enrolled_at
+    from public.enrollments e
+    join public.users u on u.id = e.student_id
+    where e.teacher_id = p_teacher_id
+      and e.status = 'active';
+end;
+$$;
+
+revoke all on function public.get_teacher_active_students(uuid) from public;
+grant execute on function public.get_teacher_active_students(uuid) to authenticated;
+
+create index if not exists enrollments_teacher_status_idx
+  on public.enrollments (teacher_id, status);
+</code></pre>
+<p><strong>2. App wiring</strong> — replace the RLS-filtered inline query with an RPC call:</p>
+<pre><code class="language-ts">// dashboard.ts — before (broken: count always 0 for teachers)
+const { count } = await supabase
+  .from('users')
+  .select('id', { count: 'exact', head: true })
+  .in('id', rosterStudentIds);
+
+// after — SECURITY DEFINER RPC, scoped server-side to auth.uid()
+const { data, error } = await supabase.rpc('get_teacher_active_students', {
+  p_teacher_id: session.user.id,
+});
+if (error) throw error;
+const activeStudents = data ?? [];
+</code></pre>
+<p><strong>3. test-db helper</strong> — stop hardcoding <code>devsecret</code>; authenticate to the <em>test</em> container:</p>
+<pre><code class="language-ts">// test/helpers/db.ts — before: JWT hand-signed with the dev secret, so every
+// request to the test container (different secret) landed unauthenticated.
+const SERVICE_ROLE_KEY = createJwt({ secret: 'devsecret', claims: { role: 'service_role' } });
+
+// after — resolve from the test project, never hardcode
+const SERVICE_ROLE_KEY =
+  process.env.TEST_SERVICE_ROLE_KEY ?? (await fetchTestContainerKeys()); // supabase status / container env
+</code></pre>
+<p><strong>4. Seed ordering</strong> — <code>parent_links.parent_id</code> FKs to <code>parent_profiles</code>, not <code>users</code>:</p>
+<pre><code class="language-sql">-- wrong: FK violation
+insert into parent_links (parent_id, student_id) values ('u-parent-1', 'u-stu-1');
+
+-- correct: parent_profiles row first
+insert into parent_profiles (id, user_id, name) values ('pp-1', 'u-parent-1', 'Parent One');
+insert into parent_links (parent_id, student_id) values ('pp-1', 'u-stu-1');
+</code></pre>
+<p><strong>5. Quizzes</strong> — quiz RLS is <code>created_by = auth.uid()</code>, so seeds must set it:</p>
+<pre><code class="language-sql">insert into quizzes (id, lesson_id, title, created_by)
+values ('quiz-1', 'lesson-1', 'Ch.1 Quiz', 'u-teacher-1');
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified on a clean DB and against the test container:
+
+1. **Repo state (the actual lesson):** after the judge reported PASS, ran `git status --porcelain` and `git show HEAD:supabase/migrations/027_teacher_dashboard_active_students.sql` — confirmed migration 027 is **tracked and committed**, not just present in the live DB. Verdict text ≠ repo state; re-check the worktree after every judge run.
+2. **Root cause reproduced:** as a teacher role with `set_config(&#x27;request.jwt.claims&#x27;, &#x27;{&quot;sub&quot;:&quot;&lt;teacher-id&gt;&quot;}&#x27;, false)`, the old inline join returns 0 rows while `select * from public.get_teacher_active_students()` returns the roster — confirming RLS (not missing data) caused the zero.
+3. **Security:** `anon` cannot execute (revoked); teacher B passing teacher A&#x27;s id gets `insufficient privilege`; function owner is the migration role so RLS bypass is intended and contained to this one RPC.
+4. **Dashboard e2e:** teacher login → Active Students card shows N &gt; 0, matching `select count(*) from enrollments where teacher_id = X and status = &#x27;active&#x27;`.
+5. **Test suite:** helper now logs `authenticated as service_role` against the test container; seeds insert `parent_profiles` before `parent_links` (no FK violation); quizzes with `created_by` are visible under quiz RLS.
+6. **Regressions:** zero-student teacher still sees 0 (correct, not a bug); admin can pass any teacher id; `search_path = public, pg_temp` prevents hijacking; `create or replace` / `create index if not exists` make the migration idempotent; `(teacher_id, status)` index keeps large rosters fast.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;sql-rls-secdefiner-lost-migration&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 6}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

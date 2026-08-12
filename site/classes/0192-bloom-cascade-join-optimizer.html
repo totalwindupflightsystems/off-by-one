@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bloom-cascade-join-optimizer — Off-By-One verified answer</title>
+<meta name="description" content="The `bloom-cascade-join-optimizer` implements a **three-phase distributed join optimizer** that uses layered Bloom filters to drastically reduce data shuffling ">
+<meta property="og:title" content="bloom-cascade-join-optimizer — Off-By-One">
+<meta property="og:description" content="The `bloom-cascade-join-optimizer` implements a **three-phase distributed join optimizer** that uses layered Bloom filters to drastically reduce data shuffling ">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0192-bloom-cascade-join-optimizer.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bloom-cascade-join-optimizer</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>python3</span></div><div class='desc'><p>bloom-cascade-join-optimizer</p></div><div class='answer'><h2>Answer</h2><p>The <code>bloom-cascade-join-optimizer</code> implements a <strong>three-phase distributed join optimizer</strong> that uses layered Bloom filters to drastically reduce data shuffling before the shuffle phase of a distributed join.</p>
+<h3>Core Architecture</h3>
+<p><strong>1. Bloom Filter</strong> — Standard probabilistic membership data structure with double-hashing (SHA-256 derived), optimal bit-array sizing (<code>m = -n·ln(p) / ln²(2)</code>) and optimal hash count (<code>k = (m/n)·ln(2)</code>).</p>
+<p><strong>2. Cascading Bloom Filter</strong> — A multi-layer (default 3) Bloom filter where <strong>each layer holds ALL keys</strong> but with progressively <strong>lower false-positive rates</strong>. Layer 0 is coarse/small; each subsequent layer is finer/larger. A key must pass <em>all</em> layers to survive, giving a combined FPR that is the product of per-layer FPRs.</p>
+<p><strong>3. BloomCascadeJoinOptimizer</strong> — The main engine with a 3-phase algorithm:</p>
+<pre><code>Phase 1 (Build):     For each R-partition, build a CascadingBloomFilter.
+Phase 2a (Coarse):   Build a global aggregate cascade from ALL R keys, 
+                     broadcast to every S node, prune immediately.
+Phase 2b (Fine):     For each R-partition, test all surviving S keys against 
+                     its cascade. A key survives if it passes ANY R filter.
+Phase 3 (Stat):      Compute join-result size + pruning metrics.
+</code></pre>
+<p><strong>4. Dynamic Tuning</strong> — After each join run, <code>tune_bloom_parameters()</code> adjusts filter capacity inversely with observed selectivity:</p>
+<pre><code class="language-python">def tune_bloom_parameters(stats, target_fpr=0.01, min_capacity=1000):
+    scale = min(5.0, max(0.5, 1.0 / max(0.001, stats.selectivity)))
+    capacity = max(min_capacity, int(stats.build_side_size * scale))
+    error_rate = max(1e-6, target_fpr / max(0.1, stats.selectivity * 10))
+    return capacity, error_rate
+</code></pre>
+<h3>Key Code Example</h3>
+<pre><code class="language-python">optimizer = BloomCascadeJoinOptimizer(
+    num_layers=3, 
+    base_error_rate=0.01, 
+    cascade_scale=3.0,
+    enable_dynamic_tuning=True
+)
+
+# Build partitioned datasets
+R = PartitionedDataset(&quot;build_side&quot;, num_partitions=4)
+S = PartitionedDataset(&quot;probe_side&quot;, num_partitions=4)
+R.distribute_uniformly([(f&quot;key_{i}&quot;, i) for i in range(1000)])
+S.distribute_uniformly([(f&quot;key_{i}&quot;, i) for i in range(500)] + 
+                        [(f&quot;other_{i}&quot;, i) for i in range(500)])
+
+# Run optimizer
+filtered_s, stats = optimizer.optimize_join(R, S)
+
+print(f&quot;Join results: {stats.join_result_size}&quot;)
+print(f&quot;Pruning ratio: {stats.pruning_ratio:.2%}&quot;)  
+print(f&quot;Filter effectiveness: {stats.filter_effectiveness:.2%}&quot;)
+</code></pre>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>All **13 tests pass** covering every critical edge case:
+
+| Test | What it verifies |
+|---|---|
+| **Bloom Filter Basic** | Insert &amp; lookup; empirical FPR &lt; 5% |
+| **Bloom Serialization** | `to_dict()` / `from_dict()` preserves keys, FPR, and key count |
+| **Cascading Bloom** | Multi-layer cascade: all keys pass, combined FPR &lt;&lt; single-layer FPR |
+| **Cascade FPR Reduction** | Cascade empirically outperforms a single filter on false positives |
+| **Partitioned Dataset** | Uniform hash distribution across partitions is correct |
+| **No Overlap** | Zero shared keys → zero join results, nearly all pruned |
+| **Full Overlap** | All keys shared → all match, filters retain everything |
+| **Partial Overlap** | 200/800 shared → 200 join results, 60% filter effectiveness |
+| **Dynamic Tuning** | `tune_bloom_parameters()` produces sensible capacity/error-rate |
+| **Skewed Partitions** | 900 keys in one partition + 100 overlapping → 1200 cross-partition matches |
+| **Empty Partition** | No shared keys → zero matches, graceful handling |
+| **Multiple Runs Adaptive** | 3 runs with decreasing overlap; optimizer adapts across runs |
+| **Large Dataset** | 8 partitions × 3000 keys; scales correctly |
+
+**Edge cases tested**: empty partitions, skewed data skew, zero overlap, full overlap, partial overlap, adaptive multi-run tuning, large-scale (8 partitions, 3000 keys each).
+
+---</pre><pre>{&quot;model&quot;: &quot;gpt-4o&quot;, &quot;problem_class&quot;: &quot;bloom-cascade-join-optimizer&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 13}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

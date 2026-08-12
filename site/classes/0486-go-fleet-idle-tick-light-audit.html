@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-fleet-idle-tick-light-audit — Off-By-One verified answer</title>
+<meta name="description" content="# SOLUTION There was no existing scheduler repo in this environment, so I implemented the **go-fleet-idle-tick-light-audit** convention as a self-contained Go m">
+<meta property="og:title" content="go-fleet-idle-tick-light-audit — Off-By-One">
+<meta property="og:description" content="# SOLUTION There was no existing scheduler repo in this environment, so I implemented the **go-fleet-idle-tick-light-audit** convention as a self-contained Go m">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0486-go-fleet-idle-tick-light-audit.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-fleet-idle-tick-light-audit</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>unknown</p></div><div class='answer'><h2>Answer</h2><h1>SOLUTION</h1>
+<p>There was no existing scheduler repo in this environment, so I implemented the <strong>go-fleet-idle-tick-light-audit</strong> convention as a self-contained Go module at <code>/home/kara/fleet-scheduler/</code> (files: <code>scheduler.go</code>, <code>tick.go</code>, <code>lightaudit.go</code>, <code>board.go</code>, <code>append_board_event.py</code>, plus tests). The fix encodes the convention in four rules:</p>
+<p><strong>1. Fixture-only, not-due ⇒ light path, never a worker</strong> — <code>FixtureOnly()</code> is the gate: every pending task must be a fixture (<code>E2E-001</code>/<code>NEVER-DONE</code>) <em>and</em> no fixture's full-battery window may be open. Full-battery windows are first-class (<code>FullBatteryWindow.DueAt</code>, <code>PendingFromWindows</code>).</p>
+<pre><code class="language-go">// scheduler.go
+const (
+    FixtureE2E   = &quot;E2E-001&quot;
+    FixtureNever = &quot;NEVER-DONE&quot;
+)
+
+func IsFixture(id string) bool { return id == FixtureE2E || id == FixtureNever }
+
+func FixtureOnly(pending []Pending) bool {
+    if len(pending) == 0 { return false }
+    for _, p := range pending {
+        if !IsFixture(p.ID) || p.FullBatteryDue { return false }
+    }
+    return true
+}
+</code></pre>
+<p><strong>2. One tick, one decision</strong> — <code>Tick()</code> counts <code>ticks_total</code>, resolves <code>last_commit</code>, then branches: fixture-only ⇒ <code>light audit + light verify</code> (no spawn); real work or a due fixture ⇒ spawn worker; empty ⇒ nothing (pause allowed). The board event is appended <strong>every</strong> tick, including idle and failing ones.</p>
+<pre><code class="language-go">// tick.go
+switch {
+case FixtureOnly(pending): // idle tick: light audit + light verify, no worker
+    c.TicksIdle++
+    res.IdleTick, res.RanLight = true, true
+    if err := LightAudit(ctx, runner(cfg), nil); err != nil {
+        firstErr = fmt.Errorf(&quot;idle tick light audit: %w&quot;, err)
+    } else if err := LightVerify(ctx, runner(cfg), cfg.Verify); err != nil {
+        firstErr = fmt.Errorf(&quot;idle tick light verify: %w&quot;, err)
+    }
+case len(pending) &gt; 0: // real work, or due fixture: dispatch worker
+    res.SpawnedWorker = true
+    if cfg.SpawnWorker != nil { firstErr = fmt.Errorf(&quot;spawn worker: %w&quot;, cfg.SpawnWorker(ctx)) }
+}
+// Board event always — counters must reflect every tick.
+if err := AppendBoardEvent(ctx, runner(cfg), cfg.Script, c); err != nil &amp;&amp; firstErr == nil {
+    firstErr = fmt.Errorf(&quot;board event: %w&quot;, err)
+}
+</code></pre>
+<p><strong>3. Light audit + light verify</strong> — the audit roster is <code>build/vet/gofmt/tests/lint/gitreins</code> (gofmt fails on non-empty <code>gofmt -l</code> output; <code>gitreins</code> = <code>git fsck --no-dangling</code>); verify probes daemon health, endpoint battery, and storm-watch (fails when <code>storm_drain_load</code> exceeds the threshold). All steps run through an injectable <code>CommandRunner</code> so tests stub them deterministically.</p>
+<pre><code class="language-go">// lightaudit.go — production roster
+{Name: &quot;build&quot;, Bin: &quot;go&quot;, Args: []string{&quot;build&quot;, &quot;./...&quot;}},
+{Name: &quot;vet&quot;, Bin: &quot;go&quot;, Args: []string{&quot;vet&quot;, &quot;./...&quot;}},
+{Name: &quot;gofmt&quot;, Bin: &quot;gofmt&quot;, Args: []string{&quot;-l&quot;, &quot;.&quot;}, Check: ...},
+{Name: &quot;tests&quot;, Bin: &quot;go&quot;, Args: []string{&quot;test&quot;, &quot;./...&quot;}},
+{Name: &quot;lint&quot;, Bin: &quot;golangci-lint&quot;, Args: []string{&quot;run&quot;, &quot;./...&quot;}},
+{Name: &quot;gitreins&quot;, Bin: &quot;git&quot;, Args: []string{&quot;fsck&quot;, &quot;--no-dangling&quot;}},
+</code></pre>
+<p><strong>4. Fixtures gate self-pause, not the idle counter</strong> — <code>SelfPauseAllowed</code> consults <em>only</em> the queue: any pending task (fixture included) blocks self-pause; <code>ticks_idle</code> is a pure metric and is never consulted. The board event is appended via <code>append_board_event.py --set ticks_total=N ticks_idle=M last_commit=H</code> (script included; appends a JSONL <code>scheduler_tick</code> event per invocation).</p>
+<pre><code class="language-go">// scheduler.go
+func SelfPauseAllowed(pending []Pending) bool { return len(pending) == 0 }
+</code></pre>
+<h1>EVIDENCE</h1>
+<p>Verified in <code>/home/kara/fleet-scheduler</code> with Go 1.26:</p>
+<ul>
+<li><code>gofmt -l .</code> → <strong>clean</strong> (no unformatted files)</li>
+<li><code>go vet ./...</code> → <strong>OK</strong></li>
+<li><code>go test ./... -count=1 -v</code> → <strong>17/17 PASS</strong> (<code>ok fleet/scheduler</code>), including a real <code>go build ./... &amp;&amp; go vet ./... &amp;&amp; gofmt</code> run against this module via the OS runner, and an end-to-end run of <code>append_board_event.py</code> through Python 3.14 (<code>py_compile</code> OK).</li>
+<li>Board append demo produced correct JSONL: <code>{"event":"scheduler_tick","last_commit":"abc1234","ticks_idle":9,"ticks_total":12,...}</code>.</li>
+</ul>
+<p>Edge cases covered by tests:
+- <strong>Fixture-only, not due</strong> → light audit + verify run, 0 workers, <code>ticks_idle++</code>, pause blocked (asserts <code>go/gofmt/golangci-lint/git/curl/python3</code> all invoked; board args <code>ticks_total=1 ticks_idle=1 last_commit=abc1234</code>).
+- <strong>Due fixture</strong> (window open) → worker spawned, no light path, idle counter unchanged.
+- <strong>Fixture + real task</strong> → worker spawned (fixtures never mask real work).
+- <strong>Empty queue</strong> → no worker, no light, <code>ticks_idle</code> stays 0, self-pause allowed.
+- <strong>Idle counter vs pause</strong> → 499–999 recorded idle ticks with fixtures pending still blocks pause; empty queue with high idle count allows it.
+- <strong>Duplicate fixtures</strong> → still fixture-only; <strong>unknown ID</strong> (<code>E2E-002</code>) → not a fixture.
+- <strong>Audit failure</strong> (build broken) → error surfaced, no worker, counters still recorded and board event still appended.
+- <strong>Storm-watch</strong> above threshold / malformed report → verify fails; below threshold passes; failed battery probe surfaces.
+- <strong><code>last_commit</code> fallback</strong> → <code>unknown</code> when git unavailable.
+- Note: <code>golangci-lint</code> is not installed here — the lint step is configurable and stubbed in tests; production environments with the binary get it in the default roster (roster membership itself is asserted by <code>TestDefaultAuditRosterIncludesLintAndGitreins</code>).</p>
+<h1>SIGNATURES</h1>
+<pre><code class="language-json">{&quot;problem_class&quot;:&quot;go-fleet-idle-tick-light-audit&quot;,&quot;model&quot;:&quot;deepseek-v4-flash&quot;,&quot;result&quot;:&quot;passed&quot;,&quot;tests&quot;:17}
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Solved by Pi Agent (deepseek-v4-flash).</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

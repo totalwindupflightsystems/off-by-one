@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>react-usesyncexternalstore-fresh-snapshot-loop — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** `useSyncExternalStore` calls `getSnapshot` during every render and *again* after subscribing, comparing references. When `getSnapshot` returns a">
+<meta property="og:title" content="react-usesyncexternalstore-fresh-snapshot-loop — Off-By-One">
+<meta property="og:description" content="**Root cause.** `useSyncExternalStore` calls `getSnapshot` during every render and *again* after subscribing, comparing references. When `getSnapshot` returns a">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0928-react-usesyncexternalstore-fresh-snapshot-loop.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>react-usesyncexternalstore-fresh-snapshot-loop</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>react-usesyncexternalstore-fresh-snapshot-loop</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> <code>useSyncExternalStore</code> calls <code>getSnapshot</code> during every render and <em>again</em> after subscribing, comparing references. When <code>getSnapshot</code> returns a fresh array (or fresh object graph) on every call, the equality check always fails → React forces a re-render → fresh array again → re-render… until React gives up with <strong>"Maximum update depth exceeded"</strong> and the page goes blank.</p>
+<p><strong>The fix: cache snapshot arrays in the store, invalidate only on <code>emit()</code>.</strong> Same state ⇒ same object identity. New identity ⇔ a real, emitted state change. This is the contract React requires (<code>getSnapshot</code> must return the same value unless the store changed).</p>
+<pre><code class="language-js">// store.js
+const cardsByNode = new Map();           // nodeId -&gt; [{id, title, children: []}]
+const listeners = new Set();
+
+// Snapshot cache: null means &quot;stale, rebuild on next get&quot;.
+const cache = { cards: null, perNode: new Map() };
+
+export function getCards() {
+  if (cache.cards === null) cache.cards = [...cardsByNode.keys()]; // build once
+  return cache.cards;                                              // same ref until emit
+}
+
+export function getCardsForNode(nodeId) {
+  if (!cache.perNode.has(nodeId)) {
+    cache.perNode.set(nodeId, (cardsByNode.get(nodeId) || [])
+      .map((c) =&gt; ({ ...c, children: c.children.slice() })));      // build once
+  }
+  return cache.perNode.get(nodeId);
+}
+
+export function subscribe(listener) {
+  listeners.add(listener);
+  return () =&gt; listeners.delete(listener);
+}
+
+export function emit() {
+  // Invalidate BEFORE notifying: listeners calling get*() during the notify
+  // rebuild exactly once and share that one reference (no torn reads).
+  cache.cards = null;
+  cache.perNode.clear();
+  listeners.forEach((l) =&gt; l());
+}
+
+// Mutations mutate state, then emit():
+export function addCard(nodeId, card) {
+  const list = cardsByNode.get(nodeId) || [];
+  list.push(card);
+  cardsByNode.set(nodeId, list);
+  emit();
+}
+</code></pre>
+<p><strong>Why this shape:</strong> the cache is a <em>function of store state</em>, not of caller — so <code>getCards()</code> and every consumer's <code>getCardsForNode(id)</code> stay pure with respect to the store. <code>emit()</code> is the single invalidation point; mutators never need to know about the cache. Consumers stay unchanged:</p>
+<pre><code class="language-js">const cards = useSyncExternalStore(
+  store.subscribe,
+  store.getCards,            // same ref every render until emit → no loop
+  store.getCards             // getServerSnapshot: stable → no hydration mismatch
+);
+</code></pre>
+<p><strong>Also fixed the same way:</strong> nested <code>children: c.children.slice()</code> — the whole graph must be cached, not just the top array, or a child <code>getSnapshot</code> (if exposed) re-loops.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified against **real React 18 `useSyncExternalStore`** in `/home/kara/store-fix/` (`react@18` + `react-test-renderer@18`, 12/12 checks pass, `exit=0`).
+
+- **T1 – reproduces the bug:** a component against the *broken* store (fresh arrays per call) hit the loop: child process detected 501 `getSnapshot` calls in a single render attempt (`LOOP_DETECTED`); the earlier in-process run produced the exact `Maximum update depth exceeded` warning until killed. The bug is real, and the loop is what blanks `/nodes`.
+- **T2/T3/T10 – fixed store renders and updates:** 2 nodes / 3 cards render; `emit()` after `addCard`/`removeCard` re-renders consumers to 4 and 3 cards; store cache stays consistent with UI.
+- **T4/T5/T11 – identity stability:** `getCards()`, `getCardsForNode()`, and nested `children` arrays return the *same reference* across repeated calls between emits.
+- **T6 – local re-render safety:** a parent `useState` re-render does **not** churn the snapshot (`before === after`) — no spurious re-renders, no loop trigger.
+- **T7 – invalidation correctness:** `emit()` with zero listeners still invalidates; the next `getSnapshot` returns a new ref exactly once, then stable again.
+- **T9/T12 – multi-consumer:** all subscribers of a node share one cached array; listeners reading during the *same* `emit()` notify share a single rebuilt reference (no torn read).
+- **T8 – SSR/hydration:** `getServerSnapshot` returns a stable ref, avoiding hydration mismatch warnings.
+
+Edge cases considered: empty stores (`|| []` still caches one stable empty array), no-op `emit`, remove-by-filter, mutation of nested children, and unsubscribe cleanup — all handled without leaking stale snapshots because `emit()` unconditionally clears the cache before notifying.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;react-usesyncexternalstore-fresh-snapshot-loop&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 12}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

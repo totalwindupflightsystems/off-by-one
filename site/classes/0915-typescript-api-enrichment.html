@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>typescript-api-enrichment — Off-By-One verified answer</title>
+<meta name="description" content="The gap: the game detail API had no per-player model/token attribution. The fix (implemented at `/home/kara/maf-gap-029/`, TypeScript, strict, no build step) wa">
+<meta property="og:title" content="typescript-api-enrichment — Off-By-One">
+<meta property="og:description" content="The gap: the game detail API had no per-player model/token attribution. The fix (implemented at `/home/kara/maf-gap-029/`, TypeScript, strict, no build step) wa">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0915-typescript-api-enrichment.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>typescript-api-enrichment</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>typescript-api-enrichment</p></div><div class='answer'><h2>Answer</h2><p>The gap: the game detail API had no per-player model/token attribution. The fix (implemented at <code>/home/kara/maf-gap-029/</code>, TypeScript, strict, no build step) walks the attribution chain <code>player.role → player_model_assignments(role → provider/model) → token_usage/api_calls[(game_id, provider, model)]</code> and reconciles the two record shapes: <strong>native</strong> rows (real <code>player_id</code>) attribute directly; <strong>legacy</strong> rows (<code>player_id = "ALL"</code>, whole-game per-model aggregates) are attributed <strong>only</strong> when the game has a sole player, the chain fully resolves, and the resolved <code>(provider, model)</code> matches — otherwise the honest answer is <strong>0</strong> and the aggregate is surfaced in an <code>unattributed</code> bucket instead of being guessed onto a player.</p>
+<p>Backward compatibility: the shared <code>Player</code> type gains only <strong>optional</strong> fields (<code>resolvedModel?</code>, <code>modelUsage?</code>); with no usage rows the payload is byte-identical to the legacy shape. Crucially, <code>recordTokenUsage</code> has no production callers (native engine records nothing), so the enrichment reads the usage store directly and treats "zero rows" as "no per-player data exists" — it never fabricates data.</p>
+<p>Core resolver (<code>src/attribution.ts</code>):</p>
+<pre><code class="language-ts">export function attributeUsage(gameId: string, playersIn: readonly Player[], deps: AttributionDeps): AttributionResult {
+  const rows = deps.usageRowsFor(gameId);
+  // Data-presence check: recordTokenUsage has NO production callers. If the
+  // store has zero rows, do not assume per-player data exists; keep the
+  // legacy payload untouched.
+  if (rows.length === 0) {
+    return { players: playersIn.map(p =&gt; ({ ...p })), unattributed: [], hasUsageData: false };
+  }
+
+  // 1. Resolve chain: player.role -&gt; assignment(provider/model); track completeness.
+  const byRole = new Map(deps.assignmentsFor(gameId).map(a =&gt; [a.role, a] as const));
+  let allPlayersResolved = true;
+  for (const p of players) {
+    const a = byRole.get(p.role);
+    if (a) p.resolvedModel = { provider: a.provider, model: a.model };
+    else allPlayersResolved = false;
+  }
+
+  // 2. NATIVE rows (real player_id): attribute directly, aggregated per (provider, model).
+  // 3. LEGACY &quot;ALL&quot; rows: attribute ONLY if isSolePlayer &amp;&amp; allPlayersResolved
+  //    &amp;&amp; solePlayer.resolvedModel matches (provider, model); else honest 0 -&gt;
+  //    push to `unattributed` with a reason (multiple_players / unresolved_assignment / model_mismatch).
+  //    A provably-attributed aggregate supersedes native rows for the same bucket
+  //    (the aggregate IS the whole-game total — never double count).
+
+  // 4. Attach non-empty buckets back: p.modelUsage = [...buckets.get(p.id)!]  // optional field
+  return { players, unattributed, hasUsageData: true };
+}
+</code></pre>
+<p>Shared <code>Player</code> type (<code>src/types.ts</code>) — optional fields keep old consumers compiling and running:</p>
+<pre><code class="language-ts">export interface Player extends GamePlayer {            // GamePlayer = { id, name, role }
+  resolvedModel?: ProviderModel;          // optional: chain resolution
+  modelUsage?: PlayerModelUsage[];        // optional: per-model tokens + apiCalls, with `attributed: boolean`
+}
+</code></pre>
+<p>API entry (<code>src/enrichGameDetail.ts</code>) only adds <code>unattributed</code> when usage data exists, so legacy responses are untouched:</p>
+<pre><code class="language-ts">return { id: gameId, players: result.players, ...(result.hasUsageData ? { unattributed: result.unattributed } : {}) };
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>11/11 runtime tests pass (`node --test` on Node 22 with built-in type stripping) and `tsc --noEmit` (strict + `erasableSyntaxOnly`) passes. Cases covered:
+
+1. **No usage rows at all** → `hasUsageData:false`, no `modelUsage`, no `resolvedModel`, no `unattributed` — no fabricated per-player data despite `recordTokenUsage` having no callers.
+2. **Legacy ALL row + sole player + resolved model matches** → attributed (tokens + apiCalls), `unattributed: []`.
+3. **Legacy ALL row + sole player but assignment missing** → honest 0 → `unattributed[].reason === &quot;unresolved_assignment&quot;`.
+4. **Legacy ALL row + multiple players (even if one&#x27;s model matches)** → honest 0 → `reason === &quot;multiple_players&quot;`.
+5. **Legacy ALL row + sole player + model mismatch** → honest 0 → `reason === &quot;model_mismatch&quot;`.
+6. **Native rows** → attributed per player, summed per `(provider, model)` bucket, sorted.
+7. **Native + legacy for same bucket** → attributed aggregate supersedes native (no double counting).
+8. **Native row with unknown player** → surfaced as `unattributed` (`unknown_player`), never dropped.
+9. **End-to-end** via `enrichGameDetail`: `role → assignment → usage`; two-player game leaves the legacy aggregate honest-0 on the matching player, single-player game attributes it.
+10. **Backward compat** (runtime): legacy payload has no `modelUsage`/`resolvedModel` keys and no `unattributed` key; **compile-time**: `{ id, name, role } satisfies Player` typechecks.
+
+```text
+# tests 11 | # pass 11 | # fail 0
+tsc --noEmit (strict) ......... PASS
+```</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;typescript-api-enrichment&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 11}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

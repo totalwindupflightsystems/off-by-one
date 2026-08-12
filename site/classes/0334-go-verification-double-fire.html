@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-verification-double-fire — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause:** the crier ran its verification pipeline and wrote a board entry without first checking a durable, single-writer claim registry — so when a sibli">
+<meta property="og:title" content="go-verification-double-fire — Off-By-One">
+<meta property="og:description" content="**Root cause:** the crier ran its verification pipeline and wrote a board entry without first checking a durable, single-writer claim registry — so when a sibli">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0334-go-verification-double-fire.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-verification-double-fire</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-verification-double-fire</p></div><div class='answer'><h2>Answer 1</h2><p><strong>Root cause:</strong> the crier ran its verification pipeline and wrote a board entry without first checking a durable, single-writer claim registry — so when a sibling foreman had already committed tick 39 (<code>083750d</code>), a second full verification and second board entry fired.</p>
+<p><strong>Fix (<code>/home/kara/crier/</code>):</strong> a <code>crier.Store</code> enforcing one committed board entry per tick number, plus a <code>VerifyOnce</code> entry point that implements the protocol:</p>
+<ol>
+<li><strong>Claim before run</strong> — <code>Acquire</code> checks the durable ledger first; only if the tick is absent does it claim an in-progress token via <code>O_CREATE|O_EXCL</code> (atomic across processes, no lock server). Live leases are never stolen; stale leases (crashed owner) are stolen only via compare-and-delete.</li>
+</ol>
+<pre><code class="language-go">// crier.go
+func (s *Store) Acquire(tick int, owner string, now time.Time) (bool, error) {
+    // 1. Already on the board? → ErrDuplicate, never run again.
+    if _, ok, err := s.GetEntry(tick); err != nil { return false, err } else if ok {
+        return false, ErrDuplicate
+    }
+    // 2. Atomic per-tick claim: only one process wins.
+    claimed, err := s.tryClaim(s.tokenPath(tick), Token{Tick: tick, Owner: owner, LeaseUntil: now.Add(s.lease)})
+    ...
+}
+</code></pre>
+<ol>
+<li><strong>One entry, never two</strong> — <code>Commit</code> serializes with <code>flock</code> and refuses a second entry: identical evidence → <code>ErrDuplicate</code>; differing evidence → <code>ErrConflict</code> (original preserved, escalated to humans, never overwritten). The ledger is written temp-file + fsync + atomic rename.</li>
+</ol>
+<pre><code class="language-go">want := HashEvidence(e.Commit, e.Evidence)      // canonical digest, computed here
+if cur, ok := entries[e.Tick]; ok {
+    if cur.EvidenceSHA == want &amp;&amp; cur.Commit == e.Commit {
+        return fmt.Errorf(&quot;%w: ... identical — second entry refused&quot;, ErrDuplicate)
+    }
+    return fmt.Errorf(&quot;%w: ... refusing to overwrite&quot;, ErrConflict)
+}
+</code></pre>
+<ol>
+<li>
+<p><strong>Reconcile, don't re-run-and-publish</strong> — the losing/sibling path independently re-runs the gates (build, vet, 8+8 tests, guard, govulncheck, hilo-stats, gitreins-count, CI-runs), hashes them canonically (sorted <code>key=commit:result</code> lines, so map order can't alter the digest), compares against the sibling's committed hash, and writes only an <strong>attestation sidecar</strong> — never a second board entry.</p>
+</li>
+<li>
+<p><strong>No duplicate workers</strong> — <code>ClaimWorker</code> registers worker IDs with <code>O_EXCL</code> (duplicate IDs refused) and additionally refuses to spawn <em>any</em> worker for an already-committed tick. Only the single acquiring process ever reaches the spawn step.</p>
+</li>
+</ol>
+<p>The crier loop collapses to one call:</p>
+<pre><code class="language-go">outcome, err := crier.VerifyOnce(s, tick, owner, commit, gates, now)
+// outcome: ran-and-committed | duplicate-confirmed | conflict-escalated
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>`go vet`, `gofmt`, and `go test -race` all pass; 10/10 tests green:
+
+| Test | Verifies |
+|---|---|
+| `TestIncident_AlreadyCommitted_SiblingWins` | Regression for the exact incident: `Acquire` → `ErrDuplicate`, second `Commit` refused, worker spawn refused, board has **exactly 1** entry owned by `foreman-a` |
+| `TestIncident_VerifyOnceReconciles` | My run re-runs gates, matches sibling claims exactly, writes 1 attestation, board untouched |
+| `TestRace_ManyCriersOneBoardEntry` | 8 racing criers on tick 39 → exactly 1 `ran`, 7 `duplicate-confirmed`, 1 board entry |
+| `TestConflict_DifferentEvidenceNeverOverwrites` | Differing evidence → `ErrConflict`, original entry intact |
+| `TestVerifyOnce_ConflictEscalated` | Conflict path through public API; board not clobbered |
+| `TestLeaseExpiry_StaleTokenStolen` | Live token not stealable; expired (crashed) owner&#x27;s token stolen; still 1 entry |
+| `TestHashEvidence_Deterministic` | Digest order-independent; sensitive to gate result and commit sha |
+| `TestWorkers_NoDuplicateSpawns` | Duplicate worker ID refused; committed tick closed to new workers |
+| `TestDistinctTicks_Independent` | Different tick numbers proceed independently |
+| `TestCorruptLedger_ErrorsNotSilenced` | Torn board errors loudly, never silently double-fires |
+
+Example run (replays incident): `foreman-a → ran-and-committed`; `crier-b → duplicate-confirmed`; `ci-recheck → duplicate-confirmed`; worker dup refused; **1** board entry for tick 39, sha `9e3f6693e0…`.
+
+Edge cases covered: same-tick races, genuine conflicts (escalate, never overwrite), crashed-owner leases, duplicate worker processes, corrupt/torn ledger, and distinct-tick independence.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-verification-double-fire&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 10}</pre></div><div class='answer'><h2>Answer 2</h2><p><strong>Root cause.</strong> Helix tick #60 found the tick #59 verification set double-fired for commit <code>6012714</code>: two sibling sessions raced, and the loser's stale output was written as truth. Three concrete failures:</p>
+<ol>
+<li><strong>Forgejo "DOWN" was a stale-port hallucination</strong> — the gate probed a hardcoded <code>:8080</code> (a proxy answering 404) instead of the pinned <code>:3030</code>.</li>
+<li><strong>Cooldown 7200 was a stale claim</strong> — <code>fleet.toml</code> pins <code>cooldown = 900</code>; 7200 came from an older fleet generation.</li>
+<li><strong>CI-FIX-E2E-SKIP closed green with no verdict.json</strong> — judge transport failed, the artifact was never produced, yet CI reported green.</li>
+</ol>
+<p>The fix makes each gate read pinned config (never sibling claims), refuse green without the judge artifact, and enforce single-fire idempotency per (tick, commit, gate) with the cooldown pin. Implementation (stdlib-only Go, built and tested at <code>/tmp/gvf</code>):</p>
+<p><strong>Fix 1 — healthcheck: pinned port + content sniff (kills the stale :8080 claim)</strong></p>
+<pre><code class="language-go">func HealthCheck(ctx context.Context, base string) error {
+    u, err := url.Parse(base)
+    if err != nil { return fmt.Errorf(&quot;forgejo_url parse: %w&quot;, err) }
+    if u.Scheme == &quot;&quot; || u.Host == &quot;&quot; { return fmt.Errorf(&quot;forgejo_url %q is not absolute&quot;, base) }
+    if u.Port() == &quot;&quot; {
+        return fmt.Errorf(&quot;forgejo_url %q has no port: pin it (3030), never fall back to 8080&quot;, base)
+    }
+    req, _ := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, &quot;/&quot;)+&quot;/&quot;, nil)
+    resp, err := (&amp;http.Client{Timeout: 5 * time.Second}).Do(req)
+    if err != nil { return fmt.Errorf(&quot;forgejo unreachable at %s: %w&quot;, base, err) }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK { return fmt.Errorf(&quot;forgejo at %s returned %s&quot;, base, resp.Status) }
+    body, _ := io.ReadAll(io.LimitReader(resp.Body, 64&lt;&lt;10))
+    if !bytes.Contains(bytes.ToLower(body), []byte(&quot;forgejo&quot;)) {
+        return fmt.Errorf(&quot;%w: %s answers %s but body does not identify Forgejo&quot;, ErrWrongService, base, resp.Status)
+    }
+    return nil
+}
+</code></pre>
+<p><strong>Fix 2 — fleet.toml cooldown pin (900, not 7200)</strong></p>
+<pre><code class="language-go">const DefaultCooldown = 900 * time.Second // fleet.toml pin
+
+func LoadConfig(path string) (*Config, error) {
+    cfg := &amp;Config{Cooldown: DefaultCooldown, Forgejo: &quot;http://127.0.0.1:3030&quot;,
+        Verdict: &quot;verdict.json&quot;, MaxRefire: 3}
+    b, err := os.ReadFile(path)
+    if err != nil {
+        if errors.Is(err, os.ErrNotExist) { return cfg, nil } // pins win when file absent
+        return nil, err
+    }
+    for i, line := range strings.Split(string(b), &quot;\n&quot;) {
+        line = strings.TrimSpace(strings.SplitN(line, &quot;#&quot;, 2)[0])
+        if line == &quot;&quot; { continue }
+        key, val, ok := strings.Cut(line, &quot;=&quot;)
+        if !ok { continue }
+        key, val = strings.TrimSpace(key), strings.Trim(strings.TrimSpace(val), `&quot;'`)
+        switch key {
+        case &quot;cooldown&quot;:
+            n, err := strconv.Atoi(val)
+            if err != nil || n &lt;= 0 { return nil, fmt.Errorf(&quot;fleet.toml:%d: bad cooldown&quot;, i+1) }
+            cfg.Cooldown = time.Duration(n) * time.Second
+        case &quot;forgejo_url&quot;:
+            if !strings.HasPrefix(val, &quot;http&quot;) { return nil, fmt.Errorf(&quot;fleet.toml:%d: forgejo_url must be absolute&quot;, i+1) }
+            cfg.Forgejo = val
+        case &quot;verdict_file&quot;:
+            cfg.Verdict = val
+        }
+    }
+    return cfg, nil
+}
+</code></pre>
+<p><strong>Fix 3 — CI-FIX-E2E-SKIP: green is unrepresentable without verdict.json</strong></p>
+<pre><code class="language-go">func LoadVerdict(path string) (*Verdict, error) {
+    b, err := os.ReadFile(path)
+    if err != nil {
+        return nil, fmt.Errorf(&quot;verdict.json missing (%v): judge transport failure must be retried, never reported green&quot;, err)
+    }
+    var v Verdict
+    if err := json.Unmarshal(b, &amp;v); err != nil { return nil, fmt.Errorf(&quot;verdict.json corrupt: %w&quot;, err) }
+    if v.Commit == &quot;&quot; { return nil, fmt.Errorf(&quot;verdict.json incomplete: commit required&quot;) }
+    return &amp;v, nil
+}
+
+func Green(v *Verdict) (bool, string) {
+    switch v.Status {
+    case &quot;pass&quot;:
+        return true, &quot;verdict.json present: status=pass&quot;
+    case &quot;fail&quot;:
+        return false, &quot;verdict.json present: status=fail&quot;
+    case &quot;skip&quot;:
+        if v.SkipWhy == &quot;&quot; { return false, &quot;verdict.json status=skip without skip_why is NOT green&quot; }
+        return true, &quot;verdict.json explicit skip: &quot; + v.SkipWhy
+    default:
+        return false, &quot;verdict.json unknown status &quot; + v.Status
+    }
+}
+</code></pre>
+<p><strong>Fix 4 — single-fire claims + cooldown + one DuckBrain record (anti-double-fire)</strong></p>
+<pre><code class="language-go">func ClaimKey(tick int, commit, gate string) string {
+    return fmt.Sprintf(&quot;%d/%s/%s&quot;, tick, commit, gate) // deterministic across sessions
+}
+
+func Acquire(store ClaimStore, c Claim, cooldown time.Duration) error {
+    if err := store.Insert(c); err != nil {
+        if errors.Is(err, ErrAlreadyClaimed) {
+            if prev, ok := store.Lookup(c.Key); ok &amp;&amp; time.Since(prev.At) &lt; cooldown {
+                return ErrCooldown // inside the 900s pin: refire blocked
+            }
+            return ErrAlreadyClaimed // already ran this tick: permanent
+        }
+        return err
+    }
+    return nil
+}
+
+func WriteOne(path string, r Record) error { // one DuckBrain record per tick
+    if b, err := os.ReadFile(path); err == nil {
+        var prev Record
+        if json.Unmarshal(b, &amp;prev) == nil &amp;&amp; prev.Tick == r.Tick {
+            return errors.New(&quot;duckbrain record already exists for this tick: refusing to overwrite&quot;)
+        }
+    }
+    r.At = time.Now().UTC().Format(time.RFC3339)
+    b, err := json.MarshalIndent(r, &quot;&quot;, &quot;  &quot;)
+    if err != nil { return err }
+    return os.WriteFile(path, append(b, '\n'), 0o644)
+}
+</code></pre>
+<p>Per-tick order: <code>Acquire</code> → run gate → <code>CIGate(verdict.json)</code> → <code>HealthCheck(cfg.Forgejo)</code> → write <strong>one</strong> DuckBrain record. The second fire of the same slot is rejected before publishing; the record writer refuses overwrites.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>**Live verification of the two wrong sibling claims (probed in this session):**
+
+| Probe | Result | Meaning |
+|---|---|---|
+| `GET http://127.0.0.1:3030/` | HTTP 200, `&lt;title&gt;Forgejo: Beyond coding. We forge.&lt;/title&gt;` | Forgejo **UP on :3030** — sibling&#x27;s &quot;DOWN&quot; claim is wrong |
+| `GET http://127.0.0.1:8080/` | HTTP 404 text/plain | :8080 is a different service — the stale check probed the wrong port |
+| `GET http://127.0.0.1:9090/api/v1/health` | `{&quot;active_ticks&quot;:6,&quot;db&quot;:&quot;connected&quot;,&quot;status&quot;:&quot;ok&quot;,...}` | Fleet scheduler live |
+| `GET http://127.0.0.1:9224/` | `{&quot;status&quot;:&quot;ok&quot;,&quot;active&quot;:1,...}` | Process runner live |
+
+**Gate results (real commands, real exit codes):**
+
+```
+gofmt -l .                 -&gt; (empty)          lint gate: clean
+go build ./...             -&gt; exit 0           build gate: ok
+go vet ./...               -&gt; exit 0           vet gate: ok
+go test -race -count=1 ./... -&gt; ok gvf/gate 1.033s   tests+race: 17/17 PASS
+```
+
+**Edge cases tested (17/17 pass):** Forgejo up on real port; 200 from wrong service caught by content sniff (`ErrWrongService`); 404 is down; URL without pinned port rejected; cooldown pin 900 from fleet.toml; missing fleet.toml falls back to pins; stale file value honoured but stale claim ignored by construction; bad cooldown errors; missing verdict.json → hard error (never green); pass → green; fail → red; skip without `skip_why` → red, with reason → green; incomplete verdict (no commit) rejected; first claim OK + sibling duplicate rejected + new tick never blocked; refire inside 900s window blocked; claim key deterministic across sessions; second DuckBrain record for tick 60 refused.
+
+**Protocol compliance:** commit NOTHING (no repository was touched); exactly one DuckBrain record written for tick 60 (`forgejo: &quot;up&quot;`, `cooldown: 900`, `verdict: pass`, `event_id: 4`, `commit: 6012714`). Deliverables written to `/workspace/solution.md`, `/workspace/evidence.md`, `/workspace/signatures.json`.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-verification-double-fire&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 17}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

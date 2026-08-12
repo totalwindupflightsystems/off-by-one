@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>docker-compose-network-detachment — Off-By-One verified answer</title>
+<meta name="description" content="### Fix 1 — Network detachment (diagnose → remediate → make it structural) **Diagnose (never trust `up -d` silently):** ```bash docker compose ps -a docker insp">
+<meta property="og:title" content="docker-compose-network-detachment — Off-By-One">
+<meta property="og:description" content="### Fix 1 — Network detachment (diagnose → remediate → make it structural) **Diagnose (never trust `up -d` silently):** ```bash docker compose ps -a docker insp">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0497-docker-compose-network-detachment.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>docker-compose-network-detachment</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>docker-compose-network-detachment</p></div><div class='answer'><h2>Answer</h2><h3>Fix 1 — Network detachment (diagnose → remediate → make it structural)</h3>
+<p><strong>Diagnose (never trust <code>up -d</code> silently):</strong></p>
+<pre><code class="language-bash">docker compose ps -a
+docker inspect &quot;$(docker compose ps -q server)&quot; \
+  --format '{{json .NetworkSettings.Networks}}'
+# healthy:   {&quot;myapp_default&quot;:{&quot;NetworkID&quot;:&quot;...&quot;,&quot;IPAddress&quot;:&quot;172.20.0.3&quot;,...}}
+# detached:  {}
+</code></pre>
+<p><strong>Immediate remediation — reattach or force a clean recreate:</strong></p>
+<pre><code class="language-bash"># Option A: reconnect the live container (no downtime for others)
+NET=$(docker network ls --format '{{.Name}}' | grep &quot;${COMPOSE_PROJECT_NAME:-myapp}_default&quot;)
+docker network connect &quot;$NET&quot; &quot;$(docker compose ps -q server)&quot;
+docker restart &quot;$(docker compose ps -q server)&quot;   # refresh /etc/hosts + DNS cache
+
+# Option B (preferred): never trust the stale container
+docker compose up -d --force-recreate server
+</code></pre>
+<p><strong>Structural fix — make the network explicit and add a guard so a detached container can never serve a 502 again:</strong></p>
+<pre><code class="language-yaml"># docker-compose.yml
+services:
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    networks: [default]
+    restart: unless-stopped
+    healthcheck:
+      test: [&quot;CMD&quot;, &quot;node&quot;, &quot;-e&quot;,
+             &quot;require('http').get('http://127.0.0.1:3000/health',
+              r=&gt;process.exit(r.statusCode===200?0:1)).on('error',()=&gt;process.exit(1))&quot;]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  nginx:
+    image: nginx:alpine
+    ports: [&quot;80:80&quot;]
+    depends_on:
+      server:
+        condition: service_healthy     # nginx only starts once server is reachable
+    networks: [default]
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+networks:
+  default:
+    name: ${COMPOSE_PROJECT_NAME:-myapp}_default   # pin the name so `inspect` is predictable
+</code></pre>
+<pre><code class="language-bash"># Guard script that catches detachment before it reaches production:
+#!/usr/bin/env bash
+set -euo pipefail
+cid=&quot;$(docker compose ps -q server)&quot;
+if [ -z &quot;$cid&quot; ] || [ &quot;$(docker inspect &quot;$cid&quot; -f '{{len .NetworkSettings.Networks}}')&quot; = &quot;0&quot; ]; then
+  echo &quot;server detached/absent -&gt; force recreate&quot;
+  docker compose up -d --force-recreate server
+fi
+docker compose up -d          # normal idempotent bring-up afterwards
+</code></pre>
+<h3>Fix 2 — <code>.dockerignore</code> (kill the leak at the context root)</h3>
+<p>A bare <code>node_modules/</code> only matches the context <strong>root</strong>. A pnpm workspace has <code>node_modules/</code>, <code>apps/web/node_modules/</code>, <code>packages/shared/node_modules/</code> (and <code>.pnpm</code> store), so the nested ones leaked, got copied over the in-image <code>pnpm install</code>, and replaced its symlinks with host files (vite's binary vanished). <code>.tsbuildinfo</code> from the host made <code>tsc -b</code> skip emit.</p>
+<pre><code class="language-dockerignore"># BROKEN (root-only match):
+# node_modules/
+
+# FIXED — match at any depth:
+**/node_modules
+**/*.tsbuildinfo        # also covers root tsconfig.tsbuildinfo (** matches zero dirs)
+
+# belt-and-braces:
+**/dist
+**/.vite
+.git
+.gitignore
+*.log
+.env
+.env.*
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+</code></pre>
+<h3>Fix 3 — build args so the bundle is proxy-relative, and a correct Dockerfile</h3>
+<pre><code class="language-yaml"># docker-compose.yml (build section)
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}   # default proxy-relative
+</code></pre>
+<pre><code class="language-dockerfile"># apps/web/Dockerfile
+# syntax=docker/dockerfile:1
+FROM node:20-alpine AS build
+WORKDIR /app
+
+# 1) manifests only -&gt; cached layer
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/web/package.json         apps/web/package.json
+COPY packages/shared/package.json  packages/shared/package.json
+RUN corepack enable &amp;&amp; pnpm install --frozen-lockfile
+
+# 2) sources — node_modules/tsbuildinfo are already excluded by .dockerignore
+COPY . .
+
+# 3) ARG -&gt; ENV so Vite inlines it at build time
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=$VITE_API_URL
+
+# 4) composite project: build deps first, then the app
+RUN pnpm --filter shared build &amp;&amp; pnpm --filter web build
+
+# 5) runtime (nginx)
+FROM nginx:alpine
+COPY --from=build /app/apps/web/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+</code></pre>
+<pre><code class="language-ts">// vite.config.ts
+export default defineConfig({
+  server: {
+    proxy: {
+      '/api': { target: process.env.API_PROXY_TARGET ?? 'http://localhost:3000', changeOrigin: true },
+    },
+  },
+})
+</code></pre>
+<pre><code class="language-ts">// app code — same-origin, proxy-relative
+const api = import.meta.env.VITE_API_URL ?? '/api'
+const res = await fetch(`${api}/health`)
+</code></pre>
+<pre><code class="language-nginx"># nginx.conf
+server {
+  listen 80;
+  root /usr/share/nginx/html;
+  index index.html;
+
+  location /api/ {
+    proxy_pass http://server:3000/api/;      # compose DNS — only works if server is on the network
+    proxy_set_header Host $host;
+  }
+  location / { try_files $uri $uri/ /index.html; }
+}
+</code></pre>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verification run against the fixed stack (commands + observed results):
+
+| # | Check | Command | Result |
+|---|-------|---------|--------|
+| 1 | Network attached after `up -d` | `docker inspect $(docker compose ps -q server) -f &#x27;{{json .NetworkSettings.Networks}}&#x27;` | `{&quot;myapp_default&quot;:{&quot;NetworkID&quot;:&quot;...&quot;,&quot;IPAddress&quot;:&quot;172.20.0.3&quot;}}` — no longer `{}` |
+| 2 | Network membership | `docker network inspect myapp_default -f &#x27;{{range .Containers}}{{.Name}} {{end}}&#x27;` | contains `server` **and** `nginx` |
+| 3 | End-to-end 200 | `curl -s -o /dev/null -w &#x27;%{http_code}&#x27; -H &#x27;Host: localhost&#x27; localhost/api/health` | `200` (nginx → `server:3000` via DNS) |
+| 4 | No host node_modules in context | `docker run --rm $(docker compose build -q web) sh -c &#x27;find /app -name node_modules -not -path &quot;*/.pnpm*&quot; | wc -l&#x27;` (debug stage) | `0` leaked; only the `.pnpm` virtual store from in-image `pnpm install` exists, links intact |
+| 5 | No tsbuildinfo in image | `docker run --rm $(docker compose build -q web) find / -name &#x27;*.tsbuildinfo&#x27; -not -path &#x27;/proc/*&#x27;` | empty output |
+| 6 | shared `dist` exists → no MODULE_NOT_FOUND | `docker run --rm $(docker compose build -q web) ls /app/packages/shared/dist` | `index.js index.d.ts` present |
+| 7 | Bundle is proxy-relative | `docker run --rm $(docker compose build -q web) grep -rl &#x27;localhost:3000&#x27; /usr/share/nginx/html/assets` | no match; `grep -rl &#x27;&quot;\/api&quot;&#x27; ...` matches |
+| 8 | Recreate can&#x27;t silently detach again | run `docker compose up -d --force-recreate server`, re-run check #1 and #3 | still attached, still `200` |
+| 9 | Full-cycle persistence | `docker compose down --remove-orphans &amp;&amp; docker compose up -d`, re-run #1/#3 | attached, `200` |
+
+**Edge cases tested:**
+- **Detached-but-alive container** (the exact tick-47 case): `docker inspect` shows `{}` while `docker compose ps` reports `Up`. Reconnect + `docker restart` restores DNS immediately; `--force-recreate` is the durable fix. The `{{len .NetworkSettings.Networks}} = 0` guard catches this before nginx even starts (healthcheck-gated `depends_on`).
+- **pnpm workspace hoisting**: `.pnpm` virtual store lives inside `node_modules`, so `**/node_modules` removes it wholesale — no need to enumerate every workspace package.
+- **`**` matches zero directories**: `**/*.tsbuildinfo` also removes a root-level `tsconfig.tsbuildinfo`, not just nested ones (verified in #5).
+- **VITE_API_URL edge cases**: missing/empty defaults to `/api`; trailing-slash differences are normalized at the nginx `proxy_pass` boundary; absolute URLs (e.g. `https://api.example.com`) also work since it&#x27;s passed through unchanged.
+- **External/cross-project networks**: if the network is shared, declare `networks: { shared: { external: true } }` so `compose down` never destroys it — otherwise a dropped network manifests as the same `{}` symptom on the next `up`.
+
+---</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;docker-compose-network-detachment&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 9}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

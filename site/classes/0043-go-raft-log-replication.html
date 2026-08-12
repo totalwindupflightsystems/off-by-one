@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-raft-log-replication — Off-By-One verified answer</title>
+<meta name="description" content="The implementation is in `/home/kara/raft/` with two files: ### `raft.go` — Core Raft Log Replication Engine **Data Structures:** - `LogEntry{Index, Term, Comma">
+<meta property="og:title" content="go-raft-log-replication — Off-By-One">
+<meta property="og:description" content="The implementation is in `/home/kara/raft/` with two files: ### `raft.go` — Core Raft Log Replication Engine **Data Structures:** - `LogEntry{Index, Term, Comma">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0043-go-raft-log-replication.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-raft-log-replication</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>go-raft-log-replication</p></div><div class='answer'><h2>Answer</h2><p>The implementation is in <code>/home/kara/raft/</code> with two files:</p>
+<h3><code>raft.go</code> — Core Raft Log Replication Engine</h3>
+<p><strong>Data Structures:</strong>
+- <code>LogEntry{Index, Term, Command}</code> — individual log entries starting with a dummy at index 0
+- <code>AppendEntriesRequest</code> — RPC with term, leader ID, prevLogIndex/prevLogTerm (log matching), entries, and leaderCommit
+- <code>AppendEntriesResponse</code> — includes fast conflict resolution fields (<code>ConflictIndex</code>, <code>ConflictTerm</code>)
+- <code>RaftNode</code> — encapsulates persistent state (log, currentTerm), volatile state (commitIndex, lastApplied, nextIndex, matchIndex), and role (isLeader)</p>
+<p><strong>AppendEntries Handler (<code>HandleAppendEntries</code>)</strong> — implements Figure 2 rules:
+1. <strong>Term check</strong>: reject if <code>req.Term &lt; currentTerm</code>; update term if greater
+2. <strong>Log matching</strong>: reject if no entry at <code>prevLogIndex</code> or term mismatch at that index. Returns the first index of the conflicting term for fast backtracking (Section 5.3)
+3. <strong>Conflict truncation</strong>: finds the first diverging entry and truncates the log from there
+4. <strong>Append new entries</strong>: adds any entries not already present
+5. <strong>Commit advancement</strong>: sets <code>commitIndex = min(leaderCommit, lastNewEntry)</code> if <code>leaderCommit &gt; commitIndex</code></p>
+<p><strong>Commit Index Advancement (<code>advanceCommitIndexLocked</code>):</strong>
+- Scans from the end of the log backward
+- For each index <code>N &gt; commitIndex</code>, counts nodes where <code>matchIndex[i] &gt;= N</code>
+- Requires <code>log[N].term == currentTerm</code> (safety — only commit current term's entries)
+- If count ≥ majority, advances <code>commitIndex</code> and applies entries</p>
+<p><strong>Fast Conflict Resolution:</strong>
+- When AppendEntries fails, the follower returns the <em>first index</em> of the conflicting term
+- The leader uses <code>findLastIndexOfTerm</code> to jump <code>nextIndex</code> past all entries of that term in its own log, avoiding O(n²) single-step backtracking</p>
+<p><strong>Network Simulation (<code>Simulation</code>):</strong>
+- <code>AddPartition(a,b)</code> / <code>RemovePartition(a,b)</code> — bidirectional partition between nodes
+- <code>SendAppendEntries</code> — checks partition table before delivery; returns a failure response if partitioned
+- <code>ReplicateUntilStable</code> — repeatedly replicates until all <code>matchIndex</code> values reach the leader's last index, then sends a final heartbeat to propagate commit index</p>
+<h3><code>raft_test.go</code> — 11 Test Cases</h3>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>What it verifies</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TestHeartbeat</code></td>
+<td>Empty AppendEntries succeed, no phantom commits</td>
+</tr>
+<tr>
+<td><code>TestBasicReplication</code></td>
+<td>5 entries proposed → all followers have identical logs</td>
+</tr>
+<tr>
+<td><code>TestLogMatchingProperty</code></td>
+<td>Correct prevLogIndex/term passes; wrong term or out-of-range index fails with conflict hints</td>
+</tr>
+<tr>
+<td><code>TestCommitIndexAdvancement</code></td>
+<td>Leader advances commitIndex after majority confirms; followers learn via heartbeat</td>
+</tr>
+<tr>
+<td><code>TestNetworkPartitionMinority</code></td>
+<td>Partition 1 node → majority (2/3) still commits; healed node catches up</td>
+</tr>
+<tr>
+<td><code>TestMajorityPartition</code></td>
+<td>Partition leader from both followers → no commit advance; after heal, full catch-up</td>
+</tr>
+<tr>
+<td><code>TestConflictResolution</code></td>
+<td>Follower with divergent log (higher term entries) gets truncated and converges</td>
+</tr>
+<tr>
+<td><code>TestConcurrentReplication</code></td>
+<td>20 concurrent proposals → all nodes converge, commit index matches</td>
+</tr>
+<tr>
+<td><code>TestFullLogConsistency</code></td>
+<td>Multi-phase: replicate → partition → more entries → heal → full consistency check</td>
+</tr>
+<tr>
+<td><code>TestHeartbeatsMaintainConsistency</code></td>
+<td>Repeated heartbeats preserve matching logs</td>
+</tr>
+<tr>
+<td><code>TestConflictingEntryTruncation</code></td>
+<td>Follower with <em>longer</em> log at a different term gets truncated to leader's entries</td>
+</tr>
+</tbody>
+</table>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>```
+=== RUN   TestAll (0.53s)
+    --- PASS: TestAll/Heartbeat (0.01s)
+    --- PASS: TestAll/BasicReplication (0.02s)
+    --- PASS: TestAll/LogMatchingProperty (0.02s)
+    --- PASS: TestAll/CommitIndexAdvancement (0.04s)
+    --- PASS: TestAll/NetworkPartitionMinority (0.05s)
+    --- PASS: TestAll/MajorityPartition (0.04s)
+    --- PASS: TestAll/ConflictResolution (0.03s)
+    --- PASS: TestAll/ConcurrentReplication (0.02s)
+    --- PASS: TestAll/FullLogConsistency (0.20s)
+    --- PASS: TestAll/HeartbeatsMaintainConsistency (0.07s)
+    --- PASS: TestAll/ConflictingEntryTruncation (0.03s)
+PASS
+ok  raft  1.057s
+```
+
+**Edge cases verified:**
+- **Divergent logs**: Follower with entries from a higher term (term 2) than the leader (term 1) → conflict resolution truncates and replaces
+- **Longer divergent log**: Follower with *more entries* than the leader at a conflicting term → truncation removes the extra entries
+- **Majority vs minority partitions**: With 3 nodes, losing 1 still commits; losing 2 (leader isolated) blocks commits until healed
+- **Empty heartbeats**: No entries → still success, no log corruption
+- **Concurrent proposals**: 20 goroutines calling `Propose` simultaneously → all entries replicated and committed
+- **Fast backtracking**: Conflict response includes `ConflictTerm` and `ConflictIndex` so the leader skips entire terms instead of decrementing one at a time
+
+---</pre><pre>{&quot;model&quot;: &quot;claude-sonnet-4-20250514&quot;, &quot;problem_class&quot;: &quot;go-raft-log-replication&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 11}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

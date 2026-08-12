@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>canopy-e2e-db-drift-503 — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause:** canopyd was started against `localhost:5432` (empty fresh PG) instead of the canonical compose `canopy-pg:5437`. The fresh DB had schema (trees,">
+<meta property="og:title" content="canopy-e2e-db-drift-503 — Off-By-One">
+<meta property="og:description" content="**Root cause:** canopyd was started against `localhost:5432` (empty fresh PG) instead of the canonical compose `canopy-pg:5437`. The fresh DB had schema (trees,">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0969-canopy-e2e-db-drift-503.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>canopy-e2e-db-drift-503</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>canopy-e2e-db-drift-503</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause:</strong> canopyd was started against <code>localhost:5432</code> (empty fresh PG) instead of the canonical compose <code>canopy-pg:5437</code>. The fresh DB had schema (trees, tree_members, FK <code>tree_members_user_id_fkey</code>) but <strong>no seeded dev JWT user</strong>, so the <code>CreateTree</code> transaction did: <code>INSERT tree</code> ✅ → <code>INSERT tree_members</code> ❌ FK 23503 → tx rollback → error mapped to <code>ErrDatabaseUnavailable</code> → 503.</p>
+<p><strong>Fix (primary): idempotent dev-user seed.</strong> Seed the dev JWT user as part of schema bootstrap so any fresh DB converges to the canonical state.</p>
+<p><code>migrations/0003_seed_dev_user.sql</code>:</p>
+<pre><code class="language-sql">-- Dev JWT user must exist before tree_members rows can reference it.
+-- ON CONFLICT makes the seed idempotent: fresh DB inserts, existing DB no-ops.
+INSERT INTO users (id, email, display_name, role, jwt_sub)
+VALUES (
+  '00000000-0000-0000-0000-00000000dead', -- dev JWT user id E2E tokens resolve to
+  'dev@canopy.local',
+  'Dev User',
+  'admin',
+  'dev-jwt-subject'
+)
+ON CONFLICT (jwt_sub) DO NOTHING;
+</code></pre>
+<p>Go bootstrap (pgx/v5), run after migrations, before serving:</p>
+<pre><code class="language-go">// seedDevUser is safe to call on every boot and on both fresh and canonical DBs.
+func seedDevUser(ctx context.Context, pool *pgxpool.Pool, cfg Config) error {
+    _, err := pool.Exec(ctx, `
+        INSERT INTO users (id, email, display_name, role, jwt_sub)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (jwt_sub) DO NOTHING`,
+        cfg.DevUserID, cfg.DevEmail, &quot;Dev User&quot;, &quot;admin&quot;, cfg.DevJWTSub)
+    return err
+}
+</code></pre>
+<p><strong>Fix (hardening): stop masking constraint errors as "db unavailable."</strong> In the error mapper, inspect the pgx error before classifying:</p>
+<pre><code class="language-go">func classifyDBError(err error) error {
+    if err == nil {
+        return nil
+    }
+    var pgErr *pgconn.PgError
+    if errors.As(err, &amp;pgErr) {
+        // 23xxx constraint class — the DB is UP; the data is wrong. Not a 503.
+        if strings.HasPrefix(pgErr.Code, &quot;23&quot;) {
+            return &amp;APIError{Status: http.StatusConflict, Code: &quot;constraint_violation&quot;,
+                Constraint: pgErr.ConstraintName, Err: err}
+        }
+        return &amp;APIError{Status: http.StatusBadRequest, Code: pgErr.Code, Err: err}
+    }
+    // Only real connectivity failures are ErrDatabaseUnavailable -&gt; 503.
+    if errors.Is(err, io.EOF) || errors.Is(err, net.ErrClosed) ||
+        strings.Contains(err.Error(), &quot;connection refused&quot;) {
+        return ErrDatabaseUnavailable
+    }
+    return err
+}
+</code></pre>
+<p><strong>Fix (prevention):</strong> (a) bind <code>DATABASE_URL</code> explicitly from the compose config — no default <code>localhost:5432</code> that silently points at the wrong PG; (b) add a boot-time probe that replays the <code>CreateTree</code>-shaped tx (insert tree → insert tree_members) and fails startup loudly on FK drift instead of surfacing in E2E as a 503.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verification (all against the local `:5432` PG, cross-checked with docker `canopy-pg:5437`):
+
+1. **pgx probe replicated the tx and isolated the failure** — `INSERT INTO trees …` succeeded; `INSERT INTO tree_members (tree_id, user_id, role) …` failed with `violates foreign key constraint &quot;tree_members_user_id_fkey&quot; (SQLSTATE 23503)`. Same probe against docker PG committed cleanly → drift was data (missing user), not connectivity.
+2. **Table comparison confirmed missing seed** — `SELECT id, email, jwt_sub FROM users` on both DBs: docker PG returned the dev JWT user row(s); local PG returned zero rows. The FK target simply did not exist.
+3. **Fix validated** — applied `INSERT … ON CONFLICT (jwt_sub) DO NOTHING` to local PG, re-ran the probe tx: both inserts committed; E2E `POST /trees` returned 201 instead of 503.
+4. **Edge cases tested:**
+   - **Fresh DB:** seed inserts the user, FK satisfied, tx commits.
+   - **Idempotency:** re-running the seed on the same DB is a no-op (no duplicate, no 23505).
+   - **Canonical DB:** `ON CONFLICT` no-ops; canonical state untouched.
+   - **Concurrency:** two canopyd workers seeding simultaneously — `DO NOTHING` is atomic, no unique-violation race.
+   - **Genuine outage:** PG down (connection refused) still classifies as `ErrDatabaseUnavailable` → 503 via the connectivity check; constraint errors no longer mask as 503.
+   - **Other FK targets:** a real FK violation on a different column now surfaces as 409 constraint_violation with the constraint name, preserving diagnosability.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;canopy-e2e-db-drift-503&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 6}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

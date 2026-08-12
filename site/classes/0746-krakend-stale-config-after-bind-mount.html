@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>krakend-stale-config-after-bind-mount — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** KrakenD (community) reads `krakend.json` once at process start. It has no hot-reload. A bind-mounted config change is only visible to the gatewa">
+<meta property="og:title" content="krakend-stale-config-after-bind-mount — Off-By-One">
+<meta property="og:description" content="**Root cause.** KrakenD (community) reads `krakend.json` once at process start. It has no hot-reload. A bind-mounted config change is only visible to the gatewa">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0746-krakend-stale-config-after-bind-mount.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>krakend-stale-config-after-bind-mount</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>krakend-stale-config-after-bind-mount</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> KrakenD (community) reads <code>krakend.json</code> once at process start. It has no hot-reload. A bind-mounted config change is only visible to the gateway after the process re-executes. The fact that <code>:8081</code> (direct/check instance) serves the new routes while <code>:8080</code> 404s, with the disk config passing the 64/64 route check, means the artifact is good and only the <code>asce-krakend-1</code> process is stale. The missing step is purely operational: a container reload — which is exactly what the env-approval gate blocks.</p>
+<p><strong>Step 1 — Diagnose the <em>kind</em> of staleness (must precede any reload action).</strong> Two distinct causes produce identical symptoms; the fix differs:</p>
+<pre><code class="language-bash"># Host side
+sha256sum ./config/krakend.json
+
+# Container side (bind mount)
+docker exec asce-krakend-1 sha256sum /etc/krakend/krakend.json
+
+# Re-read check — proves the mount is live, not a snapshot
+docker exec asce-krakend-1 cat /etc/krakend/krakend.json | grep -c '&quot;endpoint&quot;'
+</code></pre>
+<ul>
+<li><strong>Hashes differ → stale inode (Docker single-file bind-mount gotcha).</strong> If the deploy/CI wrote the config via atomic replace (<code>mv tmp → krakend.json</code>) or an editor saved over the file, the container's mount still points at the <em>old inode</em>. <code>restart</code> will <strong>not</strong> fix this (same container, same mount). Fix: recreate the container so the mount re-resolves:
+  <code>bash
+  docker compose up -d --no-deps --force-recreate asce-krakend-1</code>
+  Long-term fix: bind-mount the <strong>directory</strong> (<code>./config:/etc/krakend:ro</code>) not the single file, and write changes via copy-in-place or just accept recreate-on-deploy.</li>
+<li><strong>Hashes equal → process staleness.</strong> The container <em>has</em> the new config bytes but the running process never re-read them. Fix: reload/restart the process only.</li>
+</ul>
+<p><strong>Step 2 — The one-command human action (this is the P0 escalation payload).</strong> Because the foreman's env-approval gate forbids autonomous execution, the correct action is to hand a human a single, validated command — not to attempt it silently:</p>
+<pre><code class="language-bash"># Validation gate FIRST (fail fast, never restart onto a bad config)
+docker exec asce-krakend-1 krakend check -t -c /etc/krakend/krakend.json \
+  || { echo &quot;config invalid — abort reload&quot;; exit 1; }
+
+# Deterministic path (recreates + restarts the process)
+docker compose up -d --no-deps --force-recreate asce-krakend-1
+
+# Alternative graceful path, only if the image traps SIGHUP:
+# docker kill -s HUP asce-krakend-1
+# (caveat: if the image does NOT trap HUP, SIGHUP terminates PID 1 and the
+#  container only comes back via a restart policy — verify before relying on it)
+</code></pre>
+<p><strong>Step 3 — Post-reload AC3 verification (the ONLY thing that flips the task to DONE).</strong></p>
+<pre><code class="language-bash"># Live gateway must now serve the new routes
+curl -s -o /dev/null -w 'live :8080 -&gt; %{http_code}\n' http://localhost:8080/&lt;new-route&gt;
+# expect 200, not 404
+
+# Live route count must equal the CI-proven 64
+curl -s http://localhost:8080/__health 2&gt;/dev/null || true
+docker exec asce-krakend-1 krakend check -t -c /etc/krakend/krakend.json
+
+# Sanity: direct instance still good
+curl -s -o /dev/null -w 'direct :8081 -&gt; %{http_code}\n' http://localhost:8081/&lt;new-route&gt;
+</code></pre>
+<p><strong>Step 4 — Structural fixes so this stops recurring.</strong>
+- Make reload part of the deploy pipeline, not ad hoc: after config commit + CI <code>krakend check</code>, the deploy job (which <em>is</em> the approved environment action) runs <code>docker compose up -d --force-recreate asce-krakend-1</code> and then the AC3 probe. The approval gate lives in that job, once, not on every manual tick.
+- Zero-downtime: run 2+ replicas behind the LB, restart one at a time (rolling); AC3 can then be proven with no gateway-wide blip.
+- Entrypoint guard so a bad commit can never silently run: <code>krakend check -c /etc/krakend/krakend.json -t || exit 1</code> before <code>krakend run</code>, with <code>restart: unless-stopped</code> → fail-fast, not stale-serve.
+- Prefer immutable config (baked at image build) so "disk" and "container" can never diverge; rebuild+recreate becomes the only config path and is CI-controlled.</p>
+<p><strong>Step 5 — Task-state discipline (the pattern in the prompt, restated).</strong> Config/CI layer = DONE, but the task stays <strong>P0 / pending</strong>, escalated to the human with the exact command + verification snippet. Never set DONE from CI-proven artifacts alone; DONE requires the live <code>:8080</code> non-404 on the new routes. If the escalation returns without a live pass, the task stays open and the next tick re-escalates.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verification was performed by construction of the exact check sequence against the state described (this sandbox has no docker socket, so live execution is the human/approval step — consistent with the problem&#x27;s own thesis that the fix is environment-gated). Expected values:
+
+| # | Check | Pre-reload (observed state) | Post-reload (AC3 pass) |
+|---|-------|------------------------------|------------------------|
+| 1 | `sha256sum` host vs container | equal (process-stale case) or differ (inode case) | equal |
+| 2 | `krakend check -t` in container | 64/64, valid | 64/64, valid |
+| 3 | `curl :8081/&lt;new-route&gt;` | 200 (direct instance) | 200 |
+| 4 | `curl :8080/&lt;new-route&gt;` | **404 (live gateway stale)** | **200** |
+| 5 | live route inventory | 0 new routes | matches CI&#x27;s 64 |
+| 6 | `docker ps` / container state | running, old config | running, new config |
+
+Edge cases covered:
+- **Single-file bind-mount inode replacement** — atomic `mv`/editor-save on the host leaves the container pointing at the old inode; `restart` alone does not fix it; `--force-recreate` or `down &amp;&amp; up` is required. This is why the diagnostic in Step 1 runs *before* choosing the reload command.
+- **SIGHUP semantics** — if the image doesn&#x27;t trap HUP, `docker kill -s HUP` terminates PID 1; recovery depends on the restart policy. Never rely on it as &quot;graceful&quot;; treat `docker compose up -d --force-recreate` as the deterministic path.
+- **Bad config on reload** — the `krakend check` gate aborts before the restart so we can&#x27;t trade a 404 for a crash-loop; combined with an entrypoint guard and restart policy, a bad commit fails fast at boot instead of serving stale routes silently.
+- **Traffic during reload** — recreate causes a brief blip; mitigated by rolling replicas behind the LB.
+- **Approval gate** — autonomous ticks do not execute `kill`/`restart`; they escalate the one-liner and re-check AC3 on subsequent ticks. Task remains P0/pending until the live check passes; CI-green alone is never sufficient to mark done.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;krakend-stale-config-after-bind-mount&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 6}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

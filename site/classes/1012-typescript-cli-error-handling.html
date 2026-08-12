@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>typescript-cli-error-handling — Off-By-One verified answer</title>
+<meta name="description" content="The Mythos CLI had three related defects in the `batch` path, all reproduced and fixed in `/home/kara/mythos-cli` (commits `abb91ab` → `9f667cb`): **Before** — ">
+<meta property="og:title" content="typescript-cli-error-handling — Off-By-One">
+<meta property="og:description" content="The Mythos CLI had three related defects in the `batch` path, all reproduced and fixed in `/home/kara/mythos-cli` (commits `abb91ab` → `9f667cb`): **Before** — ">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1012-typescript-cli-error-handling.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>typescript-cli-error-handling</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>typescript-cli-error-handling</p></div><div class='answer'><h2>Answer</h2><p>The Mythos CLI had three related defects in the <code>batch</code> path, all reproduced and fixed in <code>/home/kara/mythos-cli</code> (commits <code>abb91ab</code> → <code>9f667cb</code>):</p>
+<p><strong>Before</strong> — <code>mythos batch</code> outside a project:</p>
+<pre><code>[provider:fs] version=1.0.0 module=/tmp/mythos-repro/outside-project/providers/fs.js   ← absolute path leak
+Fatal error: No project loaded: cannot find mythos.json in /tmp/... or any parent.      ← bare, no guidance
+EXIT=2                                                                                   ← wrong exit code
+</code></pre>
+<p><strong>1. Gate ProviderRegistry diagnostics behind verbosity</strong> — the registry's diagnostics include absolute on-disk module paths, so they're only emitted when the user opted in (<code>--verbose</code> or <code>MYTHOS_VERBOSE=1</code>):</p>
+<pre><code class="language-ts">// src/provider.ts
+private logDiagnostics(verbose: boolean): void {
+  if (!verbose) return;                    // gate: default runs never leak paths
+  for (const p of this.providers.values()) {
+    console.error(`[provider:${p.name}] version=${p.version} module=${p.modulePath}`);
+  }
+}
+initialize(verbose: boolean): void { this.logDiagnostics(verbose); }
+</code></pre>
+<p><strong>2. Propagate <code>MYTHOS_VERBOSE</code> to backend services</strong> — spawned children get an explicit normalized env var (never stale/missing), from the CLI's resolved verbosity (<code>--verbose</code> wins over env fallback via <code>src/config.ts</code>):</p>
+<pre><code class="language-ts">// src/backend.ts
+export function spawnBackend(command: string, args: string[], opts: BackendOptions): Promise&lt;number&gt; {
+  const env: NodeJS.ProcessEnv = { ...process.env, MYTHOS_VERBOSE: opts.verbose ? '1' : '0' };
+  return new Promise((resolve, reject) =&gt; {
+    const child = spawn(command, args, { env, stdio: 'inherit' });
+    child.on('error', reject);
+    child.on('exit', (code) =&gt; resolve(code ?? 1));
+  });
+}
+</code></pre>
+<p><strong>3. Remap <code>StorageError</code> in the CLI catch-all + exit 1</strong> — instead of a bare <code>Fatal error:</code> line, the catch-all detects the storage failure and gives actionable guidance, always exiting 1:</p>
+<pre><code class="language-ts">// src/cli.ts — main().catch(...)
+if (e instanceof StorageError || e.name === 'StorageError') {
+  console.error(
+    `mythos: ${e.message}\n` +
+    'No project is loaded in this directory.\n' +
+    'Run `mythos init` to create a project here, then try again.',
+  );
+} else {
+  console.error(`Fatal error: ${e.message}`);   // unrelated errors keep the prefix
+}
+process.exitCode = 1;
+</code></pre>
+<p><strong>After</strong> — <code>mythos batch</code> outside a project:</p>
+<pre><code>mythos: No project loaded: cannot find mythos.json in /tmp/... or any parent directory.
+No project is loaded in this directory.
+Run `mythos init` to create a project here, then try again.
+EXIT=1
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Reproduced the bug against the committed buggy baseline (`git worktree` at `abb91ab`), applied the fix, and verified with a child-process harness (`test/run-tests.mjs`, 21 assertions) run via `npm test`:
+
+| Check | Buggy | Fixed |
+|---|---|---|
+| Harness result | **10 failed** | **21/21 passed** |
+| Outside-project exit code | 2 | 1 |
+| `mythos init` hint on stderr | missing | present |
+| Absolute provider path (`/providers/fs.js`) leak | leaked | absent by default, shown only under `--verbose`/`MYTHOS_VERBOSE=1` |
+| Backend service sees `MYTHOS_VERBOSE` | undefined | `1` with flag, `0` without |
+| In-project `init`+`batch` | n/a | exit 0, &quot;Batch finished&quot; |
+| Unrelated fatal (unknown command) | exit 2 | exit 1, `Fatal error:` prefix kept |
+
+Edge cases covered: env-only verbosity (`MYTHOS_VERBOSE=1` without flag gates diagnostics on — T5), stale parent env normalized to explicit `1`/`0` rather than pass-through (T7), verbose outside-project still exits 1 with hint (T2), StorageError detection via `name` as well as `instanceof` to survive module duplication. Verified from clean state: `rm -rf dist &amp;&amp; npm test` → `21 passed, 0 failed`.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;typescript-cli-error-handling&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 21}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

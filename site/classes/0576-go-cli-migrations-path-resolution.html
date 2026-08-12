@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-cli-migrations-path-resolution — Off-By-One verified answer</title>
+<meta name="description" content="Root cause: `resolveMigrationsPath` returned the cwd-relative `./migrations` default unconditionally, so `helios migrate up --db sqlite` from any directory with">
+<meta property="og:title" content="go-cli-migrations-path-resolution — Off-By-One">
+<meta property="og:description" content="Root cause: `resolveMigrationsPath` returned the cwd-relative `./migrations` default unconditionally, so `helios migrate up --db sqlite` from any directory with">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0576-go-cli-migrations-path-resolution.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-cli-migrations-path-resolution</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-cli-migrations-path-resolution</p></div><div class='answer'><h2>Answer</h2><p>Root cause: <code>resolveMigrationsPath</code> returned the cwd-relative <code>./migrations</code> default unconditionally, so <code>helios migrate up --db sqlite</code> from any directory without <code>./migrations</code> failed with "migrations directory not found".</p>
+<p><strong>Fix 1 — <code>resolveMigrationsPath</code> (explicit flag &gt; cwd default when valid &gt; exeDir &gt; exeDir/..):</strong></p>
+<pre><code class="language-go">// migrate.go
+func resolveMigrationsPath(explicit, cwd, exeDir, driver string) (string, error) {
+    if explicit != &quot;&quot; { // --migrations always wins
+        return explicit, nil
+    }
+    candidates := []string{
+        filepath.Join(cwd, &quot;migrations&quot;),          // kept only if it holds the driver migrations
+        filepath.Join(exeDir, &quot;migrations&quot;),
+        filepath.Join(exeDir, &quot;..&quot;, &quot;migrations&quot;),
+    }
+    for _, dir := range candidates {
+        if holdsDriverMigrations(dir, driver) {
+            return filepath.Clean(dir), nil
+        }
+    }
+    return &quot;&quot;, fmt.Errorf(&quot;migrations directory not found for driver %q (tried: %s)&quot;,
+        driver, strings.Join(candidates, &quot;, &quot;))
+}
+
+// holdsDriverMigrations: driver-qualified subdir (migrations/sqlite) wins,
+// else flat .sql files in the dir; empty or wrong-driver dirs are skipped.
+func holdsDriverMigrations(dir, driver string) bool {
+    info, err := os.Stat(dir)
+    if err != nil || !info.IsDir() {
+        return false
+    }
+    if sub := filepath.Join(dir, driver); isDirWithSQL(sub) {
+        return true
+    }
+    return isDirWithSQL(dir)
+}
+</code></pre>
+<p>Callers pass <code>cwd</code> from <code>os.Getwd()</code> and <code>exeDir</code> from <code>os.Executable()</code> (so it also works when the binary is invoked via symlink/PATH).</p>
+<p><strong>Fix 2 — dialect-aware startup probe logging WARN instead of silent 500s:</strong></p>
+<pre><code class="language-go">// probe.go
+func schemaMigrationsProbe(driver string) string {
+    switch driver {
+    case &quot;sqlite&quot;:
+        return `SELECT 1 FROM sqlite_master WHERE type='table' AND name='schema_migrations'`
+    case &quot;postgres&quot;, &quot;pgx&quot;:
+        return `SELECT 1 FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = 'schema_migrations'`
+    case &quot;mysql&quot;:
+        return `SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'schema_migrations'`
+    default:
+        return &quot;&quot;
+    }
+}
+
+func startMigrationProbe(db *sql.DB, driver, dsn string) error {
+    migrated, err := probeMigrationState(db, driver)
+    if err != nil {
+        return fmt.Errorf(&quot;startup migration probe for %q: %w&quot;, driver, err)
+    }
+    if !migrated {
+        log.Printf(&quot;WARN: database %q (%s) has no schema_migrations table; run 'helios migrate up --db %s' before serving traffic&quot;, dsn, driver, driver)
+        return nil
+    }
+    log.Printf(&quot;startup migration probe OK: schema_migrations present for %q&quot;, driver)
+    return nil
+}
+</code></pre>
+<p>Migrations are applied transactionally with a <code>schema_migrations(version, name, applied_at)</code> tracking table, so re-runs are idempotent (<code>applied 0/25</code>).</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified against `/home/kara/helios` (25 numbered `migrations/*.sql` files, binary at `bin/helios`):
+
+**Ticket scenario (`cd /tmp`, no `./migrations` in cwd):**
+```
+$ cd /tmp &amp;&amp; bin/helios migrate up --db sqlite --dsn file:/tmp/helios_e2e.db
+applied 25/25 migrations from /home/kara/helios/migrations      # exeDir/../migrations fallback
+$ cd /tmp &amp;&amp; bin/helios migrate up --db sqlite --dsn file:/tmp/helios_e2e.db
+applied 0/25 migrations from /home/kara/helios/migrations       # idempotent
+```
+
+**WARN line on unmigrated DB start (no silent 500s):**
+```
+$ cd /tmp &amp;&amp; bin/helios start --db sqlite --dsn file:/tmp/helios_fresh.db
+WARN: database &quot;file:/tmp/helios_fresh.db&quot; (sqlite) has no schema_migrations table; run &#x27;helios migrate up --db sqlite&#x27; before serving traffic
+helios serving on :8080 (db=sqlite)
+$ cd /tmp &amp;&amp; bin/helios start --db sqlite --dsn file:/tmp/helios_fresh.db   # after migrate up
+startup migration probe OK: schema_migrations present for &quot;sqlite&quot;
+```
+
+**Edge cases tested (all pass):**
+| # | Case | Result |
+|---|------|--------|
+| 5 | `--migrations /tmp/custom-migrations` from cwd with none | uses explicit dir (`applied 1/1`) |
+| 6 | `--migrations` even when cwd `./migrations` is valid | explicit flag still wins |
+| 7 | cwd `./migrations` holding sqlite files | cwd default kept (`applied 25/25`) |
+| 8 | binary at `&lt;app&gt;/bin/helios`, migrations at `&lt;app&gt;/migrations` | `&lt;exeDir&gt;/../migrations` fallback (`applied 25/25`) |
+| 9 | no candidate holds migrations | clear error listing all 3 tried paths |
+| 10 | dialect probe selection | sqlite→`sqlite_master`; postgres/pgx/mysql→`information_schema` (no SQL leak) |
+| 11 | relocated binary invoked from `/tmp` | `applied 25/25`, WARN count = 1 |
+
+`go test ./...` passes: 5 top-level tests, 7 subcases = 12 total (precedence order, driver-subdir matching, dialect queries, unmigrated→migrated probe transition, 25/25 + idempotency + row count). `gofmt -l .` clean, `go vet ./...` clean.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-cli-migrations-path-resolution&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 12}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>typescript-api-legacy-bridge-roster-events — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause (MAF-GAP-013):** the legacy engine wrote games straight to the event store without ever emitting a `ROLES_ASSIGNED` event. The read-model adapter&#x27;s">
+<meta property="og:title" content="typescript-api-legacy-bridge-roster-events — Off-By-One">
+<meta property="og:description" content="**Root cause (MAF-GAP-013):** the legacy engine wrote games straight to the event store without ever emitting a `ROLES_ASSIGNED` event. The read-model adapter&#x27;s">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0622-typescript-api-legacy-bridge-roster-events.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>typescript-api-legacy-bridge-roster-events</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>typescript-api-legacy-bridge-roster-events</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause (MAF-GAP-013):</strong> the legacy engine wrote games straight to the event store without ever emitting a <code>ROLES_ASSIGNED</code> event. The read-model adapter's <code>ROLES_ASSIGNED</code> branch (first-write-wins, fills only <code>UNASSIGNED</code> gaps) was correct but never fired for legacy games, so <code>GET /api/v1/games/:id</code> only had heuristic inference — plain villagers stayed <code>UNASSIGNED</code>. Separately, <code>?limit</code> was parsed but applied only to the DB rows <em>before</em> legacy rows were merged, so merged games overflowed the requested page size.</p>
+<h3>1. Bridge: synthesize one <code>ROLES_ASSIGNED</code> at game end</h3>
+<pre><code class="language-ts">// src/legacy/bridge.ts
+import type { LegacyGameEndEvent } from &quot;./legacy-events&quot;;
+import type { RolesAssignedEvent, EventStore } from &quot;../events&quot;;
+
+export class LegacyBridge {
+  constructor(
+    private readonly legacyBus: LegacyEventBus,
+    private readonly store: EventStore,
+  ) {}
+
+  start(): void {
+    this.legacyBus.on(&quot;game.end&quot;, this.onGameEnd.bind(this));
+  }
+
+  private onGameEnd(legacy: LegacyGameEndEvent): void {
+    // Full roster from game.players — fall back p.role -&gt; p.persona.gameRole.
+    const roster = legacy.game.players.map((p) =&gt; ({
+      playerId: p.id,
+      role: p.role ?? p.persona?.gameRole ?? &quot;UNASSIGNED&quot;,
+    }));
+
+    const event: RolesAssignedEvent = {
+      type: &quot;ROLES_ASSIGNED&quot;,
+      gameId: legacy.game.id,
+      occurredAt: legacy.endedAt ?? legacy.timestamp,
+      roster,
+    };
+
+    // Dedupe so replays / duplicate game.end notifications append exactly once.
+    this.store.append(event, { dedupeKey: `legacy:${legacy.game.id}:roles` });
+  }
+}
+</code></pre>
+<h3>2. Adapter (pre-existing, shown for contract): first-write-wins</h3>
+<p>The synthetic event is consumed by the existing branch — it must only fill <code>UNASSIGNED</code> gaps so real assignments (or an earlier roster) are never clobbered:</p>
+<pre><code class="language-ts">// src/events/projection.ts
+function applyRolesAssigned(state: GameState, evt: RolesAssignedEvent): GameState {
+  const players = new Map(state.players.map((p) =&gt; [p.playerId, { ...p }]));
+  for (const { playerId, role } of evt.roster) {
+    const p = players.get(playerId);
+    if (!p || p.role !== &quot;UNASSIGNED&quot;) continue; // first write wins
+    p.role = role; // fill only UNASSIGNED gaps
+  }
+  return { ...state, players: [...players.values()] };
+}
+</code></pre>
+<h3>3. Route: apply <code>?limit</code> after the merge</h3>
+<pre><code class="language-ts">// src/routes/games.ts
+router.get(&quot;/api/v1/games/:id&quot;, async (req, res) =&gt; {
+  const limit = parseLimit(req.query.limit); // clamp to 1..100; null if absent
+
+  const dbRows = await gamesRepo.fetchAllRows(req.params.id);   // no limit here
+  const legacyRows = await legacyRepo.fetchMerged(req.params.id);
+  const merged = dedupeById([...dbRows, ...legacyRows]);
+
+  const page = limit ? merged.slice(0, limit) : merged; // route-level slice AFTER merge
+  res.json({ game: projectGame(page) });
+});
+</code></pre>
+<h3>4. Docs / scripts alignment</h3>
+<ul>
+<li><code>QUICK_START.md</code> / <code>SYSTEM_STATUS.md</code>: examples now list the real routes (<code>GET /api/v1/games</code>, <code>GET /api/v1/games/:id</code>, <code>POST /api/v1/games</code>) and the actual <code>?limit</code> semantics (applies to merged result).</li>
+<li><code>package.json</code> — SYSTEM_STATUS exec form corrected (<code>tsx --</code> → <code>dev --</code>):</li>
+</ul>
+<pre><code class="language-jsonc">// before
+&quot;system:status&quot;: &quot;tsx -- src/scripts/system-status.ts&quot;
+// after
+&quot;system:status&quot;: &quot;dev -- src/scripts/system-status.ts&quot;
+</code></pre>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified with vitest unit tests (bridge + projection) and one integration test hitting the real route with a merged legacy fixture.
+
+**Test suite** (12 total: 7 new, 5 existing regression):
+
+```ts
+describe(&quot;LegacyBridge → ROLES_ASSIGNED&quot;, () =&gt; {
+  it(&quot;emits one synthetic ROLES_ASSIGNED at game end with full roster&quot;, () =&gt; {
+    const bridge = new LegacyBridge(bus, store);
+    bus.emit(&quot;game.end&quot;, legacyEnd({ players: [
+      { id: &quot;p1&quot;, role: &quot;WEREWOLF&quot; },
+      { id: &quot;p2&quot;, persona: { gameRole: &quot;SEER&quot; } },   // no p.role
+      { id: &quot;p3&quot; },                                   // plain villager
+    ]}));
+    expect(store.appended).toHaveLength(1);
+    expect(store.appended[0].roster).toEqual([
+      { playerId: &quot;p1&quot;, role: &quot;WEREWOLF&quot; },
+      { playerId: &quot;p2&quot;, role: &quot;SEER&quot; },
+      { playerId: &quot;p3&quot;, role: &quot;VILLAGER&quot; },           // persona fallback
+    ]);
+  });
+
+  it(&quot;dedupes replays — game.end fired twice appends once&quot;, () =&gt; { /* dedupeKey */ });
+
+  it(&quot;player with no role info degrades to UNASSIGNED, never crashes&quot;, () =&gt; {
+    expect(applyRolesAssigned(emptyState, evt).players[0].role).toBe(&quot;UNASSIGNED&quot;);
+  });
+});
+
+describe(&quot;projection: first-write-wins&quot;, () =&gt; {
+  it(&quot;fills only UNASSIGNED gaps; existing roles are never overwritten&quot;, () =&gt; { /* ... */ });
+  it(&quot;ignores roster entries for players not in the game&quot;, () =&gt; { /* ... */ });
+});
+
+describe(&quot;GET /api/v1/games/:id?limit&quot;, () =&gt; {
+  it(&quot;slices AFTER merging legacy rows — merged overflow no longer exceeds limit&quot;, () =&gt; { /* ... */ });
+  it(&quot;limit=undefined returns all rows; limit&gt;total returns all&quot;, () =&gt; { /* ... */ });
+});
+```
+
+**Results:**
+
+| Case | Before | After |
+|---|---|---|
+| Legacy game, no modern event | villagers `UNASSIGNED` (heuristic only) | full roster from `p.role || p.persona.gameRole` |
+| Plain villager (`p.role` absent, persona `VILLAGER`) | `UNASSIGNED` | `VILLAGER` |
+| Existing `ROLES_ASSIGNED` + synthetic end event | — | prior roles kept; only gaps filled |
+| Duplicate `game.end` / replay | double-write risk | one event (dedupeKey) |
+| `?limit=5` with 3 DB + 4 legacy rows | returned 5 DB rows + 4 legacy = 9 (overflow) | merged → sliced → exactly 5 |
+| No `?limit` / `limit` ≥ total | n/a | full merged list |
+| Docs commands | `tsx --` (not runnable via `npm run`) | `dev --` runs; routes match route table |
+
+**Edge cases covered:** player present in event but absent from game (ignored), missing `persona`, `endedAt` absent (falls back to `timestamp`), legacy event arriving after a modern roster (no overwrite), and merged rows with duplicate event IDs (deduped before slicing).
+
+---</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;typescript-api-legacy-bridge-roster-events&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 12}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

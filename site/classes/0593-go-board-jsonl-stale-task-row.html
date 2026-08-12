@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-board-jsonl-stale-task-row — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** The board had two durable artifacts that must agree — `events.jsonl` (append-only log) and `tasks.jsonl` (row state) — but the completion pipeli">
+<meta property="og:title" content="go-board-jsonl-stale-task-row — Off-By-One">
+<meta property="og:description" content="**Root cause.** The board had two durable artifacts that must agree — `events.jsonl` (append-only log) and `tasks.jsonl` (row state) — but the completion pipeli">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0593-go-board-jsonl-stale-task-row.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-board-jsonl-stale-task-row</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-board-jsonl-stale-task-row</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> The board had two durable artifacts that must agree — <code>events.jsonl</code> (append-only log) and <code>tasks.jsonl</code> (row state) — but the completion pipeline trusted the worker's "done" signal (commit message / chat) instead of verifying the durable writes. In GAP-004, judge PASS landed at tick 187, yet the <code>task_completed</code> event was never appended, so the row never flipped. Lesson encoded as a contract: <strong>a task is completed iff (1) events.jsonl holds a <code>task_completed</code> event with <code>completion_id == "&lt;task&gt;:&lt;real commit&gt;"</code> AND (2) the tasks.jsonl row is <code>status=completed</code> carrying that same id. A message saying "complete" proves nothing.</strong></p>
+<p><strong>The fix (three parts, all idempotent so crash/rerun is safe):</strong></p>
+<p><strong>1. Completion contract + idempotency key</strong> — every completion is keyed by <code>completion_id = f"{task_id}:{commit}"</code>. Event appends dedupe on <code>_unique</code>; the row flip only transitions <code>pending→completed</code> (a second run is a no-op):</p>
+<pre><code class="language-python">def flip_to_completed(self, task_id, completion_id, commit, verdict):
+    with self._lock:
+        rows = read_jsonl(self.path)
+        for r in rows:
+            if r.get(&quot;task_id&quot;) != task_id:
+                continue
+            if r.get(&quot;status&quot;) == &quot;completed&quot;:
+                return (True, &quot;already_completed&quot;) if r.get(&quot;completion_id&quot;) == completion_id \
+                       else (False, &quot;completed_with_other_completion&quot;)
+            r.update(status=&quot;completed&quot;, completion_id=completion_id,
+                     commit=commit, judge=verdict, updated_at=_now())
+            write_jsonl_atomic(self.path, rows)   # temp file + fsync + os.replace
+            return True, &quot;flipped&quot;
+        return False, &quot;task_not_found&quot;
+</code></pre>
+<p><strong>2. Post-worker gate</strong> — after a worker reports done / judge PASSes, verify the <em>durable</em> state, and repair if either half is missing:</p>
+<pre><code class="language-python">def verify_task_completed(board, task_id, completion_id_=None):
+    events = board.events.find(&quot;task_completed&quot;, task_id=task_id)
+    if completion_id_ is not None:
+        events = [e for e in events if e.get(&quot;completion_id&quot;) == completion_id_]
+    row = board.tasks.get(task_id)
+    event_ok, row_ok = len(events) &gt; 0, row is not None and row.get(&quot;status&quot;) == &quot;completed&quot;
+    return {&quot;event_appended&quot;: event_ok, &quot;row_flipped&quot;: row_ok,
+            &quot;verified&quot;: event_ok and row_ok}
+
+def ensure_completed_after_worker_done(board, task_id, live_verify):
+    v = verify_task_completed(board, task_id)
+    if v[&quot;verified&quot;]:
+        return {&quot;verified&quot;: True, &quot;remediated&quot;: False, &quot;verification&quot;: v}
+    result = remediate(board, task_id, live_verify)
+    return {&quot;verified&quot;: result.ok, &quot;remediated&quot;: True, &quot;result&quot;: result.as_dict(),
+            &quot;verification&quot;: verify_task_completed(board, task_id)}
+</code></pre>
+<p><strong>3. <code>remediate</code> (the foreman's <code>append_board_task_completed</code>)</strong> — four steps, each idempotent:</p>
+<pre><code class="language-python">def remediate(board, task_id, live_verify, stale=False):
+    row = board.tasks.get(task_id)
+    if row is None:
+        return RemediationResult(task_id, False, &quot;task_not_found&quot;, None, None)
+    # 1) LIVE RE-VERIFY against the real commit (judge = source of truth)
+    real = live_verify(task_id, row.get(&quot;commit&quot;))
+    cid = completion_id(task_id, real[&quot;commit&quot;])
+    if real.get(&quot;verdict&quot;) != &quot;PASS&quot;:                    # never flip a failed re-verify
+        board.events.append({&quot;event&quot;: &quot;task_reverify_failed&quot;, ...}, unique_key=f&quot;reverify_failed:{cid}&quot;)
+        return RemediationResult(task_id, False, &quot;reverify_failed&quot;, ...)
+    # 2) APPEND task_completed with real commit hash + judge verdict (deduped)
+    appended = board.events.append({&quot;event&quot;: &quot;task_completed&quot;, &quot;commit&quot;: real[&quot;commit&quot;],
+                                    &quot;verdict&quot;: &quot;PASS&quot;, &quot;completion_id&quot;: cid, ...},
+                                   unique_key=f&quot;task_completed:{cid}&quot;)
+    # 3) FLIP the row atomically (only pending rows flip)
+    flipped, why = board.tasks.flip_to_completed(task_id, cid, real[&quot;commit&quot;], &quot;PASS&quot;)
+    # 4) AUDIT event, deduped by completion_id
+    board.events.append({&quot;event&quot;: &quot;task_completed_repaired&quot; if not stale else &quot;task_stale_repaired&quot;,
+                         &quot;event_appended_now&quot;: appended, &quot;row_flipped_now&quot;: why == &quot;flipped&quot;, ...},
+                        unique_key=f&quot;repaired:{cid}&quot;)
+    return RemediationResult(task_id, True, &quot;repaired&quot;, ...)
+</code></pre>
+<p>Plus a periodic <code>sweep_stale</code> that finds <code>pending</code> rows older than a threshold and remediates them — so stale rows self-heal even if the worker hook was never called. Durable IO details: event appends take a cross-process <code>flock</code>, write, then <code>fsync</code>; row rewrites go through temp file + <code>fsync</code> + <code>os.replace</code>; a torn tail line left by a crash is tolerated on read and a newline is forced before appends so the new event never merges into the fragment.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Code: `/home/kara/go-board-fix/boardstore.py` (fix), `test_board_stale.py` (11 test cases, 42 assertions), `demo_replay.py` (incident replay). All pass on Python 3.14.4:
+
+```
+ALL PASS — 42 assertions, 11 test cases
+```
+
+**Incident replay** — before (tick 187): events.jsonl holds only `worker_done_chat` (&quot;GAP-004 complete... judge PASS&quot;); row is `pending`; verify = `{event_appended: false, row_flipped: false, verified: false}`. After `ensure_completed_after_worker_done`: `task_completed` appended with real commit `9f3a1c7` + `PASS`; row flipped to `completed` with `completion_id: &quot;GAP-004:9f3a1c7&quot;` and `judge: PASS`; `task_completed_repaired` audit event written; final verify = `{verified: true}`.
+
+**Edge cases tested:**
+
+| Case | Result |
+|---|---|
+| Happy path (event + flip already present) | verified, zero remediation |
+| GAP-004 repro: no event, row pending | repaired: append + flip + audit, exactly one `task_completed` |
+| Event appended but flip crashed | flip done, event **not** double-appended |
+| Double remediation run | no duplicate events/audits; second run `already_completed` |
+| Judge re-verify FAILs | no `task_completed`, no flip, `task_reverify_failed` audited, row stays pending |
+| Worker claimed commit ≠ real commit | board records the **real** hash in event, completion_id, and row |
+| Sweeper | stale row with commit auto-repaired (`task_stale_repaired`); fresh row untouched; no-commit row fails re-verify and stays pending |
+| Crash mid-rewrite | original file intact, retry succeeds |
+| Torn tail line from crash | read tolerated; newline-forcing keeps new events parseable (this test caught a real merge bug, fixed) |
+| 10 threads × 20 concurrent appends | 200/200 valid lines, zero duplicates, no torn lines |
+| completion_id filtering | correct match / mismatch behavior |</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-board-jsonl-stale-task-row&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 11}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

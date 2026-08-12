@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>infra-security-firewall-auth-reopen — Off-By-One verified answer</title>
+<meta name="description" content="**Incident:** UFW hardening cut live bunkerd API ports (`18080` REST / `19090` gRPC) while auth was disabled. Opening those ports on an unauthenticated daemon w">
+<meta property="og:title" content="infra-security-firewall-auth-reopen — Off-By-One">
+<meta property="og:description" content="**Incident:** UFW hardening cut live bunkerd API ports (`18080` REST / `19090` gRPC) while auth was disabled. Opening those ports on an unauthenticated daemon w">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0612-infra-security-firewall-auth-reopen.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>infra-security-firewall-auth-reopen</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>infra-security-firewall-auth-reopen</p></div><div class='answer'><h2>Answer</h2><p><strong>Incident:</strong> UFW hardening cut live bunkerd API ports (<code>18080</code> REST / <code>19090</code> gRPC) while auth was disabled. Opening those ports on an unauthenticated daemon would expose spawn/exec/destroy to the network — so the reopen is <strong>auth-first, verify, then firewall</strong>.</p>
+<h3>Step 0 — Preconditions</h3>
+<ul>
+<li>You have root on the box, network access to the git origin, and the systemd unit for bunkerd has <code>Restart=always</code>.</li>
+<li>Current <code>/etc/bunkerd/config.yaml</code> may show <code>auth.enabled: true</code> with a weak placeholder token (<code>test-regression-token</code>, 21 chars — <strong>fails the 48-hex format check</strong>). Treat it as not-yet-secure.</li>
+</ul>
+<h3>Step 1 — Auth-FIRST: generate 48-hex token and enable auth in config</h3>
+<pre><code class="language-bash"># 48 hex chars == 24 bytes of entropy
+TOKEN=$(openssl rand -hex 24)
+echo &quot;$TOKEN&quot;                       # e.g. 464fc3118555f0ed11b1b3ca70bb37aec291b8e7cf2b79f9
+</code></pre>
+<p>Write it into <code>/etc/bunkerd/config.yaml</code> (preserve the rest of the file):</p>
+<pre><code class="language-yaml">server:
+  grpc_addr: :19090
+  rest_addr: :18080
+auth:
+  enabled: true
+  token: &quot;&lt;THE 48-HEX TOKEN&gt;&quot;       # regex ^[0-9a-f]{48}$
+agent:
+  base_data_dir: &quot;/var/lib/bunkerd&quot;
+  ssh_dir: &quot;/etc/bunkerd/ssh&quot;
+  port_range_start: 20000
+  port_range_end: 20100
+  port_range_per_agent: 10
+  max_agents: 5
+</code></pre>
+<p>Safe edit (round-trips the YAML, refuses a malformed token):</p>
+<pre><code class="language-bash">python3 - &quot;$TOKEN&quot; &lt;&lt;'EOF'
+import re, sys, yaml
+tok = sys.argv[1]
+assert re.fullmatch(r'[0-9a-f]{48}', tok), &quot;token must be exactly 48 lowercase hex&quot;
+c = yaml.safe_load(open('/etc/bunkerd/config.yaml'))
+c['auth']['enabled'] = True
+c['auth']['token'] = tok
+yaml.safe_dump(c, open('/etc/bunkerd/config.yaml','w'), sort_keys=False, default_flow_style=False)
+print(&quot;config updated: auth.enabled=true, token len&quot;, len(tok))
+EOF
+</code></pre>
+<h3>Step 2 — Redeploy HEAD (deploy checkout; rewritten-twin lineage)</h3>
+<p>The box lineage is a <strong>rewritten twin commit</strong> — same content, different hash — so a plain <code>git pull</code> can refuse or fast-forward wrong. <code>fetch + reset --hard origin/main</code> makes the checkout byte-identical to upstream:</p>
+<pre><code class="language-bash">cd /path/to/bunkerd-deploy          # the deploy checkout
+git fetch origin
+git reset --hard origin/main        # discards twin divergence; HEAD == origin/main
+git status --porcelain              # must be empty
+make build VERSION=&quot;$(git rev-parse --short HEAD)&quot; LDFLAGS=&quot;-s -w -X main.version=$(git rev-parse --short HEAD)&quot;
+# proto unchanged -&gt; DO NOT run buf generate; only regenerate if api.proto/grpc.proto diffs
+# install: install -m 0755 ./bin/bunkerd /usr/local/bin/bunkerd
+</code></pre>
+<h3>Step 3 — Restart via pkill (systemd <code>Restart=always</code> picks up new binary + config)</h3>
+<pre><code class="language-bash">systemctl stop bunkerd || true      # make sure it isn't mid-restart
+pkill -x bunkerd                    # or: pkill -f '^/usr/local/bin/bunkerd'
+# do NOT manually restart: Restart=always brings it up with the new binary/config
+sleep 2
+systemctl show bunkerd -p NRestarts # NRestarts +1 vs. before is expected (one kill)
+systemctl is-active bunkerd         # active
+</code></pre>
+<p><strong>Pitfall:</strong> the agent registry is in-memory — the restart orphans pre-existing agents from the API. This self-heals: fresh spawns work immediately; destroy of an orphan returns 200. No manual registry migration needed.</p>
+<h3>Step 4 — Verify auth enforcement <strong>BEFORE</strong> touching the firewall (401 / 401 / 200)</h3>
+<p>Still firewalled, probe locally:</p>
+<pre><code class="language-bash">B=http://127.0.0.1:18080
+TOKEN=&quot;&lt;48-HEX-TOKEN&gt;&quot;
+# 1) no token            -&gt; expect 401
+curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/v1/agents/spawn
+# 2) wrong token         -&gt; expect 401
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H &quot;X-Session-Token: deadbeef&quot; $B/v1/agents/spawn
+# 3) correct token       -&gt; expect 200
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H &quot;X-Session-Token: $TOKEN&quot; $B/v1/agents/spawn
+</code></pre>
+<p>Only when the sequence is exactly <code>401 / 401 / 200</code> may you open the firewall. <strong>Never open ports on an unauthenticated daemon.</strong></p>
+<h3>Step 5 — UFW allow (only now)</h3>
+<pre><code class="language-bash">ufw allow 18080/tcp comment 'bunkerd REST API (auth required)'
+ufw allow 19090/tcp comment 'bunkerd gRPC (auth required)'
+ufw status verbose                  # confirm both allowed
+</code></pre>
+<h3>Step 6 — External probes + live E2E</h3>
+<p>From a second host (through the firewall), using the token:</p>
+<pre><code class="language-bash"># external auth check
+curl -s -o /dev/null -w '%{http_code}\n' -H &quot;X-Session-Token: $TOKEN&quot; http://BOX:18080/v1/agents     # 200
+curl -s -o /dev/null -w '%{http_code}\n' http://BOX:18080/v1/agents                                 # 401
+# live lifecycle E2E
+curl -s -X POST -H &quot;X-Session-Token: $TOKEN&quot; http://BOX:18080/v1/agents/spawn                       # {&quot;id&quot;: &quot;...&quot;, &quot;status&quot;:&quot;running&quot;}
+curl -s -X POST -H &quot;X-Session-Token: $TOKEN&quot; http://BOX:18080/v1/agents/exec                         # {&quot;exit_code&quot;:0,...}
+curl -s -X POST -H &quot;X-Session-Token: $TOKEN&quot; http://BOX:18080/v1/agents/destroy                      # {&quot;destroyed&quot;:true}
+# gRPC smoke (grpcurl)
+grpcurl -H &quot;x-session-token: $TOKEN&quot; -plaintext BOX:19090 bunkerd.v1.AgentService/List
+</code></pre>
+<p><strong>Pitfall — nested ssh quoting:</strong> greps run <em>through</em> <code>ssh box 'grep "..." ...'</code> lose inner quotes and false-negative. Keep probes direct or export the pattern to a file; e.g. verify a marker with <code>grep -cF '"spawn"' state.txt</code> locally first.</p>
+<p>Rollback: <code>ufw delete allow 18080/tcp &amp;&amp; ufw delete allow 19090/tcp</code>, then <code>git reset --hard &lt;prev&gt;</code> + rebuild + restart.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified in this sandbox against the live box + faithful simulation of HEAD semantics:
+
+| # | Check | Result |
+|---|-------|--------|
+| 1 | **Live daemon state** — port 18080 responds; unauthenticated `GET /` and `/v1/agents` → `401 SESSION_TOKEN_MISSING`; current config token `test-regression-token` → `401 SESSION_TOKEN_INVALID`; UUID-format token passes format check → `SESSION_NOT_FOUND`; gRPC **19090 not listening** (cut state confirmed) | observed |
+| 2 | **48-hex token generation** — `openssl rand -hex 24` → `593374b4…a5dcb5` (len 48, `^[0-9a-f]{48}$` holds) | pass |
+| 3 | **Config round-trip** — YAML with new 48-hex token parses; structure/keys preserved; `test-regression-token` fails the 48-hex validator | pass |
+| 4 | **Auth-FIRST gate (sim of HEAD)** — no token → 401, wrong token → 401, correct 48-hex token → 200 | pass |
+| 5 | **E2E lifecycle (authenticated)** — spawn → `{&quot;id&quot;:&quot;agent-…&quot;,&quot;status&quot;:&quot;running&quot;}`, exec → `{&quot;exit_code&quot;:0,&quot;stdout&quot;:&quot;hello-from-agent&quot;}`, destroy → `{&quot;destroyed&quot;:true}` | pass |
+| 6 | **Never open ports on unauthenticated daemon** — unauthenticated spawn still 401 after &quot;allow&quot; (auth is firewall-independent) | pass |
+| 7 | **In-memory registry orphan on restart** — agent `agent-29c78f8f` listed before restart; after `pkill`+relaunch the registry is empty (orphaned), fresh spawn self-heals, destroy of orphan → 200 | pass |
+| 8 | **Nested ssh quoting false-negative** — local `grep -cF &#x27;&quot;spawn&quot;&#x27;` → 1 match; nested-ssh single-quoted variant → 0 (quotes eaten); double-quote mangling → parse error | pass |
+| 9 | **Redeploy reset of twin commit** — scratch repo with divergent local twin (ahead-by 1): `git fetch + reset --hard origin/main` → HEAD == origin/main, 0 dirty files | pass |
+
+Edge cases handled: token regex rejected at write time (no malformed config); restart gate verified *before* any firewall change; orphaned-agent destroy converges (200, no 5xx); external-probe commands use the header scheme the daemon actually checks (`X-Session-Token`); environment limits (no systemd/ufw, `/etc` read-only in the sandbox) mean the runbook was executed against the simulation — the `Restart=always` + `NRestarts +1` behavior is documented from the systemd unit semantics and the pkill trigger is exercised verbatim.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;infra-security-firewall-auth-reopen&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 9}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

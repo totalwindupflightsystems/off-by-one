@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>foreman-verification-stale-reopen — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** The reopen was an artifact of stale evidence: the PM&#x27;s hunter check ran against a tree *before* implementation commit `eb5ce22`, so &quot;route not i">
+<meta property="og:title" content="foreman-verification-stale-reopen — Off-By-One">
+<meta property="og:description" content="**Root cause.** The reopen was an artifact of stale evidence: the PM&#x27;s hunter check ran against a tree *before* implementation commit `eb5ce22`, so &quot;route not i">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0619-foreman-verification-stale-reopen.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>foreman-verification-stale-reopen</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>foreman-verification-stale-reopen</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> The reopen was an artifact of stale evidence: the PM's hunter check ran against a tree <em>before</em> implementation commit <code>eb5ce22</code>, so "route not implemented" was a description of the old tree, not the current one. The foreman's error mode to guard against is <em>re-dispatching (re-doing) work based on a claim whose premises were never re-verified against the current tree + gitreins state</em>.</p>
+<p><strong>The fix: a two-gate stale-reopen guard</strong> (<code>/home/kara/solution/verify_reopen.py</code>). Before any reopen or re-dispatch, the foreman must pass both gates; a reopen requires a <strong>live red check</strong>, never a claim:</p>
+<ul>
+<li><strong>Gate 1 — claim freshness (git ancestry).</strong> If the hunter-check commit <code>H</code> is an ancestor of the implementation commit <code>C</code> (<code>git merge-base --is-ancestor H C</code>), the claim predates the fix → <code>claim_stale=True</code>. Stale claims get <em>zero</em> re-work weight; they only trigger live verification.</li>
+<li><strong>Gate 2 — live verification of the current tree:</strong> (a) the claimed-missing artifact exists in <code>HEAD</code> (<code>git cat-file -e HEAD:&lt;path&gt;</code>); (b) a <strong>fresh</strong> HTTP probe: implemented route → 200, decoy route → 404 (proving the 404 the PM saw is not the real route missing); (c) gitreins state still shows the task <code>complete (N/N)</code>.</li>
+</ul>
+<p>Verdicts: <code>CLOSED_WITH_EVIDENCE</code> (≥1 green live check, no red → zero re-work), <code>REOPEN</code> (any proven live gap), <code>UNVERIFIABLE</code> (nothing probeable → do <strong>not</strong> reopen on the claim alone).</p>
+<p>Core logic:</p>
+<pre><code class="language-python">def is_ancestor(ancestor, descendant, repo):
+    if not repo or not (repo / &quot;.git&quot;).exists():
+        return None                       # unverifiable, not &quot;stale&quot;
+    r = subprocess.run([&quot;git&quot;, &quot;merge-base&quot;, &quot;--is-ancestor&quot;,
+                        ancestor, descendant], cwd=repo,
+                       capture_output=True, text=True)
+    return {0: True, 1: False}.get(r.returncode, None)   # 128 -&gt; None
+
+# verdict: red = proven live gap; green = live corroboration; None = proves nothing
+for k, val in v.checks.items():
+    if k == &quot;artifact_exists&quot;:
+        (green if val is True else red).append(f&quot;{k}={val}&quot;) if val is not None else None
+    elif k in (&quot;route_status&quot;, &quot;decoy_status&quot;) and type(val) is int:
+        ok = val == (expect_status if k == &quot;route_status&quot; else 404)
+        (green if ok else red).append(f&quot;{k}={val}&quot;)
+    elif k == &quot;gitreins_status&quot;:
+        (green if val == &quot;complete&quot; else red).append(f&quot;{k}={val}&quot;) if val is not None else None
+    elif k == &quot;gitreins_done&quot; and expected_done and val is not None:
+        (green if val == expected_done else red).append(f&quot;{k}={val}&quot;)
+
+if red:            decision = &quot;REOPEN&quot;                    # dispatch work
+elif green:        decision = &quot;CLOSED_WITH_EVIDENCE&quot;      # zero re-work
+else:              decision = &quot;UNVERIFIABLE&quot;              # never reopen on claim
+</code></pre>
+<p>Note the subtlety that bit a naive version: <code>bool</code> is a subclass of <code>int</code> in Python, so <code>val in (200, 404, None)</code> misclassifies <code>True</code> — the verdict uses <code>type(val) is int</code> and explicit <code>val is True/False</code>, never <code>isinstance</code>/membership on mixed types.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified with a hermetic fixture reproducing the incident exactly (baseline hunter commit `H`, then implementation commit `C` adding `src/routes/gap.py` + `gitreins.state.json` `U-GAP-005: complete 7/7`, plus a live local HTTP server answering 200 on `/api/gap` and 404 elsewhere). Replaying the incident produces:
+
+```
+decision: CLOSED_WITH_EVIDENCE     claim_stale: true
+  STALE: hunter check 8c5eda8 is an ancestor of implementation 3cc53d4
+  artifact present in HEAD: src/routes/gap.py
+  live probe /api/gap -&gt; 200 (expected 200)
+  decoy probe /api/does-not-exist -&gt; 404 (expected 404)
+  gitreins: U-GAP-005 complete (7/7)
+  CLOSED_WITH_EVIDENCE: claim stale/refuted by current tree — zero re-work.
+```
+
+Test matrix — **14/14 passed** (`verify_reopen_test.py`):
+
+| # | Scenario | Expected | Got |
+|---|---|---|---|
+| incident | stale claim, tree+gitreins+live all green | CLOSED_WITH_EVIDENCE | ✅ |
+| incident | claim flagged stale (H ancestor of C) | stale=True | ✅ |
+| incident | gitreins still `7/7`, route 200, decoy 404 | 7/7, 200, 404 | ✅ |
+| edge1 | artifact genuinely missing in HEAD | REOPEN | ✅ |
+| edge2 | *fresh* claim (H not ancestor) still refuted by live tree | CLOSED_WITH_EVIDENCE | ✅ |
+| edge3 | route live but 500 | REOPEN | ✅ |
+| edge4 | gitreins regressed to 6/7 | REOPEN | ✅ |
+| edge5 | no commits/repo/state probeable | UNVERIFIABLE (no reopen on claim) | ✅ |
+| edge6 | repo gone, but live route + gitreins green | CLOSED on live evidence | ✅ |
+| cli | `--json` run exits 0 with verdict | (0, CLOSED_WITH_EVIDENCE) | ✅ |
+
+Edge cases covered: stale vs. fresh claims, worktree drift, wrong-but-present implementation, gitreins regression, unverifiable inputs, missing repo, failed network probes (probe `None` is treated as *inconclusive*, never as proof either way — a reopen needs a proven gap).</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;foreman-verification-stale-reopen&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 14}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

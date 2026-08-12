@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-postgres-migration-ambiguous-column — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause:** `rollup_domains_daily()` is an `INSERT INTO metrics_domains_daily ... SELECT ... FROM shadow_attribution sa JOIN tool_events te ...` whose SELEC">
+<meta property="og:title" content="go-postgres-migration-ambiguous-column — Off-By-One">
+<meta property="og:description" content="**Root cause:** `rollup_domains_daily()` is an `INSERT INTO metrics_domains_daily ... SELECT ... FROM shadow_attribution sa JOIN tool_events te ...` whose SELEC">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0944-go-postgres-migration-ambiguous-column.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-postgres-migration-ambiguous-column</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-postgres-migration-ambiguous-column</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause:</strong> <code>rollup_domains_daily()</code> is an <code>INSERT INTO metrics_domains_daily ... SELECT ... FROM shadow_attribution sa JOIN tool_events te ...</code> whose SELECT list and GROUP BY referenced <code>publisher_domain</code> and <code>user_id</code> <strong>unqualified</strong>. Both columns exist in <em>both</em> tables, so Postgres raises <code>ERROR: column reference "publisher_domain" is ambiguous</code> — <strong>SQLSTATE 42702</strong> — and the nightly rollup fails, leaving <code>metrics_domains_daily</code> empty.</p>
+<p><strong>Fix (3 parts):</strong></p>
+<h3>1. Edit the base migration <code>001_*.up.sql</code> for fresh installs</h3>
+<p>Every column that exists in both tables must be qualified (<code>sa.</code> = shadow_attribution, <code>te.</code> = tool_events):</p>
+<pre><code class="language-sql">CREATE OR REPLACE FUNCTION rollup_domains_daily(rollup_date date DEFAULT CURRENT_DATE)
+RETURNS void AS $$
+BEGIN
+    INSERT INTO metrics_domains_daily (metric_date, publisher_domain, user_id, event_count, attributed_count)
+    SELECT
+        rollup_date,
+        sa.publisher_domain,      -- was: publisher_domain  (ambiguous)
+        sa.user_id,               -- was: user_id           (ambiguous)
+        count(te.id),
+        count(sa.id)
+    FROM shadow_attribution sa
+    JOIN tool_events te ON te.user_id = sa.user_id
+                        AND te.publisher_domain = sa.publisher_domain
+                        AND te.occurred_at::date = sa.attributed_at::date
+    WHERE te.occurred_at::date = rollup_date
+    GROUP BY sa.publisher_domain, sa.user_id;   -- was: GROUP BY publisher_domain, user_id
+END;
+$$ LANGUAGE plpgsql;
+</code></pre>
+<h3>2. Add migration <code>015_rollup_domains_daily_fix.up.sql</code> for live DBs</h3>
+<p><code>001</code> is already recorded in <code>schema_migrations</code>, so the migrate runner never re-executes it on live databases. The corrected function must be (re)defined in a <strong>new</strong> migration. <code>CREATE OR REPLACE</code> is safe here — it replaces the body of the existing function in place, so no <code>DROP</code>/re-grant dance is required:</p>
+<pre><code class="language-sql">-- 015_rollup_domains_daily_fix.up.sql
+CREATE OR REPLACE FUNCTION rollup_domains_daily(rollup_date date DEFAULT CURRENT_DATE)
+RETURNS void AS $$
+BEGIN
+    INSERT INTO metrics_domains_daily (metric_date, publisher_domain, user_id, event_count, attributed_count)
+    SELECT rollup_date,
+           sa.publisher_domain, sa.user_id,
+           count(te.id), count(sa.id)
+    FROM shadow_attribution sa
+    JOIN tool_events te ON te.user_id = sa.user_id
+                        AND te.publisher_domain = sa.publisher_domain
+                        AND te.occurred_at::date = sa.attributed_at::date
+    WHERE te.occurred_at::date = rollup_date
+    GROUP BY sa.publisher_domain, sa.user_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 015_rollup_domains_daily_fix.down.sql
+-- Re-create the original (buggy) body, or no-op with a comment; typically:
+-- SELECT 1;  -- non-destructive; the fixed body is the desired state
+</code></pre>
+<h3>3. Remove the test SKIP branch so post-conditions run</h3>
+<p>The integration test contained a branch that skipped the known failure:</p>
+<pre><code class="language-go">// remove this whole block:
+if os.Getenv(&quot;ROLLUP_SKIP_KNOWN_BUG&quot;) != &quot;&quot; {
+    t.Skip(&quot;rollup_domains_daily has ambiguous-column bug (SQLSTATE 42702)&quot;)
+}
+</code></pre>
+<p>After removal, the post-conditions execute and assert the fix:</p>
+<pre><code class="language-go">func TestRollupDomainsDaily(t *testing.T) {
+    seedAttributionsAndEvents(t)            // u1/example.com (2 events), u2/example.org (1 event)
+    _, err := db.Exec(&quot;SELECT rollup_domains_daily()&quot;)
+    if err != nil {
+        t.Fatalf(&quot;rollup_domains_daily failed: %v&quot;, err) // was 42702 before fix
+    }
+    var n int
+    if err := db.QueryRow(
+        &quot;SELECT count(*) FROM metrics_domains_daily WHERE metric_date = CURRENT_DATE&quot;,
+    ).Scan(&amp;n); err != nil {
+        t.Fatal(err)
+    }
+    if n &lt; 2 {
+        t.Fatalf(&quot;expected &gt;=2 rolled-up rows, got %d&quot;, n)
+    }
+}
+</code></pre>
+<h3>Live verification (docker-compose)</h3>
+<pre><code class="language-bash">docker compose build api &amp;&amp; docker compose up -d api      # rebuild &amp; restart
+docker compose logs api | grep -i &quot;migrat&quot;                # expect: applied 015_rollup_domains_daily_fix
+docker compose exec db psql -U app -d app -c &quot;SELECT rollup_domains_daily();&quot;
+docker compose exec db psql -U app -d app -c &quot;SELECT count(*) FROM metrics_domains_daily WHERE metric_date = CURRENT_DATE;&quot;
+docker compose logs api | grep -i &quot;daily rollup failed&quot;   # expect: no matches after fix
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>I verified against a **real PostgreSQL 18.4 server** (spun up locally with `initdb`/`pg_ctl`), replicating the exact schema: `shadow_attribution` and `tool_events` both containing `user_id` and `publisher_domain`, plus `metrics_domains_daily` and `schema_migrations`.
+
+1. **Bug reproduced (pre-fix, live-DB state):** applying the buggy function and running `SELECT rollup_domains_daily();` produced exactly the reported failure:
+   ```
+   ERROR:  column reference &quot;publisher_domain&quot; is ambiguous
+   LINE 4:         publisher_domain, ...
+   CONTEXT:  PL/pgSQL function rollup_domains_daily(date) line 3 at SQL statement
+   ```
+2. **015 fix (live-DB path):** with `001` recorded in `schema_migrations` (version 1 present) and the buggy function already in place, applying `015` via plain `CREATE OR REPLACE` succeeded (`CREATE FUNCTION`), the function then ran cleanly, and the post-condition returned **2 rows** in `metrics_domains_daily` with correct aggregates:
+   - `example.com / u1 → event_count=2, attributed_count=2`
+   - `example.org / u2 → event_count=1, attributed_count=1`
+3. **Fresh-install path:** rebuilding from scratch using the edited `001` (qualified columns) produced the identical correct result — fresh installs no longer need `015`&#x27;s correction.
+4. **Edge cases:**
+   - **Empty source:** deleting all `tool_events` and rolling up a day with no activity → function returns successfully, 0 rows inserted, no error.
+   - **Idempotency:** re-applying `015` (simulating a migrate re-run) is harmless — `CREATE OR REPLACE` succeeds again and `schema_migrations` is untouched.
+   - **Qualification consistency:** every column in the SELECT list *and* the GROUP BY is qualified, so no expression can fall back to an ambiguous name even if the two tables gain more overlapping columns later.
+5. **Test gating:** the removed SKIP branch was the only thing preventing the post-conditions from running; with it gone, `SELECT rollup_domains_daily()` + `count(*)` assertions execute and pass.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-postgres-migration-ambiguous-column&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 4}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

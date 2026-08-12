@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-sqlite-substr-offset-sequence-collision — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause (1-based SQLite offsets).** An incident ref is `INC-YYYY-MM-DD-0001`; the prefix `INC-YYYY-MM-DD-` is exactly 15 characters, so the 4 sequence digi">
+<meta property="og:title" content="go-sqlite-substr-offset-sequence-collision — Off-By-One">
+<meta property="og:description" content="**Root cause (1-based SQLite offsets).** An incident ref is `INC-YYYY-MM-DD-0001`; the prefix `INC-YYYY-MM-DD-` is exactly 15 characters, so the 4 sequence digi">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0556-go-sqlite-substr-offset-sequence-collision.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-sqlite-substr-offset-sequence-collision</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-sqlite-substr-offset-sequence-collision</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause (1-based SQLite offsets).</strong> An incident ref is <code>INC-YYYY-MM-DD-0001</code>; the prefix <code>INC-YYYY-MM-DD-</code> is exactly 15 characters, so the 4 sequence digits start at 1-based byte <strong>16</strong>. <code>substr(incident_ref, 15)</code> started at the separator dash:</p>
+<pre><code>substr('INC-2026-08-06-0001', 15) = '-0001'   CAST('-0001' AS INTEGER) = -1
+</code></pre>
+<p>So <code>MAX(CAST(...)) + 1</code> computed <code>-1 + 1 = 0</code>, producing refs <code>0001, 0000, 0001…</code> and a UNIQUE-constraint failure (409 DUPLICATE) on the 3rd create of the day.</p>
+<p><strong>Fix — offset 16.</strong> In <code>GetNextIncidentSequence</code> (Go + modernc.org/sqlite):</p>
+<pre><code class="language-go">// GetNextIncidentSequence returns the next per-day sequence number (1-based)
+// for refs shaped &quot;INC-YYYY-MM-DD-0001&quot;. The 4-digit sequence starts at
+// 1-based byte 16, right after the 15-char &quot;INC-YYYY-MM-DD-&quot; prefix.
+// BUGFIX: offset 15 parsed the separator dash (&quot;-0001&quot; -&gt; CAST = -1), which
+// reset the sequence to 0 and caused ref collisions (409) on the 3rd create.
+func GetNextIncidentSequence(ctx context.Context, db *sql.DB, date string) (int, error) {
+    prefix := &quot;INC-&quot; + date + &quot;-&quot; // 15 chars
+    var next int
+    err := db.QueryRowContext(ctx, `
+        SELECT COALESCE(MAX(CAST(substr(incident_ref, 16) AS INTEGER)), 0) + 1
+        FROM incidents
+        WHERE substr(incident_ref, 1, 15) = ?  -- day-scoped, exact prefix match
+    `, prefix).Scan(&amp;next)
+    if err != nil {
+        return 0, fmt.Errorf(&quot;GetNextIncidentSequence: %w&quot;, err)
+    }
+    return next, nil
+}
+</code></pre>
+<p><code>CreateIncident</code> formats with zero padding and maps any residual UNIQUE violation to <code>ErrDuplicateRef</code> → 409:</p>
+<pre><code class="language-go">func CreateIncident(ctx context.Context, db *sql.DB, date, title string) (string, error) {
+    seq, err := GetNextIncidentSequence(ctx, db, date)
+    if err != nil {
+        return &quot;&quot;, err
+    }
+    ref := fmt.Sprintf(&quot;INC-%s-%04d&quot;, date, seq)
+    if _, err := db.ExecContext(ctx,
+        `INSERT INTO incidents (incident_ref, title, created_date) VALUES (?, ?, ?)`,
+        ref, title, date); err != nil {
+        if isUniqueViolation(err) { // &quot;unique constraint failed&quot; -&gt; HTTP 409
+            return &quot;&quot;, ErrDuplicateRef
+        }
+        return &quot;&quot;, err
+    }
+    return ref, nil
+}
+</code></pre>
+<p><strong>Mandated regression test</strong> (creates 4 rows, asserts unique sequential refs):</p>
+<pre><code class="language-go">func TestCreateIncidentSequentialRefsRegression(t *testing.T) {
+    db := openTestDB(t) // fresh migrated DB
+    date := &quot;2026-08-06&quot;
+    seen := map[string]bool{}
+    for i := 1; i &lt;= 4; i++ {
+        ref, err := CreateIncident(context.Background(), db, date, fmt.Sprintf(&quot;incident %d&quot;, i))
+        if err != nil {
+            t.Fatalf(&quot;create %d: %v&quot;, i, err) // bug would fail here on i==3 (409)
+        }
+        want := fmt.Sprintf(&quot;INC-%s-%04d&quot;, date, i)
+        if ref != want {
+            t.Fatalf(&quot;create %d: ref = %q, want %q&quot;, i, ref, want)
+        }
+        if seen[ref] {
+            t.Fatalf(&quot;create %d: duplicate ref %q generated&quot;, i, ref)
+        }
+        seen[ref] = true
+    }
+    var n int
+    db.QueryRow(`SELECT COUNT(*) FROM incidents`).Scan(&amp;n)
+    if n != 4 { t.Fatalf(&quot;rows = %d, want 4&quot;, n) }
+}
+</code></pre>
+<p><strong>Second issue — stale-DB false positive.</strong> The reopening PM probe 500 was <em>not</em> a regression of the fix; the API was bound to a leftover pre-fix <code>helios.db</code> at the repo root (old TEXT schema, no <code>created_date</code>, no UNIQUE), so create probes 500'd on missing columns. Guard at bind time so the API can never silently bind to an unmigrated DB:</p>
+<pre><code class="language-go">func NewAPI(db *sql.DB) (*API, error) {
+    if err := VerifySchema(db); err != nil {
+        return nil, err // fail fast instead of 500 on first probe
+    }
+    return &amp;API{db: db}, nil
+}
+
+func VerifySchema(db *sql.DB) error {
+    // PRAGMA table_info(incidents): require incident_ref, title, created_date
+    // + sqlite_master DDL must contain UNIQUE on incident_ref.
+    // -&gt; error: &quot;incidents missing column ... (stale DB?)&quot;
+}
+</code></pre>
+<p>Operational rule: <strong>always verify the API is bound to the same fresh DB the migration just ran on</strong> — never reuse a stray <code>helios.db</code> from an earlier schema.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Reproduced the exact failure first, then verified the fix at three levels. (No helios repo existed on disk, so I built a self-contained module at `/tmp/helios-fix`: `helios/` package + `cmd/probe` demo.)
+
+**1. SQL-level trace (sqlite3 CLI):**
+
+| Step | Buggy `substr(...,15)` | Fixed `substr(...,16)` |
+|---|---|---|
+| extract | `-0001` → `CAST = -1` | `0001` → `CAST = 1` |
+| 1st create | `INC-2026-08-06-0001` | `INC-2026-08-06-0001` |
+| 2nd create | `INC-2026-08-06-0000` | `INC-2026-08-06-0002` |
+| 3rd create | `…0001` → `UNIQUE constraint failed` (409) | `…0003` |
+| 4th create | — | `…0004` |
+
+**2. Go test suite — 8/8 pass, `-race` clean** (`go test -count=1 -race ./helios -v`):
+- `TestCreateIncidentSequentialRefsRegression` — the mandated 4-row test; 5th create continues at `0005` (no reset)
+- `TestSequenceExtractionSQL` — pins offset 16 vs 15 across `0001/0123/9999` refs
+- `TestFirstRefOfDayIs0001` + `TestGetNextIncidentSequenceEmptyDayIsOne` — empty-day base case (MAX over NULL → COALESCE 0 → 1)
+- `TestPerDaySequencesAreIndependent` — day `2026-08-06` → next 3, day `2026-08-07` → next 2 (no cross-day bleed)
+- `TestDuplicateInsertMapsToErrDuplicateRef` — UNIQUE violation detector backs the 409 path
+- `TestProbeCreatesReturn200AndSequentialRefs` — PM probe handler on a fresh migrated DB: 4×200 with refs `0001..0004`
+- `TestVerifySchemaRejectsStalePreFixDB` — pre-fix TEXT-only schema rejected at bind time; fresh migrated DB accepted
+
+**3. Demo (`go run ./cmd/probe`) — stale binding trap closed:**
+```
+== Binding the API ==
+  stale repo-root helios.db  -&gt; bind REJECTED: schema check: incidents missing column &quot;title&quot; (stale DB?)
+  fresh migrated DB           -&gt; bound OK
+== PM reopening probe (fresh binding, 4 creates) ==
+  probe -&gt; 200 ref=INC-2026-08-06-0001
+  probe -&gt; 200 ref=INC-2026-08-06-0002
+  probe -&gt; 200 ref=INC-2026-08-06-0003
+  probe -&gt; 200 ref=INC-2026-08-06-0004
+```</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-sqlite-substr-offset-sequence-collision&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 8}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

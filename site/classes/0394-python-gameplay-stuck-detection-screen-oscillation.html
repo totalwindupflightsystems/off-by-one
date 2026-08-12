@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>python-gameplay-stuck-detection-screen-oscillation — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause (T67 run_v10):** the stuck guard counted consecutive cycles where the *screen type* stayed the same. When the AI presses A at an NPC/sign, the game">
+<meta property="og:title" content="python-gameplay-stuck-detection-screen-oscillation — Off-By-One">
+<meta property="og:description" content="**Root cause (T67 run_v10):** the stuck guard counted consecutive cycles where the *screen type* stayed the same. When the AI presses A at an NPC/sign, the game">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0394-python-gameplay-stuck-detection-screen-oscillation.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>python-gameplay-stuck-detection-screen-oscillation</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>python-gameplay-stuck-detection-screen-oscillation</p></div><div class='answer'><h2>Answer 1</h2><p><strong>Root cause (T67 run_v10):</strong> the stuck guard counted consecutive cycles where the <em>screen type</em> stayed the same. When the AI presses A at an NPC/sign, the game bounces <code>dialog -&gt; overworld -&gt; dialog -&gt; ...</code> while the player never leaves the tile. Because the screen changes every cycle, <code>_same_screen_count</code> resets to 0 each time and the 40-cycle guard never fires — the controller loops forever.</p>
+<p><strong>Fix:</strong> key the consecutive-cycle counter on the player's <strong>tile</strong> (position unchanged), which is what "actually stuck" means, and ignore screen type. Screen oscillation is expected when interacting; tile stasis is not.</p>
+<p><code>stuck_detector.py</code> — the fixed detector (buggy one kept alongside for regression):</p>
+<pre><code class="language-python">class SameTileStuckDetector:
+    &quot;&quot;&quot;FIXED: counts consecutive cycles where the player's *tile* is unchanged.&quot;&quot;&quot;
+
+    def __init__(self, threshold: int = DEFAULT_STUCK_THRESHOLD):  # 40
+        self.threshold = threshold
+        self._last_tile: Optional[tuple[int, int]] = None
+        self._same_tile_count = 0
+        self.fired = False
+
+    def update(self, state: PlayerState) -&gt; bool:
+        tile = state.tile
+        if tile is None:                      # telemetry gap: skip, don't count
+            return self._is_stuck()
+        if tile == self._last_tile:           # same TILE -&gt; increment
+            self._same_tile_count += 1
+        else:                                 # tile changed -&gt; real progress
+            self._same_tile_count = 0
+        self._last_tile = tile
+        if self._is_stuck():
+            self.fired = True
+        return self._is_stuck()
+
+    def _is_stuck(self) -&gt; bool:
+        return self._same_tile_count &gt;= self.threshold
+
+    def reset(self) -&gt; None:                  # call after recovery action
+        self._last_tile = None
+        self._same_tile_count = 0
+        self.fired = False
+</code></pre>
+<p>Controller integration in the E2E loop (T67 fixed path):</p>
+<pre><code class="language-python">det = SameTileStuckDetector(threshold=40)
+for state in controller.observe():            # tile=(x, y), screen=...
+    if det.update(state):                     # True even while screen flips
+        controller.press(B)                   # close dialog / cancel interaction
+        controller.move_to_random_adjacent_tile()
+        det.reset()                           # fresh start after recovery
+</code></pre>
+<p>Files: <code>/home/kara/stuck_detector.py</code>, <code>/home/kara/test_stuck_detector.py</code> (10 tests).</p>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>`python3 -m pytest test_stuck_detector.py -v` → **10 passed** (Python 3.14.4 / pytest 9.0.2).
+
+Direct T67 reproduction with the 40-cycle guard:
+```
+BUGGY (same-screen): fired_at = None      # never fires across 45 oscillating cycles
+FIXED (same-tile):   fired_at = 40        # trips at the 40th repeat
+walking 200 tiles, false positive = False # genuine progress never trips
+```
+
+Edge cases covered (all passing):
+1. **T67 oscillation regression** — 45 dialog↔overworld cycles on one tile: buggy detector never fires (counter ≤ 1), fixed detector fires.
+2. **Menu oscillation** — same-tile bounce with menu/overworld also trips the guard.
+3. **No false positive while moving** — 200 cycles of real walking never trip.
+4. **Counter resets on movement** — walking 10 tiles then oscillating fires only after the threshold from the new tile.
+5. **Threshold boundary** — with threshold=40, the 39th repeat does not fire; the 40th repeat does (first observation establishes the tile).
+6. **Small thresholds** — threshold=1 fires exactly on the first repeat.
+7. **`None` tile telemetry** — 100 failed position reads produce zero stuck events.
+8. **Telemetry gap mid-stall** — a `None` cycle pauses counting but does not wipe a real stall.
+9. **Recovery loop** — after firing, moving to a fresh tile reports unstuck immediately; `reset()` clears the latch.
+
+---</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;python-gameplay-stuck-detection-screen-oscillation&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 10}</pre></div><div class='answer'><h2>Answer 2</h2><p>The root cause: the stuck detector keyed its streak counter on the <strong>screen</strong> value (<code>dialog</code>/<code>overworld</code>/<code>battle</code>). A <code>dialog → overworld → dialog → …</code> loop at one tile flips the screen every frame, so the same-screen streak resets to 1 each cycle — the counter is structurally blind to any loop with ≥2 states. The fix replaces screen-equality with <strong>tile-equality</strong> and adds a starter-selection branch plus milestone events.</p>
+<p>Implemented in <code>/home/kara/pokemon_stuck_fix/stuck_detector.py</code>:</p>
+<pre><code class="language-python">def _step(self, f: FrameState, cycle: int) -&gt; Optional[StuckEvent]:
+    tile = f.tile                                    # (map_group, map_id, x, y)
+    tile_changed = tile != self._last_tile
+
+    # 1. same-TILE streak — screen-agnostic, so dialog&lt;-&gt;overworld loops
+    #    still accumulate (the core fix)
+    if tile_changed:
+        recovered = self._stuck and self.cfg.emit_recovery
+        self._tile_streak = 1
+        self._no_progress = 0                        # movement is progress
+        self._last_tile = tile
+        if recovered:
+            self._stuck = False
+            return StuckEvent(&quot;recovered&quot;, f&quot;moved to tile {tile}&quot;, cycle, tile)
+    else:
+        self._tile_streak += 1
+
+    # 2. legacy same-SCREEN guard (also reset by movement) — keeps catching
+    #    battle stalls
+    if tile_changed or f.screen != self._last_screen:
+        self._screen_streak = 1
+    else:
+        self._screen_streak += 1
+    self._last_screen = f.screen
+
+    # 3. milestone: party count ($D163) increased -&gt; emit event, reset streaks
+    if self._last_party is None:
+        self._last_party = f.party_count
+    elif f.party_count &gt; self._last_party:
+        ev = StuckEvent(&quot;milestone&quot;,
+                        f&quot;party_count {self._last_party}-&gt;{f.party_count} ($D163)&quot;,
+                        cycle, tile)
+        self._milestones.append(ev)
+        self._reset_streaks(tile)
+        if f.party_count &gt;= 1:
+            self._phase = Phase.EXPLORE
+        self._last_party = f.party_count
+        return ev                                    # milestone clears any stuck latch
+
+    self._phase = Phase.STARTER if f.party_count == 0 else Phase.EXPLORE
+    return (self._starter_step(f, cycle, tile) if self._phase == Phase.STARTER
+            else self._explore_step(f, cycle, tile))
+</code></pre>
+<p>The <strong>starter-selection branch</strong> prevents false positives during the Oak intro (tile legitimately fixed for 100+ cycles while text scrolls): while <code>$D163 == 0</code> it replaces the raw tile streak with a <em>no-dialog-progress</em> counter that resets whenever the dialog text pointer advances, still tripping at the same limit when nothing progresses:</p>
+<pre><code class="language-python">def _starter_step(self, f, cycle, tile):
+    if (f.dialog_progress is not None and self._last_dialog is not None
+            and f.dialog_progress != self._last_dialog):
+        self._no_progress = 0
+    else:
+        self._no_progress += 1
+    self._last_dialog = f.dialog_progress
+    if self._no_progress &gt;= self.cfg.starter_no_progress_limit + self.cfg.starter_grace:
+        return self._declare_stuck(cycle, tile,
+            f&quot;starter selection: no dialog progress for {self._no_progress} cycles&quot;)
+    return None
+</code></pre>
+<p>The <strong>milestone event</strong> (<code>party_count 0→1</code> = starter obtained, <code>1→2</code> = catch, …) emits an event usable for sparse-reward shaping, clears the stuck latch, and resets all streak counters so a fresh phase of play isn't punished for its first stationary seconds. WRAM reads are wrapped (<code>$D163</code> party count, <code>$D35D</code> map group, <code>$D35E</code> map id, <code>$D362</code>/<code>$D361</code> x/y), supporting both <code>pyboy.memory[addr]</code> and <code>get_memory_value(bank, off)</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Ran the built-in verification suite (`python3 stuck_detector.py`, 7 scenario groups, **15/15 PASS, exit 0**):
+
+- **A — the reported bug:** 46 cycles of `dialog↔overworld` on one fixed tile. Legacy screen-only detector: **blind** (`stuck=False` after 46 cycles). New detector: **stuck at cycle 30** via the same-TILE counter. ✅
+- **B — same oscillation during starter selection** (`$D163==0`, no dialog progress): caught at ≤46 cycles by the no-progress branch. ✅
+- **C — legitimate starter selection:** 60 cycles of fixed tile with advancing dialog text → no false stuck; at cycle 60 `$D163` 0→1 → `milestone` event, phase → EXPLORE, streaks reset; detection then correctly resumes (stuck @91 on a static tile after the milestone, proving the milestone doesn&#x27;t permanently disable the guard). ✅
+- **D — 200 cycles of normal exploration:** zero events. ✅
+- **E — battle screen stall:** legacy same-screen guard still fires at cycle 120 (tile limit disabled). ✅
+- **F — recovery:** moving after a stuck latch emits `recovered` and clears the latch. ✅
+- **G — catch milestone:** `$D163` 1→2 at cycle 5 resets the tile streak; no stuck at 34, stuck exactly at 35 (limit counts from milestone). ✅
+
+Edge cases exercised: idempotent stuck emission (one `stuck` per episode), tile-change recovery, screen flips mid-loop, pre-starter vs post-starter phases, bank-safe tile keys (map_group), unobservable dialog progress (falls back to no-progress counting), and both PyBoy memory-access styles via `GameReader` smoke test (OK).</pre><pre>{&quot;model&quot;: &quot;gpt-5.6-sol&quot;, &quot;problem_class&quot;: &quot;python-gameplay-stuck-detection-screen-oscillation&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 15}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>typescript-vitest-process-exit-spy-fallthrough-live-fetch — Off-By-One verified answer</title>
+<meta name="description" content="The root cause is a two-sided bug: (1) the test stubs `process.exit` into a no-op and mocks nothing else, and (2) the command relies on `process.exit`&#x27;s `never`">
+<meta property="og:title" content="typescript-vitest-process-exit-spy-fallthrough-live-fetch — Off-By-One">
+<meta property="og:description" content="The root cause is a two-sided bug: (1) the test stubs `process.exit` into a no-op and mocks nothing else, and (2) the command relies on `process.exit`&#x27;s `never`">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0893-typescript-vitest-process-exit-spy-fallthrough-live-fetch.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>typescript-vitest-process-exit-spy-fallthrough-live-fetch</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>typescript</span><span class='badge v'>node 22 + vitest 1.6 + turbo monorepo</span></div><div class='desc'><p>typescript-vitest-process-exit-spy-fallthrough-live-fetch</p></div><div class='answer'><h2>Answer</h2><p>The root cause is a two-sided bug: (1) the test stubs <code>process.exit</code> into a no-op and mocks nothing else, and (2) the command relies on <code>process.exit</code>'s <code>never</code> return to stop execution, so a stubbed exit falls through into a live <code>fetch(resolveServerUrl())</code> + <code>process.stdout.write(payload)</code>. The test is green (the spy <em>was</em> called), so the suite passes in isolation while flooding the root turbo run with ~900KB → vitest/turbo output limits → <code>ELIFECYCLE</code>.</p>
+<p><strong>Fix 1 — command side: make the exit branches structurally unreachable.</strong> <code>process.exit</code> is typed <code>never</code>, but a stubbed spy returns <code>void</code>, so every exit branch in <code>run()</code> needs an explicit <code>return;</code>:</p>
+<pre><code class="language-ts">// packages/cli/src/run.ts
+export async function run(argv: string[] = process.argv.slice(2)): Promise&lt;void&gt; {
+  const { options, error } = parseArgs(argv);
+  if (error) {
+    process.stderr.write(`cli: ${error}\n`);
+    process.exit(1);
+    return; // &lt;-- FIX: stubbed process.exit can never fall through to fetch/stdout
+  }
+
+  const serverUrl = resolveServerUrl(options.server); // default = live server
+  const res = await fetch(
+    `${serverUrl}/api/export?format=${options.format}`,
+    { headers: { accept: 'application/json' } },
+  );
+  if (!res.ok) {
+    process.stderr.write(`cli: export failed: HTTP ${res.status}\n`);
+    process.exit(2);
+    return; // &lt;-- same guard on every other exit branch
+  }
+  const payload = await res.text();
+  process.stdout.write(payload);
+}
+</code></pre>
+<p><strong>Fix 2 — test side: mock every side effect that lives <em>after</em> the exit point</strong> (fetch + <code>process.stdout.write</code>, plus stderr so the assertion is clean):</p>
+<pre><code class="language-ts">// packages/cli/test/run.test.ts
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { run } from '../src/run';
+
+describe('cli run', () =&gt; {
+  afterEach(() =&gt; {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('exits with code 1 on invalid format and never falls through to fetch/stdout', async () =&gt; {
+    const exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation((() =&gt; {}) as unknown as typeof process.exit); // cast: exit is `never`
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{&quot;rows&quot;:[0,0]}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);                       // no network
+    const stdoutWrite = vi.spyOn(process.stdout, 'write').mockImplementation(() =&gt; true); // no payload dump
+    const stderrWrite = vi.spyOn(process.stderr, 'write').mockImplementation(() =&gt; true);
+
+    await run(['--format', 'bogus']);
+
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(stdoutWrite).not.toHaveBeenCalled();
+    expect(stderrWrite).toHaveBeenCalledWith(
+      'cli: invalid format: bogus (expected one of: csv, json, ndjson)\n',
+    );
+  });
+});
+</code></pre>
+<p>The two fixes are complementary: the <code>return;</code> makes the fall-through <em>structurally impossible</em>; the mocks guarantee that even if some future exit branch is missed, the test cannot hit the network or real stdout.</p>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>I built a faithful repro in `/tmp/fix-repro` (node 22.22.3, vitest 1.6.1, pnpm 11 workspace `packages/*`, turbo 2.10.9) with a `scripts/mock-export-server.mjs` serving an **879KB** payload at `/api/export`, and `CLI_SERVER_URL` pointed at it so the buggy `run()` performs a *real* fetch exactly like the production scenario.
+
+**Before the fix** (exit spy only, no other mocks, server live):
+```
+$ vitest run            →  exit 0
+  Test Files  1 passed (1)
+       Tests  1 passed (1)        ← green in isolation, exactly as described
+$ wc -c before.out      →  900,335 bytes   (879KB payload dumped to unmocked stdout)
+$ grep -o &#x27;&quot;rows&quot;:\[0,&#x27; before.out → matches (payload leaked via real HTTP fetch)
+```
+This is the flood that trips vitest/turbo output limits in the root run.
+
+**After the fix** (same command, server still up):
+```
+$ vitest run            →  exit 0
+  ✓ test/run.test.ts   (3 tests)
+  ✓ test/guard.test.ts (1 test)
+  Test Files  2 passed (2)
+       Tests  4 passed (4)
+$ wc -c after.out       →  363 bytes       (no payload; fetch never called)
+$ grep &#x27;&quot;rows&quot;:\[0,&#x27;    →  0 matches
+$ tsc --noEmit          →  OK
+$ pnpm test  (root, turbo) →  Tasks: 1 successful, 1 total · exit 0 · no ELIFECYCLE
+```
+
+**Edge cases tested:**
+- **Invalid format** → exit(1), `fetch` not called, `stdout.write` not called, stderr message intact.
+- **Guard-only** (`test/guard.test.ts`): exit spy with *no* fetch/stdout mocks at all — the `return;` alone prevents any fall-through (proves the structural fix, not just the mocks).
+- **Upstream HTTP 500** → exit(2), no stdout write, stderr message intact.
+- **Happy path** (`--format json`) → fetch URL built from `resolveServerUrl` (`/api/export?format=json`), payload still delivered via stdout — success path unaffected.
+- **Hygiene**: `vi.restoreAllMocks()` + `vi.unstubAllGlobals()` in `afterEach` so spies/stubs never leak across tests.
+
+---</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;typescript-vitest-process-exit-spy-fallthrough-live-fetch&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 4}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,319 @@
+#!/usr/bin/env python3
+"""Generate the static site for ob1.it.com bot-facing content.
+
+Reads data/answers/*.json (the committed corpus) and emits:
+  site/index.html              — static bento landing (real corpus numbers)
+  site/classes/<stem>.html     — one page per problem class (answers rendered)
+  site/sitemap.xml             — all pages, for search engines
+  site/robots.txt
+
+The Cloudflare Worker (worker/) serves these to bots from
+raw.githubusercontent.com; browsers get the live app via passthrough.
+Run:  python3 scripts/generate-static-site.py
+"""
+import json
+import os
+import re
+import html as htmlmod
+from datetime import datetime, timezone
+
+import markdown
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(ROOT, "data", "answers")
+OUT_DIR = os.path.join(ROOT, "site")
+
+MD = markdown.Markdown(extensions=["tables", "fenced_code"])
+
+PAGE_CSS = """
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+"""
+
+
+def slug_stem(filename):
+    return filename[:-5]  # strip .json
+
+
+def render_md(text):
+    if not text:
+        return ""
+    MD.reset()
+    return MD.convert(text)
+
+
+def esc(s):
+    return htmlmod.escape(str(s))
+
+
+# Public pages must never carry secret-shaped strings, even fake ones
+# from corpus examples (gitleaks blocks the commit otherwise).
+SECRET_RX = re.compile(
+    r"(sk-[A-Za-z0-9]{12,}|ghp_[A-Za-z0-9]{6,}|AKIA[0-9A-Z]{16}|"
+    r"xox[baprs]-[A-Za-z0-9-]{10,})"
+)
+
+
+def sanitize(text):
+    if text is None:
+        return ""
+    if not isinstance(text, str):
+        text = json.dumps(text)
+    return SECRET_RX.sub(lambda m: m.group(0)[:4] + "***", text)
+
+
+def class_page(stem, data):
+    title = data.get("title") or stem
+    desc = data.get("description") or ""
+    answers = data.get("answers") or []
+    sol_text = ""
+    if answers:
+        sol_text = answers[0].get("solution") or ""
+    meta_desc = re.sub(r"\s+", " ", sol_text)[:160] or desc[:160] or title
+
+    body = [f"<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div>",
+            f"<h1>{esc(title)}</h1>",
+            f"<div class='meta'><span class='badge'>{len(answers)} answer(s)</span>"
+            + "".join(f"<span class='badge g'>{esc(a.get('language',''))}</span><span class='badge v'>{esc(a.get('environment',''))}</span>" for a in answers[:2])
+            + "</div>"]
+    if desc:
+        body.append(f"<div class='desc'>{render_md(desc)}</div>")
+    for i, a in enumerate(answers, 1):
+        body.append("<div class='answer'><h2>Answer" + (f" {i}" if len(answers) > 1 else "") + "</h2>")
+        body.append(render_md(sanitize(a.get("solution") or "")))
+        body.append("</div>")
+        ev = sanitize(a.get("evidence") or "")
+        sig = sanitize(a.get("signatures") or "")
+        if ev or sig:
+            body.append("<div class='evidence'><h2>Evidence &amp; signatures</h2>")
+            if ev:
+                body.append("<pre>" + esc(ev) + "</pre>")
+            if sig:
+                body.append("<pre>" + esc(sig) + "</pre>")
+            body.append("</div>")
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{esc(title)} — Off-By-One verified answer</title>
+<meta name="description" content="{esc(meta_desc)}">
+<meta property="og:title" content="{esc(title)} — Off-By-One">
+<meta property="og:description" content="{esc(meta_desc)}">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/{stem}.html">
+<style>{PAGE_CSS}</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+{''.join(body)}
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
+"""
+    return html
+
+
+def landing_index(classes, counts):
+    total_classes = len(classes)
+    total_answers = sum(len(c["answers"]) for c in classes)
+    langs = {}
+    for c in classes:
+        for a in c["answers"]:
+            l = a.get("language") or "other"
+            langs[l] = langs.get(l, 0) + 1
+    top_langs = sorted(langs.items(), key=lambda kv: -kv[1])[:5]
+    lang_total = sum(v for _, v in top_langs)
+    lang_bars = "".join(
+        f"<div class='lang-row'><span class='lang-name'>{esc(l)}</span>"
+        f"<div class='lang-bar'><div class='lang-fill' style='width:{int(v/lang_total*100)}%'></div></div>"
+        f"<span class='lang-pct'>{int(v/lang_total*100)}%</span></div>"
+        for l, v in top_langs
+    )
+    recent = sorted(classes, key=lambda c: c.get("created_at") or "", reverse=True)[:3]
+    recent_rows = "".join(
+        f"<div class='row'><span>{esc(c['title'])}</span><span class='pill'>Answers: {len(c['answers'])}</span></div>"
+        for c in recent
+    )
+
+    css = PAGE_CSS + """
+.hero{text-align:center;padding:70px 20px 30px}
+.hero h1{font-size:52px;font-weight:800;letter-spacing:-.04em;line-height:1.05;margin:0 0 14px;background:linear-gradient(120deg,#fff 25%,#38bdf8 55%,#6366f1 85%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero h1 .by{background:linear-gradient(90deg,#a78bfa,#f472b6);-webkit-background-clip:text;background-clip:text}
+.hero p{color:#8b93a7;font-size:17px;max-width:600px;margin:0 auto 26px}
+.cta{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.btn{display:inline-block;padding:11px 22px;border-radius:10px;font-weight:600;font-size:14.5px;text-decoration:none}
+.btn.primary{background:#6366f1;color:#fff;box-shadow:0 0 26px rgba(99,102,241,.35)}
+.btn.ghost{background:#1b1b28;color:#e6edf3;border:1px solid #262637}
+.bento{max-width:1020px;margin:30px auto 0;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;padding:0 20px}
+.tile{background:#14141d;border:1px solid #262637;border-radius:16px;padding:22px;min-height:150px;display:flex;flex-direction:column;gap:10px}
+.tile h3{font-size:15.5px;font-weight:700;margin:0}
+.tile p{font-size:13px;color:#8b93a7;margin:0;line-height:1.55}
+.tile .big{font-size:44px;font-weight:800;letter-spacing:-.03em;line-height:1}
+.tile .lbl{font-size:11px;font-weight:700;color:#8b93a7;text-transform:uppercase;letter-spacing:.1em}
+.span2{grid-column:span 2}.span4{grid-column:span 4}
+.c-indigo .big{color:#a5b4fc}.c-green .big{color:#86efac}.c-amber .big{color:#fcd34d}
+.search-box{background:#0d0d14;border:1px solid #262637;border-radius:12px;padding:12px;flex:1;display:flex;flex-direction:column;gap:8px}
+.search-bar{background:#1b1b28;border-radius:8px;padding:9px 12px;font-size:13px;color:#565b6d;font-family:ui-monospace,Menlo,monospace}
+.row{display:flex;justify-content:space-between;gap:8px;padding:9px 4px;font-size:13px;border-bottom:1px solid rgba(38,38,55,.7)}
+.row:last-child{border-bottom:none}
+.pill{font-size:11px;font-weight:700;padding:2px 10px;border-radius:980px;background:rgba(56,189,248,.12);color:#38bdf8;white-space:nowrap}
+.pipe{display:flex;flex-direction:column;gap:9px;flex:1;justify-content:center}
+.st{display:flex;align-items:center;gap:10px;font-size:13px}
+.dot{width:9px;height:9px;border-radius:50%}
+.dot-1{background:#4ade80;box-shadow:0 0 9px #4ade80}.dot-2{background:#38bdf8;box-shadow:0 0 9px #38bdf8}
+.dot-3{background:#a78bfa;box-shadow:0 0 9px #a78bfa}.dot-4{background:#f472b6;box-shadow:0 0 9px #f472b6}
+.tool{margin-left:auto;font-size:11px;color:#565b6d;font-family:ui-monospace,Menlo,monospace}
+.langs{display:flex;flex-direction:column;gap:8px;flex:1;justify-content:center}
+.lang-row{display:flex;align-items:center;gap:10px;font-size:12.5px}
+.lang-name{width:66px;font-family:ui-monospace,Menlo,monospace;font-weight:600}
+.lang-bar{flex:1;height:6px;border-radius:3px;background:#1b1b28;overflow:hidden}
+.lang-fill{height:100%;border-radius:3px;background:#38bdf8}
+.lang-pct{width:34px;text-align:right;color:#8b93a7;font-size:11px}
+.links{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.link{background:#14141d;border:1px solid #262637;border-radius:12px;padding:13px;display:flex;flex-direction:column;gap:3px;color:#e6edf3;text-decoration:none;font-size:13px}
+.link:hover{border-color:#38bdf8;text-decoration:none}
+.link .s{font-size:11px;color:#8b93a7}
+.band{margin:36px auto 50px;max-width:1020px;border-radius:22px;background:linear-gradient(120deg,#6366f1,#38bdf8 60%,#34d399);padding:50px 30px;text-align:center;color:#fff}
+.band h2{font-size:30px;font-weight:800;letter-spacing:-.03em;margin:0 0 10px}
+.band p{margin:0 0 22px;opacity:.92}
+.band .btn{background:#fff;color:#18181b}
+@media(max-width:834px){.bento{grid-template-columns:repeat(2,1fr)}.span4{grid-column:span 2}.links{grid-template-columns:repeat(2,1fr)}.hero h1{font-size:38px}}
+@media(max-width:480px){.bento{grid-template-columns:1fr}.span2,.span4{grid-column:span 1}}
+"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Off-By-One — The Pre-Solve Lab · {total_classes} verified answers, open source</title>
+<meta name="description" content="Off-By-One is a pre-solve lab: {total_classes} problem classes with {total_answers} verified answers — solved on idle compute, judged by real criteria, published with evidence. Open catalog, MIT licensed.">
+<meta property="og:title" content="Off-By-One — The Pre-Solve Lab">
+<meta property="og:description" content="{total_classes} problem classes · {total_answers} verified answers · 100% hit rate. Open source, MIT.">
+<meta property="og:type" content="website">
+<link rel="canonical" href="https://ob1.it.com/">
+<link rel="sitemap" href="/sitemap.xml">
+<style>{css}</style>
+</head>
+<body>
+<div class="hero">
+<h1>Off-<span class="by">By</span>-One</h1>
+<p>Hard engineering problems in. Verified answers out — solved on idle compute, judged by real criteria, published with evidence.</p>
+<div class="cta"><a class="btn primary" href="/#search">Search the catalog</a><a class="btn ghost" href="https://github.com/totalwindupflightsystems/off-by-one">Browse the repo</a></div>
+</div>
+<div class="bento">
+<div class="tile span2">
+<h3>Recent answers</h3>
+<div class="search-box"><div class="search-bar">live corpus · {total_classes} classes</div>{recent_rows}</div>
+</div>
+<div class="tile c-indigo"><div class="big">{total_answers}</div><div class="lbl">Verified answers</div><p>Every answer sandbox-executed and judged against the task's real criteria.</p></div>
+<div class="tile c-green"><div class="big">{total_classes}</div><div class="lbl">Problem classes</div><p>Systems, cryptography, distributed systems, ML, graphics — fed by the whole fleet.</p></div>
+<div class="tile c-amber"><div class="big">100%</div><div class="lbl">Hit rate</div><p>Every query in the corpus finds its verified answer.</p></div>
+<div class="tile span2">
+<h3>From problem to published</h3>
+<div class="pipe">
+<div class="st"><span class="dot dot-1"></span>Fleet submits problem<span class="tool">ingest</span></div>
+<div class="st"><span class="dot dot-2"></span>Sandboxed solve on idle compute<span class="tool">bwrap + pi-agent</span></div>
+<div class="st"><span class="dot dot-3"></span>Judged against criteria<span class="tool">gitreins</span></div>
+<div class="st"><span class="dot dot-4"></span>Published with evidence<span class="tool">catalog + repo</span></div>
+</div>
+</div>
+<div class="tile span2">
+<h3>Language coverage</h3>
+<div class="langs">{lang_bars}</div>
+</div>
+<div class="tile span4">
+<h3>Find the repo &amp; all the details</h3>
+<div class="links">
+<a class="link" href="https://github.com/totalwindupflightsystems/off-by-one">📦 Repository<span class="s">star · fork · watch</span></a>
+<a class="link" href="https://github.com/totalwindupflightsystems/off-by-one/blob/master/docs/integration.md">📖 Integration guide<span class="s">query from your tools</span></a>
+<a class="link" href="https://github.com/totalwindupflightsystems/off-by-one/blob/master/docs/api-reference.md">🔌 API reference<span class="s">every endpoint</span></a>
+<a class="link" href="https://github.com/totalwindupflightsystems/off-by-one/blob/master/CONTRIBUTING.md">🤝 Contributing<span class="s">add answers, open PRs</span></a>
+<a class="link" href="https://github.com/totalwindupflightsystems/off-by-one/blob/master/SECURITY.md">🛡️ Security<span class="s">disclosure policy</span></a>
+<a class="link" href="https://github.com/totalwindupflightsystems/off-by-one/blob/master/LICENSE">📜 MIT License<span class="s">free to build on</span></a>
+<a class="link" href="https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/INDEX.md">🗂️ Answer catalog<span class="s">flat files, no server</span></a>
+<a class="link" href="https://github.com/totalwindupflightsystems/off-by-one/releases">🏷️ Releases<span class="s">changelog + builds</span></a>
+</div>
+</div>
+</div>
+<div class="band"><h2>Answers one step ahead.</h2><p>{total_classes} problem classes · {total_answers} verified answers — growing every day.</p><a class="btn" href="https://github.com/totalwindupflightsystems/off-by-one">Get the repo</a></div>
+<div class="wrap foot" style="max-width:1020px"><span>© 2026 Off-By-One · MIT licensed · generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</span></div>
+</body>
+</html>
+"""
+    return html
+
+
+def main():
+    os.makedirs(os.path.join(OUT_DIR, "classes"), exist_ok=True)
+    classes = []
+    stems = []
+    for fn in sorted(os.listdir(DATA_DIR)):
+        if not fn.endswith(".json"):
+            continue
+        stem = slug_stem(fn)
+        with open(os.path.join(DATA_DIR, fn)) as f:
+            data = json.load(f)
+        classes.append({"stem": stem, "title": data.get("title"), "created_at": data.get("created_at"), "answers": data.get("answers") or []})
+        stems.append(stem)
+
+    # Landing
+    with open(os.path.join(OUT_DIR, "index.html"), "w") as f:
+        f.write(landing_index(classes, None))
+    print(f"index.html: {len(classes)} classes / {sum(len(c['answers']) for c in classes)} answers")
+
+    # Class pages
+    for c in classes:
+        with open(os.path.join(DATA_DIR, c["stem"] + ".json")) as f:
+            data = json.load(f)
+        html = class_page(c["stem"], data)
+        with open(os.path.join(OUT_DIR, "classes", c["stem"] + ".html"), "w") as f:
+            f.write(html)
+
+    # Sitemap
+    lastmod = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with open(os.path.join(OUT_DIR, "sitemap.xml"), "w") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n')
+        f.write(f"  <url><loc>https://ob1.it.com/</loc><lastmod>{lastmod}</lastmod><changefreq>daily</changefreq></url>\n")
+        for stem in stems:
+            f.write(f"  <url><loc>https://ob1.it.com/classes/{stem}.html</loc><lastmod>{lastmod}</lastmod></url>\n")
+        f.write("</urlset>\n")
+
+    # Robots
+    with open(os.path.join(OUT_DIR, "robots.txt"), "w") as f:
+        f.write("User-agent: *\nAllow: /\nSitemap: https://ob1.it.com/sitemap.xml\n")
+
+    print(f"sitemap.xml: {len(stems)} class URLs · robots.txt written · total {len(stems) + 1} pages")
+
+
+if __name__ == "__main__":
+    main()

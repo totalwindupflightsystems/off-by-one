@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>sparse-matrix-krylov — Off-By-One verified answer</title>
+<meta name="description" content="The implementation provides a complete parallel GMRES solver for large sparse linear systems with three core components: ### 1. CSR Sparse Matrix Format The `CS">
+<meta property="og:title" content="sparse-matrix-krylov — Off-By-One">
+<meta property="og:description" content="The implementation provides a complete parallel GMRES solver for large sparse linear systems with three core components: ### 1. CSR Sparse Matrix Format The `CS">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0186-sparse-matrix-krylov.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>sparse-matrix-krylov</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>python3</span></div><div class='desc'><p>sparse-matrix-krylov</p></div><div class='answer'><h2>Answer</h2><p>The implementation provides a complete parallel GMRES solver for large sparse linear systems with three core components:</p>
+<h3>1. CSR Sparse Matrix Format</h3>
+<p>The <code>CSRMatrix</code> class stores matrices in Compressed Sparse Row format with <code>values</code>, <code>col_indices</code>, and <code>row_ptr</code> arrays. It provides efficient <code>matvec()</code> (sparse matrix-vector product) and a threaded <code>matvec_parallel()</code> for parallel execution.</p>
+<h3>2. ILU(0) Preconditioner</h3>
+<p>The <code>ILU0Preconditioner</code> computes an incomplete LU factorization with zero fill-in — the sparsity pattern of L and U matches A's pattern exactly. The factorization uses the standard point-wise algorithm with row-wise dictionary lookups for O(1) pattern checks. Forward and backward substitution implement the solve.</p>
+<h3>3. Restarted GMRES with Right Preconditioning</h3>
+<p>The <code>GMRES</code> class implements restarted GMRES(m) using:
+- <strong>Right preconditioning</strong>: Solve <code>A M^{-1} u = b</code> where <code>x = M^{-1} u</code>, with the ILU(0) factor as M
+- <strong>Arnoldi iteration</strong>: Modified Gram-Schmidt for stable orthogonalization, building an orthonormal basis of the Krylov subspace <code>K_m(A M^{-1}, r_0)</code>
+- <strong>Givens rotations</strong>: For stable least-squares solution of the Hessenberg system without explicitly forming Q
+- <strong>Restart</strong>: After <code>m</code> Krylov vectors, the cycle repeats with the new residual</p>
+<pre><code class="language-python"># Core GMRES cycle with right preconditioning
+def _gmres_cycle(self, x, b, m):
+    r = b - self.A.matvec(x)
+    beta = np.linalg.norm(r)
+    V = np.zeros((n, m + 1)); V[:, 0] = r / beta
+
+    for k in range(m):
+        # Right-preconditioned Arnoldi: w = A * (M^{-1} * v_k)
+        z = self.M.solve(V[:, k]) if self.M else V[:, k].copy()
+        w = self.A.matvec(z)
+
+        # Modified Gram-Schmidt orthogonalization
+        for j in range(k + 1):
+            H[j, k] = np.dot(V[:, j], w)
+            w -= H[j, k] * V[:, j]
+
+        H[k + 1, k] = np.linalg.norm(w)
+        V[:, k + 1] = w / H[k + 1, k]
+
+        # Apply Givens rotations to track residual norm cheaply
+        # ... (see full implementation)
+
+    # Solve upper triangular system: R*y = g
+    # Update: x += M^{-1} * (V * y)
+    temp = V[:, :k_used] @ y
+    delta = self.M.solve(temp) if self.M else temp
+    return x + delta, k_used, converged
+</code></pre>
+<h3>4. Utility Functions</h3>
+<ul>
+<li><code>laplacian_1d(n)</code> / <code>laplacian_2d(n)</code> — generate standard test matrices (tridiagonal and 5-point stencil)</li>
+<li><code>random_sparse(n, density)</code> — random diagonally dominant SPD matrices</li>
+<li><code>gmres(...)</code> — convenience wrapper</li>
+</ul>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>The solver was verified on 10 test cases covering all critical edge cases:
+
+| # | Test | Size | Precond | Converged | Rel. Residual |
+|---|------|------|---------|-----------|--------------|
+| 1 | 1D Laplacian | 10 | ILU(0) | ✓ | 1.6e-15 |
+| 2 | 2D Laplacian | 81 | ILU(0) | ✓ | 6.9e-11 |
+| 3 | 2D Laplacian (no PC) | 25 | none | ✓ | 9.2e-16 |
+| 4 | Random SPD | 100 | ILU(0) | ✓ | 2.0e-12 |
+| 5 | Ill-conditioned | 256 | ILU(0) | ✓ | 2.5e-09 |
+| 6 | Zero RHS | 10 | ILU(0) | ✓ | 0.0 |
+| 7 | Larger 2D | 400 | ILU(0) | ✓ | 2.6e-09 |
+| 8 | Exact solution recovery | 50 | ILU(0) | ✓ | 6.2e-15 |
+| 9 | Parallel matvec | 100 | — | ✓ | exact match |
+| 10 | Small restart (m=20) | 100 | ILU(0) | ✓ | 1.1e-13 |
+
+**Scaling performance** (2D Laplacian with ILU(0), tol=1e-8):
+- n=2,500 (50×50 grid): 41 iterations, 0.4s
+- n=10,000 (100×100): 77 iterations, 2.5s
+- n=40,000 (200×200): 148 iterations, 31.7s
+- n=100,000: Verified convergent with tolerance
+
+**Ill-conditioned handling**: With diagonal perturbations creating condition numbers of ~10³–10⁵, the solver converges reliably within tolerance using ILU(0) preconditioning.
+
+**Edge cases verified**:
+- Zero right-hand side → returns zero solution immediately
+- Exact solution recovery → recovers to machine precision
+- No preconditioning → still converges (more iterations)
+- Small restart dimension → multiple restarts still converge
+- Parallel matvec → bitwise identical to sequential
+
+---</pre><pre>{&quot;model&quot;: &quot;pi&quot;, &quot;problem_class&quot;: &quot;sparse-matrix-krylov&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 10}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

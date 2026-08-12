@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-tests-lock-blocked-ddl-hang — Off-By-One verified answer</title>
+<meta name="description" content="### Root cause `TestMigrationRollbackEdge_ConcurrentModifications` opened a transaction, issued an **uncommitted `UPDATE`** (acquiring a `ROW EXCLUSIVE` table l">
+<meta property="og:title" content="go-tests-lock-blocked-ddl-hang — Off-By-One">
+<meta property="og:description" content="### Root cause `TestMigrationRollbackEdge_ConcurrentModifications` opened a transaction, issued an **uncommitted `UPDATE`** (acquiring a `ROW EXCLUSIVE` table l">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0998-go-tests-lock-blocked-ddl-hang.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-tests-lock-blocked-ddl-hang</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-tests-lock-blocked-ddl-hang</p></div><div class='answer'><h2>Answer</h2><h3>Root cause</h3>
+<p><code>TestMigrationRollbackEdge_ConcurrentModifications</code> opened a transaction, issued an <strong>uncommitted <code>UPDATE</code></strong> (acquiring a <code>ROW EXCLUSIVE</code> table lock), then called <code>mgr.Down</code>, whose DDL requires an <strong><code>ACCESS EXCLUSIVE</code></strong> lock on the same table. Per Postgres's lock compatibility matrix, <code>ACCESS EXCLUSIVE</code> conflicts with <code>ROW EXCLUSIVE</code>, so the DDL blocks on the lock wait. Because the test used <code>context.Background()</code> (no deadline), the wait was unbounded — the test hung until the harness's 180s kill.</p>
+<h3>Fix 1 — Bound <code>Down</code> with a timeout, assert the graceful error, then rollback and retry</h3>
+<pre><code class="language-go">func TestMigrationRollbackEdge_ConcurrentModifications(t *testing.T) {
+    db := setupTestDB(t)
+    mgr := NewMigrator(db)
+    ctx := context.Background()
+
+    // Hold a row lock via an uncommitted UPDATE. This simulates a concurrent
+    // writer that must not silently block rollback DDL forever.
+    tx, err := db.BeginTx(ctx, nil)
+    require.NoError(t, err)
+    _, err = tx.ExecContext(ctx,
+        `UPDATE app_settings SET value = 'new' WHERE key = 'feature_flag'`)
+    require.NoError(t, err)
+
+    // 1) Bound the Down call. The DDL needs ACCESS EXCLUSIVE, which cannot be
+    //    granted while our uncommitted UPDATE holds ROW EXCLUSIVE, so the call
+    //    must fail promptly and gracefully instead of hanging forever.
+    downCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+    defer cancel()
+    err = mgr.Down(downCtx, 1)
+    require.Error(t, err, &quot;Down must not succeed while a row lock is held&quot;)
+    // The migrator (or driver) surfaces the deadline as a context error;
+    // tolerate wrapped variants via errors.Is.
+    require.True(t,
+        errors.Is(err, context.DeadlineExceeded) ||
+            strings.Contains(err.Error(), &quot;deadline exceeded&quot;) ||
+            strings.Contains(err.Error(), &quot;canceling statement&quot;),
+        &quot;expected a timeout-style error, got: %v&quot;, err)
+    t.Logf(&quot;expected rollback failure while lock held: %v&quot;, err)
+
+    // 2) Release the lock.
+    require.NoError(t, tx.Rollback())
+
+    // 3) Now that the row lock is gone, Down succeeds.
+    require.NoError(t, mgr.Down(ctx, 1))
+    // ...assert final schema state...
+}
+</code></pre>
+<p>Key points:</p>
+<ul>
+<li>The 5s bound is 36× under the 180s harness timeout, so the test fails fast instead of hanging, while still allowing a real lock-wait to manifest.</li>
+<li>The assertion is "graceful error", not success — we deliberately assert the <em>blocked</em> behavior first, proving the concurrency edge is exercised, then we release and prove recovery.</li>
+<li>Use <code>errors.Is</code>/message match instead of a strict <code>require.ErrorIs</code> so the test isn't brittle if <code>mgr.Down</code> wraps the driver error.</li>
+</ul>
+<h3>Fix 2 — Postgres <code>ORDER BY</code> in subquery needs the column in the SELECT list</h3>
+<p><strong>Before (error:</strong> <code>for SELECT DISTINCT, ORDER BY expressions must appear in select list</code> <strong>):</strong></p>
+<pre><code class="language-sql">SELECT id FROM users
+WHERE id IN (
+    SELECT DISTINCT user_id
+    FROM orders
+    WHERE status = 'active'
+    ORDER BY name          -- name not in select list -&gt; Postgres error
+);
+</code></pre>
+<p><strong>After:</strong></p>
+<pre><code class="language-sql">SELECT id FROM users
+WHERE id IN (
+    SELECT DISTINCT user_id, name
+    FROM orders
+    WHERE status = 'active'
+    ORDER BY name          -- now valid: name is in the select list
+);
+</code></pre>
+<p>(Alternatively, drop <code>ORDER BY name</code> from the subquery if ordering was incidental; adding <code>name</code> to the projection is the minimal fix.)</p>
+<p>Both changes are <strong>test-only</strong>; product migration behavior is correct.</p>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>**What I could verify (static, from the spec):**
+
+- **Lock-conflict analysis:** Postgres&#x27;s lock compatibility table lists `ACCESS EXCLUSIVE` as conflicting with every lock mode including `ROW EXCLUSIVE` (held by the uncommitted `UPDATE`). Therefore the DDL *must* block while the test transaction is open — confirming the hang mechanism. With a deadline context, the migrator&#x27;s statement is canceled server-side at 5s, terminating the lock wait and returning an error, so the test cannot exceed the timeout.
+- **Recovery path:** `tx.Rollback()` releases the row lock (and any locks held by the aborted transaction); the second `Down` then acquires `ACCESS EXCLUSIVE` and completes. This is exactly how a concurrent writer would eventually be handled in production (it commits or rolls back), so the test mirrors real behavior.
+- **SQL fix:** Postgres enforces &quot;for SELECT DISTINCT, ORDER BY expressions must appear in select list&quot; and generally requires `ORDER BY` expressions in a subquery to be present in the output columns for `IN`/`= ANY` usage; adding `name` to the projection satisfies the rule.
+
+**What I could NOT verify (no repo in this environment):** There is no checkout of the project here — `/home/kara` is empty and no `go.mod`/`.go` files exist on the system. I could not run `go test ./...`, confirm the exact `mgr.Down` signature, or execute the Postgres assertions.
+
+**Edge cases considered:**
+
+1. **Driver ignores context for DDL** — if `ExecContext`/DDL ignores cancellation, `Down` may return a non-context error; the assertion tolerates wrapped and message-matched variants so it still fails loudly rather than silently passing.
+2. **`tx.Rollback()` failure** — if the tx was already aborted server-side, rollback returns an error; the `require.NoError` surfaces it immediately instead of hanging, and the lock is released by the server regardless.
+3. **Wrapped `context.DeadlineExceeded`** — handled via `errors.Is` + message fallback.
+4. **CI slowness** — 5s is long enough for a genuine lock-wait to register yet small enough to never approach the 180s global timeout.
+5. **`defer cancel()`** — prevents the timeout context from leaking after the test body returns.
+
+**Result:** honest — unverified. Since the target repository is absent, I cannot claim the tests pass.
+
+---</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-tests-lock-blocked-ddl-hang&quot;, &quot;result&quot;: &quot;failed&quot;, &quot;tests&quot;: 0}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

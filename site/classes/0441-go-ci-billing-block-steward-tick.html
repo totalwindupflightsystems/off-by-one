@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-ci-billing-block-steward-tick — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** CI-BILLING-002 is *not a code defect*: all 4 workflows (build/vet/guard + e2e) complete in 4–13s with **zero steps executed**, which is the GitH">
+<meta property="og:title" content="go-ci-billing-block-steward-tick — Off-By-One">
+<meta property="og:description" content="**Root cause.** CI-BILLING-002 is *not a code defect*: all 4 workflows (build/vet/guard + e2e) complete in 4–13s with **zero steps executed**, which is the GitH">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0441-go-ci-billing-block-steward-tick.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-ci-billing-block-steward-tick</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-ci-billing-block-steward-tick</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> CI-BILLING-002 is <em>not a code defect</em>: all 4 workflows (build/vet/guard + e2e) complete in 4–13s with <strong>zero steps executed</strong>, which is the GitHub billing signature — the org's Actions minutes/spend cap blocks job start at the queue, so runs fail before any step runs. A code failure would produce step traces and variable runtimes (typically ≥30s). There is therefore <strong>no source fix</strong>; the fix is the steward-tick procedure that (a) keeps local gates + the due-window fixture green as the "code is healthy" proof, (b) re-verifies the block signature each tick, (c) records a board audit event with <strong>explicit <code>MAX(id)+1</code></strong> (never auto-increment), (d) commits <strong>only</strong> <code>events/</code>+<code>tasks/</code> parquet (<code>board/</code>+<code>fixtures/</code> are derived/untracked), (e) updates the Phase-2 <code>last_commit</code> DB, then pushes.</p>
+<p>The one genuine bug found while building this: the classic <code>gh run list --json … | python3 - &lt;&lt;'PY'</code> pattern — the heredoc steals stdin, so the JSON <strong>never reaches the parser</strong> and the billing check silently no-ops (exactly what a broken steward tick looks like). Fix: stream to a temp file and parse with a real script.</p>
+<h3>1. Billing-check (the fix, <code>scripts/check_billing_block.py</code>)</h3>
+<pre><code class="language-python">import json, sys
+from datetime import datetime
+WINDOW_S = (4, 13)  # CI-BILLING-002: runs fail in 4-13s with zero steps
+
+def main() -&gt; int:
+    runs = json.load(open(sys.argv[1]))          # from `gh run list --json …`
+    assert len(runs) &gt;= 4, f&quot;expected &gt;=4 runs, got {len(runs)}&quot;
+    sigs = []
+    for r in runs[:4]:
+        t0 = datetime.fromisoformat(r[&quot;createdAt&quot;].replace(&quot;Z&quot;, &quot;+00:00&quot;))
+        t1 = datetime.fromisoformat(r[&quot;updatedAt&quot;].replace(&quot;Z&quot;, &quot;+00:00&quot;))
+        d = (t1 - t0).total_seconds()
+        sigs.append((r[&quot;workflowName&quot;], r[&quot;status&quot;], r[&quot;conclusion&quot;], d))
+        print(f&quot;  {r['workflowName']}: {r['status']} {r['conclusion']} {d:.1f}s&quot;)
+    if not all(s == &quot;completed&quot; and c == &quot;failure&quot; for _, s, c, _ in sigs):
+        return 1                                  # block lifted / in progress → escalate
+    if not all(WINDOW_S[0] &lt;= d &lt;= WINDOW_S[1] for *_, d in sigs):
+        return 1                                  # real code failure → escalate
+    print(&quot;=&gt; CI-BILLING-002 confirmed: 4/4 fail in 4-13s, zero steps (billing, not code)&quot;)
+    return 0
+</code></pre>
+<h3>2. Board audit with explicit <code>MAX(id)+1</code> (<code>scripts/board_audit.py</code>, core)</h3>
+<pre><code class="language-python">import duckdb
+con = duckdb.connect()
+if os.path.exists(AUDIT):
+    next_id = int(con.execute(
+        f&quot;SELECT COALESCE(MAX(id),0)+1 FROM read_parquet('{AUDIT}')&quot;).fetchone()[0])
+else:
+    next_id = 1                                    # empty/missing table → id=1
+con.execute(&quot;CREATE OR REPLACE TABLE audit (id BIGINT, tick BIGINT, event VARCHAR, detail VARCHAR, ts TIMESTAMP)&quot;)
+if os.path.exists(AUDIT):
+    con.execute(f&quot;INSERT INTO audit SELECT * FROM read_parquet('{AUDIT}')&quot;)
+con.execute(&quot;INSERT INTO audit VALUES (?,?,?,?,?::TIMESTAMP)&quot;,
+            [next_id, args.tick, args.event, args.detail, args.ts])
+con.execute(f&quot;COPY (SELECT * FROM audit ORDER BY id) TO '{AUDIT}' (FORMAT PARQUET)&quot;)
+</code></pre>
+<p>Explicit <code>MAX(id)+1</code> (not identity) keeps ids deterministic and gap-free even if a tick is replayed after a partial rollback; <code>COALESCE</code> handles the empty-table edge case.</p>
+<h3>3. Orchestrator (<code>scripts/steward_tick.sh</code>, 8 steps exactly per muster)</h3>
+<pre><code class="language-bash">PY=&quot;${PYTHON:-python3}&quot;; TICK=&quot;${1:-82}&quot;; TS=&quot;$(date -u +%Y-%m-%dT%H:%M:%SZ)&quot;
+make build &amp;&amp; make vet &amp;&amp; [ -z &quot;$(gofmt -l .)&quot; ] &amp;&amp; make guard      # 1 gates
+make test-e2e                                                        # 2 E2E-001 (~43.9s) PASS
+TMP=$(mktemp)                                                        # 3 billing check
+gh run list --limit 10 --json databaseId,workflowName,status,conclusion,createdAt,updatedAt &gt; &quot;$TMP&quot;
+&quot;$PY&quot; scripts/check_billing_block.py &quot;$TMP&quot;; rm -f &quot;$TMP&quot;            #    (stdin bug avoided)
+echo &quot;blocked=CI-BILLING-002 (org block, human) - no dispatch&quot;       # 4 no worker spawn
+&quot;$PY&quot; scripts/board_audit.py --event billing_block_verified --tick &quot;$TICK&quot; --ts &quot;$TS&quot; ...   # 5 audit
+git status --porcelain | grep -E 'board/.*\.parquet|fixtures/.*\.parquet' &amp;&amp; exit 1  # 6 guard
+git add events tasks &amp;&amp; git commit -m &quot;tick $TICK: ... (events/tasks parquet only)&quot;
+&quot;$PY&quot; scripts/phase2_last_commit.py --tick &quot;$TICK&quot; --sha &quot;$(git rev-parse HEAD)&quot;   # 7 phase2
+git push origin HEAD                                                  # 8
+</code></pre>
+<p><code>board/*.parquet</code> + <code>fixtures/*.parquet</code> are gitignored (derived artifacts); step 6 re-guards so a careless <code>git add -A</code> can never track them.</p>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified by executing the full tick-82 sequence in a faithful reproduction (`/tmp/tick82`, go1.26, duckdb 1.5.5, gh 2.46 stub emitting the exact billing signature):
+
+| Check | Result |
+|---|---|
+| Gates `make build / vet / gofmt / guard` | all green (guard rejects any `board/fixtures/*.parquet` in status) |
+| E2E-001 `make test-e2e` | `PASS`; emits `events/events.parquet`, `events/tasks.parquet` |
+| Billing signature | `wf901: failure 13.0s / wf900: 9.0s / wf899: 5.0s / wf898: 4.0s` → confirmed |
+| Audit id (missing/empty table) | id=1 (COALESCE edge case) |
+| Audit append / replay | id=2, id=3 — gap-free, append-only journal |
+| Commit contents | exactly `events/events.parquet` + `events/tasks.parquet`; `git ls-files &#x27;*.parquet&#x27;` shows only those 2; `board/audit.parquet` untracked on disk |
+| Phase-2 `last_commit` DB | row `(1, 82, cefe9db…)` inserted |
+| Push | received by remote (`cefe9db tick 82 …`) |
+| Negative path (block lifted / real failure: 60s run + a success) | rejected, exit 1 → escalation, exactly the &quot;billing no longer blocked&quot; tripwire |
+| Fixed stdin bug | `gh run list \| python3 - &lt;&lt;PY` parsed nothing; temp-file+script parses 4/4 — the steward check no longer silently no-ops |
+
+Environment honesty: the harness workspace contained only `problem.json` (no repo mounted, `gh` not authenticated, no remote workflows visible), so literal `gh run list` against the live org could not be run — consistent with the human-blocked premise; all procedural steps were verified against the reproduction above.
+
+---</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-ci-billing-block-steward-tick&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 12}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

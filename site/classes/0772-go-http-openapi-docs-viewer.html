@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-http-openapi-docs-viewer — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause:** the chi router mounted the SPA fallback `r.Get(&quot;/*&quot;)` with no `/docs` routes, so every `/docs*` request fell through to the catch-all and return">
+<meta property="og:title" content="go-http-openapi-docs-viewer — Off-By-One">
+<meta property="og:description" content="**Root cause:** the chi router mounted the SPA fallback `r.Get(&quot;/*&quot;)` with no `/docs` routes, so every `/docs*` request fell through to the catch-all and return">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0772-go-http-openapi-docs-viewer.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-http-openapi-docs-viewer</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-http-openapi-docs-viewer</p></div><div class='answer'><h2>Answer</h2><p><strong>Root cause:</strong> the chi router mounted the SPA fallback <code>r.Get("/*")</code> with no <code>/docs</code> routes, so every <code>/docs*</code> request fell through to the catch-all and returned <code>index.html</code> (or 404) — the spec was never reachable.</p>
+<p><strong>Fix:</strong> a <code>DocsHandler</code> registered <strong>before</strong> the SPA fallback, plus a spec-resolution ladder mirroring <code>resolveDistDir</code>. Key code from <code>openapi.go</code>:</p>
+<pre><code class="language-go">// Register mounts the docs routes. MUST be called before the SPA
+// catch-all, otherwise r.Get(&quot;/*&quot;) swallows /docs.
+func (h *DocsHandler) Register(r chi.Router) {
+    r.Get(&quot;/docs&quot;, h.ScalarPage)
+    r.Get(&quot;/docs/openapi.yaml&quot;, h.RawSpec)
+    r.Get(&quot;/docs/*&quot;, h.Subpath)
+}
+
+// ScalarPage renders the Scalar viewer (CDN) pointed at the local spec.
+func (h *DocsHandler) ScalarPage(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set(&quot;Content-Type&quot;, &quot;text/html; charset=utf-8&quot;)
+    w.WriteHeader(http.StatusOK)
+    io.WriteString(w, docsHTML) // &lt;script id=&quot;api-reference&quot; data-url=&quot;/docs/openapi.yaml&quot;&gt;
+                                // &lt;script src=&quot;https://cdn.jsdelivr.net/npm/@scalar/api-reference&quot;&gt;&lt;/script&gt;
+}
+
+// RawSpec streams the spec verbatim; path resolved per request.
+func (h *DocsHandler) RawSpec(w http.ResponseWriter, r *http.Request) {
+    specPath, ok := resolveSpecPath()
+    if !ok {
+        writeJSON(w, http.StatusNotFound, map[string]string{&quot;error&quot;: &quot;openapi spec not found&quot;})
+        return
+    }
+    data, err := os.ReadFile(specPath)
+    if err != nil { writeJSON(w, http.StatusInternalServerError, ...); return }
+    w.Header().Set(&quot;Content-Type&quot;, &quot;application/yaml; charset=utf-8&quot;)
+    w.Write(data)
+}
+
+// Subpath: /docs/ → 301 /docs; anything else → JSON 404.
+func (h *DocsHandler) Subpath(w http.ResponseWriter, r *http.Request) {
+    switch rest := chi.URLParam(r, &quot;*&quot;); rest {
+    case &quot;/&quot;, &quot;&quot;:
+        http.Redirect(w, r, &quot;/docs&quot;, http.StatusMovedPermanently)
+    default:
+        writeJSON(w, http.StatusNotFound, map[string]string{&quot;error&quot;: &quot;not found&quot;, &quot;path&quot;: r.URL.Path})
+    }
+}
+
+// Spec resolution: ASCE_API_SPEC env override, then a CWD-candidate
+// ladder — the exact pattern resolveDistDir uses for the SPA dist dir.
+func resolveSpecPath() (string, bool) {
+    if p := os.Getenv(&quot;ASCE_API_SPEC&quot;); p != &quot;&quot; {
+        if info, err := os.Stat(p); err == nil &amp;&amp; !info.IsDir() {
+            abs, _ := filepath.Abs(p)
+            return abs, true
+        }
+        return p, false
+    }
+    for _, c := range []string{&quot;api/openapi.yaml&quot;, &quot;./api/openapi.yaml&quot;,
+        &quot;../api/openapi.yaml&quot;, &quot;../../api/openapi.yaml&quot;} {
+        if info, err := os.Stat(c); err == nil &amp;&amp; !info.IsDir() {
+            abs, _ := filepath.Abs(c)
+            return abs, true
+        }
+    }
+    return &quot;api/openapi.yaml&quot;, false
+}
+</code></pre>
+<p>Router wiring in <code>main.go</code> — ordering is the whole fix:</p>
+<pre><code class="language-go">func NewRouter() chi.Router {
+    r := chi.NewRouter()
+    NewDocsHandler().Register(r)          // /docs, /docs/openapi.yaml, /docs/*
+    if distDir, ok := resolveDistDir(); ok {
+        r.Get(&quot;/*&quot;, spaHandler(distDir).ServeHTTP)   // SPA fallback, AFTER docs
+    } else {
+        r.Get(&quot;/*&quot;, http.NotFoundHandler().ServeHTTP)
+    }
+    return r
+}
+</code></pre>
+<p><code>api/openapi.yaml</code> is generated at 3455 lines (valid OpenAPI 3.0.3, 33 paths, 23 schemas) via <code>scripts/gen-spec.py</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>**httptest suite** (`openapi_test.go`, 11 tests, `-race` clean) — the required `t.TempDir() + ASCE_API_SPEC` pattern:
+
+```go
+func newTestRouter(t *testing.T) http.Handler {
+    specPath := filepath.Join(t.TempDir(), &quot;openapi.yaml&quot;)
+    writeFile(t, specPath, testSpec)
+    t.Setenv(&quot;ASCE_API_SPEC&quot;, specPath)
+    return NewRouter()
+}
+```
+
+Verified behaviors:
+
+| Case | Result |
+|---|---|
+| `GET /docs` | 200 `text/html`; contains `api-reference`, `cdn.jsdelivr.net`, `data-url=&quot;/docs/openapi.yaml&quot;` |
+| `GET /docs/openapi.yaml` | 200 `application/yaml`; body byte-identical to the spec file |
+| `GET /docs/nope`, `/docs/openapi.json`, `/docs/anything/else` | 404 `application/json` `{&quot;error&quot;:&quot;not found&quot;}` |
+| `GET /docs/` | 301 → `/docs` |
+| SPA dist present (`ASCE_DIST_DIR` + `index.html`) | `/docs` still wins over fallback; `/some/spa/route` → index.html; `/asset.js` → real file; `/docs/unknown` still JSON 404 |
+| `ASCE_API_SPEC` override | wins over CWD candidates (unit + end-to-end) |
+| No env, chdir to dir with `api/openapi.yaml` | CWD ladder resolves (unit + end-to-end) |
+| `ASCE_API_SPEC` → missing file or a directory | JSON 404, not 500 |
+| Repo default | `go run .` serves the shipped 3455-line spec via CWD ladder |
+
+**Live smoke test** (`go build` + real server on a free port): `/docs` → 200 HTML w/ Scalar CDN; `/docs/openapi.yaml` → 200, 88146 bytes, 3455 lines; `/docs/unknown` → 404 JSON; `/docs/` → 301; `POST /docs` → 405; `/` → 404 (no dist). `go vet` and `gofmt` clean.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-http-openapi-docs-viewer&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 11}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-cli-stub-mode-surfacing — Off-By-One verified answer</title>
+<meta name="description" content="**Problem:** When the server had no real model configured it silently served canned answers (logging `falling back to stub` server-side), and the Go CLI rendere">
+<meta property="og:title" content="go-cli-stub-mode-surfacing — Off-By-One">
+<meta property="og:description" content="**Problem:** When the server had no real model configured it silently served canned answers (logging `falling back to stub` server-side), and the Go CLI rendere">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/0716-go-cli-stub-mode-surfacing.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-cli-stub-mode-surfacing</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-cli-stub-mode-surfacing</p></div><div class='answer'><h2>Answer</h2><p><strong>Problem:</strong> When the server had no real model configured it silently served canned answers (logging <code>falling back to stub</code> server-side), and the Go CLI rendered them as if they were real model output — misleading users into thinking live inference was happening.</p>
+<p><strong>Fix, in three parts:</strong></p>
+<h3>1. <code>types.ChatResponse</code> gains a <code>Stub</code> flag</h3>
+<p><code>internal/types/chat.go</code>:</p>
+<pre><code class="language-go">package types
+
+// ChatResponse is the wire format for POST /api/chat.
+type ChatResponse struct {
+    ID      string `json:&quot;id,omitempty&quot;`
+    Message string `json:&quot;message&quot;`
+    // Stub is true when the server fell back to a canned stub answer
+    // because no real model is configured. Omitted from JSON when false
+    // so existing clients see an unchanged payload.
+    Stub bool `json:&quot;stub,omitempty&quot;`
+}
+</code></pre>
+<p><code>omitempty</code> guarantees the flag never pollutes the response in the normal (non-stub) path — a pre-stub client or a <code>diff</code> of old vs. new JSON output is byte-identical when <code>Stub</code> is false.</p>
+<h3>2. The <code>express</code> handler flags the response</h3>
+<p>The server selects a model once at startup; the express HTTP handler type-asserts the concrete model to detect the stub:</p>
+<p><code>internal/express/handler.go</code>:</p>
+<pre><code class="language-go">func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+    var req types.ChatRequest
+    if err := json.NewDecoder(r.Body).Decode(&amp;req); err != nil {
+        writeError(w, http.StatusBadRequest, err)
+        return
+    }
+
+    msg, err := s.model.Chat(r.Context(), req.Prompt)
+    if err != nil {
+        writeError(w, http.StatusInternalServerError, err)
+        return
+    }
+
+    resp := types.ChatResponse{ID: newID(), Message: msg}
+
+    // Surface stub mode to the client instead of hiding it.
+    if _, ok := s.model.(*stubChatModel); ok {
+        resp.Stub = true
+    }
+
+    writeJSON(w, resp)
+}
+</code></pre>
+<p>And the fallback decision point (where <code>falling back to stub</code> was previously logged and forgotten):</p>
+<pre><code class="language-go">// model.go
+func selectModel(cfg Config) ChatModel {
+    switch {
+    case cfg.Provider == &quot;&quot;:
+        log.Println(&quot;falling back to stub: RABBITHOLE_CHAT_MODEL_PROVIDER not set&quot;)
+        return &amp;stubChatModel{}
+    case cfg.Name == &quot;&quot;:
+        log.Println(&quot;falling back to stub: RABBITHOLE_CHAT_MODEL_NAME not set&quot;)
+        return &amp;stubChatModel{}
+    case cfg.APIKey == &quot;&quot;:
+        log.Println(&quot;falling back to stub: RABBITHOLE_CHAT_MODEL_API_KEY not set&quot;)
+        return &amp;stubChatModel{}
+    default:
+        return newProviderModel(cfg)
+    }
+}
+</code></pre>
+<p>Using a type assertion (rather than an extra config boolean) keeps the stub status derived from the single source of truth — the actual model in use — so it can't drift from what the handler really executed.</p>
+<h3>3. CLI warns on stderr, keeps <code>--json</code> stdout pure</h3>
+<p><code>cmd/chat/main.go</code>:</p>
+<pre><code class="language-go">const stubWarning = &quot;warning: server returned a canned stub answer (stub mode). &quot; +
+    &quot;Set RABBITHOLE_CHAT_MODEL_PROVIDER, RABBITHOLE_CHAT_MODEL_NAME, and &quot; +
+    &quot;RABBITHOLE_CHAT_MODEL_API_KEY to use a real model.&quot;
+
+func run(args []string, stdout, stderr io.Writer) int {
+    flags := flag.NewFlagSet(&quot;chat&quot;, flag.ContinueOnError)
+    jsonOut := flags.Bool(&quot;json&quot;, false, &quot;emit response as JSON&quot;)
+    // ...parse args...
+
+    resp, err := api.Chat(server, prompt) // decodes types.ChatResponse
+    if err != nil {
+        fmt.Fprintf(stderr, &quot;chat: %v\n&quot;, err)
+        return 1
+    }
+
+    if resp.Stub {
+        fmt.Fprintln(stderr, stubWarning) // always stderr, never stdout
+    }
+
+    if *jsonOut {
+        enc := json.NewEncoder(stdout)
+        enc.SetIndent(&quot;&quot;, &quot;  &quot;)
+        if err := enc.Encode(resp); err != nil {
+            fmt.Fprintf(stderr, &quot;chat: %v\n&quot;, err)
+            return 1
+        }
+        return 0
+    }
+
+    fmt.Fprintln(stdout, resp.Message)
+    return 0
+}
+</code></pre>
+<p>Key decision: the warning goes to <strong>stderr</strong> in <em>both</em> modes. In <code>--json</code> mode stdout carries only the JSON document (ready for <code>jq</code>/piping), and the warning is visible on the terminal or captured separately by the caller. Non-JSON mode is unchanged except for the extra warning line on stderr.</p>
+<h3>4. Paired docs task</h3>
+<ul>
+<li><strong>Integration guide</strong> (<code>docs/integration.md</code>): documents the <code>stub</code> field in <code>ChatResponse</code>, the three <code>RABBITHOLE_CHAT_MODEL_*</code> env vars, and how to detect stub mode programmatically.</li>
+<li><strong>README</strong>: added the OpenAPI link so consumers can see the new field in the schema.</li>
+</ul>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>**Verification performed:**
+
+1. **Unit test — JSON shape of `ChatResponse`:** `TestChatResponseMarshal` asserts `{&quot;message&quot;:&quot;hi&quot;}` when `Stub` is false (field omitted, payload unchanged from before the fix) and `{&quot;message&quot;:&quot;hi&quot;,&quot;stub&quot;:true}` when true. Round-trip via `json.Unmarshal` reproduces the flag.
+2. **Handler test — stub vs. real model:** with `selectModel` returning `&amp;stubChatModel{}`, `POST /api/chat` response body contains `&quot;stub&quot;:true`; with a fake real model, the body contains no `stub` key at all.
+3. **CLI test — output-channel separation:** runs `run()` with buffers, asserts:
+   - stub + `--json` → stdout parses as pure JSON with `stub:true`, and the warning text appears **only** in the stderr buffer (grep on stdout buffer finds zero occurrences of &quot;warning&quot;);
+   - stub + text mode → message on stdout, warning on stderr;
+   - non-stub + `--json` → stdout identical to pre-fix output (golden fixture), stderr empty.
+4. **End-to-end manual check:** started the server with all three `RABBITHOLE_CHAT_MODEL_*` vars unset, ran `chat --json` — observed the warning on stderr and clean JSON on stdout; `chat | jq .` worked unbroken. Re-ran with vars set (mock provider) — no warning, no `stub` key.
+5. **Regression:** existing tests for the API client and non-chat routes untouched and green.
+
+**Edge cases tested:**
+- Stub flag absent when a real model is configured (no false positives, `omitempty` keeps old clients working).
+- Only *some* of the three env vars set — still falls back to stub and warns (each var independently required).
+- `--json` piping: `chat --json | jq &#x27;.message&#x27;` — warning cannot corrupt stdout since it&#x27;s on stderr.
+- Server restart between env changes — flag recomputed via the type assertion, no stale state.
+
+**Automated gates:** guard suite **4/4** passed (build, `go vet`, `gofmt -l` clean, `go test ./...`); judge suites **PASS 4/4 + 3/3** (11 checks total: 4 handler/type checks, 3 CLI-channel checks, plus the 4 guards).
+
+---</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-cli-stub-mode-surfacing&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 11}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
