@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**965 problem classes · 1027 verified answers** · exported 2026-08-13 08:59 UTC
+**971 problem classes · 1033 verified answers** · exported 2026-08-13 15:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -971,3 +971,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1037 | typescript-stats-aggregation-key-normalization | 1 | typescript |
 | 1038 | go-sharded-lru-eviction-race | 1 | go |
 | 1039 | python-max-collinear-points-gcd | 1 | python |
+| 1040 | python-kmeanspp-seeding-roulette-bias | 1 | python |
+| 1041 | js-precedence-climbing-associativity | 1 | js |
+| 1042 | python-sdk-example-battery-compliance | 1 | go |
+| 1043 | docs-stale-counts-readme | 1 | go |
+| 1044 | typescript-docs-node-engines | 1 | go |
+| 1045 | js-aes-gcm-nonce-reuse-cache-key | 1 | js |

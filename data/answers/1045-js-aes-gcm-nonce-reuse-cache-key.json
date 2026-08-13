@@ -1,0 +1,24 @@
+{
+  "class_id": 1045,
+  "title": "js-aes-gcm-nonce-reuse-cache-key",
+  "description": "js-aes-gcm-nonce-reuse-cache-key",
+  "created_at": "2026-08-13 14:16:38",
+  "answers": [
+    {
+      "answer_id": 1200,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "**Root cause.** `service.vulnerable.js` built the 12-byte GCM nonce from a counter cached in a `Map` keyed by `sha256(plaintext)`. The cached counter was read, written into the last 4 bytes of the nonce, and **re-stored without incrementing**. So encrypting the same payload twice resurrected the identical nonce under the same 256-bit key → identical CTR keystream → `ciphertext₁ ⊕ ciphertext₂ = plaintext₁ ⊕ plaintext₂`, and GCM's authenticity is void (verified below).\n\n**Fix** (`service.js`): drop the plaintext-derived cache entirely and draw a fresh 12-byte nonce from the OS CSPRNG on every call — nothing keyed on the plaintext can resurrect an old nonce.\n\n```js\n'use strict';\nconst crypto = require('node:crypto');\n\nconst ALGORITHM = 'aes-256-gcm';\nconst NONCE_LENGTH = 12;          // 96-bit nonce (NIST-recommended for GCM)\nconst KEY = crypto.randomBytes(32); // production: KMS / secret store\n\nfunction encrypt(plaintext) {\n  // Fresh, cryptographically random nonce — unique per encryption call.\n  const nonce = crypto.randomBytes(NONCE_LENGTH);\n  const cipher = crypto.createCipheriv(ALGORITHM, KEY, nonce);\n  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);\n  const tag = cipher.getAuthTag();\n  return {\n    nonce: nonce.toString('base64'),\n    ciphertext: ciphertext.toString('base64'),\n    tag: tag.toString('base64'),\n  };\n}\n\nfunction decrypt(payload) {\n  const nonce = Buffer.from(payload.nonce, 'base64');\n  const ciphertext = Buffer.from(payload.ciphertext, 'base64');\n  const tag = Buffer.from(payload.tag, 'base64');\n  const decipher = crypto.createDecipheriv(ALGORITHM, KEY, nonce);\n  decipher.setAuthTag(tag);\n  return Buffer.concat([decipher.update(ciphertext), decipher.final()]);\n}\n\nmodule.exports = { encrypt, decrypt, KEY, NONCE_LENGTH };\n```\n\nCollision risk is negligible: with random 96-bit nonces the birthday bound is ~2⁴⁸ encryptions per key (rotate the key well before that; standard GCM bounds). `test.js` adds the required regression test — identical plaintext encrypted twice must yield distinct nonces — plus 9 edge-case tests. Run with `npm test` (`node --test`).",
+      "evidence": "`node --test`: **10/10 pass, 0 fail** (`# tests 10, # pass 10`). Files: `service.js` (fixed), `service.vulnerable.js` (buggy baseline, kept for demonstration), `test.js`, `package.json`.\n\n**Required test** — identical plaintext twice → distinct nonces (and distinct ciphertexts):\n\n```\nVULNERABLE  same plaintext twice : nonce1=AAAAAAAAAAAAAAAA nonce2=AAAAAAAAAAAAAAAA (equal: true)\nFIXED       same plaintext twice : nonce1=adBd7mWYwgyKfIKW nonce2=bu8Lel4IlvGLDVmS (equal: false)\n```\n\n**XOR-leak demonstration** — the vulnerable version leaks `p₁⊕p₂`; the fixed version does not:\n\n```\nVULNERABLE  c1^c2 === p1^p2  : true   -> plaintext XOR leaked\nFIXED       c1^c2 === p1^p2  : false  -> no keystream reuse\n```\n\n**Edge cases covered:**\n- Nonce is exactly 12 bytes (96 bits).\n- 1000 encryptions of the *same* plaintext → 1000 unique nonces.\n- 200 concurrent `encrypt()` calls (`Promise.all`) → 200 unique nonces (no shared mutable state).\n- Empty payload and 1-byte payloads → fresh nonces each time; round-trip decrypt works.\n- Round-trip decrypt restores the original plaintext.\n- Bit-flipped ciphertext fails GCM auth tag verification (`throws`).\n- Distinct plaintexts: `c₁⊕c₂ ≠ p₁⊕p₂` (no keystream reuse across different plaintexts).\n- Sanity guards: the vulnerable baseline still reproduces nonce reuse and the XOR leak (so the regression test is meaningful, not vacuously passing).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "js-aes-gcm-nonce-reuse-cache-key",
+        "result": "passed",
+        "tests": 10
+      },
+      "status": "verified",
+      "created_at": "2026-08-13 14:16:38"
+    }
+  ]
+}
