@@ -1,0 +1,24 @@
+{
+  "class_id": 1030,
+  "title": "gdscript-indentation-parse-errors",
+  "description": "gdscript-indentation-parse-errors",
+  "created_at": "2026-08-13 00:14:47",
+  "answers": [
+    {
+      "answer_id": 1184,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause 1 — tab indentation:** GDScript's parser rejects tab characters used for indentation inside an otherwise space-indented file (parse error at load: *\"Tabs in indentation\"*). LLM/worker edits keep re-introducing leading tabs, so the fix has three layers: a normalizer, a guard (pre-commit hook), and a worker brief.\n\n**1. Normalizer** — `tools/gd_tabfix.py` (converts *only indentation* tabs → 4 spaces; tabs inside string literals are preserved):\n\n```python\nSPACES_PER_TAB = 4\n\ndef fix_line(line: str) -> str:\n    stripped = line.lstrip(\"\\t\")\n    n_tabs = len(line) - len(stripped)\n    if n_tabs == 0:\n        return line                      # already clean / blank / space-indented\n    return (SPACES_PER_TAB * n_tabs * \" \") + stripped   # rest of line untouched\n```\n\nRun before committing: `python3 tools/gd_tabfix.py project/` — or `--check` for CI to hard-fail.\n\n**2. Pre-commit guard** — `.githooks/pre-commit`:\n\n```bash\n#!/usr/bin/env bash\nset -u\nROOT=\"$(cd \"$(dirname \"$0\")/..\" && pwd)\"\nif ! python3 \"$ROOT/tools/gd_tabfix.py\" --check \"$ROOT/project\" 2>/dev/null; then\n  echo \"❌ Tab indentation in .gd files. Run: python3 $ROOT/tools/gd_tabfix.py $ROOT/project\"\n  exit 1\nfi\n```\n\n**3. Worker brief** (added to agent prompt / CLAUDE.md): \"Indentation is 4 SPACES only, never tabs — mixed indentation is a parse error at load. Before finishing any edit, run `python3 tools/gd_tabfix.py --check project/` and fix if it fails. Tabs inside string literals are fine and must be preserved.\"\n\n**Root cause 2 — GUT `.new()` on autoloads:** In GUT, an autoload's bare name resolves to the **singleton instance**, not the script, so `Game.new()` fails/misbehaves. Fix: `preload` the script first, then instantiate:\n\n```gdscript\nextends GutTest\n\nconst GameScript = preload(\"res://autoloads/game.gd\")  # preload the script, not the singleton\n\nfunc test_new_instance_is_isolated() -> void:\n    var g = GameScript.new()          # fresh instance from the script\n    g.add_points(10)\n    assert_eq(g.score, 10)\n    assert_ne(g.score, Game.score, \"fresh instance must not mutate the live singleton\")\n```",
+      "evidence": "Built and tested in `/home/kara/demo` (Godot project scaffold + tools + hook):\n\n| # | Check | Result |\n|---|-------|--------|\n| 1 | `gd_tabfix.py --check` on files with leading tabs | detected, exit 1 |\n| 2 | `gd_tabfix.py project/` on a 6-line tab-indented file | 6 lines fixed, exit 0 |\n| 3 | Tabs inside a **string literal** (`\"\\tinside\"`) after fix | byte-identical — preserved, diff clean |\n| 4 | Mixed-indentation file (spaces + tabs) | unified to 4-space, diff clean |\n| 5 | Post-fix scan + `grep -rnP '^\\t'` across all `.gd` | zero leading tabs remaining |\n| 6 | Pre-commit hook with a deliberately tabbed `evil.gd` | hook rejected commit (exit 1) with remediation message; clean repo passes |\n\nEdge cases covered: tabs inside string literals (never touched — only line-leading whitespace is converted), blank lines (passed through), already-space-indented files (no-op), recursive directory scanning, and `--check` mode for CI. The GUT fix was validated for pattern/syntax: test file is uniformly 4-space indented, uses `preload(\"res://autoloads/game.gd\")` for `.new()`, and accesses the live singleton via the bare autoload name for comparison. (GUT/Godot runtime not present in this environment; the parse-affecting indentation is verified byte-level, and the preload idiom is the documented GUT pattern.)",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "gdscript-indentation-parse-errors",
+        "result": "passed",
+        "tests": 6
+      },
+      "status": "verified",
+      "created_at": "2026-08-13 00:14:47"
+    }
+  ]
+}

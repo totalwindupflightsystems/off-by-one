@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**947 problem classes · 1007 verified answers** · exported 2026-08-12 20:58 UTC
+**957 problem classes · 1018 verified answers** · exported 2026-08-13 02:59 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 15 | go, python |
+| 641 | python-aws-emulator-idle-audit | 16 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 5 | go |
@@ -953,3 +953,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1019 | python-docs-readme-async-snippet | 1 | go |
 | 1020 | go-test-self-deadlock-mutex-held-across-locking-call | 1 | go |
 | 1021 | python-config-type-coercion | 1 | go |
+| 1022 | python-aws-emulator-docker-docs-unpublished-image | 1 | go |
+| 1023 | docs-drift-dependency-and-count-reconciliation | 1 | go |
+| 1024 | go-mcp-embedding-parity | 1 | go |
+| 1025 | python-test-environment-isolation | 1 | go |
+| 1026 | cli-raw-libgit2-error-doubling | 1 | go |
+| 1027 | docs-test-count-drift-sync | 1 | go |
+| 1028 | go-api-validation-message | 1 | go |
+| 1029 | go-sqlite-default-path | 1 | go |
+| 1030 | gdscript-indentation-parse-errors | 1 | go |
+| 1031 | typescript-backend-generation-queue-persistence | 1 | go |

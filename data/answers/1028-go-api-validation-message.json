@@ -1,0 +1,24 @@
+{
+  "class_id": 1028,
+  "title": "go-api-validation-message",
+  "description": "go-api-validation-message",
+  "created_at": "2026-08-13 00:04:01",
+  "answers": [
+    {
+      "answer_id": 1182,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Built the API from scratch in `/home/kara/go-api-validation-message` (Go 1.26, stdlib only, zero deps).\n\n**Root cause:** the old validator reported the *first* missing nested field (`memory_payload.body_text is required`) and stopped — when the parent container was absent it never told callers about the container or the sibling fields, so a natural `{}` body leaked only one baffling dot-path.\n\n**Fix (main.go):**\n- `validateCreateMemory` now walks the full schema and returns **every** missing required path. Critically, when a parent container is missing it also enumerates all required descendants — `{}` yields all 4 paths:\n\n```go\nif req.MemoryPayload == nil {\n    missing = append(missing, \"memory_payload\", \"memory_payload.body_text\")\n} else if strings.TrimSpace(req.MemoryPayload.BodyText) == \"\" {\n    missing = append(missing, \"memory_payload.body_text\")\n}\n```\n\n- The 400 error is a uniform envelope with a human-readable message **and** a machine-readable array (deterministic, sorted):\n\n```json\n{\"error\":{\"code\":\"validation_failed\",\n  \"message\":\"Missing required field(s): memory_payload, memory_payload.body_text, scope_context, scope_context.tenant\",\n  \"missing_fields\":[\"memory_payload\",\"memory_payload.body_text\",\"scope_context\",\"scope_context.tenant\"]}}\n```\n\n- **Malformed JSON** (unparseable body) falls back to the full schema via `requiredFieldPaths()` so first-time users always see the complete field list.\n- **Tenant is body-only on writes:** `POST` reads `scope_context.tenant` and never falls back to the query string; `GET /v1/memories?tenant=…` is the only place the query param applies (documented in README).\n- **README Quick Start** has the minimal working body that returns `201`:\n\n```json\n{ \"scope_context\":  { \"tenant\": \"acme-corp\" },\n  \"memory_payload\": { \"body_text\": \"File the Q3 report by Friday.\" } }\n```",
+      "evidence": "Verified via `go vet`, `gofmt`, unit/E2E tests (`go test -v`, 5 tests all PASS), plus a **live server** run on port 8091 with curl:\n\n| Case | Result |\n|---|---|\n| `{}` | `400` — message + `missing_fields` enumerate **all 4** paths ✅ |\n| Documented body (exact README Quick Start body) | `201` with stored memory, tenant + body_text echoed ✅ |\n| `{\"scope_context\":{\"tenant\":\"acme\"}}` (partial) | `400` — only `memory_payload`, `memory_payload.body_text` (still exhaustive for that subtree) ✅ |\n| `{\"scope_context\":{}}` + full payload | `400` — only `scope_context.tenant` ✅ |\n| Malformed JSON `{\"scope_context\": ` | `400` — falls back to full 4-field schema ✅ |\n| `POST /v1/memories?tenant=acme` (query param on write) | ignored — body still validated (400 without payload) ✅ |\n| `GET /v1/memories?tenant=acme` | `200` ✅ |\n| whitespace-only values (`\"\"`, `\"  \"`) | treated as missing (`TrimSpace`) ✅ |\n\n`TestEmptyBodyEnumeratesAllRequiredFields` is the headline regression test: it asserts both the exact `missing_fields` set and that the message text contains every field name. Also `TestDocumentedBodyCreates` pins the README body to `201`, so the doc can't drift.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-api-validation-message",
+        "result": "passed",
+        "tests": 5
+      },
+      "status": "verified",
+      "created_at": "2026-08-13 00:04:01"
+    }
+  ]
+}
