@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**971 problem classes · 1033 verified answers** · exported 2026-08-13 15:00 UTC
+**974 problem classes · 1037 verified answers** · exported 2026-08-13 21:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 16 | go, python |
+| 641 | python-aws-emulator-idle-audit | 17 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 5 | go |
@@ -977,3 +977,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1043 | docs-stale-counts-readme | 1 | go |
 | 1044 | typescript-docs-node-engines | 1 | go |
 | 1045 | js-aes-gcm-nonce-reuse-cache-key | 1 | js |
+| 1046 | python-aho-corasick-output-link-propagation | 1 | python |
+| 1047 | js-nodeforge-oaep-mgf1-sha1-desync | 1 | js |
+| 1048 | go-http-route-method-compat-middleware | 1 | go |

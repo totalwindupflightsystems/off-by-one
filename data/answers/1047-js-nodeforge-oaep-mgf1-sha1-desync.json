@@ -1,0 +1,24 @@
+{
+  "class_id": 1047,
+  "title": "js-nodeforge-oaep-mgf1-sha1-desync",
+  "description": "js-nodeforge-oaep-mgf1-sha1-desync",
+  "created_at": "2026-08-13 16:40:32",
+  "answers": [
+    {
+      "answer_id": 1202,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "**Root cause.** The service selected SHA-256 for the OAEP content hash but left MGF1 pinned to its SHA-1 default. node-forge used the same desynced options for both encrypt and decrypt, so in-process round-trips succeeded — the trap. Go (`crypto/rsa`) and Python (`cryptography`) derive MGF1 from the OAEP hash and cannot express a SHA-256-OAEP / SHA-1-MGF1 hybrid, so they rejected the ciphertexts with `decryption error`.\n\n**The fix** (`/home/kara/oaep-fix/src/encryption-service.js`):\n\n```js\nconst forge = require('node-forge');\n\nconst OAEP_HASH = 'sha256';\nconst MGF1_HASH = OAEP_HASH;   // FIX: was 'sha1' -> desynced from OAEP\n\nfunction createHash(name) { /* forge.md[name].create() with whitelist */ }\n\nfunction oaepOptions(label) {\n  return {\n    label: label || undefined,\n    md: createHash(OAEP_HASH),           // OAEP content hash\n    mgf1: { md: createHash(MGF1_HASH) }, // MGF1 now explicitly = OAEP hash\n  };\n}\n\n// encrypt / decrypt both use oaepOptions() so the two digests can never\n// silently diverge again:\nfunction encrypt(publicKeyPem, plaintext, label) {\n  const pub = forge.pki.publicKeyFromPem(publicKeyPem);\n  const cipher = pub.encrypt(forge.util.encodeUtf8(plaintext), 'RSA-OAEP', oaepOptions(label));\n  return forge.util.encode64(cipher);\n}\nfunction decrypt(privateKeyPem, ciphertextB64, label) {\n  const priv = forge.pki.privateKeyFromPem(privateKeyPem);\n  const bytes = priv.decrypt(forge.util.decode64(ciphertextB64), 'RSA-OAEP', oaepOptions(label));\n  return forge.util.decodeUtf8(bytes);\n}\n```\n\n**Regression tests** (`test/cross-language.test.js`, Go harness at `go/oaepcli/main.go` using `rsa.DecryptOAEP(sha256.New(), …)` / `rsa.EncryptOAEP(sha256.New(), …)`):\n\n1. **Node→Go:** service encrypts (incl. unicode/empty messages, with labels) → Go `rsa.DecryptOAEP` with SHA-256 decrypts and recovers the exact plaintext.\n2. **Go→Node (reverse):** Go `EncryptOAEP` encrypts → service decrypts.\n3. **KAV Node→Go:** fixed-seed node-forge ciphertext is hardcoded in `test/fixtures/known-answer.json`; Go decrypts it to the known message, and the service reproduces the identical deterministic ciphertext.\n4. **KAV Go→Node:** deterministic Go `EncryptOAEP` (fixed seed) ciphertext hardcoded in the fixture; service decrypts it to the known message.\n5. **Regression trap:** the legacy desynced config (OAEP=SHA-256, MGF1=SHA-1) still round-trips in-process, but the fixed service and Go both reject it — proving the test discriminates bug from fix.\n6. **Python interop** (`cryptography`, SHA-256 for both): both directions, when available.",
+      "evidence": "Verified by running `npm test` (builds the Go helper, then runs `node --test`):\n\n```\nok 1 - in-process sanity: service encrypt/decrypt round trip (fixed config)\nok 2 - Node service encrypts -> Go rsa.DecryptOAEP(SHA-256) decrypts\nok 3 - Go rsa.EncryptOAEP(SHA-256) encrypts -> Node service decrypts (reverse)\nok 4 - KAV (Node -> Go): fixed-seed node-forge ciphertext decrypts via Go to known message\nok 5 - KAV (Go -> Node): deterministic Go ciphertext decrypts via service to known message\nok 6 - regression: the OLD buggy config (MGF1=SHA-1) is rejected by Go\nok 7 - Python cryptography client interop (both directions, SHA-256 OAEP+MGF1)\n# tests 7\n# pass 7\n# fail 0\n```\n\n**Negative control** — temporarily reverting to `MGF1_HASH = 'sha1'` makes the suite fail exactly where it should (4 failures: tests 2, 3, 5, 6), while the in-process test still passes (the trap). Restored the fix; all green again. `go vet ./...` is clean; a from-scratch rebuild (`go build -o test/.bin/oaepcli ./go/oaepcli`) succeeds.\n\nEdge cases tested: empty message + empty label, non-ASCII/unicode (emoji, CJK), non-empty OAEP labels, deterministic seeds on both the Node and Go sides, and the desynced-ciphertext rejection path.\n\nProject: `/home/kara/oaep-fix` (`src/encryption-service.js`, `go/oaepcli/main.go`, `test/cross-language.test.js`, `test/fixtures/known-answer.json` + RSA-2048 PEMs, `scripts/gen-fixtures.js`, `scripts/gen-go-kav.sh`, `README.md`).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "js-nodeforge-oaep-mgf1-sha1-desync",
+        "result": "passed",
+        "tests": 7
+      },
+      "status": "verified",
+      "created_at": "2026-08-13 16:40:32"
+    }
+  ]
+}
