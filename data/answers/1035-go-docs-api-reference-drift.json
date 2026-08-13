@@ -1,0 +1,24 @@
+{
+  "class_id": 1035,
+  "title": "go-docs-api-reference-drift",
+  "description": "go-docs-api-reference-drift",
+  "created_at": "2026-08-13 03:41:44",
+  "answers": [
+    {
+      "answer_id": 1189,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** Docs were written from memory/assumptions instead of the live API. Two drift instances: (1) pagination documented at the response root (`data.pagination`-style) while live serves it at `data.meta.pagination`; (2) batch examples implied a body `tenant` is honored, but live resolves tenant from the auth context only and silently ignores body fields.\n\n**Fix = two changes:**\n1. **Corrected examples** committed to `docs/` with literal, machine-verifiable values:\n   - `records.example.fixed.json` — pagination under `meta`:\n     ```json\n     { \"data\": [{\"id\": 1, \"name\": \"record-1\"}],\n       \"meta\": { \"pagination\": { \"page\": 1, \"per_page\": 10, \"total\": 47, \"total_pages\": 5 } } }\n     ```\n   - `batch.example.json` — documents auth-context-only tenant, silently-ignored body field, and the 400:\n     ```json\n     { \"request\": { \"body\": { \"tenant\": \"SILENTLY IGNORED if present\", \"items\": [{\"id\": 1, \"name\": \"record-1\"}] } },\n       \"expected\": { \"tenant\": \"tenantA\", \"accepted\": 1 },\n       \"notes\": [\"Tenant resolution is auth-context ONLY; ... 400 error.code = tenant_required\"] }\n     ```\n   - `mcp.recall.example.json` — `query` typed `\"string\"`, `required: [\"query\"]`, `additionalProperties: false`.\n2. **A CI gate that makes drift impossible to re-introduce:** every example is verified against a **live scratch server** (`docsdrift.Server`, real HTTP + real JWT HS256 + real MCP JSON-RPC) before docs are edited. The checker compares every documented leaf path against the live response and, for MCP, verifies the input schema against `tools/list` **and** proves behavior via live `tools/call`:\n\n```go\n// checker.go — drift detection with auto-suggestion\nrep.OK = compareShapes(\"\", documented, live, rep)   // records: data.meta.pagination\n...\nfunc suggest(missing string, live map[string]any) string { /* shared-trailing-segment match:\n    pagination.page -> meta.pagination.page */ }\n\n// MCP guide: schema from live tools/list + semantic type check\nrep.OK = compareShapes(\"inputSchema\", docSchema, liveSchema, rep)\ncheckSchemaTypes(docSchema, liveSchema, rep)  // \"array\" vs \"string\" are both JSON strings — value matters\n\n// Batch: live proof of auth-context-only tenant + 400 without auth\ncode, resp := c.postJSON(\"/api/v1/batch\", body, token)   // 202, tenant == expected\ncode2, _   := c.postJSON(\"/api/v1/batch\", body, \"\")      // 400, error.code == tenant_required\n```\n\nGate usage: `go run ./cmd/docscheck docs/*.example.json` (non-zero exit on drift; verifier lives in `/home/kara/go-docs-drift`).",
+      "evidence": "Verified by running the gate and 19 Go tests against a live scratch server (47 records, HS256 JWT, JSON-RPC endpoint) — no mocks:\n\n```\n=== gate on FIXED examples (must all PASS) ===\nPASS  docs/records.example.fixed.json\nPASS  docs/batch.example.json\nPASS  docs/mcp.recall.example.json\nexit=0\n\n=== gate on DRIFTED example (must fail) ===\nDRIFT docs/records.example.drifted.json\n  - pagination.page: documented path missing from live API response (suggested: meta.pagination.page)\n  ... (per_page, total, total_pages similarly)  exit=1\n```\n\n`go test ./...`: **19 passed**, `gofmt -l` empty, `go vet` clean. Edge cases tested:\n- `data.meta.pagination` present even on out-of-range pages (`page=99` → empty `data`, `meta.pagination.total` still 47) — docs must not promise pagination only when data is non-empty.\n- Docs over-promising fields (`data[0].tenant`, `data[0].tags`) flagged as drift.\n- Batch: conflicting body tenant (`tenantB`) vs auth tenant (`tenantA`) → response uses `tenantA`, body silently ignored; missing auth → 400 `tenant_required`; tampered JWT → 400; empty `items` → 202 `accepted:0`; malformed JSON body → 400.\n- MCP: `tools/list` schema `query.type == \"string\"`; live `tools/call` with string query succeeds; array and object queries → JSON-RPC `-32602` with message explaining `query must be a STRING`; guide claiming `\"array\"` or an extra `filters` property is flagged.\n- A doc example with prose inside a machine-checked value (batch `expected.tenant`) was itself caught by the gate — proving the gate enforces literal, comparable examples.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-docs-api-reference-drift",
+        "result": "passed",
+        "tests": 19
+      },
+      "status": "verified",
+      "created_at": "2026-08-13 03:41:44"
+    }
+  ]
+}

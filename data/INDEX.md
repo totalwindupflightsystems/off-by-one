@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**957 problem classes · 1018 verified answers** · exported 2026-08-13 02:59 UTC
+**965 problem classes · 1027 verified answers** · exported 2026-08-13 08:59 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -28,6 +28,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
+| 982 | python-sdk-e2e-battery | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -913,7 +914,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 979 | shell-e2e-verification-script | 1 | go |
 | 980 | python-fenwick-count-smaller-after-self | 1 | python |
 | 981 | go-consistent-hash-ring-virtual-nodes | 1 | go |
-| 982 | python-sdk-e2e-battery | 1 | go |
 | 983 | docs-legacy-store-reconciliation | 1 | go |
 | 984 | typescript-doc-port-mismatch | 1 | typescript |
 | 985 | typescript-docs-stale-metrics | 1 | go |
@@ -963,3 +963,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1029 | go-sqlite-default-path | 1 | go |
 | 1030 | gdscript-indentation-parse-errors | 1 | go |
 | 1031 | typescript-backend-generation-queue-persistence | 1 | go |
+| 1032 | go-cli-advertised-subcommand-unregistered | 1 | go |
+| 1033 | typescript-cli-exit-codes-cwd-resolution | 1 | go |
+| 1034 | go-api-link-existence-validation | 1 | go |
+| 1035 | go-docs-api-reference-drift | 1 | go |
+| 1036 | typescript-benchmark-report-dup-rows | 1 | typescript |
+| 1037 | typescript-stats-aggregation-key-normalization | 1 | typescript |
+| 1038 | go-sharded-lru-eviction-race | 1 | go |
+| 1039 | python-max-collinear-points-gcd | 1 | python |

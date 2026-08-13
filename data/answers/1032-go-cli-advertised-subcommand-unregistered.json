@@ -1,0 +1,24 @@
+{
+  "class_id": 1032,
+  "title": "go-cli-advertised-subcommand-unregistered",
+  "description": "go-cli-advertised-subcommand-unregistered",
+  "created_at": "2026-08-13 03:30:14",
+  "answers": [
+    {
+      "answer_id": 1186,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The bug: `main.go`'s top-level dispatcher switch handled `help`, `--help`, `--version`, and `ping`, but the help text advertised a `version` subcommand that no `case` registered — so `helios version` fell into `default:` and printed `Unknown command: version` (exit 1). The version format line was also duplicated inline in `--version`, risking drift.\n\n**Fix 1 — extract the shared `versionLine()` formatter** (`main.go`):\n\n```go\nconst version = \"0.1.0\"\n\n// versionLine returns the canonical version string. Both the --version\n// flag path and the version subcommand path print exactly this line, so\n// the two paths can never drift apart. It is the testable seam: main()\n// exits via os.Exit on failure, so this formatter is what unit tests pin.\nfunc versionLine() string {\n\treturn fmt.Sprintf(\"helios version %s\", version)\n}\n```\n\n**Fix 2 — register the `version` case and route both paths through the helper:**\n\n```go\n\tswitch args[0] {\n\tcase \"help\", \"-h\", \"--help\":\n\t\tfmt.Print(usage)\n\tcase \"--version\":\n\t\tfmt.Println(versionLine())\n\tcase \"version\":                    // ← added case\n\t\tfmt.Println(versionLine())\n\tcase \"ping\":\n\t\tfmt.Println(\"pong\")\n\tdefault:\n\t\tfmt.Printf(\"Unknown command: %s\\n\", args[0])\n\t\tfmt.Print(usage)\n\t\tos.Exit(1)\n\t}\n```\n\n**Fix 3 — table-test the seam** (`version_test.go`), since the dispatcher exits via `os.Exit` on the failure path:\n\n```go\nfunc TestVersionLine(t *testing.T) {\n\tconst want = \"helios version 0.1.0\"\n\ttests := []struct {\n\t\tname  string\n\t\tcheck func(got string) bool\n\t}{\n\t\t{\"is non-empty\", func(got string) bool { return got != \"\" }},\n\t\t{\"starts with the binary name\", func(got string) bool { return strings.HasPrefix(got, \"helios \") }},\n\t\t{\"embeds the version number\", func(got string) bool { return strings.Contains(got, version) }},\n\t\t{\"matches the exact canonical line\", func(got string) bool { return got == want }},\n\t\t{\"has no trailing newline (caller adds it)\", func(got string) bool { return !strings.HasSuffix(got, \"\\n\") }},\n\t\t{\"has no leading whitespace\", func(got string) bool { return !strings.HasPrefix(got, \" \") }},\n\t}\n\tfor _, tt := range tests {\n\t\tt.Run(tt.name, func(t *testing.T) {\n\t\t\tif got := versionLine(); !tt.check(got) {\n\t\t\t\tt.Errorf(\"versionLine() = %q (want %q)\", got, want)\n\t\t\t}\n\t\t})\n\t}\n}\n```",
+      "evidence": "Reproduced the bug with a **fresh** build of the original source, then verified the fix on a fresh binary. Git history preserves both states: `a07b361` (bug) → `303fd18` (fix).\n\n**Before fix (fresh build):**\n```\n$ ./helios --help      → advertises \"version   Print the helios version\"\n$ ./helios version     → Unknown command: version    (exit=1)\n```\n\n**Stale-artifact trap confirmed:** after editing the source but *before* rebuilding, `./helios version` still printed `Unknown command` — the gitignored binary at the repo root was running old code. `git check-ignore helios` confirms `/helios` is ignored, so the binary must always be rebuilt (`go build -o helios .`) before verifying.\n\n**After fix (fresh `go build -o helios .`), full matrix:**\n\n| Command | Output | Exit |\n|---|---|---|\n| `--help` / `help` / `-h` | usage text | 0 |\n| `--version` | `helios version 0.1.0` | 0 |\n| `version` | `helios version 0.1.0` *(identical — shared helper)* | 0 |\n| `ping` | `pong` | 0 |\n| `bogus` | `Unknown command: bogus` + usage | 1 |\n| *(no args)* | usage text | 0 |\n\nEdge cases covered: no-args (help, exit 0), unknown command (usage + exit 1), and byte-exact agreement between `--version` and `version` output. `gofmt -l` clean, `go vet ./...` clean, `go test -v ./...` → `PASS` (6/6 table subtests, `ok helios 0.002s`).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cli-advertised-subcommand-unregistered",
+        "result": "passed",
+        "tests": 6
+      },
+      "status": "verified",
+      "created_at": "2026-08-13 03:30:14"
+    }
+  ]
+}
