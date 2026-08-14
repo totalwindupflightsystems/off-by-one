@@ -18,13 +18,30 @@ import (
 // and the solve proceeds without those tools. The pi-agent may still produce
 // a useful answer using whatever tools are available.
 //
-// Paths already present in alreadyMounted are skipped — this prevents
-// duplicate --ro-bind entries when a resolved path is subsumed by a broader
-// mount (e.g. /usr/bin/git is under /usr which is in DefaultReadOnlyPaths).
+// Symlink handling (OB-GAP-035): every path returned by exec.LookPath is
+// resolved to its REALPATH via filepath.EvalSymlinks before any coverage
+// decision. A symlink whose realpath is NOT under the effective mount set
+// cannot be safely bind-mounted (bwrap fails with "Can't create file ...
+// No such file or directory" when the symlink target is outside the mount
+// set), so the tool is treated as missing — WARN + degrade — instead of
+// hard-failing the whole solve.
+//
+// The effective mount set is DefaultReadOnlyPaths (bwrap always mounts
+// those) united with alreadyMounted — callers pass the executor's
+// ExtraReadOnlyPaths so tool realpaths under executor extras are
+// correctly treated as covered.
+//
+// Paths already covered by the effective mount set are skipped — this
+// prevents duplicate --ro-bind entries when a resolved path is subsumed
+// by a broader mount (e.g. /usr/bin/git is under /usr).
 func ResolveTools(tools []string, alreadyMounted []string) (resolved []string, missing []string) {
-	// Build a set of already-mounted paths for O(1) prefix checks.
-	mounted := make(map[string]bool, len(alreadyMounted))
+	// Build the effective mount set for O(1) prefix checks: the
+	// caller-supplied mounts (executor extras) plus the bwrap defaults.
+	mounted := make(map[string]bool, len(alreadyMounted)+len(DefaultReadOnlyPaths))
 	for _, p := range alreadyMounted {
+		mounted[p] = true
+	}
+	for _, p := range DefaultReadOnlyPaths {
 		mounted[p] = true
 	}
 
@@ -34,8 +51,8 @@ func ResolveTools(tools []string, alreadyMounted []string) (resolved []string, m
 		if tool == "" {
 			continue
 		}
-		paths := resolveToolPaths(tool)
-		if len(paths) == 0 {
+		paths, ok := resolveToolPaths(tool, mounted)
+		if !ok {
 			missing = append(missing, tool)
 			continue
 		}
@@ -56,47 +73,65 @@ func ResolveTools(tools []string, alreadyMounted []string) (resolved []string, m
 }
 
 // resolveToolPaths maps a single tool name to the host paths needed
-// inside the sandbox. Returns nil if the tool cannot be resolved.
-func resolveToolPaths(tool string) []string {
+// inside the sandbox. The second return value is false when the tool
+// cannot be resolved for sandbox use — not on PATH, a broken symlink,
+// or (OB-GAP-035) its realpath resolves outside the effective mount
+// set — in which case the caller reports the tool as missing and the
+// solve degrades gracefully instead of failing on an unmountable
+// bwrap --ro-bind.
+func resolveToolPaths(tool string, mounted map[string]bool) ([]string, bool) {
 	switch tool {
 	case "git":
 		// git is already in DefaultReadOnlyPaths (/usr/bin/git +
-		// /usr/lib/git-core). We still resolve so the dedup logic
-		// can skip them gracefully.
-		return lookPathMulti("git", []string{"/usr/lib/git-core"})
+		// /usr/lib/git-core); the realpath coverage check dedups it.
+		ok, err := lookPathUsable("git", mounted)
+		return nil, err == nil && ok
 	case "python3-venv":
 		// The python3 binary plus venv support directories.
-		paths := lookPathMulti("python3", nil)
-		paths = append(paths, globDirs("/usr/lib/python3*", "venv")...)
-		return paths
+		ok, err := lookPathUsable("python3", mounted)
+		if !ok || err != nil {
+			return nil, false
+		}
+		paths := globDirs("/usr/lib/python3*", "venv")
+		return paths, true
 	case "jq", "parallel":
-		return lookPathMulti(tool, nil)
+		ok, err := lookPathUsable(tool, mounted)
+		return nil, err == nil && ok
 	default:
 		// Generic: just resolve the binary.
-		return lookPathMulti(tool, nil)
+		ok, err := lookPathUsable(tool, mounted)
+		return nil, err == nil && ok
 	}
 }
 
-// lookPathMulti resolves the binary via exec.LookPath and optionally
-// appends extra support directories that are verified to exist.
-func lookPathMulti(binary string, extras []string) []string {
+// lookPathUsable resolves the binary via exec.LookPath and reports
+// whether it can be made available inside the sandbox.
+//
+// If the resolved binary is (or lives behind) a symlink,
+// filepath.EvalSymlinks resolves it to its realpath. The realpath is
+// what matters:
+//   - if the realpath is under an already-mounted path, the tool is
+//     already accessible inside the sandbox — the path is deduped
+//     (skipped) and the tool is NOT reported missing;
+//   - if the realpath is NOT under any mount, the tool cannot be
+//     bind-mounted safely (bwrap would have to bind the symlink,
+//     which fails because its target is outside the mount set), so
+//     the tool is treated as missing — degrade gracefully, never
+//     hard-fail the solve (OB-GAP-035).
+//
+// If EvalSymlinks fails (broken symlink, permission, etc.), the tool
+// is likewise treated as missing.
+func lookPathUsable(binary string, mounted map[string]bool) (bool, error) {
 	path, err := exec.LookPath(binary)
 	if err != nil {
-		return nil
+		return false, err
 	}
-	result := []string{path}
-	for _, extra := range extras {
-		if _, err := exec.LookPath(filepath.Join(extra, binary)); err == nil {
-			result = append(result, extra)
-		} else {
-			// The extra path may be a directory, not a binary —
-			// check if the directory itself exists.
-			if dirExists(extra) {
-				result = append(result, extra)
-			}
-		}
+	real, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		// Broken symlink or unreadable target — cannot be mounted.
+		return false, err
 	}
-	return result
+	return isPathCovered(real, mounted), nil
 }
 
 // globDirs expands a glob pattern like /usr/lib/python3* and filters

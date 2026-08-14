@@ -30,7 +30,18 @@ func (r *BSandboxRunner) Create(ctx context.Context, id string, opts ...CreateOp
 
 	cfg := sandbox.Config{}
 	if len(oc.requiredTools) > 0 {
-		resolved, missing := sandbox.ResolveTools(oc.requiredTools, sandbox.DefaultReadOnlyPaths)
+		// The full mount set matters for tool resolution coverage:
+		// sandbox.Create merges the executor's ExtraReadOnlyPaths into
+		// the config's effective mount set (see bwrap.go Create), so a
+		// tool whose realpath lives under an executor extra (e.g.
+		// $HOME/.local/bin, /tmp/pi, /etc) must be treated as already
+		// covered — otherwise we would emit a duplicate (or, worse,
+		// unmountable symlink) --ro-bind and hard-fail the whole solve
+		// (OB-GAP-035, SBOX-002 never-fails contract).
+		mountSet := make([]string, 0, len(sandbox.DefaultReadOnlyPaths)+len(r.exec.ExtraReadOnlyPaths))
+		mountSet = append(mountSet, sandbox.DefaultReadOnlyPaths...)
+		mountSet = append(mountSet, r.exec.ExtraReadOnlyPaths...)
+		resolved, missing := sandbox.ResolveTools(oc.requiredTools, mountSet)
 		if len(missing) > 0 {
 			slog.Warn("sandbox: could not resolve declared tools on host; solve will proceed without them",
 				"missing_tools", missing)
