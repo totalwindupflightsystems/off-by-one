@@ -1,22 +1,22 @@
 # Off-by-One Answer Index
 
-**984 problem classes · 1051 verified answers** · exported 2026-08-14 10:00 UTC
+**985 problem classes · 1056 verified answers** · exported 2026-08-14 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 19 | go, python |
+| 641 | python-aws-emulator-idle-audit | 20 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 6 | go |
+| 982 | python-sdk-e2e-battery | 6 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
-| 982 | python-sdk-e2e-battery | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
 | 247 | cron-double-fire-detection | 2 | go |
@@ -990,3 +990,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1056 | python-aws-emulator-docs-upstream-drift | 1 | go |
 | 1057 | ci-test-contract-mismatch | 1 | rust |
 | 1058 | go-security-govulncheck-stdlib-toolchain-bump | 1 | go |
+| 1059 | file-query-pkg-resolution-gap | 1 | rust |
