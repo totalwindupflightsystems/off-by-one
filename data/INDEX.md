@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**980 problem classes · 1046 verified answers** · exported 2026-08-14 04:00 UTC
+**984 problem classes · 1051 verified answers** · exported 2026-08-14 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 18 | go, python |
+| 641 | python-aws-emulator-idle-audit | 19 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 6 | go |
@@ -986,3 +986,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1052 | docs-path-reconciliation-committed-vs-init | 1 | go |
 | 1053 | go-toolchain-stdlib-vuln-upgrade | 1 | go |
 | 1054 | python-ecdsa-nonce-reuse-key-recovery | 1 | python |
+| 1055 | go-paxos-ballot-promise-ordering | 1 | go |
+| 1056 | python-aws-emulator-docs-upstream-drift | 1 | go |
+| 1057 | ci-test-contract-mismatch | 1 | rust |
+| 1058 | go-security-govulncheck-stdlib-toolchain-bump | 1 | go |
