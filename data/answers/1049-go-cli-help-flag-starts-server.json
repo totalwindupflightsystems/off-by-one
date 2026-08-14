@@ -1,0 +1,24 @@
+{
+  "class_id": 1049,
+  "title": "go-cli-help-flag-starts-server",
+  "description": "go-cli-help-flag-starts-server",
+  "created_at": "2026-08-13 22:08:00",
+  "answers": [
+    {
+      "answer_id": 1205,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** stdlib `flag.Parse` stops at the first non-flag argument. With `canopyd serve --help`, `serve` is the first non-flag arg, so parsing halts there, `--help` is never seen, and the router dispatches `serve` straight into server startup — binding a port instead of printing help.\n\n**Fix (two parts, in `/home/kara/canopyd/main.go`):**\n\n1. **Pre-scan for help before any routing** — every argument is checked for `-h`/`--help`/`-help` before subcommand dispatch, so help wins regardless of position:\n```go\nfor _, a := range args {\n    if isHelpFlag(a) {\n        fmt.Fprint(stdout, usageText) // static, env-only usage\n        return 0\n    }\n}\n```\n\n2. **`serve` handled as explicit alias before routing** — strip the subcommand, then parse remaining flags with the serve flag set:\n```go\ncase \"serve\":\n    // \"serve\" is an explicit alias of the default action.\n    return runServe(args[1:], stdout, stderr)\n```\n\nThe help path prints a fully static `usageText` (documents `CANOPYD_HOST`/`CANOPYD_PORT`/`CANOPYD_LOG`) — no flag parsing, no env reads, no socket code is reached. `runServe` keeps a normal `flag.NewFlagSet` with `ContinueOnError` for `--port`/`--host`/`--log`.",
+      "evidence": "`go vet` clean; `go test -v` → **10/10 PASS** (`canopyd` 0.755s). Unit tests target the pure `run()` dispatcher; integration tests build the real binary and exercise actual processes/ports:\n\n| Test | Result |\n|---|---|\n| `serve --help` exits 0, prints env usage, no \"listening\" text | PASS |\n| Help variants: `-h`, `--help`, `-help`, after subcommand, after other flags, `help` cmd | PASS |\n| `version` / `-v` / `--version` exit 0 | PASS |\n| Unknown command → exit 2 with usage on stderr | PASS |\n| `serve --bogus`, `serve extra-arg` → exit 2 | PASS |\n| **Regression:** `serve --help` on built binary → port immediately re-bindable (no leak) | PASS |\n| **Regression:** `serve -h` → port immediately re-bindable | PASS |\n| Control: `serve` (no help) → prints \"listening\", port actually bound | PASS |\n| `serve` exits 0 on SIGINT | PASS |\n\nManual check: `CANOPYD_PORT=39999 ./canopyd serve --help` → `exit=0`, port 39999 confirmed free afterwards; `./canopyd version` → exit 0; `./canopyd nope` → exit 2. Edge cases covered: help flag anywhere on the line (before/after subcommand, mixed with other flags), both dash spellings, plus the control proving the server *does* bind when help is absent.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-cli-help-flag-starts-server",
+        "result": "passed",
+        "tests": 10
+      },
+      "status": "verified",
+      "created_at": "2026-08-13 22:08:00"
+    }
+  ]
+}

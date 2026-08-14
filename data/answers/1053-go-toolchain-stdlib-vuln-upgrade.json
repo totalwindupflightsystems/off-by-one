@@ -1,0 +1,24 @@
+{
+  "class_id": 1053,
+  "title": "go-toolchain-stdlib-vuln-upgrade",
+  "description": "go-toolchain-stdlib-vuln-upgrade",
+  "created_at": "2026-08-14 02:22:43",
+  "answers": [
+    {
+      "answer_id": 1212,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** `go.mod` pinned `go 1.26.5`, and the installed toolchain (resolved via `GOTOOLCHAIN=auto`) was therefore the vulnerable `go1.26.5`. govulncheck flagged 5 affected stdlib vulns — `GO-2026-6088` (encoding/xml), `GO-2026-6090` (crypto/tls), `GO-2026-5972` (encoding/asn1), and two net/http ones (`GO-2026-6089`/`GO-2026-5026`) — all with **`Fixed in: ...@go1.26.6`**.\n\n**Fix:** one-line bump of the `go` directive. No source-code change required. `GOTOOLCHAIN=auto` (already the default) downloads the patched toolchain on the next `go` command; the CI matrix's `go-version: 1.26` resolves to the latest patch (`1.26.6`), so CI config needs no change.\n\n`go.mod` before → after:\n\n```diff\n module example.com/vuln-demo\n\n-go 1.26.5\n+go 1.26.6\n```\n\nReproduction project used for verification (`/workspace/demo/`):\n- `main.go` exercises all four affected packages: `xml.Unmarshal`, `http.Client.Get`, `tls.Config`/HTTPS client, `asn1.Marshal`.\n- `main_test.go` adds a recursion-depth regression guard for the XML decode fix (GO-2026-6088).\n\n**Verification sequence** (all run in the module):\n\n```bash\ngo build ./...     # GOTOOLCHAIN=auto downloads go1.26.6 on first run\ngo vet ./...\ngo test ./...\ngovulncheck ./...  # -> \"No vulnerabilities found.\" (exit 0)\n```",
+      "evidence": "1. **Reproduced the vulnerable state:** with `go 1.26.5`, `go build` auto-downloaded go1.26.5 and `govulncheck ./...` exited **3** with 5 affected stdlib vulns, each reporting `Fixed in: ...@go1.26.6` with concrete call traces (`main.go:23:25 parseXML → xml.Unmarshal`, `main.go:36:25 fetch → http.Client.Get → tls.Conn.HandshakeContext`, etc.).\n\n2. **Applied the fix and re-verified on the new toolchain:**\n   - `go version` → `go version go1.26.6 linux/amd64` (auto-downloaded via `GOTOOLCHAIN=auto`, no manual install)\n   - `go build ./...` → OK\n   - `go vet ./...` → OK\n   - `go test ./...` → `ok example.com/vuln-demo 0.002s` (3/3 tests pass)\n   - `govulncheck ./...` → **\"No vulnerabilities found.\"**, exit **0**\n   - `go mod tidy` + `go mod verify` → OK (\"all modules verified\")\n\n3. **Edge cases tested:**\n   - **Deep XML nesting** (the GO-2026-6088 recursion-guard fix): a test builds 64 nested `<doc>` levels and confirms the parser no longer crashes on the patched toolchain.\n   - **Toolchain resolution:** both go1.26.5 and go1.26.6 toolchains confirmed downloadable from proxy.golang.org; `GOTOOLCHAIN=auto` switches tools transparently per-module (`go version` reflects the module directive, not the system go1.26.0).\n   - **govulncheck exit-code semantics:** 3 = affected, 0 = clean — used as the pass/fail gate.\n   - **CI impact:** `go-version: 1.26` in the matrix resolves to the latest patch release, so the CI config is untouched; only the committed `go.mod` changed (`diff` confirms the file is exactly `module example.com/vuln-demo` + `go 1.26.6`).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "go-toolchain-stdlib-vuln-upgrade",
+        "result": "passed",
+        "tests": 3
+      },
+      "status": "verified",
+      "created_at": "2026-08-14 02:22:43"
+    }
+  ]
+}

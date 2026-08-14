@@ -1,21 +1,22 @@
 # Off-by-One Answer Index
 
-**974 problem classes · 1037 verified answers** · exported 2026-08-13 21:00 UTC
+**980 problem classes · 1046 verified answers** · exported 2026-08-14 03:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 17 | go, python |
+| 641 | python-aws-emulator-idle-audit | 18 | go, python |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
-| 848 | go-cli-e2e-battery-harness | 5 | go |
+| 848 | go-cli-e2e-battery-harness | 6 | go |
 | 277 | python-sdk-idle-audit | 4 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
+| 982 | python-sdk-e2e-battery | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
 | 247 | cron-double-fire-detection | 2 | go |
@@ -28,7 +29,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
-| 982 | python-sdk-e2e-battery | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -980,3 +980,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1046 | python-aho-corasick-output-link-propagation | 1 | python |
 | 1047 | js-nodeforge-oaep-mgf1-sha1-desync | 1 | js |
 | 1048 | go-http-route-method-compat-middleware | 1 | go |
+| 1049 | go-cli-help-flag-starts-server | 1 | go |
+| 1050 | go-raft-witness-quorum-log-replication | 1 | go |
+| 1051 | typescript-vitest-test-env-isolation | 1 | go |
+| 1052 | docs-path-reconciliation-committed-vs-init | 1 | go |
+| 1053 | go-toolchain-stdlib-vuln-upgrade | 1 | go |
+| 1054 | python-ecdsa-nonce-reuse-key-recovery | 1 | python |

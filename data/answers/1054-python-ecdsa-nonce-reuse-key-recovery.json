@@ -1,0 +1,24 @@
+{
+  "class_id": 1054,
+  "title": "python-ecdsa-nonce-reuse-key-recovery",
+  "description": "python-ecdsa-nonce-reuse-key-recovery",
+  "created_at": "2026-08-14 02:50:30",
+  "answers": [
+    {
+      "answer_id": 1213,
+      "language": "python",
+      "environment": "python3",
+      "version": "3.11",
+      "solution": "**The flaw.** The service computes `k = SHA256(b\"nonce:\" || len(msg)) mod n` instead of sampling fresh randomness. Any two *distinct* messages of the **same byte length** therefore reuse the same nonce `k`, and since `r = (k·G).x mod n`, both signatures share the same `r` — the fingerprint of nonce reuse.\n\n**The math.** For each signature, ECDSA gives `s = k⁻¹(z + r·d) mod n` where `z` is the message hash. With two signatures `(r, s1)`, `(r, s2)` over hashes `z1, z2` and a shared `k`:\n\n```\ns1 − s2 = k⁻¹(z1 − z2)          ⇒   k = (z1 − z2) · (s1 − s2)⁻¹   mod n\nd = (s1·k − z1) · r⁻¹           mod n\n```\n\n**The attack (recovery code):**\n\n```python\ndef recover_key(msg1, sig1, msg2, sig2):\n    r1, s1 = sig1\n    r2, s2 = sig2\n    assert r1 == r2, \"r differs: nonce was NOT reused\"\n    assert s1 != s2, \"s1 == s2: k indeterminate\"\n    z1, z2 = z_of(msg1), z_of(msg2)            # z = SHA256(msg) mod n\n    k = (z1 - z2) * pow((s1 - s2) % N, -1, N) % N\n    d = (s1 * k - z1) * pow(r1, -1, N) % N\n    return k, d\n```\n\n**Validation** (all in the script `/home/kara/ecdsa_nonce_reuse_recovery.py`, stdlib-only secp256k1 implementation):\n\n```python\nassert pubkey(d) == Q                       # d·G == public key\nassert verify(m1, sig1, Q) and verify(m2, sig2, Q)\n```\n\n**Hardening the service** (the actual fix): never derive `k` from message content or length. Use per-message fresh randomness from a CSPRNG (`secrets.randbelow(N-1)+1`), or RFC 6979 deterministic nonces (`k = HMAC-SHA256(d, z, ...)`), and add a sanity check that `r` was never seen before for that key.\n\n---",
+      "evidence": "Verified by running the script (Python 3.14.4 here; code is stdlib-only so it runs identically on 3.11). Live demo output, with `r` byte-identical across both signatures:\n\n```\nsignature 1 (r, s1) : (0xa3b4ffeb...49754, 0xa0a0b902...b413cb4)\nsignature 2 (r, s2) : (0xa3b4ffeb...49754, 0xc5666502...d70cc6)   <-- same r\nrecovered k = (z1-z2)/(s1-s2) : 0x1386323a...311d3cb\nrecovered d = (s1*k-z1)/r     : 0x928e3275...599797a\nd == d_recovered      : True\npubkey(d_rec) == Q    : True\nverify(m1, sig1, Q)   : True\nverify(m2, sig2, Q)   : True\n```\n\n**7/7 test cases passed:**\n\n| Test | What it proves |\n|---|---|\n| `test_basic_recovery` | Fixed key; two distinct same-length messages → `k` and `d` recovered exactly; `d·G == Q`; both sigs verify |\n| `test_recovered_key_is_functional` | Recovered key signs a fresh message that verifies under its pubkey |\n| `test_consistent_across_all_pairs` | All pairs from a 4-message batch sharing one nonce recover the same `d` |\n| `test_different_lengths_rejected` | Different lengths → different `r` → attack refuses with \"nonce not reused\" |\n| `test_identical_message_rejected` | Same message twice → `s1 == s2` → division-by-zero guarded, clear error |\n| `test_fuzz_random_rounds` | 25 random keys × random distinct equal-length messages → 100% recovery |\n| `test_length_edge_cases` | 1-byte pair, 1 MB messages, empty message; all recover / verify |\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "python-ecdsa-nonce-reuse-key-recovery",
+        "result": "passed",
+        "tests": 7
+      },
+      "status": "verified",
+      "created_at": "2026-08-14 02:50:30"
+    }
+  ]
+}

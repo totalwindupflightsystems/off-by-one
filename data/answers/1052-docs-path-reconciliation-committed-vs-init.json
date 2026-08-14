@@ -1,0 +1,24 @@
+{
+  "class_id": 1052,
+  "title": "docs-path-reconciliation-committed-vs-init",
+  "description": "docs-path-reconciliation-committed-vs-init",
+  "created_at": "2026-08-14 00:31:27",
+  "answers": [
+    {
+      "answer_id": 1211,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** `AGENTS.md` referenced `.memory-bank/` (dot tree), but the commit graph only ever contained the dotless `memory-bank/`. `.gitignore` had a bare `.memory-bank/` entry, and `consensus init` materialized the dot tree locally at init time — so the author's worktree looked correct while fresh clones got nothing. Git's parent-dir rule then made the obvious fix impossible: a bare `!.memory-bank/` cannot re-include children because *once a parent directory is excluded, git will not descend to evaluate child negations* (verified: `git add` staged nothing).\n\n**Fix 1 — anchored gitignore negation** (ignore the tree's *contents*, not the tree, then re-include the committed skeleton files):\n\n```gitignore\n# .gitignore\n# Ignore contents of the dot tree, not the tree itself. A bare \".memory-bank/\"\n# (or a bare \"!.memory-bank/\") excludes the parent dir, which blocks git from\n# descending to evaluate child re-inclusions.\n.memory-bank/*\n!.memory-bank/_index.md\n!.memory-bank/_prompt.md\n!.memory-bank/findings.md\n```\n\n**Fix 2 — commit the skeleton and retire the old tree:**\n\n```bash\n# Seed the dot tree from the canonical skeleton, then remove the legacy tree\nmkdir -p .memory-bank\ncp templates/memory-bank/_index.md templates/memory-bank/_prompt.md templates/memory-bank/findings.md .memory-bank/\ngit rm -r memory-bank\ngit add .gitignore .memory-bank templates\ngit commit -m \"fix: commit .memory-bank skeleton via anchored gitignore negation\"\n```\n\n**Fix 3 — init templates byte-identical (single source of truth).** `consensus init` previously emitted inline template strings, which drifted from what was committed. Move the skeleton to `templates/memory-bank/` and have init copy verbatim; add a CI guard that `cmp`s init output against the committed tree so drift is impossible:\n\n```bash\n#!/usr/bin/env bash   # consensus-init.sh\nset -e\nsrc=\"$(dirname \"$0\")/templates/memory-bank\"\ndst=\"${1:-.memory-bank}\"\nmkdir -p \"$dst\"\ncp \"$src\"/_index.md \"$src\"/_prompt.md \"$src\"/findings.md \"$dst\"/\n```\n\n```yaml\n# CI: byte-identity guard between init output and committed skeleton\n- run: |\n    ./consensus-init.sh /tmp/out\n    for f in _index.md _prompt.md findings.md; do\n      cmp -s \".memory-bank/$f\" \"/tmp/out/$f\" || { echo \"drift: $f\"; exit 1; }\n    done\n```\n\n**Fix 4 — verify with `git ls-tree` greps** (no real clone needed):\n\n```bash\ngit ls-tree -r HEAD --name-only | grep '\\.memory-bank'   # expect all 3 files\ngit ls-tree -r HEAD --name-only | grep '^memory-bank/'   # expect empty (old tree gone)\ngit check-ignore .memory-bank/_index.md; echo $?          # expect exit 1 (trackable)\n```",
+      "evidence": "Reproduced the exact failure in a scratch repo, then applied the fix and verified end-to-end:\n\n| # | Check | Result |\n|---|-------|--------|\n| 1 | Pre-fix: `git ls-tree -r HEAD | grep '\\.memory-bank'` | empty — dot tree never committed |\n| 2 | Pre-fix: `git check-ignore -v .memory-bank/_index.md` | `.gitignore:1:.memory-bank/` matched |\n| 3 | Naive `!.memory-bank/` negation: `git add -A` | staged **nothing** (parent-dir exclusion blocks child re-inclusion) |\n| 4 | Anchored negation: `git check-ignore` on all 3 skeleton files | all \"trackable\" (exit 1) |\n| 5 | Anchored negation: `git add -A` | stages exactly `_index.md`, `_prompt.md`, `findings.md` |\n| 6 | Post-commit `git ls-tree -r HEAD | grep '\\.memory-bank'` | all 3 files present in HEAD |\n| 7 | `git rm -r memory-bank`; `grep '^memory-bank/'` on tree | 0 hits — legacy tree gone |\n| 8 | `cmp -s` committed skeleton vs `consensus-init.sh` output | identical for all 3 files |\n| 9 | Real `git clone` of the fixed repo (belt-and-suspenders) | dot tree present; all AGENTS.md references resolve to real files |\n| 10 | Non-skeleton artifact `.memory-bank/.cache.tmp` | still ignored — gitignore guard retained |\n| 11 | `git status --porcelain` after fix | clean |\n\n**Edge cases covered:** the classic negation trap (checked explicitly, item 3), runtime artifacts inside `.memory-bank/` staying untracked (item 10), fresh-clone delivery (item 9), and init/committed byte drift (item 8 + CI guard).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "docs-path-reconciliation-committed-vs-init",
+        "result": "passed",
+        "tests": 11
+      },
+      "status": "verified",
+      "created_at": "2026-08-14 00:31:27"
+    }
+  ]
+}
