@@ -258,6 +258,11 @@ cp .env.example .env
 # Build
 go build ./cmd/off-by-one
 
+# Seed the bundled answer corpus into SQLite (fresh installs: discovery
+# works immediately instead of 404ing on an empty database; idempotent,
+# safe to re-run after corpus updates)
+./off-by-one seed
+
 # Run
 ./off-by-one
 ```
