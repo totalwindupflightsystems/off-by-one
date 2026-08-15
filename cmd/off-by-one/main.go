@@ -49,6 +49,15 @@ import (
 var version = "0.1.0-dev"
 
 func main() {
+	// `off-by-one seed` — one-shot corpus loader subcommand. Dispatched
+	// before the server flag set is parsed because it owns its own flags
+	// (issue #1: fresh installs need an import path from the bundled
+	// flat corpus before discovery can return anything).
+	if len(os.Args) > 1 && os.Args[1] == "seed" {
+		runSeed(os.Args[2:])
+		return
+	}
+
 	port := flag.Int("port", envInt("OFF_BY_ONE_PORT", 8766), "HTTP listen port")
 	host := flag.String("host", envString("OFF_BY_ONE_HOST", ""), "HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy)")
 	dbPath := flag.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path")
