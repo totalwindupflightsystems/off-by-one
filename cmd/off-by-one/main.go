@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -118,13 +119,19 @@ func main() {
 			sandboxExec = &sandbox.Executor{
 				BwrapPath:          *bwrapPath,
 				WorkDir:            os.TempDir(),
-				Timeout:            sandbox.DefaultBwrapTimeout,
+				Timeout:            sandboxTimeout(),
 				ExtraReadOnlyPaths: extraReadOnlyPaths(),
 			}
 			runner := solver.NewBSandboxRunner(sandboxExec)
 			apiKey := os.Getenv("DEEPSEEK_API_KEY")
 			if looksPlaceholderAPIKey(apiKey) {
-				log.Printf("WARNING: DEEPSEEK_API_KEY is empty or placeholder — all solves will fail with 401; set DEEPSEEK_API_KEY to a real key")
+				// Issue #1 pt 5: OpenRouter-only deployments must work too.
+				apiKey = os.Getenv("OPENROUTER_API_KEY")
+				if looksPlaceholderAPIKey(apiKey) {
+					log.Printf("WARNING: DEEPSEEK_API_KEY is empty or placeholder — all solves will fail with 401; set DEEPSEEK_API_KEY (or OPENROUTER_API_KEY) to a real key")
+				} else {
+					log.Printf("DEEPSEEK_API_KEY empty — using OPENROUTER_API_KEY for solves")
+				}
 			}
 			solverExec = solver.NewExecutor(solver.Config{
 				PiAgentPath: *piAgentPath,
@@ -260,15 +267,35 @@ func main() {
 	log.Printf("off-by-one shutdown complete")
 }
 
+// sandboxTimeout returns the per-solve bwrap cap. OB1_BWRAP_TIMEOUT
+// (seconds) overrides the 300s default for users whose solves legitimately
+// take longer (issue #1 pt 8). Invalid values fall back with a warning.
+func sandboxTimeout() time.Duration {
+	if raw := os.Getenv("OB1_BWRAP_TIMEOUT"); raw != "" {
+		if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+		log.Printf("warning: OB1_BWRAP_TIMEOUT=%q is not a positive integer — using default %s", raw, sandbox.DefaultBwrapTimeout)
+	}
+	return sandbox.DefaultBwrapTimeout
+}
+
 // --- env helpers --------------------------------------------------------
 
 // extraReadOnlyPaths returns the host paths mounted read-only into the
 // bwrap sandbox. $HOME/.local/bin is resolved at startup and included
 // only when it actually exists, so the binary works for any user (a
 // bind-mount of a missing path would fail sandbox creation). /tmp/pi
-// (pi-agent tooling) and /etc (DNS/TLS config) are always included.
+// (pi-agent tooling) is included only when present — a wiped or absent
+// /tmp/pi must never fail sandbox creation (issue #1 pt 9). /etc
+// (DNS/TLS config) is always included.
 func extraReadOnlyPaths() []string {
-	paths := []string{"/tmp/pi", "/etc"}
+	paths := []string{"/etc"}
+	if _, err := os.Stat("/tmp/pi"); err == nil {
+		paths = append(paths, "/tmp/pi")
+	} else {
+		log.Printf("note: /tmp/pi not present — skipping ro-bind (solver wrapper install location)")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return paths
