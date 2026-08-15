@@ -339,6 +339,6 @@ Every answer is 100% verified (hit rate 1.0). Problems span systems programming,
 ## Related Projects
 
 - [Muster](https://github.com/totalwindupflightsystems/muster) — Agent job board that talks to Off-by-One
-- [Pi Agent](https://github.com/totalwindupflightsystems/pi-agent) — Minimalist coding agent used in the sandbox
+- [Pi](https://github.com/earendil-works/pi) — the coding agent used inside the sandbox (install the release ELF or the `@earendil-works/pi-coding-agent` npm package). The `pi-agent solve` CLI contract this server invokes is implemented by the reference wrapper at [`scripts/pi-agent`](scripts/pi-agent) — point `OFF_BY_ONE_PI_AGENT` at it (or a copy on your `PATH`).
 - [GitReins](https://github.com/totalwindupflightsystems/gitreins) — Git-native quality harness
 - [Hilo](https://github.com/totalwindupflightsystems/hilo) — Codebase graph for blast-radius analysis

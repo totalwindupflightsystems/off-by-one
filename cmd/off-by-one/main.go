@@ -258,8 +258,17 @@ func main() {
 // only when it actually exists, so the binary works for any user (a
 // bind-mount of a missing path would fail sandbox creation). /tmp/pi
 // (pi-agent tooling) and /etc (DNS/TLS config) are always included.
+// /run/systemd/resolve (the target of /etc/resolv.conf on systemd-resolved
+// hosts) is included when present — /run is tmpfs'd by bwrap, so without
+// the bind the sandbox has no DNS; on hosts without systemd-resolved the
+// path simply doesn't exist and is skipped.
 func extraReadOnlyPaths() []string {
 	paths := []string{"/tmp/pi", "/etc"}
+	for _, p := range []string{"/run/systemd/resolve"} {
+		if st, serr := os.Stat(p); serr == nil && st.IsDir() {
+			paths = append([]string{p}, paths...)
+		}
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return paths

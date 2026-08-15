@@ -1,0 +1,232 @@
+#!/usr/bin/env node
+// pi-agent — Off-by-One solve bridge (reference implementation).
+//
+// Implements the CLI contract off-by-one's solver expects:
+//   pi-agent solve --problem-file P --output O --evidence E --signatures S --model M
+//
+// Reads the problem JSON, invokes the pi coding agent (earendil-works/pi,
+// https://github.com/earendil-works/pi — install the release ELF or the npm
+// package and point PI_BIN at it, default: next to this script, then
+// ~/.local/lib/pi/pi, then /tmp/pi/pi) with the configured provider/model,
+// and writes solution.md / evidence.md / signatures.json into the sandbox
+// workspace.
+//
+// Runs INSIDE the bwrap sandbox: /usr, /lib*, /bin, /etc, $HOME/.local/bin,
+// /tmp/pi and /run/systemd/resolve are ro-bind mounted, network is shared,
+// env is inherited (OPENROUTER_API_KEY passes through from the server
+// process).
+//
+// WHY SPAWN, NOT EXECFILE (field-tested 2026-08-15): pi blocks reading stdin
+// until EOF when stdin is not a TTY, and it distinguishes a real pipe from
+// /dev/null — stdin as a char device ('ignore') hangs it forever, while a
+// real pipe that reaches EOF works. execFile's stdio handling (ignore/input)
+// hangs pi at the full deadline; spawn + child.stdin.end() completes in
+// seconds. Do not "simplify" this back to execFile.
+//
+// Also strips TLS env vars (SSL_CERT_FILE / CURL_CA_BUNDLE) that point at
+// host-only paths (e.g. a Python venv certifi) — inside the bwrap sandbox
+// those files don't exist and TLS fails with "error setting certificate
+// file".
+
+'use strict';
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+// --- arg parsing -----------------------------------------------------
+function parseArgs(argv) {
+  const opts = {};
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a.startsWith('--')) {
+      const key = a.slice(2);
+      const val = argv[i + 1];
+      if (val !== undefined && !val.startsWith('--')) {
+        opts[key] = val;
+        i++;
+      } else {
+        opts[key] = true;
+      }
+    } else {
+      opts._rest = opts._rest || [];
+      opts._rest.push(a);
+    }
+  }
+  return opts;
+}
+
+// --- model mapping ---------------------------------------------------
+// The solver passes bare model IDs (solver.DefaultModel = deepseek-v4-flash).
+// pi needs a provider-qualified model; map bare ids here. Add entries as
+// needed for your provider.
+const MODEL_MAP = {
+  'deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash-0731',
+};
+
+function resolveModel(m) {
+  if (!m) return null;
+  if (MODEL_MAP[m]) return MODEL_MAP[m];
+  // Already provider-qualified (contains '/') → pass through.
+  if (m.includes('/')) return m;
+  return null;
+}
+
+// --- main ------------------------------------------------------------
+function main() {
+  const argv = process.argv.slice(2);
+  const cmd = argv[0];
+
+  if (cmd !== 'solve') {
+    process.stderr.write(
+      'pi-agent: off-by-one solve bridge\n' +
+        'usage: pi-agent solve --problem-file P --output O [--evidence E] [--signatures S] [--model M]\n' +
+        'env:   OPENROUTER_API_KEY (required)\n'
+    );
+    process.exit(cmd ? 2 : 0);
+  }
+
+  const opts = parseArgs(argv.slice(1));
+
+  const problemFile = opts['problem-file'];
+  const outputFile = opts['output'];
+  const evidenceFile = opts['evidence'];
+  const signaturesFile = opts['signatures'];
+  const modelArg = opts['model'] || 'deepseek-v4-flash';
+
+  if (!problemFile || !outputFile) {
+    process.stderr.write('pi-agent: --problem-file and --output are required\n');
+    process.exit(2);
+  }
+  if (!fs.existsSync(problemFile)) {
+    process.stderr.write(`pi-agent: problem file not found: ${problemFile}\n`);
+    process.exit(2);
+  }
+
+  const problem = JSON.parse(fs.readFileSync(problemFile, 'utf8'));
+  const model = resolveModel(modelArg);
+  if (!model) {
+    process.stderr.write(`pi-agent: cannot resolve model "${modelArg}" to a provider-qualified id\n`);
+    process.exit(2);
+  }
+
+  const apiKey = process.env.OPENROUTER_API_KEY || process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY;
+  if (!apiKey) {
+    process.stderr.write('pi-agent: no API key (set OPENROUTER_API_KEY / LLM_API_KEY / DEEPSEEK_API_KEY)\n');
+    process.exit(2);
+  }
+
+  // Build the solve prompt from the structured problem.
+  const parts = [];
+  parts.push(`# Problem class: ${problem.problem_class || 'unknown'}`);
+  if (problem.environment) parts.push(`- Environment: ${problem.environment}`);
+  if (problem.language) parts.push(`- Language: ${problem.language}`);
+  if (problem.version) parts.push(`- Version: ${problem.version}`);
+  if (problem.description) parts.push(`\n## Description\n${problem.description}`);
+  if (problem.error_message) parts.push(`\n## Error message\n${problem.error_message}`);
+  if (problem.stack_trace) parts.push(`\n## Stack trace / logs\n${problem.stack_trace}`);
+  if (problem.context && typeof problem.context === 'object' && Object.keys(problem.context).length) {
+    parts.push(`\n## Context\n${JSON.stringify(problem.context, null, 2)}`);
+  }
+  parts.push(
+    '\n## Task\n' +
+      'Diagnose this problem and produce a verified solution. Write the solution as markdown ' +
+      'with a title, root-cause analysis, the exact fix (code or commands), and a verification ' +
+      'section. Keep it self-contained and directly usable.'
+  );
+  const prompt = parts.join('\n');
+
+  // Locate the pi binary: $PI_BIN, same dir as this wrapper, then common
+  // install locations (host + sandbox ro-mount).
+  const candidates = [
+    process.env.PI_BIN,
+    path.join(__dirname, 'pi'),
+    path.join(__dirname, '..', 'lib', 'pi', 'pi'),
+    '/tmp/pi/pi',
+  ].filter(Boolean);
+  const piBin = candidates.find((c) => fs.existsSync(c));
+  if (!piBin) {
+    process.stderr.write('pi-agent: pi binary not found (looked in: ' + candidates.join(', ') + ')\n');
+    process.exit(2);
+  }
+
+  const piArgs = [
+    '--provider', 'openrouter',
+    '--model', model,
+    '--print',
+    prompt,
+  ];
+
+  const deadlineMs = 25 * 60 * 1000; // under the server's 30m solve timeout
+  const piEnv = { ...process.env };
+  delete piEnv.CURL_CA_BUNDLE;
+  delete piEnv.SSL_CERT_FILE;
+
+  // spawn + immediate stdin EOF — see header comment, do NOT switch to
+  // execFile (hangs pi forever).
+  const child = spawn(piBin, piArgs, {
+    env: piEnv,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  child.stdin.end();
+
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (d) => { stdout += d; });
+  child.stderr.on('data', (d) => { stderr += d; });
+
+  const timer = setTimeout(() => {
+    child.kill('SIGKILL');
+    process.stderr.write(`pi-agent: pi timed out after ${deadlineMs / 60000} min\n`);
+    process.exit(1);
+  }, deadlineMs);
+
+  child.on('error', (err) => {
+    clearTimeout(timer);
+    process.stderr.write(`pi-agent: pi failed to start: ${err.message}\n`);
+    process.exit(1);
+  });
+
+  child.on('close', (code, signal) => {
+    clearTimeout(timer);
+    if (code !== 0) {
+      process.stderr.write(`pi-agent: pi exited ${signal ? 'with signal ' + signal : 'with code ' + code}\n`);
+      if (stderr) process.stderr.write(String(stderr).slice(0, 2048) + '\n');
+      process.exit(1);
+    }
+
+    const solution = String(stdout).trim() || '# Solution\n(pi returned no output)';
+
+    fs.mkdirSync(path.dirname(outputFile), { recursive: true });
+    fs.writeFileSync(outputFile, solution + '\n');
+
+    if (evidenceFile) {
+      fs.mkdirSync(path.dirname(evidenceFile), { recursive: true });
+      fs.writeFileSync(evidenceFile,
+        '# Evidence\n' +
+        `- Problem class: ${problem.problem_class || 'unknown'}\n` +
+        `- Model: ${model}\n` +
+        `- Solved: ${new Date().toISOString()}\n` +
+        '- Verification: solution produced by pi in sandbox; see signatures.json\n'
+      );
+    }
+
+    if (signaturesFile) {
+      fs.mkdirSync(path.dirname(signaturesFile), { recursive: true });
+      fs.writeFileSync(signaturesFile, JSON.stringify({
+        problem_class: problem.problem_class || 'unknown',
+        description: problem.description || '',
+        environment: problem.environment || '',
+        language: problem.language || '',
+        version: problem.version || '',
+        model,
+        provider: 'openrouter',
+        solved_at: new Date().toISOString(),
+      }, null, 2) + '\n');
+    }
+
+    process.stdout.write(`pi-agent: solved ${problem.problem_class} via ${model}\n`);
+    process.exit(0);
+  });
+}
+
+main();

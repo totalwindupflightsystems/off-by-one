@@ -48,14 +48,17 @@ func TestExtraReadOnlyPaths_IncludesExistingLocalBin(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	paths := extraReadOnlyPaths()
-	if len(paths) != 3 {
-		t.Fatalf("paths: got %v, want 3 entries", paths)
+	want := expectedMounts(localBin)
+	if len(paths) != len(want) {
+		t.Fatalf("paths: got %v, want %d entries (%v)", paths, len(want), want)
 	}
 	if paths[0] != localBin {
 		t.Errorf("paths[0]: got %q, want %q", paths[0], localBin)
 	}
-	if paths[1] != "/tmp/pi" || paths[2] != "/etc" {
-		t.Errorf("static mounts: got %v, want [/tmp/pi /etc] after localBin", paths[1:])
+	for i, w := range want {
+		if paths[i] != w {
+			t.Errorf("paths[%d]: got %q, want %q", i, paths[i], w)
+		}
 	}
 }
 
@@ -67,11 +70,14 @@ func TestExtraReadOnlyPaths_SkipsMissingLocalBin(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	paths := extraReadOnlyPaths()
-	if len(paths) != 2 {
-		t.Fatalf("paths: got %v, want 2 entries", paths)
+	want := expectedMounts("")
+	if len(paths) != len(want) {
+		t.Fatalf("paths: got %v, want %d entries (%v)", paths, len(want), want)
 	}
-	if paths[0] != "/tmp/pi" || paths[1] != "/etc" {
-		t.Errorf("paths: got %v, want [/tmp/pi /etc]", paths)
+	for i, w := range want {
+		if paths[i] != w {
+			t.Errorf("paths[%d]: got %q, want %q", i, paths[i], w)
+		}
 	}
 }
 
@@ -88,7 +94,51 @@ func TestExtraReadOnlyPaths_SkipsFileLocalBin(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	paths := extraReadOnlyPaths()
-	if len(paths) != 2 {
-		t.Fatalf("paths: got %v, want 2 entries (file .local/bin skipped)", paths)
+	want := expectedMounts("")
+	if len(paths) != len(want) {
+		t.Fatalf("paths: got %v, want %d entries (file .local/bin skipped; %v)", paths, len(want), want)
 	}
+}
+
+// TestExtraReadOnlyPaths_IncludesResolverWhenPresent asserts that
+// /run/systemd/resolve (the target of /etc/resolv.conf on systemd-resolved
+// hosts) is mounted when the directory exists — bwrap tmpfs's /run, so
+// without the bind the sandbox has no DNS.
+func TestExtraReadOnlyPaths_IncludesResolverWhenPresent(t *testing.T) {
+	if _, err := os.Stat("/run/systemd/resolve"); err != nil || !isDir("/run/systemd/resolve") {
+		t.Skip("/run/systemd/resolve not present on this host")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	paths := extraReadOnlyPaths()
+	found := false
+	for _, p := range paths {
+		if p == "/run/systemd/resolve" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("paths: %v — want /run/systemd/resolve included when the dir exists", paths)
+	}
+}
+
+// expectedMounts returns the mount set extraReadOnlyPaths should produce
+// for the given (possibly empty) localBin path, mirroring the function's
+// ordering: resolver (if present), localBin (if present), /tmp/pi, /etc.
+func expectedMounts(localBin string) []string {
+	paths := []string{"/tmp/pi", "/etc"}
+	if isDir("/run/systemd/resolve") {
+		paths = append([]string{"/run/systemd/resolve"}, paths...)
+	}
+	if localBin != "" {
+		paths = append([]string{localBin}, paths...)
+	}
+	return paths
+}
+
+func isDir(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
 }
