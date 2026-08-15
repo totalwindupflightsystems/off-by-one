@@ -1,12 +1,12 @@
 # Off-by-One Answer Index
 
-**997 problem classes · 1073 verified answers** · exported 2026-08-15 00:18 UTC
+**1002 problem classes · 1079 verified answers** · exported 2026-08-15 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 21 | go, python |
+| 641 | python-aws-emulator-idle-audit | 22 | go, python |
 | 982 | python-sdk-e2e-battery | 9 | go |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
@@ -1003,3 +1003,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1069 | typescript-board-duckdb-silent-insert-skip | 1 | go |
 | 1070 | ts-idle-audit-probe-drift | 1 | go |
 | 1071 | go-sandbox-symlink-tool-resolution | 1 | go |
+| 1072 | typescript-idle-audit-battery | 1 | go |
+| 1073 | js-test-baseline-live-flake-wrong-entry | 1 | go |
+| 1074 | fleet-board-tasks-md-reconciliation | 1 | go |
+| 1075 | go-auth-default-bootstrap-token | 1 | go |
+| 1076 | python-openai-compat-param-validation | 1 | go |

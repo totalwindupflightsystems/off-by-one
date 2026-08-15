@@ -1,0 +1,24 @@
+{
+  "class_id": 1073,
+  "title": "js-test-baseline-live-flake-wrong-entry",
+  "description": "js-test-baseline-live-flake-wrong-entry",
+  "created_at": "2026-08-15 01:01:53",
+  "answers": [
+    {
+      "answer_id": 1242,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** `known-fails.txt` is the regression gate's baseline: a failing live test is only tolerated when its **exact fullName** has a baseline entry. A previous fix baselined the wrong test — `MiMo anti-abuse gate` (it happened to return 400 during a local flake probe, while `MiMo bootstrap` PASSED in that same probe run). The probe masked the real CI failure: `test/live/mimo.spec.ts > MiMo bootstrap` was failing in CI, unbaselined, so the gate kept tripping (PM reopened 3×). Because the wrong entry still resolved to a *known* test, baseline validation (88/88 known) passed — the wrongness was invisible to the validator.\n\n**The fix.** Baseline the missing live test, using the sibling entry's precedent for exact fullName format (`<file> > <test title>`), and make the gate match failures against the baseline by exact fullName only:\n\n```diff\n--- a/known-fails.txt\n+++ b/known-fails.txt\n@@\n test/live/provider83.spec.ts > provider83 live call\n-test/live/mimo.spec.ts > MiMo anti-abuse gate      # WRONG: not the CI-failing test\n test/live/mimo.spec.ts > MiMo tokenizer\n test/live/mimo.spec.ts > MiMo streaming\n test/live/gemini.spec.ts > Gemini quota exceeded\n test/live/openai.spec.ts > OpenAI rate limit\n+test/live/mimo.spec.ts > MiMo bootstrap            # the missing CI-failing live test\n```\n\nGate logic that enforces it (and would have caught the original mistake):\n\n```js\n// gate.mjs — the guard\nconst baseline = new Set(readBaseline(\"known-fails.txt\"));  // exact fullNames\nconst failures = results.filter(r => r.status === \"fail\");\n\n// 1) Every baseline entry must resolve to a KNOWN test fullName (88/88 known)\nfor (const entry of baseline)\n  if (!suiteFullNames.has(entry)) fail(`orphan/unknown baseline: ${entry}`);\n\n// 2) Every CI failure must be guarded by an EXACT fullName entry — no\n//    substring/title matching (\"MiMo\" or \"gate\" must never guard a sibling).\nconst unguarded = failures.filter(f => !baseline.has(f.fullName));\nif (unguarded.length) throw new Error(`unbaselined failures:\\n` + unguarded.join(\"\\n\"));\n```\n\n**Lesson encoded as process:** before closing a regression-gate task, assert `baseline.has(failingTest.fullName)` — the entry must **match the failing test's fullName**, not merely name a test that also flaked in a probe.\n\n---",
+      "evidence": "Built a faithful simulation (`/tmp/mimo-demo/`): 88-entry baseline, live suite with MiMo bootstrap failing in CI, probe showing bootstrap PASS / gate 400 (the trap), and the gate script with exact-match guarding.\n\n| Run | Baseline | Result |\n|---|---|---|\n| Before fix, exact gate | 88/88 known | **FAIL** (exit 1): `✗ test/live/mimo.spec.ts > MiMo bootstrap` unguarded; sibling entries listed but none match |\n| **After fix, exact gate** | **88/88 known** | **PASS** (exit 0): all 4 CI failures guarded |\n| Edge: typo'd entry `MiMo tokenizr` | 88/89 known | **FAIL** (exit 2): orphan entry flagged by validation |\n| Edge: stale guard (baselined test passes) | 88/88 known | PASS — flaky pass is tolerated (guard PASS) |\n| Edge: empty/zero-test results | 0/88 known | FAIL loudly (exit 2) — never silently green on a broken run |\n\nKey proof point: in the *before* state validation reports 88/88 known **yet the gate fails** — exactly the \"baselined the wrong test, everything looks fine\" symptom that misled the PM into reopening 3×. After the one-line baseline fix (swap wrong entry → `MiMo bootstrap`), the identical suite goes green with bootstrap guarded.\n\n---",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "js-test-baseline-live-flake-wrong-entry",
+        "result": "passed",
+        "tests": 88
+      },
+      "status": "verified",
+      "created_at": "2026-08-15 01:01:53"
+    }
+  ]
+}
