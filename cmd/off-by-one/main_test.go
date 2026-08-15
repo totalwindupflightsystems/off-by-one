@@ -131,3 +131,32 @@ func TestSandboxTimeout(t *testing.T) {
 		t.Fatalf("negative: got %s, want default %s", got, sandbox.DefaultBwrapTimeout)
 	}
 }
+
+// TestExtraReadOnlyPaths_IncludesResolverWhenPresent asserts that
+// /run/systemd/resolve (the target of /etc/resolv.conf on systemd-resolved
+// hosts) is mounted when the directory exists — bwrap tmpfs's /run, so
+// without the bind the sandbox has no DNS.
+func TestExtraReadOnlyPaths_IncludesResolverWhenPresent(t *testing.T) {
+	if _, err := os.Stat("/run/systemd/resolve"); err != nil || !isDir("/run/systemd/resolve") {
+		t.Skip("/run/systemd/resolve not present on this host")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	paths := extraReadOnlyPaths()
+	found := false
+	for _, p := range paths {
+		if p == "/run/systemd/resolve" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("paths: %v — want /run/systemd/resolve included when the dir exists", paths)
+	}
+}
+
+func isDir(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && st.IsDir()
+}
