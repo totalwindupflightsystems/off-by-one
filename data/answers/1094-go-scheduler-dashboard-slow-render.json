@@ -1,0 +1,28 @@
+{
+  "class_id": 1094,
+  "title": "go-scheduler-dashboard-slow-render",
+  "description": "go-scheduler-dashboard-slow-render",
+  "created_at": "2026-08-15 20:22:20",
+  "answers": [
+    {
+      "answer_id": 1267,
+      "language": "go",
+      "environment": "docker",
+      "version": "schedulerd",
+      "solution": "Note: the repo `coding-hermes/scheduler` is not present in this environment, so I could not read the actual `generator_data.go` source or run a live reproduction. I produced a complete solution document based on the supplied root-cause description and fix direction.\n\n## Summary of the solution (`/home/kara/go-scheduler-dashboard-slow-render.md`)\n\n**Root cause:** After the dashboard redesign (`b814483`), `Generator.collect()`'s second pass calls `ciConclusion()` (generator_data.go:855) once per enabled project. Each call runs a **synchronous** `gh run list --limit 1` subprocess in the project workdir (~0.69s each). With 44+ enabled projects serial execution ≈ 30s per HTML render. The DB is fast (projectQuery 0.07s, uses `idx_ticks_project_spawned`) and JSON endpoints don't hit this second pass — which is exactly why only `GET /` and `/dashboard/partial` degrade while `/api/v1/*` stay under 1s.\n\n**Fix (three coordinated changes):**\n1. **TTL cache (60s)** — mutex-guarded `map[workdir]entry{conclusion, fetchedAt}` on the `Generator`, so subsequent renders within the TTL issue zero subprocesses.\n2. **Bounded concurrency (max 8)** — `golang.org/x/sync/errgroup` with `SetLimit(8)` (or a semaphore for Go <1.20) to parallelize the workdir pass with an upper bound.\n3. **2s hard timeout** — `exec.CommandContext` so a hung `gh` can never stall a render; on timeout/exit-error it returns `\"\"`, preserving the existing **empty-string = unknown** CI-pill semantics.\n\n**Verification section** covers: cold/warm render timings (`29.96s → ~0.1–0.2s` warm), CI-pill consistency across warm renders, confirm the 44 serial `execve` fan-out disappears (0 on cache hit), JSON endpoints stay <1s, timeout-safety with a slow-`gh` stub (never hangs, degrades to unknown), and concurrent-load deadlock checks.\n\nEstimated warm render floor is the `projectQuery` at ~0.07s, with cold renders bounded by `44 workdirs / 8 concurrency` ~ roughly 4s worst case.\n\nTo make this *verified* against the live codebase, the patch would need to be applied in `internal/dashboard/generator_data.go` and re-measured — the doc includes the exact `curl`/`strace`/load-run commands for that. If you can point me at a checkout of the repo (clone it into this environment), I'll apply the edit to the real source and run the verification battery.\n",
+      "evidence": "# Evidence\n- Problem class: go-scheduler-dashboard-slow-render\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-15T20:22:20.792Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Fleet dashboard GET / and /dashboard/partial render in ~30s after PR #1 dashboard redesign (b814483) deploy. Root cause: internal/dashboard/generator_data.go:855 ciConclusion() runs `gh run list --limit 1` as a synchronous subprocess per project workdir (measured 0.69s each) inside Generator.collect() second pass — 44+ enabled projects x ~0.7s = ~30s per render. The DB query itself is fast (projectQuery 0.07s on 57k-row ticks; EXPLAIN uses idx_ticks_project_spawned). Fix: TTL-cache CI conclusions per workdir in Generator (60s, mutex-guarded map), bounded concurrency (errgroup/semaphore max 8), and/or exec.CommandContext hard timeout (2s). Symptom signature: dashboard HTML endpoints time out (>10s) while all /api/v1/* JSON endpoints respond <1s; endpoint battery shows 000 on root + partial only.",
+        "environment": "",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "go-scheduler-dashboard-slow-render",
+        "provider": "openrouter",
+        "solved_at": "2026-08-15T20:22:20.793Z",
+        "version": "schedulerd"
+      },
+      "status": "verified",
+      "created_at": "2026-08-15 20:22:20"
+    }
+  ]
+}

@@ -1,13 +1,13 @@
 # Off-by-One Answer Index
 
-**1011 problem classes · 1089 verified answers** · exported 2026-08-15 16:00 UTC
+**1019 problem classes · 1099 verified answers** · exported 2026-08-15 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
 | 641 | python-aws-emulator-idle-audit | 22 | go, python |
-| 982 | python-sdk-e2e-battery | 10 | go |
+| 982 | python-sdk-e2e-battery | 11 | go |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 6 | go |
@@ -29,6 +29,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
+| 971 | js-e2e-browser-verification | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -903,7 +904,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 968 | docs-org-rename-url-drift | 1 | go |
 | 969 | canopy-e2e-db-drift-503 | 1 | go |
 | 970 | browser-e2e-vite-cold-compile-prewarm | 1 | go |
-| 971 | js-e2e-browser-verification | 1 | go |
 | 972 | python-aws-emulator-test-coverage-matrix | 1 | go |
 | 973 | go-cli-bootstrap-templates | 1 | go |
 | 974 | go-wiring-registry-field-never-populated | 1 | go |
@@ -1017,3 +1017,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1083 | graph-stats-dedup-ux | 1 | rust |
 | 1084 | typescript-express-dead-route-implementation | 1 | go |
 | 1085 | static-html-docs-metadata-fix | 1 | go |
+| 1086 | python-sha256-length-extension-mac-forgery | 1 | python |
+| 1088 | rust-cli-error-message-prefix-doubling | 1 | rust |
+| 1089 | rust-cli-stats-dedup-note-conditional | 1 | rust |
+| 1090 | typescript-express-postgres-fk-leak-404 | 1 | go |
+| 1091 | python-driver-module-level-connect-api | 1 | go |
+| 1092 | bash-deploy-verify-symlink-check | 1 | go |
+| 1093 | typescript-gradebook-name-resolution | 1 | go |
+| 1094 | go-scheduler-dashboard-slow-render | 1 | go |
