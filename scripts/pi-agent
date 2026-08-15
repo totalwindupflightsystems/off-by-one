@@ -5,11 +5,12 @@
 //   pi-agent solve --problem-file P --output O --evidence E --signatures S --model M
 //
 // Reads the problem JSON, invokes the pi coding agent (earendil-works/pi,
-// https://github.com/earendil-works/pi — install the release ELF or the npm
-// package and point PI_BIN at it, default: next to this script, then
-// ~/.local/lib/pi/pi, then /tmp/pi/pi) with the configured provider/model,
-// and writes solution.md / evidence.md / signatures.json into the sandbox
-// workspace.
+// https://github.com/earendil-works/pi — install the release ELF or the
+// npm package and point PI_BIN at it, default: next to this script, then
+// ~/.local/lib/pi/pi, then /tmp/pi/pi, then the npm layout under
+// $PI_HOME//tmp/pi/~/.local/share/pi/~/.pi) with the configured
+// provider/model, and writes solution.md / evidence.md / signatures.json
+// into the sandbox workspace.
 //
 // Runs INSIDE the bwrap sandbox: /usr, /lib*, /bin, /etc, $HOME/.local/bin,
 // /tmp/pi and /run/systemd/resolve are ro-bind mounted, network is shared,
@@ -27,10 +28,18 @@
 // host-only paths (e.g. a Python venv certifi) — inside the bwrap sandbox
 // those files don't exist and TLS fails with "error setting certificate
 // file".
+//
+// Hardening folded in from the upstream issue #1 solver-chain work:
+// $PI_MODEL verbatim override, placeholder-key detection (isUsableKey),
+// provider env hygiene (the losing provider's key is dropped — pi resolves
+// `deepseek/deepseek-v4-flash` by which key is present), --api-key
+// propagation, and PI_CODING_AGENT_DIR isolation (a stale ~/.pi/agent
+// store makes pi skip env-key auth for providers not in the store).
 
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 const { spawn } = require('child_process');
 
 // --- arg parsing -----------------------------------------------------
@@ -63,11 +72,59 @@ const MODEL_MAP = {
   'deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash-0731',
 };
 
+/**
+ * isUsableKey reports whether a key looks like a real provider key
+ * rather than empty/placeholder content. Placeholder-shaped values
+ * (like the ones in .env.example) must never steer model selection.
+ */
+function isUsableKey(value) {
+  if (!value) return false;
+  const k = String(value).trim();
+  if (k.length < 20) return false;
+  const lower = k.toLowerCase();
+  const markers = ['your', 'changeme', 'change-me', 'placeholder', 'example', 'dummy', 'todo', 'insert'];
+  return !markers.some((m) => lower.includes(m));
+}
+
 function resolveModel(m) {
+  // $PI_MODEL wins verbatim (caller's override).
+  if (process.env.PI_MODEL && process.env.PI_MODEL.trim() !== '') {
+    return process.env.PI_MODEL.trim();
+  }
   if (!m) return null;
   if (MODEL_MAP[m]) return MODEL_MAP[m];
   // Already provider-qualified (contains '/') → pass through.
   if (m.includes('/')) return m;
+  return null;
+}
+
+// --- pi binary discovery ---------------------------------------------
+// ELF installs first (matches the live lab layout), then the npm layout
+// (packages/coding-agent/dist/cli.js under $PI_HOME//tmp/pi/home dirs).
+function findPiBin() {
+  const elfCandidates = [
+    process.env.PI_BIN,
+    path.join(__dirname, 'pi'),
+    path.join(__dirname, '..', 'lib', 'pi', 'pi'),
+    '/tmp/pi/pi',
+  ].filter(Boolean);
+  for (const c of elfCandidates) {
+    if (fs.existsSync(c)) return { bin: c, isJs: false };
+  }
+  const jsCandidates = [];
+  if (process.env.PI_HOME && process.env.PI_HOME.trim() !== '') {
+    jsCandidates.push(path.join(process.env.PI_HOME.trim(), 'packages', 'coding-agent', 'dist', 'cli.js'));
+  }
+  jsCandidates.push(path.join('/tmp/pi', 'packages', 'coding-agent', 'dist', 'cli.js'));
+  try {
+    jsCandidates.push(path.join(os.homedir(), '.local', 'share', 'pi', 'packages', 'coding-agent', 'dist', 'cli.js'));
+    jsCandidates.push(path.join(os.homedir(), '.pi', 'packages', 'coding-agent', 'dist', 'cli.js'));
+  } catch {
+    /* homedir unavailable — skip home candidates */
+  }
+  for (const c of jsCandidates) {
+    if (fs.existsSync(c)) return { bin: c, isJs: true };
+  }
   return null;
 }
 
@@ -79,8 +136,8 @@ function main() {
   if (cmd !== 'solve') {
     process.stderr.write(
       'pi-agent: off-by-one solve bridge\n' +
-        'usage: pi-agent solve --problem-file P --output O [--evidence E] [--signatures S] [--model M]\n' +
-        'env:   OPENROUTER_API_KEY (required)\n'
+        'usage: pi-agent solve --problem-file P --output O [--evidence E] [--signatures S] [--model M] [--api-key K]\n' +
+        'env:   OPENROUTER_API_KEY (required), PI_MODEL (optional override), PI_BIN / PI_HOME (pi install)\n'
     );
     process.exit(cmd ? 2 : 0);
   }
@@ -109,9 +166,29 @@ function main() {
     process.exit(2);
   }
 
-  const apiKey = process.env.OPENROUTER_API_KEY || process.env.LLM_API_KEY || process.env.DEEPSEEK_API_KEY;
-  if (!apiKey) {
-    process.stderr.write('pi-agent: no API key (set OPENROUTER_API_KEY / LLM_API_KEY / DEEPSEEK_API_KEY)\n');
+  // Key selection with placeholder detection: a placeholder-looking value
+  // must never be treated as a real key.
+  const envKeys = [process.env.OPENROUTER_API_KEY, process.env.LLM_API_KEY, process.env.DEEPSEEK_API_KEY];
+  const usableKey = envKeys.find((k) => isUsableKey(k));
+  if (opts['api-key']) {
+    // --api-key wins over env.
+    if (!isUsableKey(opts['api-key'])) {
+      process.stderr.write('pi-agent: --api-key looks like a placeholder, refusing to use it\n');
+      process.exit(2);
+    }
+  } else if (!usableKey) {
+    process.stderr.write(
+      'pi-agent: no usable API key (set OPENROUTER_API_KEY / LLM_API_KEY / DEEPSEEK_API_KEY)\n'
+    );
+    process.exit(2);
+  }
+
+  const piBin = findPiBin();
+  if (!piBin) {
+    process.stderr.write(
+      'pi-agent: pi binary not found — install from https://github.com/earendil-works/pi/releases ' +
+        '(ELF at /tmp/pi/pi or $PI_BIN, or clone the npm layout to /tmp/pi / $PI_HOME)\n'
+    );
     process.exit(2);
   }
 
@@ -135,35 +212,57 @@ function main() {
   );
   const prompt = parts.join('\n');
 
-  // Locate the pi binary: $PI_BIN, same dir as this wrapper, then common
-  // install locations (host + sandbox ro-mount).
-  const candidates = [
-    process.env.PI_BIN,
-    path.join(__dirname, 'pi'),
-    path.join(__dirname, '..', 'lib', 'pi', 'pi'),
-    '/tmp/pi/pi',
-  ].filter(Boolean);
-  const piBin = candidates.find((c) => fs.existsSync(c));
-  if (!piBin) {
-    process.stderr.write('pi-agent: pi binary not found (looked in: ' + candidates.join(', ') + ')\n');
-    process.exit(2);
-  }
-
-  const piArgs = [
-    '--provider', 'openrouter',
-    '--model', model,
-    '--print',
-    prompt,
-  ];
-
-  const deadlineMs = 25 * 60 * 1000; // under the server's 30m solve timeout
+  // --- env hygiene ---
   const piEnv = { ...process.env };
   delete piEnv.CURL_CA_BUNDLE;
   delete piEnv.SSL_CERT_FILE;
 
+  if (opts['api-key']) {
+    // Propagate the explicit key to every provider var pi could read.
+    piEnv.OPENAI_API_KEY = opts['api-key'];
+    if (model.includes('openrouter')) {
+      piEnv.OPENROUTER_API_KEY = opts['api-key'];
+    } else {
+      piEnv.DEEPSEEK_API_KEY = opts['api-key'];
+    }
+  }
+  // Provider env hygiene: `deepseek/deepseek-v4-flash` is registered under
+  // BOTH the deepseek and openrouter registries — pi resolves by which key
+  // is present, so the losing key must not leak into the sandbox env.
+  if (model.includes('openrouter')) {
+    delete piEnv.DEEPSEEK_API_KEY;
+  } else if (model.startsWith('deepseek/')) {
+    delete piEnv.OPENROUTER_API_KEY;
+  }
+
+  // PI_CODING_AGENT_DIR isolation: a stale ~/.pi/agent store (from ANY
+  // prior pi usage, e.g. `pi login` for another provider) makes pi skip
+  // env-key auth for providers not in the store — "No API key found for
+  // deepseek" even with DEEPSEEK_API_KEY set. The bwrap sandbox never
+  // hits this (clean HOME), so mirror that: point PI_CODING_AGENT_DIR at
+  // a fresh temp dir unless the caller set it explicitly.
+  if (!piEnv.PI_CODING_AGENT_DIR) {
+    piEnv.PI_CODING_AGENT_DIR = path.join(
+      os.tmpdir(),
+      'pi-agent-' + (typeof process.getuid === 'function' ? process.getuid() : 'user')
+    );
+    try {
+      fs.mkdirSync(piEnv.PI_CODING_AGENT_DIR, { recursive: true });
+    } catch {
+      /* non-fatal: pi falls back to the default dir */
+    }
+  }
+
+  const deadlineMs = 25 * 60 * 1000; // under the server's 30m solve timeout
+
+  const piArgs = ['--provider', 'openrouter', '--model', model, '--print', prompt];
+  // npm-layout installs run under node; ELF installs run directly.
+  const childBin = piBin.isJs ? process.execPath : piBin.bin;
+  const childArgs = piBin.isJs ? [piBin.bin, ...piArgs] : piArgs;
+
   // spawn + immediate stdin EOF — see header comment, do NOT switch to
   // execFile (hangs pi forever).
-  const child = spawn(piBin, piArgs, {
+  const child = spawn(childBin, childArgs, {
     env: piEnv,
     stdio: ['pipe', 'pipe', 'pipe'],
   });

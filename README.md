@@ -198,6 +198,43 @@ go run ./cmd/off-by-one --help
 | `--solve-timeout` | Per-solve timeout cap (env `OFF_BY_ONE_SOLVE_TIMEOUT`) |
 | `--version` | Print version and exit |
 
+## Solver chain (solving)
+
+Actually solving submitted problems (not just browsing pre-verified answers) requires three pieces on the host: **bubblewrap**, the upstream **Pi** coding agent, and the shipped **pi-agent wrapper**.
+
+> **bwrap is a hard requirement.** Without it the server runs in catalog mode — `POST /api/v1/problems/submit` returns `503 solver_unavailable` and the cron loop never starts. Install it first:
+>
+> ```bash
+> sudo apt install bubblewrap
+> ```
+
+**1. Install Pi** — the real upstream is [github.com/earendil-works/pi](https://github.com/earendil-works/pi) (the agent the sandbox solves with):
+
+```bash
+git clone https://github.com/earendil-works/pi /tmp/pi
+cd /tmp/pi && npm install --ignore-scripts && npm run build
+```
+
+The wrapper searches for the install in this order: `$PI_HOME`, `/tmp/pi`, `~/.local/share/pi`, `~/.pi`. Set `PI_HOME` if you install it anywhere else.
+
+**2. Put the reference wrapper on your PATH** — the server execs `pi-agent solve …` inside the sandbox:
+
+```bash
+ln -s "$(pwd)/scripts/pi-agent" ~/.local/bin/pi-agent   # or: cp scripts/pi-agent ~/.local/bin/
+```
+
+**3. Configure the model + credentials:**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DEEPSEEK_API_KEY` | Yes\* | Primary solver key (DeepSeek provider) |
+| `OPENROUTER_API_KEY` | No | Fallback solver key — used automatically when no usable DeepSeek key is set |
+| `PI_MODEL` | No | Model override passed to pi verbatim, e.g. `anthropic/claude-sonnet-4-20250514` |
+
+\* Either `DEEPSEEK_API_KEY` or `OPENROUTER_API_KEY` must be set for solves to authenticate. The wrapper resolves the model per the available key: `deepseek-v4-flash` → `deepseek/deepseek-v4-flash` (DeepSeek key present) or `openrouter/deepseek/deepseek-v4-flash-0731` (OpenRouter-only). Because `deepseek/deepseek-v4-flash` is registered under both the deepseek and openrouter providers in pi's model registry, the wrapper **drops the losing provider's key from the solve environment** so pi resolves the intended provider.
+
+**Solve times:** solves legitimately take **1–5+ minutes** (pi searches, fetches docs, reflects, then answers), and hard problems can run longer. The bwrap sandbox caps each solve at **300s** by default — raise it with `OB1_BWRAP_TIMEOUT=<seconds>` (e.g. `OB1_BWRAP_TIMEOUT=900` for a 15-minute cap) if you routinely solve long-running problems.
+
 ## Development
 
 ### Prerequisites
@@ -220,6 +257,11 @@ cp .env.example .env
 
 # Build
 go build ./cmd/off-by-one
+
+# Seed the bundled answer corpus into SQLite (fresh installs: discovery
+# works immediately instead of 404ing on an empty database; idempotent,
+# safe to re-run after corpus updates)
+./off-by-one seed
 
 # Run
 ./off-by-one

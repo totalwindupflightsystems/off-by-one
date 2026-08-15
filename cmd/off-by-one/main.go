@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -49,6 +50,15 @@ import (
 var version = "0.1.0-dev"
 
 func main() {
+	// `off-by-one seed` — one-shot corpus loader subcommand. Dispatched
+	// before the server flag set is parsed because it owns its own flags
+	// (issue #1: fresh installs need an import path from the bundled
+	// flat corpus before discovery can return anything).
+	if len(os.Args) > 1 && os.Args[1] == "seed" {
+		runSeed(os.Args[2:])
+		return
+	}
+
 	port := flag.Int("port", envInt("OFF_BY_ONE_PORT", 8766), "HTTP listen port")
 	host := flag.String("host", envString("OFF_BY_ONE_HOST", ""), "HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy)")
 	dbPath := flag.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path")
@@ -109,13 +119,19 @@ func main() {
 			sandboxExec = &sandbox.Executor{
 				BwrapPath:          *bwrapPath,
 				WorkDir:            os.TempDir(),
-				Timeout:            sandbox.DefaultBwrapTimeout,
+				Timeout:            sandboxTimeout(),
 				ExtraReadOnlyPaths: extraReadOnlyPaths(),
 			}
 			runner := solver.NewBSandboxRunner(sandboxExec)
 			apiKey := os.Getenv("DEEPSEEK_API_KEY")
 			if looksPlaceholderAPIKey(apiKey) {
-				log.Printf("WARNING: DEEPSEEK_API_KEY is empty or placeholder — all solves will fail with 401; set DEEPSEEK_API_KEY to a real key")
+				// Issue #1 pt 5: OpenRouter-only deployments must work too.
+				apiKey = os.Getenv("OPENROUTER_API_KEY")
+				if looksPlaceholderAPIKey(apiKey) {
+					log.Printf("WARNING: DEEPSEEK_API_KEY is empty or placeholder — all solves will fail with 401; set DEEPSEEK_API_KEY (or OPENROUTER_API_KEY) to a real key")
+				} else {
+					log.Printf("DEEPSEEK_API_KEY empty — using OPENROUTER_API_KEY for solves")
+				}
 			}
 			solverExec = solver.NewExecutor(solver.Config{
 				PiAgentPath: *piAgentPath,
@@ -251,19 +267,38 @@ func main() {
 	log.Printf("off-by-one shutdown complete")
 }
 
+// sandboxTimeout returns the per-solve bwrap cap. OB1_BWRAP_TIMEOUT
+// (seconds) overrides the 300s default for users whose solves legitimately
+// take longer (issue #1 pt 8). Invalid values fall back with a warning.
+func sandboxTimeout() time.Duration {
+	if raw := os.Getenv("OB1_BWRAP_TIMEOUT"); raw != "" {
+		if secs, err := strconv.Atoi(raw); err == nil && secs > 0 {
+			return time.Duration(secs) * time.Second
+		}
+		log.Printf("warning: OB1_BWRAP_TIMEOUT=%q is not a positive integer — using default %s", raw, sandbox.DefaultBwrapTimeout)
+	}
+	return sandbox.DefaultBwrapTimeout
+}
+
 // --- env helpers --------------------------------------------------------
 
 // extraReadOnlyPaths returns the host paths mounted read-only into the
 // bwrap sandbox. $HOME/.local/bin is resolved at startup and included
 // only when it actually exists, so the binary works for any user (a
 // bind-mount of a missing path would fail sandbox creation). /tmp/pi
-// (pi-agent tooling) and /etc (DNS/TLS config) are always included.
-// /run/systemd/resolve (the target of /etc/resolv.conf on systemd-resolved
-// hosts) is included when present — /run is tmpfs'd by bwrap, so without
-// the bind the sandbox has no DNS; on hosts without systemd-resolved the
-// path simply doesn't exist and is skipped.
+// (pi-agent tooling) is included only when present — a wiped or absent
+// /tmp/pi must never fail sandbox creation (issue #1 pt 9). /etc
+// (DNS/TLS config) is always included. /run/systemd/resolve (the target
+// of /etc/resolv.conf on systemd-resolved hosts) is included when present —
+// /run is tmpfs'd by bwrap, so without the bind the sandbox has no DNS; on
+// hosts without systemd-resolved the path simply doesn't exist and is skipped.
 func extraReadOnlyPaths() []string {
-	paths := []string{"/tmp/pi", "/etc"}
+	paths := []string{"/etc"}
+	if _, err := os.Stat("/tmp/pi"); err == nil {
+		paths = append(paths, "/tmp/pi")
+	} else {
+		log.Printf("note: /tmp/pi not present — skipping ro-bind (solver wrapper install location)")
+	}
 	for _, p := range []string{"/run/systemd/resolve"} {
 		if st, serr := os.Stat(p); serr == nil && st.IsDir() {
 			paths = append([]string{p}, paths...)

@@ -3,8 +3,12 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
 )
 
 // TestLooksPlaceholderAPIKey covers the startup key-validation
@@ -38,7 +42,9 @@ func TestLooksPlaceholderAPIKey(t *testing.T) {
 }
 
 // TestExtraReadOnlyPaths_IncludesExistingLocalBin asserts that
-// $HOME/.local/bin is mounted read-only when it exists on the host.
+// $HOME/.local/bin is mounted read-only when it exists on the host, and
+// /etc is always mounted (issue #1 pt 9: /tmp/pi is conditional, covered
+// by the file-bin test below).
 func TestExtraReadOnlyPaths_IncludesExistingLocalBin(t *testing.T) {
 	home := t.TempDir()
 	localBin := filepath.Join(home, ".local", "bin")
@@ -48,41 +54,34 @@ func TestExtraReadOnlyPaths_IncludesExistingLocalBin(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	paths := extraReadOnlyPaths()
-	want := expectedMounts(localBin)
-	if len(paths) != len(want) {
-		t.Fatalf("paths: got %v, want %d entries (%v)", paths, len(want), want)
+	if !slices.Contains(paths, localBin) {
+		t.Fatalf("paths: existing .local/bin must be mounted, got %v", paths)
 	}
-	if paths[0] != localBin {
-		t.Errorf("paths[0]: got %q, want %q", paths[0], localBin)
-	}
-	for i, w := range want {
-		if paths[i] != w {
-			t.Errorf("paths[%d]: got %q, want %q", i, paths[i], w)
-		}
+	if !slices.Contains(paths, "/etc") {
+		t.Fatalf("paths: /etc must always be mounted, got %v", paths)
 	}
 }
 
 // TestExtraReadOnlyPaths_SkipsMissingLocalBin asserts that a missing
 // $HOME/.local/bin is omitted (a bind-mount of a nonexistent path would
-// fail sandbox creation), while the static mounts remain.
+// fail sandbox creation), while /etc remains.
 func TestExtraReadOnlyPaths_SkipsMissingLocalBin(t *testing.T) {
 	home := t.TempDir() // no .local/bin inside
 	t.Setenv("HOME", home)
 
 	paths := extraReadOnlyPaths()
-	want := expectedMounts("")
-	if len(paths) != len(want) {
-		t.Fatalf("paths: got %v, want %d entries (%v)", paths, len(want), want)
+	if slices.Contains(paths, filepath.Join(home, ".local", "bin")) {
+		t.Fatalf("paths: missing .local/bin must be omitted, got %v", paths)
 	}
-	for i, w := range want {
-		if paths[i] != w {
-			t.Errorf("paths[%d]: got %q, want %q", i, paths[i], w)
-		}
+	if !slices.Contains(paths, "/etc") {
+		t.Fatalf("paths: /etc must always be mounted, got %v", paths)
 	}
 }
 
 // TestExtraReadOnlyPaths_SkipsFileLocalBin asserts a regular file at
-// $HOME/.local/bin (not a directory) is not mounted.
+// $HOME/.local/bin (not a directory) is not mounted, and that /etc is
+// always mounted while /tmp/pi is conditional on its presence (issue #1
+// pt 9 — a wiped /tmp/pi must never fail sandbox creation).
 func TestExtraReadOnlyPaths_SkipsFileLocalBin(t *testing.T) {
 	home := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(home, ".local"), 0o755); err != nil {
@@ -94,9 +93,42 @@ func TestExtraReadOnlyPaths_SkipsFileLocalBin(t *testing.T) {
 	t.Setenv("HOME", home)
 
 	paths := extraReadOnlyPaths()
-	want := expectedMounts("")
-	if len(paths) != len(want) {
-		t.Fatalf("paths: got %v, want %d entries (file .local/bin skipped; %v)", paths, len(want), want)
+	if !slices.Contains(paths, "/etc") {
+		t.Fatalf("paths: /etc must always be mounted, got %v", paths)
+	}
+	for _, p := range paths {
+		if p == filepath.Join(home, ".local", "bin") {
+			t.Fatalf("paths: file .local/bin must be skipped, got %v", paths)
+		}
+	}
+	_, err := os.Stat("/tmp/pi")
+	hasTmpPi := slices.Contains(paths, "/tmp/pi")
+	if err == nil && !hasTmpPi {
+		t.Fatalf("paths: /tmp/pi exists on host but was not mounted: %v", paths)
+	}
+	if err != nil && hasTmpPi {
+		t.Fatalf("paths: /tmp/pi absent on host but still mounted: %v", paths)
+	}
+}
+
+// TestSandboxTimeout covers OB1_BWRAP_TIMEOUT parsing: unset → default,
+// valid seconds → override, invalid → default with warning (issue #1 pt 8).
+func TestSandboxTimeout(t *testing.T) {
+	t.Setenv("OB1_BWRAP_TIMEOUT", "")
+	if got := sandboxTimeout(); got != sandbox.DefaultBwrapTimeout {
+		t.Fatalf("unset: got %s, want default %s", got, sandbox.DefaultBwrapTimeout)
+	}
+	t.Setenv("OB1_BWRAP_TIMEOUT", "900")
+	if got := sandboxTimeout(); got != 900*time.Second {
+		t.Fatalf("900: got %s, want 15m", got)
+	}
+	t.Setenv("OB1_BWRAP_TIMEOUT", "abc")
+	if got := sandboxTimeout(); got != sandbox.DefaultBwrapTimeout {
+		t.Fatalf("invalid: got %s, want default %s", got, sandbox.DefaultBwrapTimeout)
+	}
+	t.Setenv("OB1_BWRAP_TIMEOUT", "-5")
+	if got := sandboxTimeout(); got != sandbox.DefaultBwrapTimeout {
+		t.Fatalf("negative: got %s, want default %s", got, sandbox.DefaultBwrapTimeout)
 	}
 }
 
@@ -122,20 +154,6 @@ func TestExtraReadOnlyPaths_IncludesResolverWhenPresent(t *testing.T) {
 	if !found {
 		t.Errorf("paths: %v — want /run/systemd/resolve included when the dir exists", paths)
 	}
-}
-
-// expectedMounts returns the mount set extraReadOnlyPaths should produce
-// for the given (possibly empty) localBin path, mirroring the function's
-// ordering: resolver (if present), localBin (if present), /tmp/pi, /etc.
-func expectedMounts(localBin string) []string {
-	paths := []string{"/tmp/pi", "/etc"}
-	if isDir("/run/systemd/resolve") {
-		paths = append([]string{"/run/systemd/resolve"}, paths...)
-	}
-	if localBin != "" {
-		paths = append([]string{localBin}, paths...)
-	}
-	return paths
 }
 
 func isDir(p string) bool {

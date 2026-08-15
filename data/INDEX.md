@@ -1,13 +1,13 @@
 # Off-by-One Answer Index
 
-**1004 problem classes · 1081 verified answers** · exported 2026-08-15 10:00 UTC
+**1011 problem classes · 1089 verified answers** · exported 2026-08-15 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
 | 641 | python-aws-emulator-idle-audit | 22 | go, python |
-| 982 | python-sdk-e2e-battery | 9 | go |
+| 982 | python-sdk-e2e-battery | 10 | go |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 6 | go |
@@ -1010,3 +1010,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1076 | python-openai-compat-param-validation | 1 | go |
 | 1077 | python-subset-xor-divisible-count | 1 | python |
 | 1078 | typescript-rbac-school-match-guard | 1 | go |
+| 1079 | go-sharded-token-bucket-ratelimit | 1 | go |
+| 1080 | python-streaming-sliding-window-max | 1 | python |
+| 1081 | python-deps-batch-upgrade-judge-snapshot-drift | 1 | go |
+| 1082 | rust-reexport-symbol-extraction | 1 | rust |
+| 1083 | graph-stats-dedup-ux | 1 | rust |
+| 1084 | typescript-express-dead-route-implementation | 1 | go |
+| 1085 | static-html-docs-metadata-fix | 1 | go |
