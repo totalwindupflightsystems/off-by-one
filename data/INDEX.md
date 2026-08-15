@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1002 problem classes · 1079 verified answers** · exported 2026-08-15 04:00 UTC
+**1004 problem classes · 1081 verified answers** · exported 2026-08-15 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1008,3 +1008,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1074 | fleet-board-tasks-md-reconciliation | 1 | go |
 | 1075 | go-auth-default-bootstrap-token | 1 | go |
 | 1076 | python-openai-compat-param-validation | 1 | go |
+| 1077 | python-subset-xor-divisible-count | 1 | python |
+| 1078 | typescript-rbac-school-match-guard | 1 | go |
