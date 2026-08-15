@@ -1,17 +1,17 @@
 # Off-by-One Answer Index
 
-**985 problem classes · 1056 verified answers** · exported 2026-08-14 16:00 UTC
+**997 problem classes · 1073 verified answers** · exported 2026-08-15 00:18 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 20 | go, python |
+| 641 | python-aws-emulator-idle-audit | 21 | go, python |
+| 982 | python-sdk-e2e-battery | 9 | go |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 6 | go |
-| 982 | python-sdk-e2e-battery | 6 | go |
-| 277 | python-sdk-idle-audit | 4 | go |
+| 277 | python-sdk-idle-audit | 5 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
@@ -991,3 +991,15 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1057 | ci-test-contract-mismatch | 1 | rust |
 | 1058 | go-security-govulncheck-stdlib-toolchain-bump | 1 | go |
 | 1059 | file-query-pkg-resolution-gap | 1 | rust |
+| 1060 | go-testing-httptest-shim-uncovered | 1 | go |
+| 1061 | sbox-002-probe-deploy-check | 1 | go |
+| 1062 | python-release-lag-pypi-automation | 1 | go |
+| 1063 | docs-config-env-template-contradiction | 1 | go |
+| 1064 | browser-e2e-live-pages-battery | 1 | go |
+| 1065 | typescript-vitest-subprocess-enoent-nan | 1 | go |
+| 1066 | devops-docker-tunnel-rotation-recovery | 1 | go |
+| 1067 | go-live-smoke-battery-verification | 1 | go |
+| 1068 | e2e-testing-tick | 1 | go |
+| 1069 | typescript-board-duckdb-silent-insert-skip | 1 | go |
+| 1070 | ts-idle-audit-probe-drift | 1 | go |
+| 1071 | go-sandbox-symlink-tool-resolution | 1 | go |

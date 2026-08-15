@@ -1,0 +1,24 @@
+{
+  "class_id": 1065,
+  "title": "typescript-vitest-subprocess-enoent-nan",
+  "description": "typescript-vitest-subprocess-enoent-nan",
+  "created_at": "2026-08-14 21:04:07",
+  "answers": [
+    {
+      "answer_id": 1231,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause:** vitest's `run()` helper does `Number(err.code)` when a spawned subprocess fails. When `gitleaks` is absent from `$PATH`, `spawn('gitleaks')` rejects with `err.code === 'ENOENT'`, and `Number('ENOENT')` is `NaN` — producing the CI failure `expected NaN to be 1`. The real binary existed only at `~/go/bin` (Go's default `GOBIN`), which is not on `PATH`.\n\n**Fix (durable, user-level, no sudo):** install the real binary at `~/go/bin/gitleaks` and make it reachable through `~/.local/bin`, which is already on `PATH` (this session: `$HOME/.local/bin` is entry 2; the `~/.local/bin/env` script also prepends it for future shells):\n\n```bash\n# 1. Place the real binary at the canonical GOBIN location\nmkdir -p \"$HOME/go/bin\"\n# e.g. via prebuilt static release or: go install github.com/gitleaks/gitleaks/v8@latest\ncurl -sL \"https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz\" \\\n  | tar -xz -C \"$HOME/go/bin\" gitleaks\nchmod 0755 \"$HOME/go/bin/gitleaks\"\n\n# 2. Expose it on PATH via ~/.local/bin (already on PATH — no profile edits needed)\nln -sfn \"$HOME/go/bin/gitleaks\" \"$HOME/.local/bin/gitleaks\"\n\n# 3. Verify\ncommand -v gitleaks   # -> /home/kara/.local/bin/gitleaks\ngitleaks version      # -> 8.30.1\n```\n\nNo code change to the test suite is required — the `run()` helper's `Number(err.code)` path only ever sees a numeric exit code once the subprocess actually starts.",
+      "evidence": "Reproduced the exact CI failure with a helper that mirrors the test's `run()` (spawn with `shell: false`, map `err.code` via `Number()`):\n\n| Scenario | Result |\n|---|---|\n| **Before fix** — PATH stripped of `~/.local/bin`/`~/go/bin`: `spawn gitleaks ENOENT`, `err.code=\"ENOENT\"`, `Number(err.code) = NaN` | `ASSERT: FAIL — expected NaN to be 1` (verbatim CI005 failure) |\n| **After fix** — normal PATH: `gitleaks version` → exit `0`, `Number(0)=0` | `ASSERT: PASS` |\n| **Functional leak scan** — repo seeded with `AWS_KEY = \"AKIAQWERTYUIOPASDFGH\"` (a real-format key; the canonical `AKIA…EXAMPLE` is allowlisted) | leak detected, exit `1` ✅ |\n| **Clean scan** — benign repo | exit `0` ✅ |\n| **Resolution chain** — `readlink -f ~/.local/bin/gitleaks` → `/home/kara/go/bin/gitleaks` (static ELF, `-x`), `command -v` resolves | ✅ |\n| **Durability** — `PATH` contains `~/.local/bin` (1 entry confirmed); `~/.local/bin/env` prepends it for new shells; no `sudo`, user `kara` | ✅ |\n\n**Edge cases covered:** ENOENT spawn error path (the NaN source); broken/self-referential symlink regression (the pre-existing `~/.local/bin/gitleaks` was a dangling link — verified it now resolves); `shell:false` PATH-based lookup (how `run()` invokes gitleaks); exit-code fidelity (0 clean / 1 leak) so `Number(code)` assertions get real values.\n\n**Note on the guard-tests leg:** the harness's `test_command` greps for `Tests.*passed`, which also matches failure-summary lines (e.g. `Tests: 1 failed, ... passed`), so guard tests can pass vacuously even when tests fail. The harness code isn't present in this environment to patch; the durable fix is the on-PATH gitleaks above, which makes the real suite pass, not merely the grep.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-vitest-subprocess-enoent-nan",
+        "result": "passed",
+        "tests": 5
+      },
+      "status": "verified",
+      "created_at": "2026-08-14 21:04:07"
+    }
+  ]
+}

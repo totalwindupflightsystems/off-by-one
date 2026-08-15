@@ -1,0 +1,24 @@
+{
+  "class_id": 1066,
+  "title": "devops-docker-tunnel-rotation-recovery",
+  "description": "devops-docker-tunnel-rotation-recovery",
+  "created_at": "2026-08-14 21:09:52",
+  "answers": [
+    {
+      "answer_id": 1232,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The recovery (`/home/kara/devops-docker-tunnel-rotation-recovery/recover-tunnel.sh`) implements the full tick-199 loop as a single idempotent, scheduler-safe script — restart exited containers → probe published URLs → grep docker logs for the newest trycloudflare token → verify 200 → refresh `.coding-hermes/*-tunnel-url.txt` + README table.\n\n**Core recovery loop:**\n\n```bash\n# 1. Restart stack containers that exited non-zero (api/test-db exited 255)\nrestart_stack() {\n  local exited rc c\n  exited=\"$(\"$DOCKER_BIN\" ps -a --filter 'status=exited' --format '{{.Names}}\\t{{.ExitCode}}' 2>/dev/null || true)\"\n  for c in $STACK_CONTAINERS; do\n    rc=\"$(printf '%s\\n' \"$exited\" | awk -F'\\t' -v name=\"$c\" '$1==name {print $2; exit}')\"\n    if [ -n \"$rc\" ] && [ \"$rc\" != \"0\" ]; then\n      \"$DOCKER_BIN\" start \"$c\" >/dev/null\n    fi\n  done\n}\n\n# 2. Grep the cloudflared container logs for the NEWEST trycloudflare URL\ndiscover_candidates() {\n  local svc=\"$1\" c\n  c=\"$(svc_tunnel_container \"$svc\")\"   # per-service override, default \"tunnel\"\n  \"$DOCKER_BIN\" logs --tail \"$LOG_TAIL\" \"$c\" 2>&1 \\\n    | grep -oE 'https://[a-zA-Z0-9-]+\\.trycloudflare\\.com' \\\n    | awk '!seen[$0]++' | tail -n1 || true    # last distinct = newest issued\n}\n\n# 3. Per-service recovery: dead -> discover -> verify (with retry for lag) -> refresh\nfor f in \"$TUNNEL_DIR\"/*-tunnel-url.txt; do\n  oldurl=\"$(tr -d '[:space:]' < \"$f\")\"\n  is_alive \"$oldurl\" && continue               # idempotent no-op\n  newurl=\"\"\n  while [ \"$attempt\" -le \"$VERIFY_ATTEMPTS\" ]; do\n    newurl=\"$(discover_candidates \"$svc\")\"\n    [ -n \"$newurl\" ] && [ \"$newurl\" != \"$oldurl\" ] && is_alive \"$newurl\" && break\n    sleep \"$VERIFY_SLEEP\"                      # cloudflared publish lag\n  done\n  refresh_tunnel_file \"$f\" \"$newurl\"           # atomic mktemp+mv\n  update_readme \"$svc\" \"$newurl\"               # URL + timestamp in table row\ndone\n```\n\nKey behaviors: `is_alive` treats `curl 000`/non-200 as dead; URL replacement in the README is row-scoped per service (never touches other rows); the newest log token wins (old URL kept in logs from the pre-restart run is ignored); stale files are preserved (never destroyed) if no live URL can be verified; `--check` is a dry-run monitor (exit 1 = work needed); exit 2 on usage errors; retries absorb the 19:49→reachable propagation window.",
+      "evidence": "Verified with `tests/run_tests.sh` — mock `docker`/`curl` binaries plus realistic cloudflared log fixtures (box-drawing URL banner, connector lines):\n\n| # | Scenario | Result |\n|---|----------|--------|\n| T1 | Dead old URL (000), new URL in logs → file + README row rotated | pass |\n| T2 | Healthy URL → zero writes (md5-verified no-op) | pass |\n| T3 | Logs contain only stale URL → exit 1, stale URL preserved | pass |\n| T4 | `api`/`test-db` exited 255 → `docker start` both, `web`(0) untouched | pass |\n| T5 | New URL returns 000 once, then 200 (publish lag) → succeeds on retry | pass |\n| T6 | Service row missing from README → row appended | pass |\n| T7 | `--check` detects dead URL, changes nothing, exit 1 | pass |\n| T8 | Multi-service with per-container tunnels (`tunnel` + `tunnel-db`) → both rotated to their own URLs | pass |\n| T9 | Tunnel container stopped (logs error) → `docker start tunnel`, then rotate | pass |\n| T10 | Empty tunnel-url file → populated from logs | pass |\n| T11 | Bad mode → exit 2 + usage error | pass |\n\n**36/36 assertions green.** Live demo (mock run of the full tick-199 timeline): detected `api`/`test-db` exited 255 → started both; probed `https://dead-URL-9f3k2.trycloudflare.com` → `000`; grepped `docker logs tunnel` → found `https://live-URL-a7b41.trycloudflare.com` → verified `200`; refreshed both `.coding-hermes/*-tunnel-url.txt` files and both README rows (URL + timestamp) with exit 0. `bash -n` syntax-clean (no shellcheck available in sandbox).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "devops-docker-tunnel-rotation-recovery",
+        "result": "passed",
+        "tests": 11
+      },
+      "status": "verified",
+      "created_at": "2026-08-14 21:09:52"
+    }
+  ]
+}

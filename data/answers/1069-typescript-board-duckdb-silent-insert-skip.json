@@ -1,0 +1,24 @@
+{
+  "class_id": 1069,
+  "title": "typescript-board-duckdb-silent-insert-skip",
+  "description": "typescript-board-duckdb-silent-insert-skip",
+  "created_at": "2026-08-14 22:40:05",
+  "answers": [
+    {
+      "answer_id": 1235,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** The per-tick append path ran without the duckdb-providing uv environment. The duckdb write degraded to a silent no-op (swallowed `ImportError`/insert error) while the plain-fs `events.jsonl` append — which can never fail — kept growing. Result: DB 270 vs JSONL 318 rows with **max ids equal (323)** — a middle-block gap (272–319) that a naive max-id-only parity check cannot see.\n\n**Three-part fix** (implemented in `/home/kara/ring-runner/`):\n\n**1. Detect — `board_jsonl_parity_probe.py`.** Compares row counts, full id sets, and ordered sequence gaps — never max id alone (the incident trap):\n\n```python\nreport = {\n  \"verdict\": ..., \"jsonl_rows\": ..., \"db_rows\": ...,\n  \"max_ids_equal\": max(jsonl_ids) == max(db_ids),   # reported, NOT the verdict\n  \"missing_ids\": sorted(jset - dset), \"db_sequence_gaps\": [...],\n}\n# verdict: MATCH only if counts equal AND sets equal AND no sequence gaps\n```\n`VERDICT: DIVERGENCE` → exit 1, machine-readable JSON on stdout. `MATCH` → exit 0. Also flags duplicate ids in the JSONL and handles missing DB files/empty tables cleanly.\n\n**2. Repair — `sync_board_from_jsonl.py`.** Re-derives `board.db` from the JSONL (source of truth), then verifies internally:\n\n```python\ncon.execute(\"BEGIN TRANSACTION\")\ncon.execute(\"DROP TABLE IF EXISTS events\")\nfor ev in events: con.execute(\"INSERT INTO events (id,tick,ts,payload) VALUES (?,?,?,?)\", ...)\ncon.execute(\"COMMIT\")\n# verify: counts, max ids, id-set equality -> \"board.db sync OK\" or exit 1\n```\nFull rebuild is atomic; `--incremental` upserts only missing ids; duplicate ids in the source resolve last-wins with a warning; idempotent.\n\n**3. Prevent — the root cause watch.** `run.sh` is the only permitted tick entrypoint:\n\n```sh\n#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"$0\")\"\nexec uv run --with duckdb python tick.py \"$@\"   # EVERY tick, every time\n```\n\n`tick.py` hard-imports duckdb (running outside the uv env aborts loudly — no silent skip) and re-queries each inserted row (`SELECT COUNT(*) WHERE id=?` must be 1) so a lost write can't masquerade as success. `runner.ts` documents the TS-board contract: fail-fast constructor, **no silent catch**, verify-after-insert. Run the probe after every tick and in cron; DIVERGENCE pages.",
+      "evidence": "All runs executed live with `uv run --with duckdb` (duckdb 1.5.5) in `/home/kara/ring-runner`:\n\n| # | Test | Result |\n|---|---|---|\n| 1 | Incident state reproduced (JSONL 318 / DB 270 / max 323 both) | ✓ |\n| 2 | Probe → `DIVERGENCE`, `max_ids_equal=True`, missing 48 (272–319), gap `271→320 (48)`, exit 1 | ✓ |\n| 3 | Sync full → `board.db sync OK (rows=318, max id=323)` → re-probe `MATCH`, exit 0 | ✓ |\n| 4 | Probe with missing DB file → clean DIVERGENCE, no traceback | ✓ |\n| 5 | Probe with empty DB (exists, no table) → DIVERGENCE | ✓ |\n| 6 | Duplicate ids in JSONL → DIVERGENCE, dup ids listed | ✓ |\n| 7 | Both sources empty → MATCH | ✓ |\n| 8 | Sync idempotency (run twice) | ✓ |\n| 9 | `--incremental` on stale prefix DB → repaired 218, probe MATCH | ✓ |\n| 10 | Trap demo: naive max-id check says \"OK\", real probe says DIVERGENCE | ✓ |\n| 11 | Bare `python3 tick.py` (no uv env) → hard `ModuleNotFoundError`, **no silent skip** | ✓ |\n| 12 | Buggy-path repro: 5 jsonl-only ticks → DB unchanged, probe catches DIVERGENCE | ✓ |\n| 13 | Sync on dup-corrupted JSONL → warning + last-wins, DB OK | ✓ |\n| 14 | Clean JSONL → sync → MATCH (328/328, gaps 0, missing 0) | ✓ |\n| 15 | `./run.sh` tick wrapper: 2 ticks under uv → MATCH | ✓ |\n| 16 | Incremental sync post-change → MATCH | ✓ |\n\nKey trap verified live: with the incident state, `max_ids_equal=True` while `db_rows=270 vs jsonl 318` — the probe's set+count+gap checks are what catch it. Live artifacts left at MATCH (330/330 rows, exit 0).",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "typescript-board-duckdb-silent-insert-skip",
+        "result": "passed",
+        "tests": 16
+      },
+      "status": "verified",
+      "created_at": "2026-08-14 22:40:05"
+    }
+  ]
+}

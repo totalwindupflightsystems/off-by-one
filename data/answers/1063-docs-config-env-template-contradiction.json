@@ -1,0 +1,24 @@
+{
+  "class_id": 1063,
+  "title": "docs-config-env-template-contradiction",
+  "description": "docs-config-env-template-contradiction",
+  "created_at": "2026-08-14 18:44:10",
+  "answers": [
+    {
+      "answer_id": 1228,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "**Root cause.** GETTING-STARTED §3 described what the *in-container* environment looks like (`postgres:5432`) while `.env.example` ships *host-facing* values (`localhost:5433`). Users copied the template, saw the mismatch, and \"fixed\" it by adding prefixed variables like `API_POSTGRES_HOST=postgres:5432` — which are dead keys the app never reads, so the container silently fell back to defaults.\n\n**The fix (GETTING-STARTED.md §3 note).** Describe the template as-is, then explain where the switch to the service name happens:\n\n```markdown\n> **Note:** The root `.env` is host-facing. The `POSTGRES_*` values shipped in\n> `.env.example` use `POSTGRES_HOST=localhost` and `POSTGRES_PORT=5433`, which is\n> the port the `postgres` service publishes on your machine (mapped `5433:5432`).\n> No changes are needed when you run the API from your host.\n>\n> When the `api` container runs under Compose, it **overrides** `POSTGRES_HOST`\n> and `POSTGRES_PORT` to `postgres:5432` in-container (see `docker-compose.yml`),\n> so it talks to the `postgres` service over the internal network. `POSTGRES_USER`,\n> `POSTGRES_PASSWORD`, and `POSTGRES_DB` are never overridden and always come from\n> your root `.env`.\n>\n> Do **not** rename or prefix these variables (for example `API_POSTGRES_*`);\n> Compose merges overrides by key, and a different prefix would create a second,\n> unused variable while the container falls back to the wrong default.\n```\n\nThe matching compose config (unchanged by the fix, but now documented truthfully):\n\n```yaml\nservices:\n  postgres:\n    image: postgres:16\n    ports:\n      - \"5433:5432\"            # host-facing; docs describe THIS side\n  api:\n    environment:\n      POSTGRES_HOST: postgres  # in-container override\n      POSTGRES_PORT: 5432      # in-container override\n```\n\n**The rule, encoded as a test:** when docs describe env behavior, diff against `.env.example` (the template) — never the live `.env`, which may carry developer-local overrides (e.g. a remote DB on `6543`).",
+      "evidence": "Reproduction built at `/home/kara/repro` (docs + `.env.example` + `docker-compose.yml` + 2 tests, stdlib + PyYAML only).\n\n1. **Contradiction reproduced first** — with the broken note, `tests/test_docs_vs_template.py` failed:\n   - `docs claim POSTGRES_HOST=postgres but .env.example (template) ships POSTGRES_HOST=localhost`\n   - `docs claim POSTGRES_PORT=5432 but .env.example (template) ships POSTGRES_PORT=5433`\n2. **After the fix, all tests pass:**\n   - `test_docs_vs_template.py` — parses §3 claims and asserts they equal `.env.example` exactly → **PASS**\n   - `test_compose_overrides.py` — asserts `api` overrides `POSTGRES_HOST=postgres`, `POSTGRES_PORT=5432`, and does **not** override `POSTGRES_USER/PASSWORD/DB` → **PASS**\n3. **Live engine check** — `docker compose config` (Compose 2.40.3) shows the merged `api` environment as `POSTGRES_HOST: postgres`, `POSTGRES_PORT: \"5432\"`, confirming the in-container reality the docs now describe.\n4. **Edge cases tested:**\n   - *Live `.env` vs template*: wrote a dev `.env` with `db.internal.corp:6543`; the docs test still passes because it reads `.env.example`, while a naive docs-vs-live diff would fail — proving the rule.\n   - *Port asymmetry*: host `5433` ≠ container `5432` is asserted on both sides (compose port mapping and docs claim).\n   - *YAML type coercion*: `5432` parses as int; test compares `str()`-normalized values.\n   - *Unnecessary prefixes*: the fixed note explicitly forbids `API_POSTGRES_*`; the template test fails if any docs claim introduces a key `.env.example` doesn't define.",
+      "signatures": {
+        "model": "deepseek-v4-flash",
+        "problem_class": "docs-config-env-template-contradiction",
+        "result": "passed",
+        "tests": 2
+      },
+      "status": "verified",
+      "created_at": "2026-08-14 18:44:10"
+    }
+  ]
+}
