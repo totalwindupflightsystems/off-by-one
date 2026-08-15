@@ -103,24 +103,26 @@ function isUsableKey(value) {
 }
 
 /**
- * qualifyModel resolves the pi model identifier. $PI_MODEL wins
- * verbatim; already-qualified ids (containing "/") pass through; bare
- * names get the provider prefix implied by the available keys.
+ * resolveModel maps the requested model to an explicit {provider, id}
+ * pair. $PI_MODEL wins verbatim (caller's override). When a DeepSeek
+ * key is usable the model resolves as `deepseek/<id>`; an OpenRouter-
+ * only environment resolves to the openrouter-qualified id. The chosen
+ * provider's competing env key is dropped before exec (env hygiene):
+ * `deepseek/deepseek-v4-flash` exists under BOTH the deepseek and
+ * openrouter registries — pi picks the provider whose key is actually
+ * present, so the losing key must not leak into the sandbox env.
  */
-function qualifyModel(env, requested) {
+function resolveModel(env, requested) {
   if (env.PI_MODEL && env.PI_MODEL.trim() !== "") {
-    return env.PI_MODEL.trim(); // used verbatim — caller's override
+    return { provider: null, id: env.PI_MODEL.trim() }; // verbatim
   }
   const model = (requested || DEFAULT_BARE_MODEL).trim();
-  if (model.includes("/")) {
-    return model; // already provider-qualified
-  }
   const hasDeepseek = isUsableKey(env.DEEPSEEK_API_KEY);
   const hasOpenRouter = isUsableKey(env.OPENROUTER_API_KEY);
   if (!hasDeepseek && hasOpenRouter) {
-    return OPENROUTER_DEEPSEEK_MODEL;
+    return { provider: "openrouter", id: OPENROUTER_DEEPSEEK_MODEL };
   }
-  return "deepseek/" + model;
+  return { provider: "deepseek", id: "deepseek/" + model };
 }
 
 function main() {
@@ -151,15 +153,41 @@ function main() {
 
   // 2./4. Build env: --api-key rides the provider-appropriate env vars
   // (pi's deepseek/openai providers read DEEPSEEK_API_KEY/OPENAI_API_KEY;
-  // openrouter reads OPENROUTER_API_KEY).
+  // openrouter reads OPENROUTER_API_KEY). The competing provider's key
+  // is DROPPED — `deepseek/deepseek-v4-flash` is registered under both
+  // providers and pi resolves by which key is present.
   const env = { ...process.env };
+  const resolved = resolveModel(env, args.model);
   if (args.api_key) {
-    env.DEEPSEEK_API_KEY = args.api_key;
     env.OPENAI_API_KEY = args.api_key;
+    if (resolved.provider === "openrouter") {
+      env.OPENROUTER_API_KEY = args.api_key;
+    } else {
+      env.DEEPSEEK_API_KEY = args.api_key;
+    }
   }
-  const model = qualifyModel(env, args.model);
-  if (args.api_key && model.startsWith("openrouter/")) {
-    env.OPENROUTER_API_KEY = args.api_key;
+  if (resolved.provider === "deepseek") {
+    delete env.OPENROUTER_API_KEY;
+  } else if (resolved.provider === "openrouter") {
+    delete env.DEEPSEEK_API_KEY;
+  }
+
+  // Isolate pi's agent/config dir. A stale ~/.pi/agent store (from ANY
+  // prior pi usage, e.g. `pi login` for another provider) makes pi skip
+  // env-key auth for providers not in the store — "No API key found for
+  // deepseek" even with DEEPSEEK_API_KEY set. The bwrap sandbox never
+  // hits this (clean HOME), so mirror that: point PI_CODING_AGENT_DIR at
+  // a fresh temp dir unless the caller set it explicitly.
+  if (!env.PI_CODING_AGENT_DIR) {
+    env.PI_CODING_AGENT_DIR = path.join(
+      os.tmpdir(),
+      "pi-agent-" + (typeof process.getuid === "function" ? process.getuid() : "user")
+    );
+    try {
+      fs.mkdirSync(env.PI_CODING_AGENT_DIR, { recursive: true });
+    } catch (e) {
+      /* non-fatal: pi falls back to the default dir */
+    }
   }
 
   // Build the prompt and write it to a temp file (avoids shell
@@ -196,7 +224,7 @@ function main() {
     const nodeBin = fs.existsSync(process.execPath) ? process.execPath : "node";
     const result = execFileSync(
       nodeBin,
-      [install.cli, "--model", model, "--print", `@${promptFile}`],
+      [install.cli, "--model", resolved.id, "--print", `@${promptFile}`],
       {
         env,
         timeout: SOLVE_TIMEOUT_MS,
@@ -222,13 +250,13 @@ function main() {
           JSON.parse(m[1]);
           sig = m[1].trim();
         } catch {
-          sig = JSON.stringify({ model, result: "completed" });
+          sig = JSON.stringify({ model: resolved.id, result: "completed" });
         }
       }
     }
     if (!sol) {
       sol = result.trim();
-      ev = `Solved by Pi Agent (${model}).`;
+      ev = `Solved by Pi Agent (${resolved.id}).`;
     }
 
     if (args.output) fs.writeFileSync(args.output, sol);

@@ -231,7 +231,7 @@ ln -s "$(pwd)/scripts/pi-agent" ~/.local/bin/pi-agent   # or: cp scripts/pi-agen
 | `OPENROUTER_API_KEY` | No | Fallback solver key — used automatically when no usable DeepSeek key is set |
 | `PI_MODEL` | No | Model override passed to pi verbatim, e.g. `anthropic/claude-sonnet-4-20250514` |
 
-\* Either `DEEPSEEK_API_KEY` or `OPENROUTER_API_KEY` must be set for solves to authenticate. Bare model names are qualified automatically by the wrapper: `deepseek-v4-flash` → `deepseek/deepseek-v4-flash`, or → `openrouter/deepseek/deepseek-v4-flash-0731` when only an OpenRouter key is available.
+\* Either `DEEPSEEK_API_KEY` or `OPENROUTER_API_KEY` must be set for solves to authenticate. The wrapper resolves the model per the available key: `deepseek-v4-flash` → `deepseek/deepseek-v4-flash` (DeepSeek key present) or `openrouter/deepseek/deepseek-v4-flash-0731` (OpenRouter-only). Because `deepseek/deepseek-v4-flash` is registered under both the deepseek and openrouter providers in pi's model registry, the wrapper **drops the losing provider's key from the solve environment** so pi resolves the intended provider.
 
 **Solve times:** solves legitimately take **1–5+ minutes** (pi searches, fetches docs, reflects, then answers), and hard problems can run longer. The bwrap sandbox caps each solve at **300s** by default — raise it with `OB1_BWRAP_TIMEOUT=<seconds>` (e.g. `OB1_BWRAP_TIMEOUT=900` for a 15-minute cap) if you routinely solve long-running problems.
 
