@@ -1,0 +1,251 @@
+#!/usr/bin/env node
+/**
+ * pi-agent wrapper — bridges Off-by-One's solver to the upstream Pi
+ * coding agent CLI (https://github.com/earendil-works/pi).
+ *
+ * CLI contract (what the server execs inside the bwrap sandbox):
+ *
+ *   pi-agent solve --problem-file <json> --output <md> \
+ *           --evidence <md> --signatures <json> \
+ *           --model <m> [--api-key <k>]
+ *
+ * This is the reference implementation the solver expects. It was
+ * originally a hand-written adapter that only lived on the fleet host
+ * and was never shipped (issue #1). Hardening fixes carried here:
+ *
+ *   1. Pi install discovery — checks $PI_HOME, then /tmp/pi, then
+ *      ~/.local/share/pi, then ~/.pi. Missing install prints a clear
+ *      actionable error and exits non-zero.
+ *   2. Model qualification — bare model names are ambiguous across
+ *      providers and pi rejects them. `deepseek-v4-flash` maps to
+ *      `deepseek/deepseek-v4-flash`; when DEEPSEEK_API_KEY is unusable
+ *      but OPENROUTER_API_KEY is set, the openrouter-qualified model
+ *      is used instead. $PI_MODEL overrides everything, used verbatim.
+ *   3. stdin is CLOSED (stdio 'ignore') — pi reads stdin for the
+ *      interactive prompt and hangs forever on a non-TTY pipe. All
+ *      input is delivered via the @file prompt path.
+ *   4. --api-key is propagated to DEEPSEEK_API_KEY + OPENAI_API_KEY,
+ *      plus OPENROUTER_API_KEY when the qualified model is an
+ *      openrouter model.
+ */
+
+"use strict";
+
+const { execFileSync } = require("child_process");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+// Matches the server's per-solve budget (30m) — pi does search/fetch/
+// reflect cycles and hard problems legitimately need minutes.
+const SOLVE_TIMEOUT_MS = 30 * 60 * 1000;
+
+// Default pi model when the server passes a bare name. The server
+// always passes a bare `deepseek-v4-flash` unless configured otherwise.
+const DEFAULT_BARE_MODEL = "deepseek-v4-flash";
+
+// The openrouter-qualified equivalent used when only an OpenRouter key
+// is available.
+const OPENROUTER_DEEPSEEK_MODEL = "openrouter/deepseek/deepseek-v4-flash-0731";
+
+function parseArgs() {
+  const args = {};
+  const argv = process.argv.slice(2);
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === "solve") continue;
+    if (argv[i].startsWith("--")) {
+      const key = argv[i].slice(2).replace(/-/g, "_");
+      args[key] = argv[i + 1] || "";
+      i++;
+    }
+  }
+  return args;
+}
+
+/**
+ * findPiInstall returns { dir, cli } for the first candidate install
+ * that actually ships the coding-agent CLI, or null. Mirrors how the
+ * fleet host lays out pi, with documented search order.
+ */
+function findPiInstall() {
+  const candidates = [];
+  if (process.env.PI_HOME && process.env.PI_HOME.trim() !== "") {
+    candidates.push(process.env.PI_HOME.trim());
+  }
+  candidates.push("/tmp/pi");
+  try {
+    candidates.push(path.join(os.homedir(), ".local", "share", "pi"));
+    candidates.push(path.join(os.homedir(), ".pi"));
+  } catch {
+    /* homedir unavailable — skip home candidates */
+  }
+  for (const dir of candidates) {
+    const cli = path.join(dir, "packages", "coding-agent", "dist", "cli.js");
+    if (fs.existsSync(cli)) {
+      return { dir, cli };
+    }
+  }
+  return null;
+}
+
+/**
+ * isUsableKey reports whether a key looks like a real provider key
+ * rather than empty/placeholder content. Placeholder-shaped values
+ * (like the ones in .env.example) must never steer model selection.
+ */
+function isUsableKey(value) {
+  if (!value) return false;
+  const k = String(value).trim();
+  if (k.length < 20) return false;
+  const lower = k.toLowerCase();
+  const markers = ["your", "changeme", "change-me", "placeholder", "example", "dummy", "todo", "insert"];
+  return !markers.some((m) => lower.includes(m));
+}
+
+/**
+ * qualifyModel resolves the pi model identifier. $PI_MODEL wins
+ * verbatim; already-qualified ids (containing "/") pass through; bare
+ * names get the provider prefix implied by the available keys.
+ */
+function qualifyModel(env, requested) {
+  if (env.PI_MODEL && env.PI_MODEL.trim() !== "") {
+    return env.PI_MODEL.trim(); // used verbatim — caller's override
+  }
+  const model = (requested || DEFAULT_BARE_MODEL).trim();
+  if (model.includes("/")) {
+    return model; // already provider-qualified
+  }
+  const hasDeepseek = isUsableKey(env.DEEPSEEK_API_KEY);
+  const hasOpenRouter = isUsableKey(env.OPENROUTER_API_KEY);
+  if (!hasDeepseek && hasOpenRouter) {
+    return OPENROUTER_DEEPSEEK_MODEL;
+  }
+  return "deepseek/" + model;
+}
+
+function main() {
+  const args = parseArgs();
+  if (!args.problem_file) {
+    console.error("--problem-file required");
+    process.exit(1);
+  }
+
+  // 1. Locate the pi install up front — a clear actionable error beats
+  // a deep `spawn node ENOENT` inside the solver.
+  const install = findPiInstall();
+  if (!install) {
+    console.error(
+      "pi not found — install from https://github.com/earendil-works/pi/releases " +
+        "(clone to /tmp/pi or set PI_HOME to the repo root)"
+    );
+    process.exit(1);
+  }
+
+  let problem;
+  try {
+    problem = JSON.parse(fs.readFileSync(args.problem_file, "utf-8"));
+  } catch (err) {
+    console.error(`failed to read --problem-file: ${err.message}`);
+    process.exit(1);
+  }
+
+  // 2./4. Build env: --api-key rides the provider-appropriate env vars
+  // (pi's deepseek/openai providers read DEEPSEEK_API_KEY/OPENAI_API_KEY;
+  // openrouter reads OPENROUTER_API_KEY).
+  const env = { ...process.env };
+  if (args.api_key) {
+    env.DEEPSEEK_API_KEY = args.api_key;
+    env.OPENAI_API_KEY = args.api_key;
+  }
+  const model = qualifyModel(env, args.model);
+  if (args.api_key && model.startsWith("openrouter/")) {
+    env.OPENROUTER_API_KEY = args.api_key;
+  }
+
+  // Build the prompt and write it to a temp file (avoids shell
+  // escaping issues; pi reads `@file` prompts non-interactively).
+  const lines = [
+    "Solve this problem and respond in three sections:",
+    "",
+    `Problem: ${problem.problem_class}`,
+    `Environment: ${problem.environment} | Language: ${problem.language} ${problem.version || ""}`,
+    "",
+    problem.description || "",
+  ];
+  if (problem.error_message) lines.push("", "Error:", problem.error_message);
+  if (problem.stack_trace) lines.push("", "Stack trace:", problem.stack_trace);
+  lines.push(
+    "",
+    "## SOLUTION",
+    "Provide the fix with code examples.",
+    "",
+    "## EVIDENCE",
+    "How you verified this works. Edge cases tested.",
+    "",
+    "## SIGNATURES",
+    `JSON: {"problem_class":"${problem.problem_class}","model":"<model>","result":"passed|failed","tests":<count>}`
+  );
+
+  const promptFile = path.join(os.tmpdir(), `pi-prompt-${Date.now()}.txt`);
+  fs.writeFileSync(promptFile, lines.join("\n"), "utf-8");
+
+  try {
+    // 3. stdin is 'ignore' — closed, never a pipe. pi's interactive
+    // prompt reads stdin and blocks forever when it is not a TTY; the
+    // @file prompt path means stdin is never needed.
+    const nodeBin = fs.existsSync(process.execPath) ? process.execPath : "node";
+    const result = execFileSync(
+      nodeBin,
+      [install.cli, "--model", model, "--print", `@${promptFile}`],
+      {
+        env,
+        timeout: SOLVE_TIMEOUT_MS,
+        maxBuffer: 4 * 1024 * 1024,
+        encoding: "utf-8",
+        stdio: ["ignore", "pipe", "pipe"],
+      }
+    );
+
+    // Parse the three sections out of pi's output.
+    const sections = result.split(/^## /m).filter(Boolean);
+    let sol = "",
+      ev = "",
+      sig = "{}";
+
+    for (const s of sections) {
+      const body = s.replace(/^(SOLUTION|EVIDENCE|SIGNATURES)\s*\n?/, "").trim();
+      if (s.startsWith("SOLUTION")) sol = body;
+      else if (s.startsWith("EVIDENCE")) ev = body;
+      else if (s.startsWith("SIGNATURES")) {
+        const m = body.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/) || [null, body];
+        try {
+          JSON.parse(m[1]);
+          sig = m[1].trim();
+        } catch {
+          sig = JSON.stringify({ model, result: "completed" });
+        }
+      }
+    }
+    if (!sol) {
+      sol = result.trim();
+      ev = `Solved by Pi Agent (${model}).`;
+    }
+
+    if (args.output) fs.writeFileSync(args.output, sol);
+    if (args.evidence) fs.writeFileSync(args.evidence, ev);
+    if (args.signatures) fs.writeFileSync(args.signatures, sig);
+    console.log(`Solved: ${problem.problem_class}`);
+  } catch (err) {
+    const detail = (err.stderr || err.message || String(err)).toString();
+    console.error("solve failed:", detail.slice(0, 500));
+    process.exit(1);
+  } finally {
+    try {
+      fs.unlinkSync(promptFile);
+    } catch {
+      /* already gone */
+    }
+  }
+}
+
+main();
