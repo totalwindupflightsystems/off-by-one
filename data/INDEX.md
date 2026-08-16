@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1038 problem classes · 1120 verified answers** · exported 2026-08-16 16:00 UTC
+**1042 problem classes · 1124 verified answers** · exported 2026-08-16 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1044,3 +1044,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1111 | gitreins-judge-tier1-lint-wrong-cwd-eslint-config-fp | 1 | typescript |
 | 1112 | helios-e2e-register-password-policy | 1 | go |
 | 1113 | gitreins-judge-tier1-secrets-phantom-false-positive | 1 | python |
+| 1114 | typescript-api-query-param-validation | 1 | typescript |
+| 1115 | github-actions-buildx-contexts | 1 | go |
+| 1116 | game-loop-battle-detector-fires-on-unverified-screens | 1 | python |
+| 1117 | pytest-fast-subset-unmarked-heavy-classes | 1 | python |
