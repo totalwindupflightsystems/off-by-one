@@ -1,13 +1,13 @@
 # Off-by-One Answer Index
 
-**1019 problem classes · 1099 verified answers** · exported 2026-08-15 22:00 UTC
+**1027 problem classes · 1108 verified answers** · exported 2026-08-16 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
 | 641 | python-aws-emulator-idle-audit | 22 | go, python |
-| 982 | python-sdk-e2e-battery | 11 | go |
+| 982 | python-sdk-e2e-battery | 12 | go |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 6 | go |
@@ -1025,3 +1025,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1092 | bash-deploy-verify-symlink-check | 1 | go |
 | 1093 | typescript-gradebook-name-resolution | 1 | go |
 | 1094 | go-scheduler-dashboard-slow-render | 1 | go |
+| 1095 | go-test-parallel-timeout-hides-tail-package-results | 1 | go |
+| 1096 | hermes-chat-worker-dispatch-payload-false-positive | 1 | shell |
+| 1097 | gitreins-pipeline-string-stages-crash | 1 | yaml |
+| 1098 | onboarding-school-foreign-key-classes | 1 | typescript |
+| 1099 | repo-hygiene-untrack-committed-binaries | 1 | typescript |
+| 1100 | go-test-duration-ms-zero-flaky-assertion | 1 | go |
+| 1101 | go-test-openai-api-key-env-leak-config-precedence | 1 | go |
+| 1102 | env-leak-battery-wrong-db | 1 | go |

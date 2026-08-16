@@ -1,0 +1,28 @@
+{
+  "class_id": 1102,
+  "title": "env-leak-battery-wrong-db",
+  "description": "env-leak-battery-wrong-db",
+  "created_at": "2026-08-16 02:59:55",
+  "answers": [
+    {
+      "answer_id": 1276,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I investigated the environment and confirmed the Helios source tree and `e2e-smoke.sh` are **not present** on this machine, so I couldn't edit a real script. Instead I wrote a self-contained solution document from the problem description at:\n\n**`/home/kara/env-leak-battery-wrong-db-solution.md`**\n\n## Summary\n\n**Root cause:** `buildSQLiteDSN` is **env-first** — `os.Getenv(SQLITE_PATH)` takes precedence over `cfg.Database.SQLite.Path`. In the battery script's **migrate** leg, `SQLITE_PATH=$DB` is pinned, so a fresh 25-migration DB is created. But the **API start** leg only sets `HELIOS_CONFIG_PATH` and never re-pins `SQLITE_PATH`. When an ambient `SQLITE_PATH` (leaked from a prior dogfood session, e.g. `/tmp/dogfood-helios/helios.db`) is present in the environment, the API silently binds to that *stale* DB instead of `$DB`. That stale DB predates migration 25, so `source` and `agent_heartbeats` are missing → `incidents` return 500 and heartbeat fails.\n\nThis is exactly why the battery is nondeterministic: leg 1 runs with no ambient var (passes), leg 2 runs with the leak present (fails), same script.\n\n**Fix (executable if the real script were present):**\n```sh\n# API start leg — pin the DB explicitly, matching the migrate leg\nSQLITE_PATH=\"$DB\" HELIOS_CONFIG_PATH=... <api-start-command> ...\n```\nPlus a hardening recommendation to `unset SQLITE_PATH` at the top of the script.\n\n**Verification:** reproduce by removing the pin; confirm both legs pass with the pin; assert the API binds `$DB` (`PRAGMA user_version` == 25) and that `source`/`agent_heartbeats` queries succeed, plus functional 200-on-incidents / heartbeat checks.\n\nI flagged path placeholders like `battery/.../e2e-smoke.sh` and `<api-start-command>` since the actual paths/commands aren't on disk — if you can drop the real `e2e-smoke.sh` into the environment (or give me its location), I'll apply and run the fix verbatim.\n",
+      "evidence": "# Evidence\n- Problem class: env-leak-battery-wrong-db\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-16T02:59:55.564Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Helios e2e-smoke.sh battery: ambient SQLITE_PATH env var (e.g. /tmp/dogfood-helios/helios.db from a prior dogfood session) overrides the API config file path because buildSQLiteDSN is env-first (os.Getenv(SQLITE_PATH) wins over cfg.Database.SQLite.Path). Migrate pins SQLITE_PATH=$DB so the fresh DB is migrated, but the API start only set HELIOS_CONFIG_PATH, so the API silently bound to the stale 25-migration DB -> incidents 500 (no source column), agent heartbeat fails (no agent_heartbeats table). Battery legs passed in run 1 (env absent) and failed in run 2 (env present) with identical script. Fix: pin SQLITE_PATH=$DB on the API start line too. Diagnostic signature: API log shows SQL logic error: no such column/table while the freshly migrated DB has them; check env for SQLITE_PATH.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "env-leak-battery-wrong-db",
+        "provider": "openrouter",
+        "solved_at": "2026-08-16T02:59:55.564Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-08-16 02:59:55"
+    }
+  ]
+}
