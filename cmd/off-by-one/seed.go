@@ -24,7 +24,7 @@ import (
 func runSeed(args []string) {
 	fs := flag.NewFlagSet("seed", flag.ExitOnError)
 	dir := fs.String("dir", "./data", "Corpus data directory (contains answers/*.json)")
-	dbPath := fs.String("db", "./off-by-one.db", "SQLite database path")
+	dbPath := fs.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "Usage: off-by-one seed [-dir DIR] [-db DB]\n\n")
 		fmt.Fprintf(fs.Output(), "Loads the bundled flat answer corpus (DIR/answers/*.json) into the\n")
