@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1031 problem classes · 1113 verified answers** · exported 2026-08-16 10:00 UTC
+**1038 problem classes · 1120 verified answers** · exported 2026-08-16 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1037,3 +1037,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1104 | git-merge-brings-new-dependency-build-fails-module-not-found | 1 | javascript |
 | 1105 | go-mcp-deterministic-session-id-key-generation | 1 | go |
 | 1106 | go-test-env-contamination-openai-key-leaks-into-config-override-test | 1 | go |
+| 1107 | go-modular-square-root-tonelli-shanks | 1 | go |
+| 1108 | docs-cli-readme-drift | 1 | go |
+| 1109 | typescript-sqlite-count-distinct-aggregation | 1 | typescript |
+| 1110 | duckdb-board-sync-keyerror-legacy-jsonl-rows | 1 | python |
+| 1111 | gitreins-judge-tier1-lint-wrong-cwd-eslint-config-fp | 1 | typescript |
+| 1112 | helios-e2e-register-password-policy | 1 | go |
+| 1113 | gitreins-judge-tier1-secrets-phantom-false-positive | 1 | python |
