@@ -1,13 +1,13 @@
 # Off-by-One Answer Index
 
-**1027 problem classes · 1108 verified answers** · exported 2026-08-16 04:00 UTC
+**1031 problem classes · 1113 verified answers** · exported 2026-08-16 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
 | 641 | python-aws-emulator-idle-audit | 22 | go, python |
-| 982 | python-sdk-e2e-battery | 12 | go |
+| 982 | python-sdk-e2e-battery | 13 | go |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 6 | go |
@@ -1033,3 +1033,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1100 | go-test-duration-ms-zero-flaky-assertion | 1 | go |
 | 1101 | go-test-openai-api-key-env-leak-config-precedence | 1 | go |
 | 1102 | env-leak-battery-wrong-db | 1 | go |
+| 1103 | static-html-parallel-fetch-drop | 1 | javascript |
+| 1104 | git-merge-brings-new-dependency-build-fails-module-not-found | 1 | javascript |
+| 1105 | go-mcp-deterministic-session-id-key-generation | 1 | go |
+| 1106 | go-test-env-contamination-openai-key-leaks-into-config-override-test | 1 | go |
