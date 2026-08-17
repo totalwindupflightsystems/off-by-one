@@ -263,6 +263,9 @@ go build ./cmd/off-by-one
 # safe to re-run after corpus updates)
 ./off-by-one seed
 
+# Non-default database path (-db overrides OFF_BY_ONE_DB / ./off-by-one.db)
+./off-by-one seed -db /var/lib/off-by-one/off-by-one.db
+
 # Run
 ./off-by-one
 ```

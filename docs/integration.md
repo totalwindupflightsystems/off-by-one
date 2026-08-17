@@ -15,6 +15,7 @@ Base URL: `http://localhost:8766` (or wherever the binary is listening).
 7. [Deduplication and Queue Behavior](#deduplication-and-queue-behavior)
 8. [Read-Only Catalog Mode](#read-only-catalog-mode)
 9. [MCP / Muster Auto-Discovery](#mcp--muster-auto-discovery)
+10. [Seeding the Answer Corpus](#seeding-the-answer-corpus)
 
 ---
 
@@ -335,6 +336,22 @@ curl -s http://localhost:8766/openapi.json | head -c 200
 ```
 
 Muster can consume this spec to auto-generate MCP tools for the lab. The spec is also the source of truth for route definitions, request/response schemas, and status codes.
+
+---
+
+## Seeding the Answer Corpus
+
+The `seed` subcommand loads the bundled flat answer corpus (`data/answers/*.json`) into the SQLite graph store, so fresh installs get working discovery immediately instead of 404ing on an empty database. It is idempotent: re-running imports only the corpus delta, so it is safe to re-run after corpus updates.
+
+```bash
+# Load the bundled corpus into the default DB (./off-by-one.db)
+./off-by-one seed
+
+# Custom corpus dir and DB path
+./off-by-one seed -dir ./data -db /var/lib/off-by-one/off-by-one.db
+```
+
+Database path resolution: the `-db` flag wins, then the `OFF_BY_ONE_DB` environment variable (see [Configuration Reference](#configuration-reference)), then the default `./off-by-one.db`. The `-dir` flag defaults to `./data` and only needs to change if the corpus lives elsewhere.
 
 ---
 
