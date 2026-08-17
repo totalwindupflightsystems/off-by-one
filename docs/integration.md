@@ -100,7 +100,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
   "position": 1,
   "estimated_time": "30s",
   "existing_solutions": 0,
-  "related_problems": ["go-slice-index-out-of-bounds"]
+  "related_problems": ["so-nil-pointer-deref"]
 }
 ```
 
@@ -178,7 +178,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
   },
   "related": [
     {
-      "problem_class": "go-slice-index-out-of-bounds",
+      "problem_class": "so-nil-pointer-deref",
       "relationship": "similar",
       "relevance": 0.85
     }
@@ -300,7 +300,7 @@ When a duplicate is detected, the API returns HTTP `409 Conflict` with a body li
   "position": 1,
   "estimated_time": "30s",
   "existing_solutions": 3,
-  "related_problems": ["go-slice-index-out-of-bounds"]
+  "related_problems": ["so-nil-pointer-deref"]
 }
 ```
 

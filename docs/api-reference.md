@@ -55,7 +55,7 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
   "position": 1,
   "estimated_time": "30s",
   "existing_solutions": 0,
-  "related_problems": ["go-slice-index-out-of-bounds"]
+  "related_problems": ["so-nil-pointer-deref"]
 }
 ```
 
@@ -254,7 +254,7 @@ Search the graph for a pre-verified answer. When only `problem_class` is provide
   },
   "related": [
     {
-      "problem_class": "go-slice-index-out-of-bounds",
+      "problem_class": "so-nil-pointer-deref",
       "relationship": "similar",
       "relevance": 0.85
     }
@@ -296,7 +296,7 @@ Get related problem classes for a given class using graph edges.
 {
   "related": [
     {
-      "problem_class": "go-slice-index-out-of-bounds",
+      "problem_class": "so-nil-pointer-deref",
       "relationship": "similar",
       "weight": 0.85
     }
