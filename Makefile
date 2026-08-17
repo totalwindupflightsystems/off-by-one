@@ -1,4 +1,4 @@
-.PHONY: build test test-short connect-muster clean
+.PHONY: build test test-short check-binary-fresh connect-muster clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -9,6 +9,25 @@ LDFLAGS := -X main.version=$(VERSION)
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/off-by-one
+
+# Guard for the deployed host artifact: ./off-by-one is gitignored but is what
+# systemd runs. Fails (exit 1, "run make build") whenever the on-disk binary
+# does not byte-match a fresh build of the current source. Go builds are
+# deterministic for identical source + toolchain + flags, so cmp is meaningful;
+# the fresh build uses the same LDFLAGS as `make build`.
+check-binary-fresh:
+	@if [ ! -f $(BINARY) ]; then \
+		echo "ERROR: ./$(BINARY) is missing — run 'make build'"; \
+		exit 1; \
+	fi
+	@tmp=$$(mktemp); \
+	trap 'rm -f "$$tmp"' EXIT; \
+	go build -ldflags "$(LDFLAGS)" -o "$$tmp" ./cmd/off-by-one; \
+	if ! cmp -s "$$tmp" $(BINARY); then \
+		echo "ERROR: ./$(BINARY) is stale — source changed since it was built; run 'make build'"; \
+		exit 1; \
+	fi; \
+	echo "./$(BINARY) is up to date with source"
 
 test:
 	go test -count=1 ./...
