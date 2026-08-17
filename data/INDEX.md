@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1048 problem classes · 1130 verified answers** · exported 2026-08-17 10:00 UTC
+**1052 problem classes · 1134 verified answers** · exported 2026-08-17 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1054,3 +1054,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1121 | postgres-store-queries-tables-missing-from-real-migration-chain | 1 | go |
 | 1122 | ci-pipefail-head-sigpipe-141 | 1 | yaml |
 | 1123 | go-postgres-null-scan-into-string | 1 | go |
+| 1124 | gitreins-judge-tier1-secrets-test-fixture-password-literals | 1 | go |
+| 1125 | go-test-hermeticity | 1 | go |
+| 1126 | go-postgres-missing-table-in-migration-chain | 1 | go |
+| 1127 | go-sqlite-perf-n-plus-one-misattribution | 1 | go |
