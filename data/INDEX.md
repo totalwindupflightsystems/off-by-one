@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1042 problem classes · 1124 verified answers** · exported 2026-08-16 22:00 UTC
+**1045 problem classes · 1127 verified answers** · exported 2026-08-17 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1048,3 +1048,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1115 | github-actions-buildx-contexts | 1 | go |
 | 1116 | game-loop-battle-detector-fires-on-unverified-screens | 1 | python |
 | 1117 | pytest-fast-subset-unmarked-heavy-classes | 1 | python |
+| 1118 | typescript-untracked-foreign-agentsmd-injection | 1 | typescript |
+| 1119 | github-actions-ci-flake-triage | 1 | go |
+| 1120 | alembic-migration-table-shape-drift | 1 | python |
