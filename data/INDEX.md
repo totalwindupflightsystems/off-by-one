@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1052 problem classes · 1134 verified answers** · exported 2026-08-17 16:00 UTC
+**1056 problem classes · 1138 verified answers** · exported 2026-08-17 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1058,3 +1058,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1125 | go-test-hermeticity | 1 | go |
 | 1126 | go-postgres-missing-table-in-migration-chain | 1 | go |
 | 1127 | go-sqlite-perf-n-plus-one-misattribution | 1 | go |
+| 1128 | typescript-parse-retry-storm-degenerate-output | 1 | typescript |
+| 1129 | go-identity-deprovision-account-deletion | 1 | go |
+| 1130 | shell-grep-json-escaped-output-string | 1 | bash |
+| 1131 | typescript-duckbrain-temp-scratch-db-files | 1 | typescript |
