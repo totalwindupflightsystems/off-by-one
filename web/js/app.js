@@ -87,10 +87,23 @@
     activateView(valid ? initial : 'home');
   }
 
-  // Back/forward across problem pages: re-render on hash change.
+  // Back/forward across problem pages: re-render on hash change. Leaving
+  // a problem page restores the underlying tab view (the search view's
+  // own hashchange listener re-reads its URL state).
   window.addEventListener('hashchange', () => {
     const slug = currentProblemSlug();
-    if (slug) showProblemView(slug);
+    if (slug) {
+      showProblemView(slug);
+      return;
+    }
+    const vp = document.getElementById('view-problem');
+    if (vp) {
+      vp.hidden = true;
+      vp.classList.remove('active');
+    }
+    const viewName = (location.hash || '#home').slice(1).split('?')[0];
+    const tab = Array.from(tabs).find((t) => t.dataset.view === viewName);
+    if (tab) activateView(viewName);
   });
 
   // ---------- Theme toggle ----------
