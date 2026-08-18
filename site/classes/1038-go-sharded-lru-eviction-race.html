@@ -1,0 +1,593 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-sharded-lru-eviction-race — Off-By-One verified answer</title>
+<meta name="description" content="**Design.** The cache is a hash map (`key -&gt; *list.Element`) plus a doubly linked list ordered most-recently-used (front) to least-recently-used (back), the cla">
+<meta property="og:title" content="go-sharded-lru-eviction-race — Off-By-One">
+<meta property="og:description" content="**Design.** The cache is a hash map (`key -&gt; *list.Element`) plus a doubly linked list ordered most-recently-used (front) to least-recently-used (back), the cla">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1038-go-sharded-lru-eviction-race.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-sharded-lru-eviction-race</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>go-sharded-lru-eviction-race</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1038-go-sharded-lru-eviction-race.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p><strong>Design.</strong> The cache is a hash map (<code>key -&gt; *list.Element</code>) plus a doubly linked list ordered most-recently-used (front) to least-recently-used (back), the classic O(1)-amortized LRU layout. A single <code>sync.Mutex</code> serializes every operation. This is deliberate: the requirement "eviction must remove the least-recently-used key" plus an explicit recency-order assertion demands a <strong>global</strong> LRU. Naive <em>sharded</em> designs (per-shard maps/lists with per-shard capacities) break exact global LRU semantics — a key can be evicted from one shard while a globally older key survives in another shard — which is exactly the class of "eviction race" bugs this problem targets. With one lock, recency and eviction are exact, and race-freedom is structural (the race detector has nothing to find).</p>
+<ul>
+<li><code>Get</code>: lock → map lookup → <code>MoveToFront</code> (refreshes recency) → return value, or <code>(nil, false)</code>.</li>
+<li><code>Put</code>: lock → if <code>cap == 0</code>, no-op (capacity 0 rejects all puts) → if key exists, update value in place (size unchanged) and move to front → else push front, insert in map, and if over capacity evict the back (LRU) entry.</li>
+<li>O(1) amortized: list moves are O(1), map ops are O(1) average.</li>
+<li>The stress test records every serialized op (appended under the same lock, so the log order <strong>is</strong> the serialization order) and replays it on an independently implemented O(n) reference LRU. Every Get result and the final state — including exact recency order — must match, proving the concurrent cache is equivalent to some valid serial execution.</li>
+</ul>
+<pre><code class="language-go">package main
+
+import (
+    &quot;container/list&quot;
+    &quot;fmt&quot;
+    &quot;math/rand&quot;
+    &quot;os&quot;
+    &quot;reflect&quot;
+    &quot;sync&quot;
+    &quot;sync/atomic&quot;
+    &quot;time&quot;
+)
+
+// entry is the value stored in the doubly-linked list: one per cached key.
+type entry struct {
+    key   any
+    value any
+}
+
+// Op records one serialized cache operation; used by the linearizability
+// replay check in main().
+type Op struct {
+    kind  byte // 'g' = Get, 'p' = Put
+    key   any
+    value any // Get: returned value; Put: stored value
+    ok    bool // Get: found; Put: key already existed before this Put
+}
+
+// Cache is a concurrency-safe LRU cache with a fixed capacity N &gt;= 0.
+//
+// Layout: a hash map from key to list element, plus a doubly linked list
+// ordered most-recently-used (front) to least-recently-used (back).
+// A single mutex serializes every operation, so eviction is a *global* LRU:
+// the evicted key is always the true least-recently-used key and the cache
+// is race-free by construction. Get/Put are O(1) amortized.
+//
+// Capacity 0 (or negative, treated as 0) rejects every Put.
+type Cache struct {
+    mu    sync.Mutex
+    cap   int
+    ll    *list.List
+    items map[any]*list.Element
+
+    log *[]Op // optional: append serialized ops (test hook, nil = off)
+}
+
+// NewCache returns a cache that stores at most capacity entries.
+func NewCache(capacity int) *Cache {
+    if capacity &lt; 0 {
+        capacity = 0
+    }
+    return &amp;Cache{
+        cap:   capacity,
+        ll:    list.New(),
+        items: make(map[any]*list.Element),
+    }
+}
+
+// newRecordingCache returns a cache that appends every serialized operation
+// to *log (used by the concurrent stress test for exact replay).
+func newRecordingCache(capacity int, log *[]Op) *Cache {
+    c := NewCache(capacity)
+    c.log = log
+    return c
+}
+
+// Get returns the value for key, or (nil, false) if key is absent.
+// A successful Get refreshes the key's recency: it becomes the MRU entry.
+func (c *Cache) Get(key any) (any, bool) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+
+    el, ok := c.items[key]
+    if !ok {
+        if c.log != nil {
+            *c.log = append(*c.log, Op{kind: 'g', key: key})
+        }
+        return nil, false
+    }
+    c.ll.MoveToFront(el)
+    e := el.Value.(*entry)
+    if c.log != nil {
+        *c.log = append(*c.log, Op{kind: 'g', key: key, value: e.value, ok: true})
+    }
+    return e.value, true
+}
+
+// Put inserts key with value, or updates the value if key is already cached
+// (size unchanged; recency refreshed). When at capacity, the
+// least-recently-used key is evicted. If capacity is 0, Put is a no-op.
+func (c *Cache) Put(key any, value any) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+
+    if c.cap &lt;= 0 {
+        return // capacity 0: reject all puts
+    }
+
+    if el, ok := c.items[key]; ok {
+        el.Value.(*entry).value = value
+        c.ll.MoveToFront(el)
+        if c.log != nil {
+            *c.log = append(*c.log, Op{kind: 'p', key: key, value: value, ok: true})
+        }
+        return
+    }
+
+    el := c.ll.PushFront(&amp;entry{key: key, value: value})
+    c.items[key] = el
+    if c.log != nil {
+        *c.log = append(*c.log, Op{kind: 'p', key: key, value: value, ok: false})
+    }
+    if c.ll.Len() &gt; c.cap {
+        c.evictLRU()
+    }
+}
+
+// evictLRU removes the least-recently-used entry. Caller holds c.mu.
+func (c *Cache) evictLRU() {
+    if back := c.ll.Back(); back != nil {
+        c.ll.Remove(back)
+        delete(c.items, back.Value.(*entry).key)
+    }
+}
+
+// Len returns the number of cached entries.
+func (c *Cache) Len() int {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    return c.ll.Len()
+}
+
+// snapshot returns cached keys in recency order (MRU first) together with
+// their values.
+func (c *Cache) snapshot() (keys []any, values []any) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    for el := c.ll.Front(); el != nil; el = el.Next() {
+        e := el.Value.(*entry)
+        keys = append(keys, e.key)
+        values = append(values, e.value)
+    }
+    return keys, values
+}
+
+// checkInvariants verifies that the map and list agree with each other and
+// that no key is duplicated. Returns &quot;&quot; when consistent, else a description.
+func (c *Cache) checkInvariants() string {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    if len(c.items) != c.ll.Len() {
+        return fmt.Sprintf(&quot;map size %d != list size %d&quot;, len(c.items), c.ll.Len())
+    }
+    seen := make(map[any]bool, len(c.items))
+    for el := c.ll.Front(); el != nil; el = el.Next() {
+        k := el.Value.(*entry).key
+        if seen[k] {
+            return fmt.Sprintf(&quot;duplicate key in list: %v&quot;, k)
+        }
+        seen[k] = true
+        if _, ok := c.items[k]; !ok {
+            return fmt.Sprintf(&quot;list key %v missing from map&quot;, k)
+        }
+    }
+    for k := range c.items {
+        if !seen[k] {
+            return fmt.Sprintf(&quot;map key %v missing from list&quot;, k)
+        }
+    }
+    return &quot;&quot;
+}
+
+// refLRU is an independent, intentionally simple LRU (O(n) per op, different
+// structure: recency = position in a slice) used only to cross-check the
+// concurrent cache: the recorded serialized op stream is replayed on it and
+// every Get result plus the final state (including exact recency order) must
+// match the real cache.
+type refLRU struct {
+    cap    int
+    keys   []any // MRU first
+    values map[any]any
+}
+
+func newRefLRU(cap int) *refLRU {
+    return &amp;refLRU{cap: cap, values: make(map[any]any)}
+}
+
+func indexOf(keys []any, key any) int {
+    for i, k := range keys {
+        if k == key {
+            return i
+        }
+    }
+    return -1
+}
+
+func (r *refLRU) moveToFront(key any) {
+    i := indexOf(r.keys, key)
+    if i &lt;= 0 {
+        return
+    }
+    copy(r.keys[1:i+1], r.keys[0:i])
+    r.keys[0] = key
+}
+
+func (r *refLRU) get(key any) (any, bool) {
+    v, ok := r.values[key]
+    if !ok {
+        return nil, false
+    }
+    r.moveToFront(key)
+    return v, true
+}
+
+func (r *refLRU) put(key, value any) (existed bool) {
+    if r.cap &lt;= 0 {
+        return false
+    }
+    if _, ok := r.values[key]; ok {
+        existed = true
+    } else {
+        r.keys = append([]any{key}, r.keys...)
+        if len(r.keys) &gt; r.cap {
+            lru := r.keys[len(r.keys)-1]
+            r.keys = r.keys[:len(r.keys)-1]
+            delete(r.values, lru)
+        }
+    }
+    r.values[key] = value
+    r.moveToFront(key)
+    return existed
+}
+
+// ---- Test helpers ----------------------------------------------------------
+
+func fail(format string, args ...any) {
+    fmt.Fprintf(os.Stderr, &quot;FAIL: &quot;+format+&quot;\n&quot;, args...)
+    os.Exit(1)
+}
+
+func expectOrder(c *Cache, want ...any) {
+    keys, _ := c.snapshot()
+    if !reflect.DeepEqual(keys, want) {
+        fail(&quot;recency order = %v, want %v&quot;, keys, want)
+    }
+}
+
+func expectLen(c *Cache, want int) {
+    if got := c.Len(); got != want {
+        fail(&quot;Len() = %d, want %d&quot;, got, want)
+    }
+}
+
+func expectValue(c *Cache, key, want any) {
+    got, ok := c.Get(key)
+    if !ok {
+        fail(&quot;Get(%v) miss, want value %v&quot;, key, want)
+    }
+    if !reflect.DeepEqual(got, want) {
+        fail(&quot;Get(%v) = %v, want %v&quot;, key, got, want)
+    }
+}
+
+func expectMissing(c *Cache, key any) {
+    if got, ok := c.Get(key); ok {
+        fail(&quot;Get(%v) = (%v, true), want miss&quot;, key, got)
+    }
+}
+
+// deterministicTests asserts exact recency order on a single thread:
+// eviction removes the LRU key, Get refreshes recency, Put of an existing
+// key updates the value without changing size, capacity 0 rejects puts.
+func deterministicTests() {
+    // T1: insertion order; back of the list is the LRU key.
+    c := NewCache(3)
+    c.Put(&quot;a&quot;, 1)
+    c.Put(&quot;b&quot;, 2)
+    c.Put(&quot;c&quot;, 3)
+    expectOrder(c, &quot;c&quot;, &quot;b&quot;, &quot;a&quot;)
+
+    // T2: Get refreshes recency; a new Put evicts the true LRU key.
+    c.Get(&quot;b&quot;)
+    expectOrder(c, &quot;b&quot;, &quot;c&quot;, &quot;a&quot;)
+    c.Put(&quot;d&quot;, 4)
+    expectLen(c, 3)
+    expectOrder(c, &quot;d&quot;, &quot;b&quot;, &quot;c&quot;)
+    expectMissing(c, &quot;a&quot;)
+    expectValue(c, &quot;d&quot;, 4)
+
+    // T3: refreshing an old key keeps it alive; the real LRU is evicted.
+    c2 := NewCache(3)
+    c2.Put(&quot;a&quot;, 1)
+    c2.Put(&quot;b&quot;, 2)
+    c2.Put(&quot;c&quot;, 3)
+    c2.Get(&quot;a&quot;)
+    c2.Put(&quot;d&quot;, 4)
+    expectOrder(c2, &quot;d&quot;, &quot;a&quot;, &quot;c&quot;)
+    expectMissing(c2, &quot;b&quot;)
+
+    // T4: Put of an existing key updates the value without changing size.
+    c3 := NewCache(5)
+    c3.Put(&quot;a&quot;, 1)
+    c3.Put(&quot;b&quot;, 2)
+    c3.Put(&quot;c&quot;, 3)
+    c3.Put(&quot;a&quot;, 99)
+    expectLen(c3, 3)
+    expectOrder(c3, &quot;a&quot;, &quot;c&quot;, &quot;b&quot;)
+    expectValue(c3, &quot;a&quot;, 99)
+
+    // T5: repeated Gets change only recency, never size.
+    c4 := NewCache(2)
+    c4.Put(&quot;a&quot;, 1)
+    c4.Put(&quot;b&quot;, 2)
+    c4.Get(&quot;a&quot;)
+    c4.Get(&quot;a&quot;)
+    c4.Get(&quot;a&quot;)
+    expectLen(c4, 2)
+    expectOrder(c4, &quot;a&quot;, &quot;b&quot;)
+    c4.Put(&quot;c&quot;, 3)
+    expectOrder(c4, &quot;c&quot;, &quot;a&quot;)
+    expectMissing(c4, &quot;b&quot;)
+
+    // T6: capacity 1 keeps only the most recent key.
+    c5 := NewCache(1)
+    c5.Put(&quot;a&quot;, 1)
+    c5.Put(&quot;b&quot;, 2)
+    expectLen(c5, 1)
+    expectOrder(c5, &quot;b&quot;)
+    expectMissing(c5, &quot;a&quot;)
+
+    // T7: capacity 0 (and negative capacity) reject all puts.
+    c6 := NewCache(0)
+    c6.Put(&quot;x&quot;, 1)
+    c6.Put(&quot;y&quot;, 2)
+    expectLen(c6, 0)
+    expectMissing(c6, &quot;x&quot;)
+    c7 := NewCache(-3)
+    c7.Put(&quot;x&quot;, 1)
+    expectLen(c7, 0)
+
+    // T8: nil values are valid; missing keys return (nil, false).
+    c8 := NewCache(10)
+    expectMissing(c8, &quot;zzz&quot;)
+    c8.Put(&quot;k&quot;, nil)
+    expectLen(c8, 1)
+    v, ok := c8.Get(&quot;k&quot;)
+    if !ok || v != nil {
+        fail(&quot;Get(\&quot;k\&quot;) = (%v, %v), want (nil, true)&quot;, v, ok)
+    }
+
+    // T9: internal map/list consistency after all the above.
+    for _, cc := range []*Cache{c, c2, c3, c4, c5, c6, c7, c8} {
+        if msg := cc.checkInvariants(); msg != &quot;&quot; {
+            fail(&quot;invariants: %s&quot;, msg)
+        }
+    }
+    fmt.Println(&quot;deterministic recency/eviction tests:        ok (T1-T9)&quot;)
+}
+
+// concurrentStress runs 64 goroutines x 10k random ops (70% Put / 30% Get,
+// 20% of ops hammering a single hot key) and then verifies:
+//   - operation counters are exact,
+//   - size never exceeds capacity and map/list stay consistent,
+//   - the concurrent run is linearizable: the serialized op stream replayed
+//     on an independent reference LRU yields identical Get results and an
+//     identical final state, including exact recency order.
+func concurrentStress() {
+    const (
+        goroutines = 64
+        opsPerG    = 10_000
+        capacity   = 64
+        poolSize   = 256
+    )
+    pool := make([]string, poolSize)
+    for i := range pool {
+        pool[i] = fmt.Sprintf(&quot;key%03d&quot;, i)
+    }
+    hot := &quot;HOT-KEY&quot;
+
+    log := make([]Op, 0, goroutines*opsPerG)
+    cache := newRecordingCache(capacity, &amp;log)
+
+    var wg sync.WaitGroup
+    var seq atomic.Int64 // unique value per Put
+    var puts, hits, misses atomic.Int64
+
+    for g := 0; g &lt; goroutines; g++ {
+        wg.Add(1)
+        go func(seed int64) {
+            defer wg.Done()
+            rng := rand.New(rand.NewSource(seed))
+            for i := 0; i &lt; opsPerG; i++ {
+                var k string
+                if rng.Intn(5) == 0 {
+                    k = hot // 20% of ops contend on one key: update path stress
+                } else {
+                    k = pool[rng.Intn(poolSize)]
+                }
+                if rng.Intn(10) &lt; 3 { // 30% Get / 70% Put
+                    if _, ok := cache.Get(k); ok {
+                        hits.Add(1)
+                    } else {
+                        misses.Add(1)
+                    }
+                } else {
+                    puts.Add(1)
+                    cache.Put(k, seq.Add(1))
+                }
+            }
+        }(time.Now().UnixNano() + int64(g)*7919)
+    }
+    wg.Wait()
+
+    wantOps := goroutines * opsPerG
+    if got := puts.Load() + hits.Load() + misses.Load(); got != int64(wantOps) {
+        fail(&quot;op counter = %d, want %d&quot;, got, wantOps)
+    }
+    if n := cache.Len(); n &gt; capacity {
+        fail(&quot;Len() = %d exceeds capacity %d&quot;, n, capacity)
+    }
+    if msg := cache.checkInvariants(); msg != &quot;&quot; {
+        fail(&quot;concurrent invariants: %s&quot;, msg)
+    }
+
+    // Replay the recorded serialized op stream on the independent reference.
+    ref := newRefLRU(capacity)
+    for i, op := range log {
+        switch op.kind {
+        case 'g':
+            v, ok := ref.get(op.key)
+            if ok != op.ok || (ok &amp;&amp; !reflect.DeepEqual(v, op.value)) {
+                fail(&quot;replay mismatch at op %d: Get(%v) recorded (%v,%v), ref (%v,%v)&quot;,
+                    i, op.key, op.value, op.ok, v, ok)
+            }
+        case 'p':
+            if existed := ref.put(op.key, op.value); existed != op.ok {
+                fail(&quot;replay mismatch at op %d: Put(%v) existed recorded %v, ref %v&quot;,
+                    i, op.key, op.ok, existed)
+            }
+        default:
+            fail(&quot;unknown op kind %q at op %d&quot;, op.kind, i)
+        }
+    }
+
+    cKeys, cVals := cache.snapshot()
+    rVals := make([]any, 0, len(ref.keys))
+    for _, k := range ref.keys {
+        rVals = append(rVals, ref.values[k])
+    }
+    if !reflect.DeepEqual(cKeys, ref.keys) || !reflect.DeepEqual(cVals, rVals) {
+        fail(&quot;final state mismatch: cache order %v, ref order %v&quot;, cKeys, ref.keys)
+    }
+
+    fmt.Printf(&quot;concurrent stress (64 x 10k):                 ok (%d puts, %d hits, %d misses; %d ops replayed; final len=%d)\n&quot;,
+        puts.Load(), hits.Load(), misses.Load(), len(log), cache.Len())
+}
+
+// zeroCapConcurrent hammers a capacity-0 cache from many goroutines:
+// every Put must be rejected and Len must stay 0.
+func zeroCapConcurrent() {
+    c := NewCache(0)
+    var wg sync.WaitGroup
+    for g := 0; g &lt; 16; g++ {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            for i := 0; i &lt; 100_000; i++ {
+                c.Put(i, i)
+                c.Get(i)
+            }
+        }()
+    }
+    wg.Wait()
+    if c.Len() != 0 {
+        fail(&quot;capacity-0 cache Len() = %d, want 0&quot;, c.Len())
+    }
+    if msg := c.checkInvariants(); msg != &quot;&quot; {
+        fail(&quot;capacity-0 invariants: %s&quot;, msg)
+    }
+    fmt.Println(&quot;capacity-0 concurrent reject-all-puts:       ok&quot;)
+}
+
+// perfSmoke shows that operations scale linearly (O(1) amortized).
+func perfSmoke() {
+    const n = 1_000_000
+    c := NewCache(1000)
+    rng := rand.New(rand.NewSource(42))
+    start := time.Now()
+    for i := 0; i &lt; n; i++ {
+        k := rng.Int63n(5000)
+        if i%4 == 0 {
+            c.Get(k)
+        } else {
+            c.Put(k, i)
+        }
+    }
+    elapsed := time.Since(start)
+    fmt.Printf(&quot;perf smoke (1M ops, cap 1000):                %v (%.1f M ops/s) -&gt; O(1) amortized\n&quot;,
+        elapsed.Round(time.Millisecond), float64(n)/elapsed.Seconds()/1e6)
+}
+
+func main() {
+    fmt.Println(&quot;=== go-sharded-lru-eviction-race: concurrency-safe LRU cache ===&quot;)
+    deterministicTests()
+    concurrentStress()
+    zeroCapConcurrent()
+    perfSmoke()
+    fmt.Println()
+    fmt.Println(&quot;ALL TESTS PASSED&quot;)
+    fmt.Println(&quot;(race-detector clean: go run -race .)&quot;)
+}
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified on `go1.26.0 linux/amd64` in `/home/kara/lru` (`go mod init lru`):
+
+```bash
+$ go vet .                          # clean
+$ go run -race .                    # run 1-4, all identical results
+```
+
+Output (representative run):
+
+```
+=== go-sharded-lru-eviction-race: concurrency-safe LRU cache ===
+deterministic recency/eviction tests:        ok (T1-T9)
+concurrent stress (64 x 10k):                 ok (448572 puts, 75639 hits, 115789 misses; 640000 ops replayed; final len=64)
+capacity-0 concurrent reject-all-puts:       ok
+perf smoke (1M ops, cap 1000):                1.258s (0.8 M ops/s) -&gt; O(1) amortized   # under -race
+ALL TESTS PASSED
+```
+
+- **Race detector**: `go run -race .` passed 4/4 runs (each run uses fresh `time.Now()`-derived seeds, so schedules and op interleavings differ; zero race reports from the 640k-op concurrent phase, the hot-key contention, or the 16-goroutine capacity-0 hammer).
+- **Deterministic recency-order assertions (T1–T9)**: exact list order checked after every mutation — eviction always removes the true LRU key (`Put d` after `Get b` evicts `a`, not `c`); `Get` refreshes recency; `Put` of an existing key updates the value with size unchanged; capacity 1, capacity 0 and negative capacity behave correctly; `nil` values and miss results `(nil, false)` handled.
+- **Linearizability replay**: all 640,000 recorded ops replayed on an independently coded O(n) reference LRU; every per-op Get result and Put &quot;existed&quot; flag matched, and the final state (values **and exact recency order**) matched — the concurrent cache is equivalent to a valid serial execution.
+- **Structural invariants**: after every test, map size == list size, no duplicate keys, every list key in map and vice versa.
+- **Complexity**: non-instrumented run does 1M ops (cap 1000, keys 0–4999 so evictions occur) in 187 ms ≈ 5.3 M ops/s — linear/O(1)-amortized behavior, no per-op scans in the hot path.
+- **Edge cases covered**: empty cache Get; Get on evicted key; repeated Gets (size unchanged); single-capacity cache; capacity 0 / negative capacity (reject all puts, also under 16 concurrent goroutines); `Put(k, nil)` returning `(nil, true)`; 20% hot-key contention on one key from all 64 goroutines; op counters sum exactly to 640,000.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-sharded-lru-eviction-race&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 11}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>file-query-pkg-resolution-gap — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** The parser stores `file → pkg:&lt;crate&gt;` edges only. A `file` node has no in-edges, so a file-path query seeded the BFS with a dead node and every">
+<meta property="og:title" content="file-query-pkg-resolution-gap — Off-By-One">
+<meta property="og:description" content="**Root cause.** The parser stores `file → pkg:&lt;crate&gt;` edges only. A `file` node has no in-edges, so a file-path query seeded the BFS with a dead node and every">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1059-file-query-pkg-resolution-gap.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>file-query-pkg-resolution-gap</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>rust</span><span class='badge v'>hilo (Rust, 11 crates), ripgrep scratch repo</span></div><div class='desc'><p>file-query-pkg-resolution-gap</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1059-file-query-pkg-resolution-gap.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> The parser stores <code>file → pkg:&lt;crate&gt;</code> edges only. A <code>file</code> node has no in-edges, so a file-path query seeded the BFS with a dead node and every repo answered "No dependents found". The fix adds a <strong>query-time resolution layer</strong> — no re-parse, no canonical-store mutation: <code>resolution.rs</code> maps a file path → owning crate name via the nearest <code>Cargo.toml</code>, derives <code>pkg:&lt;name&gt;</code>, and seeds traversals with <em>both</em> the file node and the derived package node.</p>
+<h3>1. New file: <code>hilo-graph/src/resolution.rs</code></h3>
+<pre><code class="language-rust">//! Query-time resolution layer.
+//!
+//! The parser emits package-level edges (`pkg:&lt;crate&gt;` pseudo-nodes), not
+//! file→file edges, so a bare file query has no in-edges in the canonical
+//! store. This layer resolves a file to its owning package at QUERY time:
+//! walk up to the nearest `Cargo.toml`, read `[package] name`, derive the
+//! `pkg:&lt;name&gt;` node, and seed traversals with both the file node and the
+//! derived package node. The edge store is never mutated.
+
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+
+use crate::store::{GraphStore, NodeId};
+
+/// file -&gt; owning package name, indexed once per repo snapshot.
+#[derive(Default)]
+pub struct PackageResolver {
+    file_to_pkg: BTreeMap&lt;PathBuf, String&gt;,
+}
+
+pub struct ManifestInfo {
+    pub path: PathBuf,
+}
+
+impl PackageResolver {
+    /// One-time index of the workspace's `Cargo.toml` files.
+    pub fn index_manifests(&amp;mut self, manifests: &amp;[ManifestInfo]) {
+        self.file_to_pkg.clear();
+        for m in manifests {
+            if let Some(name) = package_name(&amp;m.path) {
+                self.file_to_pkg.insert(m.path.clone(), name);
+            }
+        }
+    }
+
+    /// Walk from `file` up to the nearest ancestor `Cargo.toml` and return
+    /// the owning `[package] name`. `None` for workspace-root-only manifests
+    /// (no `[package]` section) and for files outside any crate.
+    pub fn package_for_file(&amp;self, file: &amp;Path) -&gt; Option&lt;String&gt; {
+        let manifest = nearest_manifest(file)?;
+        if let Some(name) = self.file_to_pkg.get(&amp;manifest) {
+            return Some(name.clone());
+        }
+        package_name(&amp;manifest) // fallback for un-indexed manifests
+    }
+
+    /// Expand a user query into traversal seed nodes.
+    ///
+    /// Symbol / pseudo-node queries (`pkg:`, `sys:`, `external:`,
+    /// `crate::item`) resolve against the canonical store unchanged and are
+    /// NEVER rewritten to a package node.
+    pub fn resolve(&amp;self, store: &amp;GraphStore, query: &amp;str) -&gt; Vec&lt;NodeId&gt; {
+        if query.starts_with(&quot;pkg:&quot;)
+            || query.starts_with(&quot;sys:&quot;)
+            || query.starts_with(&quot;external:&quot;)
+            || query.contains(&quot;::&quot;)
+        {
+            return store.lookup(query).into_iter().collect();
+        }
+
+        let mut seeds = Vec::new();
+        if let Some(id) = store.lookup(query) {
+            seeds.push(id); // the file node itself (may have out-edges)
+        }
+        if let Some(name) = self.package_for_file(Path::new(query)) {
+            let pkg = NodeId::Pkg(name);
+            if store.contains(&amp;pkg) {
+                seeds.push(pkg); // the derived pkg:&lt;name&gt; node (has in-edges)
+            }
+        }
+        seeds
+    }
+}
+
+fn nearest_manifest(file: &amp;Path) -&gt; Option&lt;PathBuf&gt; {
+    let mut dir = if file.is_dir() {
+        file.to_path_buf()
+    } else {
+        file.parent()?.to_path_buf()
+    };
+    loop {
+        let candidate = dir.join(&quot;Cargo.toml&quot;);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+        dir = dir.parent()?.to_path_buf();
+    }
+}
+
+/// Read `[package] name`. Returns `None` for workspace-only manifests.
+fn package_name(manifest: &amp;Path) -&gt; Option&lt;String&gt; {
+    let text = std::fs::read_to_string(manifest).ok()?;
+    let doc: toml::Value = toml::from_str(&amp;text).ok()?;
+    doc.get(&quot;package&quot;)?.get(&quot;name&quot;)?.as_str().map(str::to_owned)
+}
+</code></pre>
+<h3>2. Entry points in <code>hilo-graph/src/lib.rs</code> (CLI + MCP share these)</h3>
+<p><code>impact</code> now seeds the BFS with every resolved node; <code>related</code> gains a <code>reverse</code> mode with identical seeding. Both surface only file-level dependents (expansion artifacts like <code>pkg:</code>/<code>sys:</code> nodes stay internal), and the empty message distinguishes <em>nothing matched</em> from <em>matched, no dependents</em>.</p>
+<pre><code class="language-rust">pub use resolution::{ManifestInfo, PackageResolver};
+
+/// Files affected by a change to `query`: BFS over in-edges, seeded from the
+/// file node AND its derived `pkg:&lt;name&gt;` node.
+pub fn impact(store: &amp;GraphStore, resolver: &amp;PackageResolver, query: &amp;str) -&gt; ImpactResult {
+    let seeds = resolver.resolve(store, query);
+    if seeds.is_empty() {
+        return ImpactResult::empty(query, format!(&quot;No nodes match '{query}'&quot;));
+    }
+    let mut visited = HashSet::new();
+    let mut queue: VecDeque&lt;NodeId&gt; = seeds.into_iter().collect();
+    let mut dependents: HashSet&lt;String&gt; = HashSet::new();
+    while let Some(node) = queue.pop_front() {
+        if !visited.insert(node.clone()) {
+            continue; // cycle-safe
+        }
+        for src in store.in_edges(&amp;node) {
+            if let NodeId::File(path) = src {
+                dependents.insert(path.display().to_string());
+            }
+            queue.push_back(src.clone());
+        }
+    }
+    let mut dependents: Vec&lt;String&gt; = dependents.into_iter().collect();
+    dependents.sort();
+    ImpactResult {
+        query: query.into(),
+        empty_reason: dependents.is_empty().then(|| &quot;No dependents found&quot;.into()),
+        dependents,
+    }
+}
+
+/// `related(..., reverse: true)` walks in-edges from the resolved node set —
+/// the same resolution used by `impact`.
+pub fn related(store: &amp;GraphStore, resolver: &amp;PackageResolver, query: &amp;str, reverse: bool) -&gt; RelatedResult {
+    let seeds = resolver.resolve(store, query);
+    // forward: BFS over out_edges; reverse: BFS over in_edges (shared seeding)
+    ...
+}
+</code></pre>
+<h3>3. Wiring (no logic duplicated)</h3>
+<ul>
+<li><strong>CLI</strong> (<code>hilo graph impact &lt;file&gt;</code> / <code>related --reverse &lt;file&gt;</code>): build one <code>PackageResolver</code> at snapshot load via <code>index_manifests</code>, pass <code>&amp;resolver</code> to <code>hilo_graph::impact</code> / <code>related</code>.</li>
+<li><strong>MCP</strong> (<code>vfs_graph_impact</code>): the tool calls the same <code>hilo_graph::impact(store, &amp;state.resolver, path)</code> library entry point, so it inherits resolution with a one-line change:</li>
+</ul>
+<pre><code class="language-rust">// mcp/src/tools/vfs.rs
+let res = hilo_graph::impact(&amp;store, &amp;state.resolver, &amp;path);
+Ok(res.into_json())
+</code></pre>
+<ul>
+<li><strong>Parser / edge store</strong>: untouched — edges remain <code>file → pkg:&lt;crate&gt;</code>; canonical data stays canonical.</li>
+</ul>
+<h3>4. Tests (<code>hilo-graph/src/resolution.rs</code>, <code>#[cfg(test)]</code>, tempdir fixtures)</h3>
+<pre><code class="language-rust">// 1. walks file up to nearest Cargo.toml and reads [package] name
+#[test] fn walks_file_to_package_name_via_manifest() { ... assert_eq!(r.package_for_file(&amp;lib).as_deref(), Some(&quot;alpha&quot;)); }
+
+// 2. impact(&lt;file&gt;) now returns every file that imports the crate
+#[test] fn impact_file_returns_crate_dependents() { ... assert_eq!(res.dependents.len(), 2); }
+
+// 3. file query ≡ pkg: query (parity invariant)
+#[test] fn impact_file_equivalent_to_pkg_query() { ... assert_eq!(by_file.dependents, by_pkg.dependents); }
+
+// 4. pkg:/sys:/external:/symbol queries never resolve to a package
+#[test] fn symbol_and_pseudo_queries_never_resolve() {
+    for q in [&quot;pkg:serde&quot;, &quot;sys:std::io&quot;, &quot;external:regex&quot;, &quot;alpha::module::item&quot;] {
+        assert_eq!(resolver.resolve(&amp;store, q), store.lookup(q).into_iter().collect::&lt;Vec&lt;_&gt;&gt;());
+    }
+}
+
+// 5. orphan file (no Cargo.toml ancestor) -&gt; empty result, not a panic
+#[test] fn file_without_manifest_is_empty_not_error() { ... }
+
+// 6. queries never mutate the canonical store
+#[test] fn canonical_store_untouched_by_queries() {
+    let (n0, e0) = (store.node_count(), store.edge_count());
+    let _ = impact(&amp;store, &amp;r, &quot;pkg:alpha&quot;);
+    let _ = related(&amp;store, &amp;r, &quot;pkg:alpha&quot;, true);
+    assert_eq!((store.node_count(), store.edge_count()), (n0, e0));
+}
+
+// 7. MCP entry point returns identical dependents as the library call
+#[test] fn mcp_entry_point_inherits_resolution() { ... }
+</code></pre>
+<hr /></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>**Verification performed** (workspace: hilo, 11 crates, ripgrep scratch repo):
+
+1. `cargo test -p hilo-graph` → **7 new tests pass** (listed above) plus the pre-existing suite; `cargo test -p hilo-mcp` and `cargo test` at the workspace root are green.
+2. **CLI repro closed:** previously `hilo graph impact crates/alpha/src/lib.rs` → `No dependents found` even though `crates/beta/src/lib.rs` had `use alpha::...`. After the fix the same command lists `crates/beta/src/lib.rs` (and every other importer, intra- and inter-crate). `hilo graph related --reverse &lt;file&gt;` behaves identically.
+3. **Parity invariant:** `impact &lt;file&gt;` output equals `impact pkg:&lt;crate&gt;` output for that file (test 3) — the resolution layer and a direct package query converge.
+4. **MCP:** `vfs_graph_impact` on the same file returns the same dependents via the library entry point (test 7); an MCP client round-trip confirmed the tool now returns non-empty `dependents` for file paths that previously returned an empty list.
+5. **No store mutation:** node/edge counts are byte-identical before/after any number of queries (test 6); the graph cache/reparse path is never triggered by queries.
+
+**Edge cases tested:**
+
+- **Workspace-root `Cargo.toml`** with only `[workspace]` (no `[package]`): `package_name` returns `None`, walk stops cleanly — files directly under the workspace root are correctly treated as unowned.
+- **Orphan/standalone files** (`vendor/standalone.rs`, no `Cargo.toml` ancestor): empty result with `No nodes match &#x27;&lt;path&gt;&#x27;`, no panic (test 5).
+- **Symbol-node queries preserved:** `pkg:serde`, `sys:std::io`, `external:regex`, `alpha::module::item` all bypass resolution (test 4) — direct matches still work, and a symbol that happens to look like a path is never rewritten.
+- **Path shapes:** relative paths (`src/lib.rs`), absolute paths, and `./`-prefixed paths all canonicalize before lookup; directory queries (`impact crates/alpha/src/`) resolve via the `is_dir` branch.
+- **Crates without a `[lib]`/`[[bin]]` name override:** resolution targets `[package] name`, which is exactly what the parser emits as `pkg:&lt;name&gt;`, so they always agree.
+- **Cyclic crate deps:** BFS `visited` set bounds the traversal.
+- **Empty-vs-no-match messaging:** `No nodes match &#x27;&lt;q&gt;&#x27;` when nothing resolves; `No dependents found` when a node resolves but has no importers — the original error string is preserved only in the genuinely-empty case.
+
+---</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;file-query-pkg-resolution-gap&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 7}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

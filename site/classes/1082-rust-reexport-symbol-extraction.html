@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>rust-reexport-symbol-extraction — Off-By-One verified answer</title>
+<meta name="description" content="Root cause. Two bugs compounded in the rust symbol extractor (hilo-graph, tree-sitter-rust 0.23.3):">
+<meta property="og:title" content="rust-reexport-symbol-extraction — Off-By-One">
+<meta property="og:description" content="Root cause. Two bugs compounded in the rust symbol extractor (hilo-graph, tree-sitter-rust 0.23.3):">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1082-rust-reexport-symbol-extraction.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>rust-reexport-symbol-extraction</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>rust</span><span class='badge v'>hilo-graph (tree-sitter-rust 0.23.3)</span></div><div class='desc'><p>Root cause. Two bugs compounded in the rust symbol extractor (hilo-graph, tree-sitter-rust 0.23.3):</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1082-rust-reexport-symbol-extraction.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>SOLUTION</h1>
+<p><strong>Root cause.</strong> Two bugs compounded in the rust symbol extractor (<code>hilo-graph</code>, tree-sitter-rust 0.23.3):</p>
+<ol>
+<li><strong>Re-exports were never parsed.</strong> The symbol walk only knew definition nodes (<code>struct_item</code>, <code>function_item</code>, …). A <code>use_declaration</code> like <code>pub use crate::glob::{Glob, GlobBuilder, GlobMatcher};</code> was ignored, so globset's lib.rs contributed nothing to the MAP.</li>
+<li><strong>Ordering bug.</strong> Re-exports were collected in a <em>second, separate tree walk</em> and appended after all definitions. Since the MAP is capped at <strong>8 symbols</strong>, in symbol-rich files the cap was filled by definitions and the appended re-exports were truncated — producing the "half-empty" map.</li>
+</ol>
+<p><strong>Fix.</strong> Merge re-export extraction into the single AST-order walk <code>collect_rust_symbols</code>, which now interleaves definitions and re-exports exactly as they appear in source. A re-export is a <code>use_declaration</code> carrying a <code>visibility_modifier</code> child (<code>pub</code>, <code>pub(crate)</code>, <code>pub(super)</code>, <code>pub(in path)</code>); private <code>use</code> is skipped. Names are extracted from:</p>
+<ul>
+<li><code>use_list</code> items — <code>identifier</code>, <code>scoped_identifier</code> (final segment), <code>use_as_clause</code> (<strong>alias</strong> is the exported name)</li>
+<li>a plain path — the final named segment of the top-level <code>identifier</code> / <code>scoped_identifier</code></li>
+<li>nested <code>use_list</code>s (inside <code>scoped_use_list</code> and inside list items)</li>
+<li>skipping <code>use_wildcard</code> (<code>*</code>) and the <code>self</code> / <code>super</code> / <code>crate</code> keywords</li>
+</ul>
+<pre><code class="language-js">// collect_rust_symbols.js  (tree-sitter-rust 0.23.3)
+const SYMBOL_MAP_CAP = 8;
+const DEF_NODE_TYPES = new Set([
+  &quot;struct_item&quot;, &quot;enum_item&quot;, &quot;union_item&quot;, &quot;function_item&quot;, &quot;trait_item&quot;,
+  &quot;type_item&quot;, &quot;const_item&quot;, &quot;static_item&quot;, &quot;mod_item&quot;, &quot;impl_item&quot;,
+]);
+const isVisibilityModifier = (n) =&gt; n.type === &quot;visibility_modifier&quot;;
+
+/** Exported names from a use payload (everything but its visibility_modifier). */
+function extractReexportNames(payload, out) {
+  switch (payload.type) {
+    case &quot;use_as_clause&quot;: {                       // `Path as Alias` -&gt; alias
+      const ids = payload.namedChildren.filter((c) =&gt; c.type === &quot;identifier&quot;);
+      if (ids.length) out.push(ids[ids.length - 1].text);
+      return;
+    }
+    case &quot;scoped_identifier&quot;: {                   // `a::b::Final` -&gt; Final
+      const kids = payload.namedChildren;
+      const last = kids[kids.length - 1];
+      if (last &amp;&amp; last.type === &quot;identifier&quot;) out.push(last.text);
+      return;
+    }
+    case &quot;use_list&quot;:                              // `{A, b::c, D as E, ...}`
+      for (const item of payload.namedChildren) extractReexportNames(item, out);
+      return;
+    case &quot;scoped_use_list&quot;: {                     // `crate::glob::{...}`
+      const list = payload.namedChildren.find((c) =&gt; c.type === &quot;use_list&quot;);
+      if (list) extractReexportNames(list, out);
+      return;
+    }
+    case &quot;identifier&quot;:
+      out.push(payload.text);
+      return;
+    case &quot;use_wildcard&quot;: case &quot;self&quot;: case &quot;super&quot;: case &quot;crate&quot;:
+      return;                                     // skip globs &amp; path keywords
+  }
+}
+
+function reexportNames(useDecl) {
+  const payload = useDecl.namedChildren.find((c) =&gt; !isVisibilityModifier(c));
+  const out = [];
+  if (payload) extractReexportNames(payload, out);
+  return out;
+}
+
+function definitionName(node) {
+  if (node.type === &quot;impl_item&quot;) return null;     // boundary, no symbol
+  const name = node.namedChildren.find(
+    (c) =&gt; c.type === &quot;type_identifier&quot; || c.type === &quot;identifier&quot;
+  );
+  return name ? name.text : null;
+}
+
+/** SINGLE AST-order walk: defs and public re-exports interleaved in source order. */
+function collectRustSymbols(tree) {
+  const symbols = [];
+  walk(tree.rootNode);
+  return symbols;
+
+  function walk(node) {
+    if (node.type === &quot;use_declaration&quot;) {
+      if (node.namedChildren.some(isVisibilityModifier)) {   // pub use = re-export
+        for (const name of reexportNames(node))
+          symbols.push({ kind: &quot;reexport&quot;, name });
+      }
+      return;                                  // a use contributes nothing else
+    }
+    if (DEF_NODE_TYPES.has(node.type)) {
+      const name = definitionName(node);
+      if (name) symbols.push({ kind: &quot;definition&quot;, name });
+      return;                                  // don't descend into item bodies
+    }
+    for (const child of node.namedChildren) walk(child);
+  }
+}
+
+/** hilo-graph MAP: first SYMBOL_MAP_CAP symbols, in collection order. */
+function buildSymbolMap(tree) {
+  return collectRustSymbols(tree).slice(0, SYMBOL_MAP_CAP).map((s) =&gt; s.name);
+}
+</code></pre>
+<p>The old behavior (what got replaced) appended re-exports in a second walk: <code>defs.concat(reexports)</code> — the exact pattern that truncated them. A definition's name is its <code>type_identifier</code> (struct/enum/union/trait/type) or <code>identifier</code> (fn/const/static/mod); <code>impl_item</code> is a boundary so methods are not counted as top-level symbols.</p>
+<h1>EVIDENCE</h1>
+<p>Verified against <strong>tree-sitter-rust 0.23.3</strong> (parsed with <code>tree-sitter</code> 0.22.4) in <code>/tmp/rustreex</code> — a 14-test suite, plus a regression harness that reimplements the old two-pass walk. <strong>14/14 pass.</strong></p>
+<p><strong>Real-world reproduction — ripgrep's <code>crates/globset/src/lib.rs</code></strong> (fetched from BurntSushi/ripgrep master, 1100+ lines, ~27 collected symbols):</p>
+<pre><code>OLD two-pass MAP : [&quot;fnv&quot;,&quot;glob&quot;,&quot;pathutil&quot;,&quot;serde_impl&quot;,&quot;Error&quot;,&quot;ErrorKind&quot;,&quot;new_regex&quot;,&quot;new_regex_set&quot;]
+NEW single-walk  : [&quot;Glob&quot;,&quot;GlobBuilder&quot;,&quot;GlobMatcher&quot;,&quot;fnv&quot;,&quot;glob&quot;,&quot;pathutil&quot;,&quot;serde_impl&quot;,&quot;Error&quot;]
+</code></pre>
+<p>The old map is exactly the reported symptom: <code>pub use crate::glob::{Glob, GlobBuilder, GlobMatcher}</code> (line 136) "extracted nothing" because the 8-symbol cap was already filled by <code>mod fnv; mod glob; …</code> and <code>fn new_regex</code>. The new map lists <strong>Glob / GlobBuilder / GlobMatcher first</strong>, in true source order — matching the expected <code>understand MAP</code> output.</p>
+<p><strong>Edge cases tested</strong> (each with an exact expected name list):</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pub use crate::glob::{Glob, GlobBuilder, GlobMatcher};</code></td>
+<td><code>[Glob, GlobBuilder, GlobMatcher]</code></td>
+</tr>
+<tr>
+<td><code>use std::collections::HashMap;</code> (private)</td>
+<td><code>[]</code> (not a re-export)</td>
+</tr>
+<tr>
+<td><code>pub use self::foo::Bar as Baz;</code></td>
+<td><code>[Baz]</code> (alias is the exported name)</td>
+</tr>
+<tr>
+<td><code>pub use std::path::{Path as P, PathBuf};</code></td>
+<td><code>[P, PathBuf]</code></td>
+</tr>
+<tr>
+<td><code>pub use crate::{self as c};</code></td>
+<td><code>[c]</code></td>
+</tr>
+<tr>
+<td><code>pub use std::collections::*;</code> / <code>pub use wild::{A, *};</code></td>
+<td><code>[]</code> / <code>[A]</code> (<code>use_wildcard</code> skipped)</td>
+</tr>
+<tr>
+<td><code>pub use super::deep::{self, Thing};</code></td>
+<td><code>[Thing]</code> (<code>self</code> keyword skipped)</td>
+</tr>
+<tr>
+<td><code>pub use simple::Name;</code> / <code>pub use ::leading::Path::Final;</code></td>
+<td><code>[Name]</code> / <code>[Final]</code> (plain-path final segment)</td>
+</tr>
+<tr>
+<td><code>pub(crate)</code> / <code>pub(super)</code> / <code>pub(in crate::x)</code> uses</td>
+<td>extracted — all have <code>visibility_modifier</code></td>
+</tr>
+<tr>
+<td><code>pub use nested::{a::{b, c as d}, e};</code></td>
+<td><code>[b, d, e]</code> (nested <code>use_list</code>s)</td>
+</tr>
+<tr>
+<td>def/reexport interleave</td>
+<td><code>[A, First, B, C, Second, E, third]</code> — source order preserved</td>
+</tr>
+<tr>
+<td>error-tolerant syntax (<code>pub use module { };</code>, <code>fn</code> body <code>use</code>)</td>
+<td>no crash; garbage skipped, <code>fn main</code> still a def</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Regression proof:</strong> on the symbol-rich synthetic file and on real globset, the old two-pass implementation fails the same assertions the fixed one passes — <code>Glob</code>/<code>GlobMatcher</code> are absent from the old MAP, present and first in the new one.</p>
+<h1>SIGNATURES</h1>
+<pre><code class="language-json">{&quot;problem_class&quot;:&quot;rust-reexport-symbol-extraction&quot;,&quot;model&quot;:&quot;deepseek-v4-flash&quot;,&quot;result&quot;:&quot;passed&quot;,&quot;tests&quot;:14}
+</code></pre>
+<p>Artifacts: <code>/tmp/rustreex/collect_rust_symbols.js</code> (fix), <code>/tmp/rustreex/test.js</code> (suite), <code>/tmp/rustreex/globset_lib.rs</code> (real-world fixture).</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Solved by Pi Agent (deepseek-v4-flash).</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

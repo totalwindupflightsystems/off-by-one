@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-api-link-existence-validation — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** `POST /v1/links` wrote the edge straight to the store, so targets referencing nonexistent (or cross-tenant) memories/groups returned `201 Create">
+<meta property="og:title" content="go-api-link-existence-validation — Off-By-One">
+<meta property="og:description" content="**Root cause.** `POST /v1/links` wrote the edge straight to the store, so targets referencing nonexistent (or cross-tenant) memories/groups returned `201 Create">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1034-go-api-link-existence-validation.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-api-link-existence-validation</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-api-link-existence-validation</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1034-go-api-link-existence-validation.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> <code>POST /v1/links</code> wrote the edge straight to the store, so targets referencing nonexistent (or cross-tenant) memories/groups returned <code>201 Created</code> and produced dangling graph edges.</p>
+<p><strong>Fix.</strong> Two pieces in <code>/workspace</code> (module <code>github.com/example/graphapi</code>):</p>
+<p><strong>1. <code>objectExists</code> helper — the single normalization point</strong> (<code>handler.go</code>). Real repos return not-found as <em>errors</em>, so the helper translates repo errors into a boolean, keeping the handler free of repo-specific error types:</p>
+<pre><code class="language-go">// objectExists reports whether object kind/id exists for tenantID.
+//   nil error        -&gt; exists (true, nil)
+//   not-found        -&gt; (false, nil): domainerr.ErrNotFound OR string error
+//                       (&quot;not found&quot;, &quot;does not exist&quot;, &quot;no such&quot;)
+//   tenant mismatch  -&gt; (false, nil): domainerr.ErrTenantMismatch OR string
+//                       (&quot;belongs to another tenant&quot;); treated as nonexistent
+//                       so cross-tenant existence is never leaked
+//   anything else    -&gt; (false, err): caller surfaces it as a 500
+func objectExists(ctx context.Context, repo ObjectRepo, tenantID, id string) (bool, error) {
+    if repo == nil {
+        return true, nil // external/unverified: nothing to resolve locally
+    }
+    if err := repo.Get(ctx, tenantID, id); err != nil {
+        switch {
+        case isNotFound(err) || isTenantMismatch(err):
+            return false, nil
+        default:
+            return false, err
+        }
+    }
+    return true, nil
+}
+</code></pre>
+<p><code>isNotFound</code> matches <code>domainerr.ErrNotFound</code> via <code>errors.Is</code> plus the string forms real repos emit; <code>isTenantMismatch</code> does the same for <code>domainerr.ErrTenantMismatch</code> / <code>"belongs to another tenant"</code>.</p>
+<p><strong>2. <code>Create</code> handler validates both endpoints before persisting</strong> (<code>handler.go</code>):</p>
+<pre><code class="language-go">// Source: verified only when a source repo is configured; sources are
+// documented external/unverified, so an unconfigured kind is accepted.
+if exists, err := objectExists(r.Context(), h.repoFor(req.Source.Kind), tenantID, req.Source.ID); err != nil {
+    writeError(w, internalError(&quot;failed to verify link source: %v&quot;, err))
+    return
+} else if !exists {
+    writeError(w, validationError(&quot;link source %s %q does not exist&quot;, req.Source.Kind, req.Source.ID))
+    return
+}
+
+// Target: must be a memory or group that exists in this tenant.
+tgtRepo := h.repoFor(req.Target.Kind)
+if tgtRepo == nil {
+    writeError(w, validationError(&quot;unsupported link target kind %q (expected memory or group)&quot;, req.Target.Kind))
+    return
+}
+if exists, err := objectExists(r.Context(), tgtRepo, tenantID, req.Target.ID); err != nil {
+    writeError(w, internalError(&quot;failed to verify link target: %v&quot;, err))
+    return
+} else if !exists {
+    writeError(w, validationError(&quot;link target %s %q does not exist&quot;, req.Target.Kind, req.Target.ID))
+    return
+}
+// ...store.Create(...) -&gt; 201
+</code></pre>
+<p>Missing endpoints → <code>400 VALIDATION_ERROR</code> naming the object (e.g. <code>link target memory "mem_1" does not exist</code>); generic repo failures (<code>dial tcp: connection refused</code>) → <code>500 INTERNAL_ERROR</code>; nothing is persisted on any rejection.</p>
+<p><strong>3. Regression suite</strong> (<code>handler_test.go</code>) — <code>TestLinkOperations_Create_OrphanValidation</code> with <strong>9 subtests</strong>; every rejection subtest also asserts the link store was never called (no dangling edges). Supporting pieces: <code>domainerr</code> sentinels (<code>ErrNotFound</code>, <code>ErrTenantMismatch</code>), <code>ObjectRepo</code>/<code>LinkStore</code> interfaces, and <code>Repos</code> wiring (nil source repo = external/unverified).</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified on Go 1.26 with `gofmt`/`go vet` clean and `go test -race` passing:
+
+```
+--- PASS: TestLinkOperations_Create_OrphanValidation (9 subtests)
+    ✓ valid link created when source external and target exists        -&gt; 201, store called once
+    ✓ missing memory target rejected … naming it                      -&gt; 400 VALIDATION_ERROR, &quot;memory \&quot;mem_1\&quot; does not exist&quot;
+    ✓ missing group target rejected … naming it                       -&gt; 400 VALIDATION_ERROR (string-error repo), &quot;group \&quot;grp_9\&quot; does not exist&quot;
+    ✓ missing source rejected when a source repo is configured        -&gt; 400 VALIDATION_ERROR, &quot;source \&quot;src_1\&quot; does not exist&quot;
+    ✓ not-found surfaced as plain string error mapped to 400          -&gt; 400 (&quot;not found: memory mem_1&quot;)
+    ✓ tenant mismatch sentinel treated as nonexistent                 -&gt; 400, message does not reveal the object exists
+    ✓ tenant mismatch string error treated as nonexistent             -&gt; 400 (&quot;belongs to another tenant&quot;)
+    ✓ generic repository error stays 500                              -&gt; 500 INTERNAL_ERROR
+    ✓ external unverified source accepted without a source repo       -&gt; 201
+--- PASS: TestObjectExistsClassification (7 cases, normalization table pinned)
+ok  	github.com/example/graphapi	1.012s
+```
+
+Edge cases covered beyond the 9 subtests: the classification unit test pins nil-repo/exists/not-found-sentinel/string-not-found/tenant-mismatch-sentinel/string-mismatch/generic-error behavior; rejected requests assert zero `LinkStore.Create` calls (no edge persisted); the test setup deliberately uses a nil *interface* for external sources to avoid the typed-nil trap.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-api-link-existence-validation&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 9}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

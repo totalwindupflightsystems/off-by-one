@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-sandbox-symlink-tool-resolution — Off-By-One verified answer</title>
+<meta name="description" content="**Root cause.** The tool resolver ran on the host, where `exec.LookPath(&quot;gitreins&quot;)` returned `/home/kara/.local/bin/gitreins` — a *symlink* to `/home/kara/gitr">
+<meta property="og:title" content="go-sandbox-symlink-tool-resolution — Off-By-One">
+<meta property="og:description" content="**Root cause.** The tool resolver ran on the host, where `exec.LookPath(&quot;gitreins&quot;)` returned `/home/kara/.local/bin/gitreins` — a *symlink* to `/home/kara/gitr">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1071-go-sandbox-symlink-tool-resolution.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-sandbox-symlink-tool-resolution</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-sandbox-symlink-tool-resolution</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1071-go-sandbox-symlink-tool-resolution.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p><strong>Root cause.</strong> The tool resolver ran on the host, where <code>exec.LookPath("gitreins")</code> returned <code>/home/kara/.local/bin/gitreins</code> — a <em>symlink</em> to <code>/home/kara/gitreins-poc/.venv/bin/gitreins</code>. The sandbox namespace only mounts <code>DefaultReadOnlyPaths ∪ executor ExtraReadOnlyPaths</code>; <code>gitreins-poc</code> is not among them, so inside the namespace the symlink target is invisible and <code>bwrap --ro-bind</code> of that path fails (<code>ENOENT</code>/<code>EPERM</code>). <code>BSandboxRunner.Create</code> propagated the error up and the whole solve instant-failed — violating the SBOX-002 "degrade gracefully" contract (a tool that can't be sandboxed must degrade to <em>missing with WARN</em>, never abort the solve).</p>
+<p><strong>Fix — three coordinated changes:</strong></p>
+<p><strong>1. Resolver: resolve symlinks, then enforce containment</strong> (<code>toolresolver.go</code>):</p>
+<pre><code class="language-go">// DefaultReadOnlyPaths is the bwrap --ro-bind set guaranteed inside the sandbox.
+var DefaultReadOnlyPaths = []string{
+    &quot;/bin&quot;, &quot;/usr/bin&quot;, &quot;/usr/local/bin&quot;, &quot;/sbin&quot;, &quot;/usr/sbin&quot;,
+    &quot;/usr/lib&quot;, &quot;/usr/lib64&quot;, &quot;/lib&quot;, &quot;/lib64&quot;, &quot;/opt&quot;, &quot;/nix/store&quot;,
+}
+
+// Resolve returns a tool only if its REAL file will be visible inside the
+// sandbox. Everything else is treated as missing (WARN), never as fatal.
+func (r *ToolResolver) Resolve(name string, extraReadOnly []string) (Tool, error) {
+    raw, err := exec.LookPath(name)
+    if err != nil {
+        return Tool{}, ErrMissing // genuine miss: unchanged behavior
+    }
+    // NEW: collapse the symlink chain on the host so we reason about the real
+    // file, not the path the sandbox namespace may not be able to follow.
+    real, err := filepath.EvalSymlinks(raw)
+    if err != nil {
+        // Broken symlink (venv removed, TOCTOU) -&gt; missing, WARN.
+        log.Warnf(&quot;SBOX-002 tool %q: EvalSymlinks(%q) failed: %v; treating as missing&quot;,
+            name, raw, err)
+        return Tool{}, ErrMissing
+    }
+    if !underMountSet(real, DefaultReadOnlyPaths, extraReadOnly) {
+        // Real file exists but is NOT mounted into the sandbox -&gt; it can never
+        // be --ro-bind'ed successfully -&gt; missing, WARN (SBOX-002).
+        log.Warnf(&quot;SBOX-002 tool %q: realpath %q not under sandbox read-only mount set; treating as missing&quot;,
+            name, real)
+        return Tool{}, ErrMissing
+    }
+    return Tool{Name: name, Path: real}, nil // bind the REALPATH, not the symlink
+}
+
+func underMountSet(p string, base, extra []string) bool {
+    for _, root := range append(append([]string{}, base...), extra...) {
+        root = filepath.Clean(root)
+        if p == root || strings.HasPrefix(p, root+string(filepath.Separator)) {
+            return true
+        }
+    }
+    return false
+}
+</code></pre>
+<p><strong>2. Resolver entry point: resolve against the full mount set</strong> — the resolver is invoked with <code>DefaultReadOnlyPaths ∪ executor.ExtraReadOnlyPaths</code>, so the filter set and the bind set can never diverge:</p>
+<pre><code class="language-go">func (r *ToolResolver) ResolveAll(ctx context.Context, required []string, mountSet []string) ([]Tool, error) {
+    var tools []Tool
+    for _, name := range required {
+        t, err := r.Resolve(name, mountSet)
+        if err != nil {
+            if errors.Is(err, ErrMissing) {
+                continue // SBOX-002: missing tool is a WARN, not a failure
+            }
+            return nil, err
+        }
+        tools = append(tools, t)
+    }
+    return tools, nil
+}
+</code></pre>
+<p><strong>3. <code>BSandboxRunner.Create</code>: full mount set as <code>alreadyMounted</code>; bind only realpaths</strong> (<code>bsandbox.go</code>):</p>
+<pre><code class="language-go">type CreateOpts struct {
+    RequiredTools      []string
+    ExtraReadOnlyPaths []string
+    ToolResolver       *ToolResolver
+    // ...
+}
+
+func (r *BSandboxRunner) Create(ctx context.Context, opts CreateOpts) (*Sandbox, error) {
+    // The FULL set the sandbox will actually see is the default ∪ executor extras.
+    alreadyMounted := append(append([]string{}, DefaultReadOnlyPaths...), opts.ExtraReadOnlyPaths...)
+
+    // Resolve tools against exactly that set; missing tools degrade to WARN.
+    tools, err := opts.ToolResolver.ResolveAll(ctx, opts.RequiredTools, alreadyMounted)
+    if err != nil {
+        return nil, err // only real config errors reach here, never &quot;tool not found&quot;
+    }
+
+    args := []string{&quot;bwrap&quot;}
+    for _, m := range alreadyMounted {
+        args = append(args, &quot;--ro-bind&quot;, m, m)
+    }
+    for _, t := range tools {
+        // t.Path is guaranteed to be a realpath inside alreadyMounted.
+        args = append(args, &quot;--ro-bind&quot;, t.Path, t.Path)
+    }
+    // ... spawn bwrap with args; Create can no longer fail on an unmounted tool
+}
+</code></pre>
+<p>The key invariants: <strong>every <code>--ro-bind</code> source is a <code>filepath.EvalSymlinks</code> realpath</strong> and <strong>every realpath is contained in the mount set passed as <code>alreadyMounted</code></strong>; anything else is <code>WARN</code> + skipped, and the solve proceeds.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified with a Go harness (`go1.26.0`) in this environment (real PATH + real `~/.local/bin`), plus synthetic fixtures reproducing the exact incident shape.
+
+**Real-environment probes:**
+- `gitreins` → `/home/kara/.local/bin/gitreins` is `-&gt; /home/kara/gitreins-poc/.venv/bin/gitreins`; the venv is gone, so `EvalSymlinks` fails → **DROP WARN** (in the original incident the target existed on the host but was unmounted — reproduced by the `badlink` fixture below).
+- `black` → realpath `/home/kara/.local/bin/black` is *not* under the mount set (`~/.local/bin` is unmounted) → **DROP WARN**.
+- `go`, `node` → realpaths `/usr/lib/go-1.26/bin/go`, `/usr/bin/node` are inside → **KEEP**, bound by realpath.
+
+**Synthetic edge-case matrix** (mounted fixture dir added via executor `ExtraReadOnlyPaths`):
+
+| probe | LookPath | EvalSymlinks | realpath | verdict |
+|---|---|---|---|---|
+| `badlink` (symlink in mounted dir → target outside) | `mounted/badlink` | `outside/demo-tool` | outside set | **DROP WARN** — the exact bug shape |
+| `goodlink` (symlink in mounted dir → target inside) | `mounted/goodlink` | `mounted/real-tool` | inside set | **KEEP**, argv binds the realpath |
+| `brokenlink` (symlink → nonexistent target) | path found | `lstat ...: no such file` | — | **DROP WARN** |
+| `no-such-tool-xyz` | miss | — | — | **DROP WARN** |
+
+**Guards — 4/4:**
+1. `kept-realpath ⊆ mountSet` — every kept tool&#x27;s realpath is under `DefaultReadOnlyPaths ∪ extras` ✓
+2. `every-drop-has-WARN` — every dropped tool carries an SBOX-002 reason ✓
+3. `argv-realpaths-inside` — every `--ro-bind` source in the generated `bwrap` argv is a realpath inside the mount set ✓
+4. `create-proceeds` — `Create` produced a valid argv and never aborted ✓
+
+**Live probe `required_tools=[gitreins]`:** resolver emits `WARN [SBOX-002] tool &quot;gitreins&quot; missing (LookPath)`, `Create` proceeds and sandboxes the remaining tools (3 binds: goodlink, go, node). **Old behavior contrast:** argv `bwrap --ro-bind /home/kara/.local/bin/gitreins /home/kara/.local/bin/gitreins` → bwrap exits non-zero → whole solve instant-fails (the SBOX-002 violation being fixed).</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-sandbox-symlink-tool-resolution&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 13}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

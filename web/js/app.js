@@ -16,6 +16,28 @@
   const tabs = document.querySelectorAll('.nav-tab');
   const views = document.querySelectorAll('.view');
 
+  // ---------- Problem pages (#/problem/<slug>) ----------
+  // Not a nav tab: a shareable detail page rendered by problem.js.
+  // Deactivates every tab and shows only #view-problem.
+  function showProblemView(slug) {
+    tabs.forEach((t) => {
+      t.classList.remove('active');
+      t.setAttribute('aria-selected', 'false');
+    });
+    views.forEach((v) => {
+      const active = v.id === 'view-problem';
+      v.classList.toggle('active', active);
+      v.hidden = !active;
+    });
+    document.body.classList.remove('home-view');
+    if (window.Ob1Problem) window.Ob1Problem.open(slug);
+  }
+
+  function currentProblemSlug() {
+    const m = (location.hash || '').match(/^#\/problem\/(.+)$/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
   function activateView(name) {
     tabs.forEach((t) => {
       const active = t.dataset.view === name;
@@ -55,10 +77,21 @@
   // Open the view named in the URL hash, defaulting to home (the hub
   // landing — catalog, repo links, docs). The hash may carry search
   // params (#search?limit=20&offset=40) — strip them for the view-name
-  // comparison.
-  const initial = (location.hash || '#home').slice(1).split('?')[0];
-  const valid = Array.from(tabs).some((t) => t.dataset.view === initial);
-  activateView(valid ? initial : 'home');
+  // comparison. A #/problem/<slug> hash opens the shareable problem page.
+  const problemSlug = currentProblemSlug();
+  if (problemSlug) {
+    showProblemView(problemSlug);
+  } else {
+    const initial = (location.hash || '#home').slice(1).split('?')[0];
+    const valid = Array.from(tabs).some((t) => t.dataset.view === initial);
+    activateView(valid ? initial : 'home');
+  }
+
+  // Back/forward across problem pages: re-render on hash change.
+  window.addEventListener('hashchange', () => {
+    const slug = currentProblemSlug();
+    if (slug) showProblemView(slug);
+  });
 
   // ---------- Theme toggle ----------
   const themeBtn = document.getElementById('theme-toggle');

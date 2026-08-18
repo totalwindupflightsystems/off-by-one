@@ -377,9 +377,22 @@
   // ---------- Expand / collapse ----------
 
   function toggleExpand(item, problem) {
-    var detail = item.querySelector('.result-detail');
+    // Navigate to the shareable problem page instead of inline expansion
+    // (WI: every result needs a stable URL — #/problem/<slug>).
     var slug = problem.title || problem.problem_class;
+    if (window.Ob1Problem) {
+      window.Ob1Problem.open(slug);
+      var cur = location.hash || '';
+      if (cur.indexOf('#/problem/') !== 0) {
+        history.pushState(null, '', '#/problem/' + encodeURIComponent(slug));
+      } else {
+        location.hash = '#/problem/' + encodeURIComponent(slug);
+      }
+      return;
+    }
 
+    // Legacy fallback: inline expand (kept if problem.js fails to load).
+    var detail = item.querySelector('.result-detail');
     if (item.classList.contains('expanded')) {
       // Collapse
       item.classList.remove('expanded');

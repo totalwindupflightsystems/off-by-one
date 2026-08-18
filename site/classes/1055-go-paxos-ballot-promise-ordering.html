@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-paxos-ballot-promise-ordering — Off-By-One verified answer</title>
+<meta name="description" content="The corrected Paxos acceptor lives in `/home/kara/paxosballot/paxos.go`. The two traps are fixed with two deliberate properties in the `Prepare` handler: **Fix ">
+<meta property="og:title" content="go-paxos-ballot-promise-ordering — Off-By-One">
+<meta property="og:description" content="The corrected Paxos acceptor lives in `/home/kara/paxosballot/paxos.go`. The two traps are fixed with two deliberate properties in the `Prepare` handler: **Fix ">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1055-go-paxos-ballot-promise-ordering.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-paxos-ballot-promise-ordering</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>go-paxos-ballot-promise-ordering</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1055-go-paxos-ballot-promise-ordering.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The corrected Paxos acceptor lives in <code>/home/kara/paxosballot/paxos.go</code>. The two traps are fixed with two deliberate properties in the <code>Prepare</code> handler:</p>
+<p><strong>Fix 1 — off-by-one (<code>&lt;=</code> vs <code>&lt;</code>).</strong> Reject only when the incoming ballot is <em>strictly</em> lower than the highest promised ballot (<code>b &lt; promised</code>), and never persist anything on the reject path. With <code>b &lt;= promised</code> the reject branch also writes <code>promisedBallot = b</code>, so a rejected ballot clobbers (lowers) the promise — after which a competing leader with a ballot between the old and new promise can hijack the round. <code>&lt;=</code> additionally rejects equal-ballot retries, which must instead re-promise and return the highest accepted value.</p>
+<p><strong>Fix 2 — persist after validate, and persist a full state copy.</strong> The promise is written to the store only <em>after</em> the ballot has been validated against the current promise, and the write is <code>next := a.state</code> (a full copy carrying <code>AcceptedBallot</code>/<code>AcceptedValue</code> forward). Persisting before validation lets a request that is about to be rejected corrupt the promise anyway, and a naive "fresh record" write silently drops the accepted value — breaking the invariant that once a value is accepted for a ballot, it is never lost.</p>
+<pre><code class="language-go">func (a *Acceptor) Prepare(b Ballot) PrepareResult {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+
+    // Step 1: validate FIRST. Reject iff b &lt; PromisedBallot (strict &lt;).
+    //   b &lt;  promised -&gt; reject, and DO NOT touch any state
+    //   b == promised -&gt; re-promise; return the highest accepted value
+    //   b &gt;  promised -&gt; raise the promise to b
+    if b &lt; a.state.PromisedBallot {
+        return PrepareResult{OK: false, PromisedBallot: a.state.PromisedBallot}
+    }
+
+    // Step 2: persist ONLY after validation passes, as a FULL COPY of the
+    // state so raising the promise can never discard an accepted value.
+    next := a.state
+    next.PromisedBallot = b
+    if err := a.store.Write(next); err != nil {
+        return PrepareResult{OK: false, PromisedBallot: a.state.PromisedBallot, Err: err}
+    }
+    a.state = next
+
+    return PrepareResult{
+        OK:             true,
+        PromisedBallot: next.PromisedBallot,
+        AcceptedBallot: next.AcceptedBallot,
+        AcceptedValue:  next.AcceptedValue,
+        HasAccepted:    next.HasAccepted,
+    }
+}
+</code></pre>
+<p><code>Accept</code> (Phase 2) follows the same discipline: reject iff <code>b &lt; promised</code>, then persist a full copy with the accepted ballot/value set. State is durable through a <code>Store</code> interface (<code>Read</code>/<code>Write</code> of whole <code>State</code> records), so a promise or accepted value survives restarts, and a failed persist never mutates in-memory state.</p>
+<p>The <code>bugdemo</code> package ships the two buggy variants (<code>OffByOne</code>: reject with <code>&lt;=</code> + persist on reject; <code>PersistBeforeValidate</code>: persist before validating with a value-dropping write) so the failure modes can be reproduced on demand.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Repo: `/home/kara/paxosballot` (module `paxosballot`, go 1.26). `go vet` clean; `go test -race -v ./...` — **10/10 pass**:
+
+```
+--- PASS: TestPrepareRejectsLowerBallotAndKeepsState       (reject 3, 4 after promise 7; promise stays 7)
+--- PASS: TestEqualBallotRePromisesWithAcceptedValue       (Prepare(1) twice after Accept(1,&quot;x&quot;) -&gt; OK + &quot;x&quot;)
+--- PASS: TestHigherPreparePreservesAcceptedValue          (Accept(5,&quot;alpha&quot;), Prepare(9) -&gt; returns &quot;alpha&quot;)
+--- PASS: TestRejectedPrepareDoesNotCorruptState           (reject leaves all fields; retry 8 re-promises &quot;gold&quot;)
+--- PASS: TestPromiseSurvivesRestart                       (promise 42 durable; Prepare(41) rejected after restart)
+--- PASS: TestAcceptedValueSurvivesRestart                 (Accept(10,&quot;persist-me&quot;) durable across restart)
+--- PASS: TestPrepareStoreFailureLeavesStateUnchanged      (failed persist: no in-memory/durable change, Err set)
+--- PASS: TestAcceptRules                                  (Accept below promise rejected; equal/above OK)
+--- PASS: TestMultipleRounds                               (round 2/3 leaders learn and keep v1)
+--- PASS: TestConcurrentPreparesMonotonic                  (16 goroutines x 100 ballots; final promise == max)
+ok  paxosballot  1.012s
+```
+
+Edge cases covered: equal-ballot retries (re-promise, not reject), rejected ballots never lowering the promise, accepted value surviving higher-ballot promises *and* restarts, store-write failure leaving both memory and disk state untouched, and concurrent monotonicity of the promise.
+
+The traps are real — `go test -tags bugdemo ./bugdemo/` fails all 4 scenarios against the buggy code, exactly as described in the problem:
+
+```
+FAILURE MODE: rejected ballot 3 overwrote the promise: got 3, want 5     (OffByOne, &lt;= persists on reject)
+FAILURE MODE: equal-ballot Prepare(2) must re-promise, got a rejection   (OffByOne, &lt;= rejects equal ballot)
+FAILURE MODE: raising the promise discarded the accepted value           (PersistBeforeValidate, value dropped)
+FAILURE MODE: rejected request overwrote the promise: got 3, want 5      (PersistBeforeValidate, persist before validate)
+```
+
+The identical scenarios pass against the fixed implementation in `paxos_test.go`.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-paxos-ballot-promise-ordering&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 10}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

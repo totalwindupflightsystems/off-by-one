@@ -39,6 +39,9 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 .badge.g{background:rgba(74,222,128,.12);color:#4ade80}
 .badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
 .desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
 .answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
 .answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
 .answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
@@ -87,6 +90,45 @@ def sanitize(text):
     return SECRET_RX.sub(lambda m: m.group(0)[:4] + "***", text)
 
 
+def extract_problem_context(solution):
+    """Pull a readable problem statement out of a solution markdown blob
+    when the class description is just the title (corpus-seeded classes).
+    Prefers a '## What is X?'-style section; falls back to the first
+    substantive paragraph after the first heading."""
+    if not solution:
+        return ""
+    lines = solution.splitlines()
+    in_section = False
+    buf = []
+    for line in lines:
+        l = line.strip()
+        if re.match(r"^#{1,3}\s", l):
+            if in_section:
+                break
+            if re.match(r"^#{2,3}\s+(what is|problem|overview|background|the problem|introduction|context)[:\s]", l, re.I):
+                in_section = True
+            continue
+        if in_section and l:
+            buf.append(l)
+            if len(" ".join(buf)) > 420:
+                break
+    txt = re.sub(r"\s+", " ", " ".join(buf)).strip()
+    if len(txt) > 60:
+        return txt
+    filler = re.compile(r"^(now here|here is|here's|the complete solution|below is)", re.I)
+    started = False
+    for line in lines:
+        l = line.strip()
+        if re.match(r"^#\s", l):
+            started = True
+            continue
+        if started and l and not re.match(r"^#{1,6}\s", l) and not re.match(r"^[-*_=]{3,}$", l) and not filler.match(l):
+            p = re.sub(r"\s+", " ", re.sub(r"[*_`]", "", l)).strip()
+            if len(p) > 40:
+                return p
+    return ""
+
+
 def class_page(stem, data):
     title = data.get("title") or stem
     desc = data.get("description") or ""
@@ -94,15 +136,28 @@ def class_page(stem, data):
     sol_text = ""
     if answers:
         sol_text = answers[0].get("solution") or ""
-    meta_desc = re.sub(r"\s+", " ", sol_text)[:160] or desc[:160] or title
+    problem_ctx = extract_problem_context(sol_text)
+    if desc and desc.strip() != title.strip() and len(desc) > 20:
+        meta_desc = re.sub(r"\s+", " ", desc)[:160]
+        show_desc = desc
+    elif problem_ctx:
+        meta_desc = problem_ctx[:160]
+        show_desc = problem_ctx
+    else:
+        meta_desc = re.sub(r"\s+", " ", sol_text)[:160] or title
+        show_desc = ""
+    gh_src = f"https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/{stem}.json"
 
     body = [f"<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div>",
             f"<h1>{esc(title)}</h1>",
             f"<div class='meta'><span class='badge'>{len(answers)} answer(s)</span>"
             + "".join(f"<span class='badge g'>{esc(a.get('language',''))}</span><span class='badge v'>{esc(a.get('environment',''))}</span>" for a in answers[:2])
             + "</div>"]
-    if desc:
-        body.append(f"<div class='desc'>{render_md(desc)}</div>")
+    if show_desc:
+        body.append(f"<div class='desc'>{render_md(sanitize(show_desc))}</div>")
+    elif desc:
+        body.append(f"<div class='desc'>{render_md(sanitize(desc))}</div>")
+    body.append(f"<div class='src'><a href='{gh_src}'>📦 Source in repository (JSON)</a></div>")
     for i, a in enumerate(answers, 1):
         body.append("<div class='answer'><h2>Answer" + (f" {i}" if len(answers) > 1 else "") + "</h2>")
         body.append(render_md(sanitize(a.get("solution") or "")))
