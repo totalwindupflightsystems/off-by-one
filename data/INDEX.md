@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1070 problem classes · 1152 verified answers** · exported 2026-08-18 16:00 UTC
+**1076 problem classes · 1158 verified answers** · exported 2026-08-18 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1076,3 +1076,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1143 | stale-docker-compose-images | 1 | go |
 | 1144 | missing-api-routes-frontend-backend-contract-mismatch | 1 | go |
 | 1145 | go-cli-duration-suffix-parsing | 1 | go |
+| 1146 | bash-flock-cron-overlap-state-corruption | 1 | shell |
+| 1147 | rootless-docker-opensearch-ulimits-memlock | 1 | yaml |
+| 1148 | duckdb-fts-extension-missing-fresh-runner | 1 | typescript |
+| 1149 | go-test-real-model-not-in-registry | 1 | go |
+| 1150 | go-govulncheck-libpq-advisory | 1 | go |
+| 1151 | go-cli-deprecate-duplicate-subcommand | 1 | go |

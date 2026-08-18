@@ -1,0 +1,28 @@
+{
+  "class_id": 1148,
+  "title": "duckdb-fts-extension-missing-fresh-runner",
+  "description": "duckdb-fts-extension-missing-fresh-runner",
+  "created_at": "2026-08-18 17:39:45",
+  "answers": [
+    {
+      "answer_id": 1323,
+      "language": "typescript",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Solution written to `/home/kara/SOLUTION.md`. Here's a summary of what I found and verified:\n\n## Diagnosis (reproduced exactly)\n\nInstalled node-duckdb 1.4.4, pointed `HOME` at an empty dir (cold `~/.duckdb/extensions`, emulating a fresh runner), and ran the pre-fix code `LOAD fts;`:\n\n```\nIO Error: Extension \".../v1.4.4/linux_amd64/fts.duckdb_extension\" not found.\nExtension \"fts\" is an existing extension.  Install it first using \"INSTALL fts\".\n```\n\nIdentical to the CI failure. Root cause: FTS bootstrap only did `LOAD fts` (relying on auto-install, which fails on ephemeral runners), unlike the repo's VSS bootstrap which already does `INSTALL vss` + `LOAD vss`.\n\n## Two non-obvious findings that shape the fix\n\n1. **`INSTALL fts` is idempotent** — re-running it after a successful install is a verified no-op, so calling it unconditionally is safe.\n2. **node-duckdb 1.4.4's `db.exec(sql)` without a callback silently swallows errors** — no Promise, no throw (verified: `await db.exec('BAD SQL')` prints \"no error thrown\", exit 0). So the documented fix must use a promisify wrapper or callbacks — a bare `try/await/catch` would not catch anything. Likewise, the CI pre-install snippet from the problem description fails silently offline (exit 0), so I provide a fail-loud callback version.\n\n## Verified end-to-end (all scenarios passed)\n\n| Scenario | Result |\n|---|---|\n| Cold runner, pre-fix `LOAD fts` only | FAIL — exact CI error |\n| Cold runner, `INSTALL fts` → `LOAD fts` | PASS, extension cached |\n| Cold runner + offline (bogus repo, no cache) | Clear error naming `\"fts\"` + INSTALL detail + network guidance |\n| Warm cached runner + fully offline, `LOAD` only | PASS (proves actions/cache works) |\n| Re-`INSTALL fts` on cached env | No-op, PASS |\n\nThe markdown contains the complete solution: the `ensureFtsExtension` helper (`src/duckdb/fts.ts`), the bootstrap call-site change, the CI YAML (actions/cache on `~/.duckdb/extensions` keyed by `runner.os`/`runner.arch`/duckdb version + the fail-loud pre-install step), a full verification section with every command and observed output, and a note that the GAP-012-style empty test counts are a symptom, not the bug (test count kept identical).\n",
+      "evidence": "# Evidence\n- Problem class: duckdb-fts-extension-missing-fresh-runner\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-18T17:39:45.722Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Symptom: CI (GitHub Actions, node-duckdb 1.4.4) fails 10 vitest tests in a DuckDB FTS search suite with `IO Error: Extension \"/home/runner/.duckdb/extensions/v1.4.4/linux_amd64/fts.duckdb_extension\" not found. Extension \"fts\" is an existing extension. Install it first using \"INSTALL fts\".` Downstream: `SearchIndexMissingError: No keyword search index for namespace .../.search`. Locally the suite is green because ~/.duckdb/extensions already has the extension cached — the bug only appears on cold environments. Root cause: code did only `LOAD fts;` (relying on DuckDB auto-install, which fails on fresh runners); the repo's own VSS code (src/duckdb/vss.ts) uses the correct pattern: explicit `INSTALL vss` then `LOAD vss` in try/catch. Fix (proven locally against a cold extension_directory): (1) before LOAD, run explicit idempotent `INSTALL fts;` — INSTALL on an already-installed extension is a no-op; on INSTALL error still attempt LOAD, throw clear error naming the extension + network requirement if both fail; (2) in CI workflow add a pre-install step (`node -e \"const {Database}=require('duckdb'); const db=new Database(':memory:'); db.exec('INSTALL fts'); db.exec('LOAD fts'); db.close();\"`) plus actions/cache on ~/.duckdb/extensions. Note: GAP-012-style 'assert docs test counts' steps print empty counts when the vitest summary contains failures — that is a symptom, not the bug. Kept test count identical (no new tests).",
+        "environment": "",
+        "language": "typescript",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "duckdb-fts-extension-missing-fresh-runner",
+        "provider": "openrouter",
+        "solved_at": "2026-08-18T17:39:45.722Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-08-18 17:39:45"
+    }
+  ]
+}
