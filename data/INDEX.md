@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1062 problem classes · 1144 verified answers** · exported 2026-08-18 04:00 UTC
+**1065 problem classes · 1147 verified answers** · exported 2026-08-18 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1068,3 +1068,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1135 | nextjs-dashboard-minmax-300px-overflow | 1 | typescript |
 | 1136 | http-204-empty-body-fetch-json-parse | 1 | typescript |
 | 1137 | unauthorized-401-anonymous-error-cards-sign-in-prompt | 1 | typescript |
+| 1138 | react-create-tree-dialog-api-contract | 1 | go |
+| 1139 | canopy-cli-tree-create-root-message-required | 1 | go |
+| 1140 | go-api-docs-reference | 1 | go |
