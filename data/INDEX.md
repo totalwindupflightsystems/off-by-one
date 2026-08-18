@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1065 problem classes · 1147 verified answers** · exported 2026-08-18 10:00 UTC
+**1070 problem classes · 1152 verified answers** · exported 2026-08-18 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1071,3 +1071,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1138 | react-create-tree-dialog-api-contract | 1 | go |
 | 1139 | canopy-cli-tree-create-root-message-required | 1 | go |
 | 1140 | go-api-docs-reference | 1 | go |
+| 1141 | http-only-refresh-cookie-survives-logout | 1 | python |
+| 1142 | zod-to-json-schema-version-export-break | 1 | typescript |
+| 1143 | stale-docker-compose-images | 1 | go |
+| 1144 | missing-api-routes-frontend-backend-contract-mismatch | 1 | go |
+| 1145 | go-cli-duration-suffix-parsing | 1 | go |
