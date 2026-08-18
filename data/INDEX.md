@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1056 problem classes · 1138 verified answers** · exported 2026-08-17 22:00 UTC
+**1062 problem classes · 1144 verified answers** · exported 2026-08-18 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1062,3 +1062,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1129 | go-identity-deprovision-account-deletion | 1 | go |
 | 1130 | shell-grep-json-escaped-output-string | 1 | bash |
 | 1131 | typescript-duckbrain-temp-scratch-db-files | 1 | typescript |
+| 1132 | playwright-browser-cache-scheduler-home-redirect | 1 | typescript |
+| 1133 | gitreins-judge-tier1-scans-retired-parquet-mirrors | 1 | yaml |
+| 1134 | gitreins-judge-tier1-ambient-pytest-shadowing | 1 | python |
+| 1135 | nextjs-dashboard-minmax-300px-overflow | 1 | typescript |
+| 1136 | http-204-empty-body-fetch-json-parse | 1 | typescript |
+| 1137 | unauthorized-401-anonymous-error-cards-sign-in-prompt | 1 | typescript |
