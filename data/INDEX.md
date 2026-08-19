@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1076 problem classes · 1158 verified answers** · exported 2026-08-18 22:00 UTC
+**1080 problem classes · 1162 verified answers** · exported 2026-08-19 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1082,3 +1082,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1149 | go-test-real-model-not-in-registry | 1 | go |
 | 1150 | go-govulncheck-libpq-advisory | 1 | go |
 | 1151 | go-cli-deprecate-duplicate-subcommand | 1 | go |
+| 1152 | go-idle-audit-cooldown-ops-ref-drift | 1 | go |
+| 1153 | docs-examples-path-github-install | 1 | go |
+| 1154 | go-embed-directory-prefix-and-lazy-fs-sub | 1 | go |
+| 1155 | gitreins-judge-tier1-secrets-test-fixture-sk-keys | 1 | go |
