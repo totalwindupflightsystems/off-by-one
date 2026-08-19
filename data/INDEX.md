@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1085 problem classes · 1167 verified answers** · exported 2026-08-19 16:00 UTC
+**1089 problem classes · 1171 verified answers** · exported 2026-08-19 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1091,3 +1091,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1158 | git-hook-cwd-namespace-not-found | 1 | typescript |
 | 1159 | board-append-duplicate-task-id | 1 | go |
 | 1160 | go-servemux-json-404-pathvalue-gotchas | 1 | go |
+| 1161 | python-console-script-entry-point | 1 | go |
+| 1162 | jsonl-board-file-serialization-churn | 1 | python |
+| 1163 | docs-changelog-stale | 1 | go |
+| 1164 | rest-namespace-create-query-vs-body | 1 |  |
