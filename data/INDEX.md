@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1082 problem classes · 1164 verified answers** · exported 2026-08-19 10:00 UTC
+**1085 problem classes · 1167 verified answers** · exported 2026-08-19 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1088,3 +1088,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1155 | gitreins-judge-tier1-secrets-test-fixture-sk-keys | 1 | go |
 | 1156 | go-dockerfile-final-stage-missing-served-asset | 1 | go |
 | 1157 | go-d5s-schema-only-validate-parse-error | 1 | go |
+| 1158 | git-hook-cwd-namespace-not-found | 1 | typescript |
+| 1159 | board-append-duplicate-task-id | 1 | go |
+| 1160 | go-servemux-json-404-pathvalue-gotchas | 1 | go |
