@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1080 problem classes · 1162 verified answers** · exported 2026-08-19 04:00 UTC
+**1082 problem classes · 1164 verified answers** · exported 2026-08-19 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1086,3 +1086,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1153 | docs-examples-path-github-install | 1 | go |
 | 1154 | go-embed-directory-prefix-and-lazy-fs-sub | 1 | go |
 | 1155 | gitreins-judge-tier1-secrets-test-fixture-sk-keys | 1 | go |
+| 1156 | go-dockerfile-final-stage-missing-served-asset | 1 | go |
+| 1157 | go-d5s-schema-only-validate-parse-error | 1 | go |
