@@ -28,6 +28,19 @@ func skipIfNoGit(t *testing.T) {
 	}
 }
 
+// setGitIdentity makes engine-created commits hermetic. The export engine
+// runs plain `git commit`, which falls back to ambient global config
+// (~/.gitconfig) for author/committer identity; in CI/judge environments
+// that config is absent and the commit dies with "Author identity unknown".
+// t.Setenv pins the identity for the whole test process.
+func setGitIdentity(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", "Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
+}
+
 // initBareRepo creates a bare git repository with HEAD pointing to the
 // given branch, and returns its path. The export engine clones from this
 // bare repo, so it serves as the "remote" in tests.
@@ -169,6 +182,7 @@ func TestExport_NoRepoURL(t *testing.T) {
 
 func TestExport_ClassMismatch(t *testing.T) {
 	skipIfNoGit(t)
+	setGitIdentity(t)
 	store, pc, answer := makeStore(t)
 
 	barePath := initBareRepo(t, "main")
@@ -193,6 +207,7 @@ func TestExport_ClassMismatch(t *testing.T) {
 
 func TestExport_FullFlow(t *testing.T) {
 	skipIfNoGit(t)
+	setGitIdentity(t)
 	if runtime.GOOS == "windows" {
 		t.Skip("file path separators differ on Windows")
 	}
@@ -273,6 +288,7 @@ func TestExport_FullFlow(t *testing.T) {
 
 func TestExport_DryRun(t *testing.T) {
 	skipIfNoGit(t)
+	setGitIdentity(t)
 	store, pc, answer := makeStore(t)
 
 	barePath := initBareRepo(t, "main")
@@ -308,6 +324,7 @@ func TestExport_DryRun(t *testing.T) {
 
 func TestExport_IdempotentNoChanges(t *testing.T) {
 	skipIfNoGit(t)
+	setGitIdentity(t)
 	store, pc, answer := makeStore(t)
 
 	barePath := initBareRepo(t, "main")
@@ -346,6 +363,7 @@ func TestExport_IdempotentNoChanges(t *testing.T) {
 
 func TestExport_PullExistingClone(t *testing.T) {
 	skipIfNoGit(t)
+	setGitIdentity(t)
 	store, pc, answer := makeStore(t)
 
 	barePath := initBareRepo(t, "main")
