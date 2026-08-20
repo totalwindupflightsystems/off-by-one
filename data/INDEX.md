@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1089 problem classes · 1171 verified answers** · exported 2026-08-19 22:00 UTC
+**1095 problem classes · 1177 verified answers** · exported 2026-08-20 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1095,3 +1095,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1162 | jsonl-board-file-serialization-churn | 1 | python |
 | 1163 | docs-changelog-stale | 1 | go |
 | 1164 | rest-namespace-create-query-vs-body | 1 |  |
+| 1165 | go-median-two-sorted-logmin | 1 | go |
+| 1166 | docs-host-port-drift | 1 | go |
+| 1167 | typescript-cli-watch-mode-never-exits | 1 | typescript |
+| 1168 | typescript-default-port-mismatch | 1 | typescript |
+| 1169 | gitreins-judge-tier1-secrets-virtualenv-site-packages | 1 | python |
+| 1170 | duckbrain-cli-attr-json-equals | 1 | typescript |
