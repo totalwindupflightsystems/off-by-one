@@ -413,7 +413,7 @@ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 			return
 		}
-		out := listProblemsResponse{Total: total}
+		out := listProblemsResponse{Problems: []problemClassWire{}, Total: total}
 		for _, h := range hits {
 			cnt, _ := s.Store.AnswerCount(r.Context(), h.ClassID)
 			out.Problems = append(out.Problems, problemClassWire{
@@ -437,7 +437,7 @@ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	out := listProblemsResponse{Total: total}
+	out := listProblemsResponse{Problems: []problemClassWire{}, Total: total}
 	for _, p := range rows {
 		out.Problems = append(out.Problems, problemClassWire{
 			ID:          p.ID,
@@ -565,7 +565,7 @@ func (s *Server) handleGetRelated(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	out := relatedResponse{}
+	out := relatedResponse{Related: []relatedEntry{}}
 	for _, e := range edges {
 		// Resolve target title for human-readable output.
 		target, _ := s.Store.GetProblemClass(r.Context(), e.TargetID)

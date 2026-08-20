@@ -441,6 +441,12 @@ func TestListProblems_Empty(t *testing.T) {
 	if resp.Total != 0 {
 		t.Errorf("total = %d, want 0", resp.Total)
 	}
+	if resp.Problems == nil {
+		t.Errorf("problems is nil; want non-nil empty slice (serializes as null)")
+	}
+	if !strings.Contains(rr.Body.String(), `"problems":[]`) {
+		t.Errorf("body = %s, want it to contain `\"problems\":[]`", rr.Body.String())
+	}
 }
 
 func TestListProblems_WithData(t *testing.T) {
@@ -470,6 +476,31 @@ func TestListProblems_SearchQuery(t *testing.T) {
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 	if resp.Total < 1 {
 		t.Errorf("total = %d, want >= 1 (FTS5 match)", resp.Total)
+	}
+}
+
+// A search with no matches must return "problems":[] (not null) so
+// agent clients can iterate the field without a nil check (OB-GAP-046).
+func TestListProblems_SearchNoMatch(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	seedClass(t, store, "docker-permissions", "fixing permissions in containers", "docker", "go", "1.0", "use user flag", graph.AnswerVerified)
+	rr := do(t, s, "GET", "/api/v1/problems?q=zzzznomatchxyz", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var resp listProblemsResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp.Total != 0 {
+		t.Errorf("total = %d, want 0", resp.Total)
+	}
+	if len(resp.Problems) != 0 {
+		t.Errorf("problems len = %d, want 0", len(resp.Problems))
+	}
+	if resp.Problems == nil {
+		t.Errorf("problems is nil; want non-nil empty slice (serializes as null)")
+	}
+	if !strings.Contains(rr.Body.String(), `"problems":[]`) {
+		t.Errorf("body = %s, want it to contain `\"problems\":[]`", rr.Body.String())
 	}
 }
 
@@ -622,6 +653,12 @@ func TestGetRelated_Empty(t *testing.T) {
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 	if len(resp.Related) != 0 {
 		t.Errorf("related len = %d, want 0", len(resp.Related))
+	}
+	if resp.Related == nil {
+		t.Errorf("related is nil; want non-nil empty slice (serializes as null)")
+	}
+	if !strings.Contains(rr.Body.String(), `"related":[]`) {
+		t.Errorf("body = %s, want it to contain `\"related\":[]`", rr.Body.String())
 	}
 }
 
