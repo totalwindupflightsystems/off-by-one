@@ -36,6 +36,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	apihttp "github.com/totalwindupflightsystems/off-by-one/internal/api"
 	"github.com/totalwindupflightsystems/off-by-one/internal/cron"
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
@@ -50,6 +52,14 @@ import (
 var version = "0.1.0-dev"
 
 func main() {
+	// Load optional local .env (Quick Start: cp .env.example .env) so keys
+	// and OFF_BY_ONE_* defaults work without process-env injection. Load()
+	// (not Overload()) never overrides variables already set in the process
+	// environment, so systemd/env-injected keys keep winning. The error is
+	// ignored because a .env file is optional — the documented, accepted
+	// pattern.
+	_ = godotenv.Load()
+
 	// `off-by-one seed` — one-shot corpus loader subcommand. Dispatched
 	// before the server flag set is parsed because it owns its own flags
 	// (issue #1: fresh installs need an import path from the bundled

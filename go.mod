@@ -2,7 +2,10 @@ module github.com/totalwindupflightsystems/off-by-one
 
 go 1.25.0
 
-require modernc.org/sqlite v1.54.0
+require (
+	github.com/joho/godotenv v1.5.1
+	modernc.org/sqlite v1.54.0
+)
 
 require (
 	github.com/google/pprof v0.0.0-20260709232956-b9395ee17fa0 // indirect
