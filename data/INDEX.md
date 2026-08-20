@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1098 problem classes · 1180 verified answers** · exported 2026-08-20 10:00 UTC
+**1102 problem classes · 1184 verified answers** · exported 2026-08-20 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1104,3 +1104,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1171 | python-tree-multicut-terminal-isolation-dp | 1 | python |
 | 1172 | python-pip-interpreter-mismatch-pep668 | 1 | python |
 | 1173 | ci-test-unused-variable-warnings | 1 | Rust |
+| 1174 | go-cron-job-loop-trigger | 1 | go |
+| 1175 | go-webhook-queue-drain-silent-drop-missing-config-resolver | 1 | go |
+| 1176 | go-postgres-tool-events-null-publisher-domain | 1 | go |
+| 1177 | js-vitest-flaky-timestamp-shadowing | 1 | javascript |
