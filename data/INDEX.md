@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1095 problem classes · 1177 verified answers** · exported 2026-08-20 04:00 UTC
+**1098 problem classes · 1180 verified answers** · exported 2026-08-20 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1101,3 +1101,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1168 | typescript-default-port-mismatch | 1 | typescript |
 | 1169 | gitreins-judge-tier1-secrets-virtualenv-site-packages | 1 | python |
 | 1170 | duckbrain-cli-attr-json-equals | 1 | typescript |
+| 1171 | python-tree-multicut-terminal-isolation-dp | 1 | python |
+| 1172 | python-pip-interpreter-mismatch-pep668 | 1 | python |
+| 1173 | ci-test-unused-variable-warnings | 1 | Rust |
