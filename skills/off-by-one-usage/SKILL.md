@@ -17,7 +17,11 @@ verified answers in a SQLite graph. Any agent hitting the same problem class lat
 discovers the pre-verified answer instead of debugging from scratch. Answers are
 also published as flat files (`data/answers/`, `data/answers.jsonl`) and a web UI.
 
-Field-tested 2026-08-10 (coding-hermes-dogfood). Verdict: 🟡 PROMISING-BUT-ROUGH.
+Field-tested 2026-08-10 (coding-hermes-dogfood) verdict 🟡 PROMISING-BUT-ROUGH;
+re-field-tested 2026-08-20 (coding-hermes-dogfood) verdict ✅ SHIPPABLE. All
+P1/P2 gaps from run #1 were fixed by the fleet and re-verified live on 2026-08-20
+(see docs/dogfood/2026-08-20-integration.md). Pitfalls below reflect the CURRENT
+state; if a pitfall mentions a fixed OB-GAP id, it is stale — check the board.
 
 ## Entry points
 
@@ -89,24 +93,35 @@ grep -l '"title": ".*raft.*"' data/answers/*.json
 python3 -c "import json; print(json.load(open('data/answers/0043-go-raft-log-replication.json'))['answers'][0]['solution'])"
 ```
 
-## Pitfalls (each cost real time on 2026-08-10)
+## Pitfalls (each cost real time on 2026-08-10 or 2026-08-20; status as of 2026-08-20)
 
-1. **Readonly mode has no discovery** — `--readonly` 403s ALL POSTs, including the
-   only discover endpoint. Catalog instances are human-browse-only until OB-GAP-020
-   lands. Don't wire an agent to a readonly instance.
-2. **`solver_available:false`** (stats) = submissions queue forever. Startup logs
-   `WARN: cron loop not started — no solver available`. Check stats before relying
-   on the queue.
-3. **Detail endpoint lies about status** — `GET /api/v1/problems/{class}` returns
-   `"status":""`; use list/discover for status (OB-GAP-024).
-4. **README counts are stale** (812/948 vs live 874/1012 at last check) — trust
-   `/api/v1/stats` or `data/INDEX.md`, not README (OB-GAP-021).
+1. **Zero-match search returns `{"problems":null}` not `[]`** — and
+   `GET /api/v1/problems/{class}/related` returns `{"related":null}`. Guard
+   with `resp.get("problems") or []` in clients (OB-GAP-046 open).
+2. **`solver_available:false`** (stats) = no solver; submit now returns
+   **503 solver_unavailable** immediately (OB-GAP-034 fixed) — the queue never
+   silently accepts. Check stats before relying on the queue anyway.
+3. **`stats.avg_solve_time` is always `""`** and submit's `estimated_time` is a
+   fixed "5m0s" default that disappears at position 0 — don't build scheduling
+   on it (OB-GAP-047 open).
+4. **`seed` is CWD-relative and fails silently**: run from the repo root (or
+   `-dir <repo>/data`); a missing corpus dir logs an info line and exits 0 with
+   an EMPTY db (OB-GAP-048 open). `OFF_BY_ONE_DB`/`-db` are honored (fixed).
 5. **Export/import are config-gated** — 501 unless started with `-export-dir`/
    `-import-dir`. Not a bug.
-6. **Corpus has test junk** (`0009-test-self-dogfood`, `0016-test`,
-   `docs-canary-*`) — filter when bulk-consuming (OB-GAP-025).
-7. **The 300s bwrap-cap** failure pattern is normal fleet behavior, not a
-   regression — don't chase it.
+6. **The 300s bwrap-cap** failure pattern (`signal: killed` at exactly 5m) is
+   normal fleet behavior, not a regression — don't chase it. `OB1_BWRAP_TIMEOUT`
+   raises the cap.
+7. **Queue window is per-class** — `GET /api/v1/queue?limit=100` is dominated
+   by `off-by-one-self-test` entries; the authoritative picture is the DB.
+   Don't conclude "nothing is happening" from the API window.
+
+Former pitfalls now FIXED (do not re-report): readonly-mode discover 403
+(OB-GAP-020 — discover works in readonly now), detail status empty (OB-GAP-024),
+README corpus counts stale (OB-GAP-021 — counts live in data/COUNTS.md),
+corpus test junk (OB-GAP-025 — export filters it), "solver absent → queue
+forever" (OB-GAP-034 — submit 503s), `go-nil-pointer-deref` doc example
+(OB-GAP-022/045 — examples use `so-nil-pointer-deref`).
 
 ## Running a scratch instance (safe testing)
 

@@ -95,3 +95,53 @@ that answers "does it work and why" without re-running the world.
    works since OB-GAP-020 (discover is 200 in readonly mode).
 6. **Commit hygiene:** GitReins guard blocks on secrets/build/tests; docs-only
    commits pass. Never commit API keys.
+
+---
+
+## 5. Second field-test run — 2026-08-19/20 (dogfood #2) — verdict SHIPPABLE
+
+Full record: `docs/dogfood/2026-08-20-integration.md`. What was re-verified and
+what was newly found.
+
+### Verified fixed since run #1 (all live, not from test output)
+
+- **Readonly discover (OB-GAP-020):** scratch `--readonly` instance on :8891 →
+  `POST /discover` returns 200 `found:true`; submit → 403 with a clear message;
+  chat → 403 "AI agent disabled in read-only catalog mode"; stats expose
+  `readonly:true` + `solver_available:false`. Seeded instance honored
+  `OFF_BY_ONE_DB` (OB-GAP-039/044) — 1095 classes / 1177 answers loaded.
+- **Detail status (OB-GAP-024):** `GET /problems/so-nil-pointer-deref` →
+  `"status":"verified"`.
+- **Corpus counts (OB-GAP-021):** README has zero literal counts; `data/COUNTS.md`
+  auto-stamped at export (1095/1177 at 2026-08-20 04:00 UTC).
+- **Corpus hygiene (OB-GAP-025):** zero test/canary/dogfood patterns in
+  `data/INDEX.md`; `answers.jsonl` = 1177 lines, all parse, all `verified`,
+  1095 unique classes.
+- **Solver-absent submit (OB-GAP-034):** submit on a solver-less instance →
+  503 `solver_unavailable` (readonly probe; code path per board).
+- **Security (OB-GAP-006/015):** live `ps` during a solve shows the bwrap/pi
+  argv with NO `sk-` keys and no `--api-key`/`/usr/bin/env` shim.
+- **Error paths:** 404s carry messages; bad cadence → 400 `invalid_request`;
+  export/import → 501 `not_configured` with guidance; `/ws/chat` → 426 without
+  upgrade headers (WS-only, by design).
+
+### New findings (tasks OB-GAP-046..050, filed 2026-08-20)
+
+| ID | Severity | What | Evidence |
+|---|---|---|---|
+| OB-GAP-046 | P2 | Empty collections serialize as `null`, not `[]`: `GET /api/v1/problems?q=<no-match>` → `{"problems":null,"total":0}`; `GET /problems/<class>/related` → `{"related":null}` | My client crashed (`TypeError: 'NoneType' object is not iterable`) on the first no-match search; raw responses captured |
+| OB-GAP-047 | P3 | `stats.avg_solve_time` always `""` (spec: string) on a lab with 1346 completed solves; submit's `estimated_time` is a fixed "5m0s" that clears to `""` at position 0 | Live stats + queue detail for `sub_e6bf1e` |
+| OB-GAP-048 | P3 | `seed` exits 0 with an EMPTY 4KB DB when the corpus dir is unreadable (wrong CWD or `-dir`); only an info log line | `OFF_BY_ONE_DB=/tmp/x.db ./off-by-one seed` from /tmp → exit 0, empty db |
+| OB-GAP-049 | P3 | Knowledge artifacts drift after fixes: `skills/off-by-one-usage/SKILL.md` pitfalls #1/#3/#4/#6 advertised OB-GAP-020/024/021/025 as active for days after they shipped | Board shows all complete; skill updated in this commit; tick-gate proposed |
+| OB-GAP-050 | P2 | FTS search rows carry wrong metadata for EVERY class: `?q=<term>` → `status:"pending"`, `description:""`, `created_at:""`, while plain list + detail return `verified` + populated fields for the same ids (incl. so-nil-pointer-deref, verified since 07-24) | Probed 5 classes across the corpus on 2026-08-20 |
+
+### How the live solve pipeline looks from the outside (right way to watch)
+
+- Live server runs with `-cron-interval 60s`; a submit lands in SQLite, the cron
+  loop dequeues when load is idle, `bwrap` spawns `pi-agent solve` with
+  `problem.json`, output files (`solution.md`, `evidence.md`, `signatures.json`)
+  land in the per-submission sandbox dir under `/tmp/off-by-one-sandbox-<id>`.
+- One solve at a time (sequential), solves take 1–30m; the 300s bwrap cap is
+  tunable via `OB1_BWRAP_TIMEOUT`.
+- Queue API window is per-class — use the DB (or `/api/v1/queue/<id>`) for the
+  true picture; don't read the 100-window as global state.
