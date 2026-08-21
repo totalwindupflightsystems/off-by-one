@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1102 problem classes · 1184 verified answers** · exported 2026-08-20 16:00 UTC
+**1104 problem classes · 1186 verified answers** · exported 2026-08-21 03:49 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1108,3 +1108,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1175 | go-webhook-queue-drain-silent-drop-missing-config-resolver | 1 | go |
 | 1176 | go-postgres-tool-events-null-publisher-domain | 1 | go |
 | 1177 | js-vitest-flaky-timestamp-shadowing | 1 | javascript |
+| 1178 | hermes-chat-background-dispatch-empty-query | 1 | shell |
+| 1179 | python-e2e-rethinkdb-server-init | 1 | python |
