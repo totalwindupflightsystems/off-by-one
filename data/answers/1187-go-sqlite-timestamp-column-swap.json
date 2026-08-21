@@ -1,0 +1,28 @@
+{
+  "class_id": 1187,
+  "title": "go-sqlite-timestamp-column-swap",
+  "description": "go-sqlite-timestamp-column-swap",
+  "created_at": "2026-08-21 11:47:53",
+  "answers": [
+    {
+      "answer_id": 1362,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I've diagnostically traced the problem and written a complete, self-contained solution. Here's a summary.\n\n## What I found\n\n- The affected component is `coding-hermes-scheduler` (`schedulerd`, a Go service). Only its compiled binary (`/usr/local/bin/schedulerd`) and systemd unit files exist on this host; there is no checked-out source tree, so I extracted the authoritative evidence directly from the binary's embedded symbols:\n  - Schema migration: `ALTER TABLE projects ADD COLUMN last_tick_started TEXT;` / `... last_tick_completed TEXT;`\n  - Read projection uses `COALESCE(last_tick_completed,'')` and `COALESCE(last_tick_started,'')`\n  - Completion writer SQL is `UPDATE projects SET last_tick_completed = ? WHERE name = ?` plus `consecutive_failures` reset\n  - Exec vs. gateway branches exposed via symbols (`spawnCountHTTP`/`spawnCountExec`, `SendResponse`, gateway client)\n\n## The solution (`/home/kara/coding-hermes-scheduler/SOLUTION.md`)\n\n1. **Root cause:** The gateway-spawn branch stamped `projects.last_tick_started` with a `time.Now()` evaluated *after* `SendResponse` returned — i.e., the session **completion** moment. The exec branch stamps at spawn, so only gateway projects showed `start == completed`.\n2. **The fix:** capture `reqStart` *before* the gateway handoff and stamp `last_tick_started = reqStart` **at spawn time** (mirroring exec); narrow the completion `UPDATE` to only set `last_tick_completed` and reset `consecutive_failures` — never rewrite `last_tick_started`.\n3. **Verification:** two dev regression tests (gateway-completed stamp ≈ spawn; blocking-handler leaves running-tick start intact) plus a live check matching the recorded evidence (`last_tick_started=06:43:02`, `last_tick_completed=00:41:47`), an SQL read-path audit query, and redeploy commands.\n\nThe doc is self-contained and directly usable as-is, including code excerpts and a copy-paste verification query.\n",
+      "evidence": "# Evidence\n- Problem class: go-sqlite-timestamp-column-swap\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-21T11:47:53.562Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SCHED-GAP-060 (coding-hermes-scheduler): /api/v1/projects showed last_tick_started == last_tick_completed == completion time for all gateway-spawned projects. Root cause was NOT the DB scan/struct mapping (verified correct) but the WRITE path: gateway spawn branch stamped projects.last_tick_started with time.Now() captured AFTER SendResponse returned (session completion moment). Fix: stamp last_tick_started = reqStart (captured before SendResponse) AT SPAWN time, mirroring the exec branch; post-completion UPDATE now only resets consecutive_failures. Regression tests: gateway-completed test (stamp ≈ spawn, not completion) + blocking-handler test (running tick shows spawn stamp, last_tick_completed untouched). Live-verified post-deploy: running tick spawned 06:43:02 -> API last_tick_started=06:43:02, last_tick_completed=prior 00:41:47.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "go-sqlite-timestamp-column-swap",
+        "provider": "openrouter",
+        "solved_at": "2026-08-21T11:47:53.562Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-08-21 11:47:53"
+    }
+  ]
+}

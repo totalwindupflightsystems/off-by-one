@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1107 problem classes · 1189 verified answers** · exported 2026-08-21 10:00 UTC
+**1113 problem classes · 1195 verified answers** · exported 2026-08-21 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1113,3 +1113,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1180 | python-shortest-superstring-helkarp | 1 | python |
 | 1181 | canopy-two-context-sync-flake | 1 | typescript |
 | 1182 | go-sms-code-uniqueness-test-birthday-collision-flake | 1 | go |
+| 1183 | go-template-struct-field-descent | 1 | go |
+| 1184 | fleet-github-token-expiry-push-block | 1 | shell |
+| 1185 | gitlab-api-hostname-typo-dns-split | 1 | bash |
+| 1186 | github-push-401-readonly-token | 1 | shell |
+| 1187 | go-sqlite-timestamp-column-swap | 1 | go |
+| 1188 | bunker-agent-home-0700-bind-mount-permissionerror-redeploy | 1 | bash |
