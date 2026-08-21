@@ -20,6 +20,7 @@ Key files:
 - `sql/schema/schema.sql` — Database schema
 - `.env` — DEEPSEEK_API_KEY, OPENROUTER_API_KEY
 - `go.mod` — Go module definition
+- `cmd/off-by-one` — main binary; `off-by-one seed` loads the bundled corpus (see README Quick Start)
 
 ## GitReins Quality Harness (MANDATORY)
 

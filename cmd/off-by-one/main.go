@@ -69,6 +69,10 @@ func main() {
 		return
 	}
 
+	// Custom usage: the default flag-package output prints only the server
+	// flags, hiding the `seed` subcommand dispatched above (OB-GAP-053).
+	flag.Usage = printUsage
+
 	port := flag.Int("port", envInt("OFF_BY_ONE_PORT", 8766), "HTTP listen port")
 	host := flag.String("host", envString("OFF_BY_ONE_HOST", ""), "HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy)")
 	dbPath := flag.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path")
@@ -275,6 +279,20 @@ func main() {
 	// the deferred store.Close() fires.
 	wg.Wait()
 	log.Printf("off-by-one shutdown complete")
+}
+
+// printUsage writes the full usage text to flag.CommandLine.Output():
+// the subcommand list first (the default flag-package usage prints only
+// the server flags, so --help never mentioned `seed` — OB-GAP-053),
+// then the server flag set. Installed as flag.Usage before flag.Parse()
+// so --help/-h (ErrHelp) and parse errors all show it.
+func printUsage() {
+	out := flag.CommandLine.Output()
+	fmt.Fprintf(out, "Usage of off-by-one:\n")
+	fmt.Fprintf(out, "\nCommands:\n")
+	fmt.Fprintf(out, "  seed    one-shot corpus loader: merge data/answers/ into the SQLite DB (see README Quick Start)\n")
+	fmt.Fprintf(out, "\nFlags:\n")
+	flag.PrintDefaults()
 }
 
 // sandboxTimeout returns the per-solve bwrap cap. OB1_BWRAP_TIMEOUT

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"flag"
 	"os"
 	"path/filepath"
 	"slices"
@@ -159,4 +161,27 @@ func TestExtraReadOnlyPaths_IncludesResolverWhenPresent(t *testing.T) {
 func isDir(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
+}
+
+// TestPrintUsage_ShowsSeedSubcommand asserts that the --help output
+// lists a Commands section naming the `seed` subcommand before the
+// server flags — the default flag-package usage printed only the flags,
+// so users never learned seed existed (OB-GAP-053).
+func TestPrintUsage_ShowsSeedSubcommand(t *testing.T) {
+	var buf bytes.Buffer
+	flag.CommandLine.SetOutput(&buf)
+	defer flag.CommandLine.SetOutput(os.Stderr)
+
+	printUsage()
+
+	out := buf.String()
+	for _, want := range []string{"Usage of off-by-one:", "Commands:", "seed", "Flags:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("usage output missing %q, got:\n%s", want, out)
+		}
+	}
+	// The Commands section must come before the flag dump.
+	if strings.Index(out, "Commands:") > strings.Index(out, "Flags:") {
+		t.Errorf("usage output: Commands section must precede Flags, got:\n%s", out)
+	}
 }
