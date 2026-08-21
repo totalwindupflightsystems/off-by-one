@@ -45,6 +45,61 @@ func TestSearch_EmptyQuery(t *testing.T) {
 	}
 }
 
+// Search hits must carry the same per-class metadata as
+// ListProblemClassesWithCountsFiltered rows (derived best status,
+// description, created_at, answer_count) so the API search path can
+// populate them without per-hit lookups (OB-GAP-050).
+func TestSearch_HitCarriesClassMetadata(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	cid, _ := s.CreateProblemClass(ctx, "so-nil-pointer-deref", "nil pointer dereference in Go")
+	aid, _ := s.CreateAnswerNode(ctx, cid, 0, "go", "go", "v1", "check for nil first", "", `{}`)
+	if err := s.UpdateAnswerStatus(ctx, aid, AnswerVerified); err != nil {
+		t.Fatalf("UpdateAnswerStatus: %v", err)
+	}
+	// A second class with only a pending answer, to verify per-class
+	// status derivation (verified vs pending) in one result set.
+	cid2, _ := s.CreateProblemClass(ctx, "pending-nil-check", "pending nil guard")
+	if _, err := s.CreateAnswerNode(ctx, cid2, 0, "go", "go", "v1", "maybe guard nil", "", `{}`); err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+
+	hits, err := s.Search(ctx, "nil", "", "", "", 10, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(hits) < 2 {
+		t.Fatalf("hits = %d, want >= 2", len(hits))
+	}
+	byID := map[int64]SearchHit{}
+	for _, h := range hits {
+		byID[h.ClassID] = h
+	}
+	verified, ok := byID[cid]
+	if !ok {
+		t.Fatalf("no hit for verified class %d", cid)
+	}
+	if verified.Status != "verified" {
+		t.Errorf("verified class status = %q, want verified", verified.Status)
+	}
+	if verified.Description != "nil pointer dereference in Go" {
+		t.Errorf("verified class description = %q, want seeded description", verified.Description)
+	}
+	if verified.CreatedAt.IsZero() {
+		t.Error("verified class CreatedAt is zero, want parsed created_at")
+	}
+	if verified.AnswerCount != 1 {
+		t.Errorf("verified class AnswerCount = %d, want 1", verified.AnswerCount)
+	}
+	pending, ok := byID[cid2]
+	if !ok {
+		t.Fatalf("no hit for pending class %d", cid2)
+	}
+	if pending.Status != "pending" {
+		t.Errorf("pending class status = %q, want pending", pending.Status)
+	}
+}
+
 func TestSearch_FilterByEnv(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

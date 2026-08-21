@@ -98,13 +98,20 @@ type RelatedEdge struct {
 }
 
 // SearchHit is one row of full-text search output, with a snippet of the
-// matched content and a relevance score.
+// matched content and a relevance score. Description, CreatedAt, AnswerCount
+// and Status carry the same per-class metadata the plain list endpoint
+// returns (status is the derived best answer status), so FTS search results
+// are interchangeable with list rows (OB-GAP-050).
 type SearchHit struct {
-	ClassID  int64
-	Title    string
-	Snippet  string
-	Score    float64
-	AnswerID sql.NullInt64
+	ClassID     int64
+	Title       string
+	Snippet     string
+	Score       float64
+	AnswerID    sql.NullInt64
+	Description string
+	CreatedAt   time.Time
+	AnswerCount int
+	Status      string
 }
 
 // Open creates a Store backed by the SQLite database at dbPath. The schema

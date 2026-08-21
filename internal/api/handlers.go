@@ -415,12 +415,13 @@ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
 		}
 		out := listProblemsResponse{Problems: []problemClassWire{}, Total: total}
 		for _, h := range hits {
-			cnt, _ := s.Store.AnswerCount(r.Context(), h.ClassID)
 			out.Problems = append(out.Problems, problemClassWire{
 				ID:          h.ClassID,
 				Title:       h.Title,
-				AnswerCount: cnt,
-				Status:      statusOrDefault(status),
+				Description: h.Description,
+				AnswerCount: h.AnswerCount,
+				Status:      h.Status,
+				CreatedAt:   formatTimeRFC3339(h.CreatedAt),
 			})
 		}
 		writeJSON(w, http.StatusOK, out)
@@ -860,14 +861,6 @@ func parseIntDefault(s string, def, min, max int) int {
 		return def
 	}
 	return n
-}
-
-// statusOrDefault returns the status if non-empty, else "pending".
-func statusOrDefault(s string) string {
-	if s == "" {
-		return "pending"
-	}
-	return s
 }
 
 // formatTimeRFC3339 formats a time.Time as RFC3339 or returns "" for

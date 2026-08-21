@@ -53,8 +53,19 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 	// rank/answer_id, so SQLite keeps both. We dedupe by class id with
 	// ROW_NUMBER, preferring the class-level hit (answer_id NULL), so
 	// pagination aligns with SearchCount (which counts distinct ids).
+	//
+	// The deduped hits are then joined back to problem_classes and the
+	// answer aggregate so each hit carries the same per-class metadata as
+	// ListProblemClassesWithCountsFiltered: description, created_at,
+	// answer_count, and the derived best status (ci_passed > verified >
+	// pending > failed, coalescing to 'pending'). That keeps the API
+	// search path from doing N+1 lookups per hit (OB-GAP-050).
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, title, snip, rank, answer_id FROM (
+		SELECT hits.id, hits.title, hits.snip, hits.rank, hits.answer_id,
+		       pc.description, pc.created_at,
+		       COALESCE(ac.cnt, 0) AS answer_count,
+		       COALESCE(ac.best_status, 'pending') AS status
+		FROM (
 			SELECT *, ROW_NUMBER() OVER (
 				PARTITION BY id ORDER BY has_answer, rank
 			) AS rn FROM (
@@ -87,9 +98,22 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 				                       THEN a.status IN ('verified', 'ci_passed')
 				                       ELSE a.status = ? END))
 			)
-		)
-		WHERE rn = 1
-		ORDER BY rank
+		) hits
+		JOIN problem_classes pc ON pc.id = hits.id
+		LEFT JOIN (
+			SELECT class_id,
+			       COUNT(*) AS cnt,
+			       CASE
+			           WHEN MAX(CASE WHEN status = 'ci_passed' THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
+			           WHEN MAX(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) = 1 THEN 'verified'
+			           WHEN MAX(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) = 1 THEN 'pending'
+			           ELSE 'failed'
+			       END AS best_status
+			FROM answer_nodes
+			GROUP BY class_id
+		) ac ON ac.class_id = hits.id
+		WHERE hits.rn = 1
+		ORDER BY hits.rank
 		LIMIT ? OFFSET ?
 	`, ftsQuery, env, env, lang, lang, status, status, status,
 		ftsQuery, env, env, lang, lang, status, status, status,
@@ -101,9 +125,12 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 	var out []SearchHit
 	for rows.Next() {
 		var hit SearchHit
-		if err := rows.Scan(&hit.ClassID, &hit.Title, &hit.Snippet, &hit.Score, &hit.AnswerID); err != nil {
+		var created string
+		if err := rows.Scan(&hit.ClassID, &hit.Title, &hit.Snippet, &hit.Score, &hit.AnswerID,
+			&hit.Description, &created, &hit.AnswerCount, &hit.Status); err != nil {
 			return nil, fmt.Errorf("scan search hit: %w", err)
 		}
+		hit.CreatedAt = parseSQLiteTime(created)
 		out = append(out, hit)
 	}
 	return out, rows.Err()

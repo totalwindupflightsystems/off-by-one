@@ -477,6 +477,33 @@ func TestListProblems_SearchQuery(t *testing.T) {
 	if resp.Total < 1 {
 		t.Errorf("total = %d, want >= 1 (FTS5 match)", resp.Total)
 	}
+	// OB-GAP-050: search results must carry the same per-class metadata
+	// as the plain list/detail endpoints — real derived status (not the
+	// status filter echoed back), description, created_at, answer_count.
+	found := false
+	for _, p := range resp.Problems {
+		if p.Status == "" {
+			t.Errorf("problem %q: status empty, want derived status", p.Title)
+		}
+		if p.CreatedAt == "" {
+			t.Errorf("problem %q: created_at empty, want RFC3339 timestamp", p.Title)
+		}
+		if p.Title == "docker-permissions" {
+			found = true
+			if p.Status != "verified" {
+				t.Errorf("docker-permissions status = %q, want verified", p.Status)
+			}
+			if p.Description != "fixing permissions in containers" {
+				t.Errorf("docker-permissions description = %q, want seeded description", p.Description)
+			}
+			if p.AnswerCount != 1 {
+				t.Errorf("docker-permissions answer_count = %d, want 1", p.AnswerCount)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("docker-permissions not in search results: %+v", resp.Problems)
+	}
 }
 
 // A search with no matches must return "problems":[] (not null) so
