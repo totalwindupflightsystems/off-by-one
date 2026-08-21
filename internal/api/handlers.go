@@ -657,6 +657,11 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	depth, _ := s.Queue.Depth(r.Context())
 	st.QueueDepth = depth
+	// Avg solve time comes from the queue's solve timings; left empty
+	// until the first solve completes (same error-ignore style as Depth).
+	if avg, _ := s.Queue.AvgSolveTime(r.Context()); avg > 0 {
+		st.AvgSolveTime = avg.Round(time.Second).String()
+	}
 	// Expose read-only mode so the UI can disable the AI chat panel,
 	// and solver availability so users can tell why submissions sit queued.
 	writeJSON(w, http.StatusOK, struct {

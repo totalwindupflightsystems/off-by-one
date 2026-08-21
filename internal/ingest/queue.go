@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	schemasql "github.com/totalwindupflightsystems/off-by-one/sql/schema"
@@ -352,6 +353,26 @@ func (q *Queue) Depth(ctx context.Context) (int, error) {
 		`SELECT COUNT(1) FROM queue_entries WHERE status IN ('pending', 'in_progress')`,
 	).Scan(&n)
 	return n, err
+}
+
+// AvgSolveTime returns the mean wall-clock solve time across completed
+// queue entries (completed_at - started_at). Used by the /api/v1/stats
+// endpoint. Returns 0 when no entries have completed yet — AVG over an
+// empty set is NULL in SQLite, so we scan into a sql.NullFloat64.
+func (q *Queue) AvgSolveTime(ctx context.Context) (time.Duration, error) {
+	var avg sql.NullFloat64
+	err := q.db.QueryRowContext(ctx,
+		`SELECT AVG(julianday(completed_at) - julianday(started_at)) * 86400.0
+		FROM queue_entries
+		WHERE status = 'complete' AND started_at IS NOT NULL AND completed_at IS NOT NULL`,
+	).Scan(&avg)
+	if err != nil {
+		return 0, err
+	}
+	if !avg.Valid {
+		return 0, nil
+	}
+	return time.Duration(avg.Float64 * float64(time.Second)), nil
 }
 
 // Dequeue atomically marks and returns the highest-priority pending

@@ -473,8 +473,9 @@ type Stats struct {
 
 // Stats returns aggregate counters across the graph. Hit rate is
 // computed as verified_answers / total_answers (when total > 0).
-// Coverage is verified / total problems. Avg solve time is left as
-// an empty string — the cron loop populates it once solves begin.
+// Coverage is verified / total problems. Avg solve time is left empty
+// here — the API layer computes it from queue_entries solve timings
+// (see Queue.AvgSolveTime) and fills the field in handleStats.
 func (s *Store) Stats(ctx context.Context) (*Stats, error) {
 	var st Stats
 	row := s.db.QueryRowContext(ctx, `

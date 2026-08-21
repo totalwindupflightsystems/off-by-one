@@ -817,6 +817,9 @@ func TestStats_Empty(t *testing.T) {
 	if st.TotalProblems != 0 || st.TotalAnswers != 0 {
 		t.Errorf("stats: %+v, want zeroed", st)
 	}
+	if st.AvgSolveTime != "" {
+		t.Errorf("avg_solve_time = %q, want empty with no completed solves", st.AvgSolveTime)
+	}
 }
 
 func TestStats_Populated(t *testing.T) {
@@ -845,6 +848,39 @@ func TestStats_Populated(t *testing.T) {
 	}
 	if st.HitRate < 0.49 || st.HitRate > 0.51 {
 		t.Errorf("hit_rate = %f, want ~0.5", st.HitRate)
+	}
+}
+
+// TestStats_AvgSolveTime asserts /api/v1/stats reports a non-empty
+// avg_solve_time once the queue holds a completed solve with real
+// started_at/completed_at timestamps (OB-GAP-047).
+func TestStats_AvgSolveTime(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	// Insert a completed solve directly: started 10:00:00, completed
+	// 10:02:13 -> 133s -> "2m13s".
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status, stage, started_at, completed_at)
+		VALUES ('sub_avg1', 'cls', 'complete', 'done',
+			'2026-08-21 10:00:00', '2026-08-21 10:02:13')`); err != nil {
+		t.Fatalf("insert completed entry: %v", err)
+	}
+	// A pending row with no timing must not affect the average.
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status) VALUES ('sub_avg2', 'cls', 'pending')`); err != nil {
+		t.Fatalf("insert pending entry: %v", err)
+	}
+
+	rr := do(t, s, "GET", "/api/v1/stats", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var st graph.Stats
+	_ = json.Unmarshal(rr.Body.Bytes(), &st)
+	if st.AvgSolveTime == "" {
+		t.Fatalf("avg_solve_time is empty, want non-empty for a completed solve")
+	}
+	if st.AvgSolveTime != "2m13s" {
+		t.Errorf("avg_solve_time = %q, want %q", st.AvgSolveTime, "2m13s")
 	}
 }
 
