@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1113 problem classes · 1195 verified answers** · exported 2026-08-21 16:00 UTC
+**1116 problem classes · 1198 verified answers** · exported 2026-08-21 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1119,3 +1119,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1186 | github-push-401-readonly-token | 1 | shell |
 | 1187 | go-sqlite-timestamp-column-swap | 1 | go |
 | 1188 | bunker-agent-home-0700-bind-mount-permissionerror-redeploy | 1 | bash |
+| 1190 | totalstack-auto-wired-provider-dispatch-500 | 1 | python |
+| 1191 | godot-save-load-format-mismatch | 1 | gdscript |
+| 1192 | godot-warroom-keyboard-focus | 1 | gdscript |
