@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1104 problem classes · 1186 verified answers** · exported 2026-08-21 04:00 UTC
+**1107 problem classes · 1189 verified answers** · exported 2026-08-21 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1110,3 +1110,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1177 | js-vitest-flaky-timestamp-shadowing | 1 | javascript |
 | 1178 | hermes-chat-background-dispatch-empty-query | 1 | shell |
 | 1179 | python-e2e-rethinkdb-server-init | 1 | python |
+| 1180 | python-shortest-superstring-helkarp | 1 | python |
+| 1181 | canopy-two-context-sync-flake | 1 | typescript |
+| 1182 | go-sms-code-uniqueness-test-birthday-collision-flake | 1 | go |
