@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1138 problem classes · 1221 verified answers** · exported 2026-08-22 21:06 UTC
+**1139 problem classes · 1222 verified answers** · exported 2026-08-22 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1144,3 +1144,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1212 | go-scheduler-next-fire-time | 1 | go |
 | 1213 | jsonl-board-unicode-escape-roundtrip | 1 | go |
 | 1214 | gitreins-judge-token-cap | 1 | html |
+| 1215 | gltf-exporter-node-esm | 1 | go |
