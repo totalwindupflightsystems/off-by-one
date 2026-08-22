@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1116 problem classes · 1198 verified answers** · exported 2026-08-21 22:00 UTC
+**1122 problem classes · 1204 verified answers** · exported 2026-08-22 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1122,3 +1122,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1190 | totalstack-auto-wired-provider-dispatch-500 | 1 | python |
 | 1191 | godot-save-load-format-mismatch | 1 | gdscript |
 | 1192 | godot-warroom-keyboard-focus | 1 | gdscript |
+| 1193 | shell-tls-intermediate-chain-bundle-order | 1 | shell |
+| 1194 | d5s-async-expression-stringifies-promise | 1 | go |
+| 1195 | go-cli-serve-addr-host-doubling | 1 | go |
+| 1196 | go-stats-avg-solve-time-never-populated | 1 | go |
+| 1197 | css-grid-fr-track-min-content-overflow | 1 | typescript |
+| 1198 | frontend-auth-refresh-token-single-flight-race | 1 | typescript |
