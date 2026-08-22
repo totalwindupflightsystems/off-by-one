@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.0.0
+version: 1.1.0
 category: software-development
 ---
 
@@ -93,35 +93,33 @@ grep -l '"title": ".*raft.*"' data/answers/*.json
 python3 -c "import json; print(json.load(open('data/answers/0043-go-raft-log-replication.json'))['answers'][0]['solution'])"
 ```
 
-## Pitfalls (each cost real time on 2026-08-10 or 2026-08-20; status as of 2026-08-20)
+## Pitfalls (each cost real time on 2026-08-10 or 2026-08-20; status as of 2026-08-22)
 
-1. **Zero-match search returns `{"problems":null}` not `[]`** — and
-   `GET /api/v1/problems/{class}/related` returns `{"related":null}`. Guard
-   with `resp.get("problems") or []` in clients (OB-GAP-046 open).
-2. **`solver_available:false`** (stats) = no solver; submit now returns
+1. **`solver_available:false`** (stats) = no solver; submit now returns
    **503 solver_unavailable** immediately (OB-GAP-034 fixed) — the queue never
    silently accepts. Check stats before relying on the queue anyway.
-3. **`stats.avg_solve_time` is always `""`** and submit's `estimated_time` is a
-   fixed "5m0s" default that disappears at position 0 — don't build scheduling
-   on it (OB-GAP-047 open).
-4. **`seed` is CWD-relative and fails silently**: run from the repo root (or
-   `-dir <repo>/data`); a missing corpus dir logs an info line and exits 0 with
-   an EMPTY db (OB-GAP-048 open). `OFF_BY_ONE_DB`/`-db` are honored (fixed).
-5. **Export/import are config-gated** — 501 unless started with `-export-dir`/
+2. **`seed` is CWD-relative**: run from the repo root (or pass
+   `-dir <repo>/data`); a missing/unreadable corpus dir exits non-zero with an
+   ERROR line instead of a silent success. `OFF_BY_ONE_DB`/`-db` are honored.
+3. **Export/import are config-gated** — 501 unless started with `-export-dir`/
    `-import-dir`. Not a bug.
-6. **The 300s bwrap-cap** failure pattern (`signal: killed` at exactly 5m) is
+4. **The 300s bwrap-cap** failure pattern (`signal: killed` at exactly 5m) is
    normal fleet behavior, not a regression — don't chase it. `OB1_BWRAP_TIMEOUT`
    raises the cap.
-7. **Queue window is per-class** — `GET /api/v1/queue?limit=100` is dominated
+5. **Queue window is per-class** — `GET /api/v1/queue?limit=100` is dominated
    by `off-by-one-self-test` entries; the authoritative picture is the DB.
    Don't conclude "nothing is happening" from the API window.
 
-Former pitfalls now FIXED (do not re-report): readonly-mode discover 403
-(OB-GAP-020 — discover works in readonly now), detail status empty (OB-GAP-024),
-README corpus counts stale (OB-GAP-021 — counts live in data/COUNTS.md),
-corpus test junk (OB-GAP-025 — export filters it), "solver absent → queue
-forever" (OB-GAP-034 — submit 503s), `go-nil-pointer-deref` doc example
-(OB-GAP-022/045 — examples use `so-nil-pointer-deref`).
+Former pitfalls now FIXED (do not re-report): zero-match search nulls
+(OB-GAP-046 — `problems`/`related` now return `[]`), `stats.avg_solve_time`
+empty (OB-GAP-047 — now computed from completed solves), seed empty-db exit on
+a missing corpus dir (OB-GAP-048 — now exits 1 with an ERROR), readonly-mode
+discover 403 (OB-GAP-020 — discover works in readonly now), detail status
+empty (OB-GAP-024), README corpus counts stale (OB-GAP-021 — counts live in
+data/COUNTS.md), corpus test junk (OB-GAP-025 — export filters it),
+"solver absent → queue forever" (OB-GAP-034 — submit 503s),
+`go-nil-pointer-deref` doc example (OB-GAP-022/045 — examples use
+`so-nil-pointer-deref`).
 
 ## Running a scratch instance (safe testing)
 
