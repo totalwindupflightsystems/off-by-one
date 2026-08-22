@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1129 problem classes · 1211 verified answers** · exported 2026-08-22 10:00 UTC
+**1136 problem classes · 1218 verified answers** · exported 2026-08-22 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1135,3 +1135,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1203 | docs-runbook-api-param-shape | 1 | go |
 | 1204 | gitreins-judge-incomplete-truncation | 1 | python |
 | 1205 | godot-shared-stylebox-mutation | 1 | gdscript |
+| 1206 | bare-pytest-cwd-not-on-syspath | 1 | python |
+| 1207 | godot-task-result-lost-update | 1 | gdscript |
+| 1208 | go-cli-status-exit-code-stale-binary | 1 | go |
+| 1209 | duckbrain-http-memories-attributes-contract | 1 | typescript |
+| 1210 | go-cli-version-ignores-native-vcs-buildinfo | 1 | go |
+| 1211 | asce-openapi-json-route-topology | 1 | go |
+| 1212 | go-scheduler-next-fire-time | 1 | go |

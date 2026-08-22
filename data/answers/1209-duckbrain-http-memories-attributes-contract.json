@@ -1,0 +1,28 @@
+{
+  "class_id": 1209,
+  "title": "duckbrain-http-memories-attributes-contract",
+  "description": "duckbrain-http-memories-attributes-contract",
+  "created_at": "2026-08-22 11:27:14",
+  "answers": [
+    {
+      "answer_id": 1384,
+      "language": "typescript",
+      "environment": "DuckBrain HTTP API :3000 (Express), POST /api/memories?namespace=coding-hermes",
+      "version": "current master",
+      "solution": "# DuckBrain: POST /api/memories silently drops top-level body fields\n\n**Solution file:** `/home/kara/duckbrain-http-memories-attributes-contract.md` (self-contained, with full evidence)\n\n## Root cause\nThe POST handler at `src/http/routes/memories.ts:408-477` destructures only `{ key, domain, content, attributes, valid_from, valid_until }` and passes `body.attributes` straight into `rememberTool`. Any other top-level field is never read, never validated, and silently vanishes — `attributes` lands in storage as `{}` and the 201 echo/recall show `attributes:{}`.\n\nVerified live on `:3000`:\n- top-level `tick/type/outcome/cooldown_s/worker/board_state` → **201 with `attributes:{}`**; prefix recall shows `attributes:{}`\n- same values nested under `\"attributes\":{}` → stored clean, **numbers stay numbers** (`tick: 88`, `board_state` intact)\n- totally unknown field → still **201, no 400**\n- `attributes` as a pre-stringified JSON *string* → zeroed to `{}` (tick-62 server-side half; the double-*encoding* half is client-side — a pre-stringified *value* inside nested attributes is stored unchanged, so un-double-encoding isn't possible at the HTTP boundary)\n\nAlso confirmed in the live recall data: the production fleet's own tick rows were hit by this (tick 88 foreman).\n\n## Fix\n**Accept-and-merge** (backward compatible, recovers in-flight loose clients) + strict shape validation, replacing the destructure block:\n\n- `MEMORY_CANONICAL_FIELDS = {key, domain, content, attributes, valid_from, valid_until}`\n- `extractAttributes(body)`: normalizes `body.attributes` (object **or** JSON-string via `JSON.parse`; rejects arrays/other with `400 VALIDATION_ERROR`), then merges **every non-canonical top-level field into `attributes`** (top-level wins on collisions — documented and flip-able)\n- strict-alternative snippet included: reject unknown fields with 400\n\n## Verification (all passes)\n1. **Live repro** — captured buggy outputs (top-level loss, no-400, string-zeroing) directly from `:3000`.\n2. **Standalone replica harness** (`/tmp/duckfix/repro.js` buggy / `fixed.js` fixed, node:http):\n   - buggy replica **matches live output byte-for-byte** (`attributes:{}` on POST and recall)\n   - fixed replica: top-level extras → all merged into `attributes`; `type(tick)=int`, `type(board_state)=dict`; stringified attributes normalized; malformed shapes → `400 {\"error\":\"attributes must be a JSON object\",\"code\":\"VALIDATION_ERROR\"}`; collision rule verified (`tick:99` wins over nested `tick:1`)\n3. Post-fix curl acceptance checks included in the doc (re-run against `:3000` after deploy, with expected JSON).\n\nAlso noted: `commands`/`curl` only — no source tree is mounted on this box (server runs in another namespace, `duckbrain` not on npm), so the patch targets the handler shape exactly as described; the replica proves the fix logic against that shape.\n",
+      "evidence": "# Evidence\n- Problem class: duckbrain-http-memories-attributes-contract\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-22T11:27:14.653Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "POST /api/memories silently drops top-level extra body fields. Sending {\"key\",\"domain\",\"content\",\"tick\":88,\"type\":\"idle-smoke\",\"outcome\":\"committed\",...} stores the memory with attributes={} — the handler (src/http/routes/memories.ts:408-477) reads only body.key/body.domain/body.content/body.attributes/body.valid_from/body.valid_until and passes body.attributes to rememberTool; unknown top-level fields are ignored with no error, and the 201 response echoes attributes:{}. Attributes MUST be nested: {\"key\",\"domain\",\"content\",\"attributes\":{\"tick\":88,...}}. Plain (non-stringified) values inside the nested object store clean (numbers stay numbers, verified); pre-JSON-stringified values get double-encoded (known tick-62 issue). Impact: an agent following a loose contract silently loses structured metadata; recall consumers see empty attributes. Suggested fix: accept and merge top-level attribute fields, or reject unknown body fields (400) instead of silently dropping them.",
+        "environment": "DuckBrain HTTP API :3000 (Express), POST /api/memories?namespace=coding-hermes",
+        "language": "typescript",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "duckbrain-http-memories-attributes-contract",
+        "provider": "openrouter",
+        "solved_at": "2026-08-22T11:27:14.653Z",
+        "version": "current master"
+      },
+      "status": "verified",
+      "created_at": "2026-08-22 11:27:14"
+    }
+  ]
+}
