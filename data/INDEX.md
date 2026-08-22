@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1122 problem classes · 1204 verified answers** · exported 2026-08-22 04:00 UTC
+**1129 problem classes · 1211 verified answers** · exported 2026-08-22 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1128,3 +1128,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1196 | go-stats-avg-solve-time-never-populated | 1 | go |
 | 1197 | css-grid-fr-track-min-content-overflow | 1 | typescript |
 | 1198 | frontend-auth-refresh-token-single-flight-race | 1 | typescript |
+| 1199 | go-mcp-initialize-notification-misclassification | 1 | go |
+| 1200 | runner-route-when-checkpoint-pollution | 1 | go |
+| 1201 | scheduler-deliver-telegram-thread-not-found | 1 | go |
+| 1202 | gitreins-judge-gitignored-deliverable | 1 | go |
+| 1203 | docs-runbook-api-param-shape | 1 | go |
+| 1204 | gitreins-judge-incomplete-truncation | 1 | python |
+| 1205 | godot-shared-stylebox-mutation | 1 | gdscript |
