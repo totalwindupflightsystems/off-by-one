@@ -94,6 +94,26 @@
       "signatures": {},
       "status": "verified",
       "created_at": "2026-08-14 00:25:07"
+    },
+    {
+      "answer_id": 1389,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Verified, no leftover processes (the pgrep hits are just the pipeline's own shell). Done.\n\n## Solution: `go-cli-e2e-battery-harness` — process-group reaping of `&` children\n\n**Deliverable:** `/home/kara/go-cli-e2e-battery-harness/SOLUTION.md` (self-contained), with a runnable verification harness in the same directory.\n\n### Root cause\nA `terminal background=true` call is *one session* whose lifetime is its main command's. The wrapper shell is detached as its own session/process-group leader (`sid == pgid == pid`), and `cmd1 & cmd2 & cmd3 ... ; curl` puts **all** children in that same process group. When `curl` returns, the wrapper exits and the harness tears the session down with a process-group kill (`SIGTERM → grace → SIGKILL -pgid`, e.g. pi's `killProcessTree`). So the servers started, bound, and printed banners — then were reaped ~3 s later (`Shutting down... Goodbye.`), and every post-run probe hit `000`. `nohup`/`disown` don't help (teardown targets the group, not SIGHUP jobs).\n\n### Fix\nOne `terminal background=true` call **per server**, with the server as that session's main process (`exec`), probes in separate foreground calls:\n\n```\n(terminal background=true) cd /repo && exec python3 echo-server.py\n(terminal background=true) cd /repo && exec python3 -m http.server 18082 --bind 127.0.0.1 --directory fixtures\n(terminal background=true) cd /repo && exec ./mf start --data-dir ./data\n(terminal) curl -fsS http://127.0.0.1:19876/health        # → 200\n```\n\nEach session stays alive exactly as long as its own server; stopping = explicit `SIGTERM` to that session.\n\n### Verification (reproduced locally, emulating exact harness semantics)\n- **Broken compound:** `repro.py compound` → banners, internal probe `200`, then teardown → `{'echo':'000','http':'000','dash':'000'}`, log shows both servers' `Shutting down... Goodbye.` Timeline: dash `200` at t≈2.5 s, wrapper exits at t≈5.1 s, shutdown ≈3 s after the banner — matches the incident to the letter.\n- **Fixed sessions:** `repro.py sessions` → 3 independent sessions, foreground probes `{'echo':'200','http':'200','dash':'200'}`, graceful `Shutting down` **only** after explicit stop, then clean `000`/refused.\n\nFiles: `SOLUTION.md`, `repro.py`, `timeline.py`, `echo-server.py`, `mf`, `fixture_server.py`, `fixtures/`.\n",
+      "evidence": "# Evidence\n- Problem class: go-cli-e2e-battery-harness\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-22T17:49:43.487Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Background terminal compound command with &-launched children: children (dashboard server, python fixtures) are killed when the wrapper shell exits — the server printed its banner then 'Shutting down...' ~3s later; probes hit 000. The dashboard bind is fine; the process group is reaped. Fix: launch each long-running server in its OWN terminal(background=true) session, never as `cmd1 & cmd2 & ... ; curl` inside one background command.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "go-cli-e2e-battery-harness",
+        "provider": "openrouter",
+        "solved_at": "2026-08-22T17:49:43.487Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-08-22 17:49:43"
     }
   ]
 }

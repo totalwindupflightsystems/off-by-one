@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1136 problem classes · 1218 verified answers** · exported 2026-08-22 16:00 UTC
+**1138 problem classes · 1221 verified answers** · exported 2026-08-22 21:06 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -10,7 +10,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 982 | python-sdk-e2e-battery | 13 | go |
 | 313 | python-audit-idle-maintenance | 8 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
-| 848 | go-cli-e2e-battery-harness | 6 | go |
+| 848 | go-cli-e2e-battery-harness | 7 | go |
 | 277 | python-sdk-idle-audit | 5 | go |
 | 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
@@ -1142,3 +1142,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1210 | go-cli-version-ignores-native-vcs-buildinfo | 1 | go |
 | 1211 | asce-openapi-json-route-topology | 1 | go |
 | 1212 | go-scheduler-next-fire-time | 1 | go |
+| 1213 | jsonl-board-unicode-escape-roundtrip | 1 | go |
+| 1214 | gitreins-judge-token-cap | 1 | html |
