@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1148 problem classes · 1231 verified answers** · exported 2026-08-23 16:00 UTC
+**1154 problem classes · 1237 verified answers** · exported 2026-08-23 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1154,3 +1154,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1222 | kth-median-two-sorted-arrays-binary-partition | 1 | python |
 | 1223 | go-deterministic-rng-threading | 1 | go |
 | 1224 | typescript-vite-bundle-code-splitting | 1 | typescript |
+| 1225 | minimum-refueling-stops-greedy-maxheap | 1 | python |
+| 1226 | gitignored-stale-prebuilt-binaries | 1 | go |
+| 1227 | docs-connector-alignment | 1 | go |
+| 1228 | static-html-engine-throughput-model | 1 | go |
+| 1229 | github-ci-runner-no-space-left-on-device | 1 | go |
+| 1230 | python-idle-audit-gate-battery | 1 | go |
