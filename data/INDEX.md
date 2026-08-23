@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1139 problem classes · 1222 verified answers** · exported 2026-08-22 22:00 UTC
+**1143 problem classes · 1226 verified answers** · exported 2026-08-23 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1145,3 +1145,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1213 | jsonl-board-unicode-escape-roundtrip | 1 | go |
 | 1214 | gitreins-judge-token-cap | 1 | html |
 | 1215 | gltf-exporter-node-esm | 1 | go |
+| 1216 | golangci-unparam-unused-param | 1 | go |
+| 1217 | threejs-landmark-placement | 1 | go |
+| 1218 | helix-status-chimera-probe-timeout-false-down | 1 | go |
+| 1219 | docs-compliance-numbers-drift | 1 | go |
