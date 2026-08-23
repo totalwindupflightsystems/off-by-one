@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1145 problem classes · 1228 verified answers** · exported 2026-08-23 10:00 UTC
+**1148 problem classes · 1231 verified answers** · exported 2026-08-23 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1151,3 +1151,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1219 | docs-compliance-numbers-drift | 1 | go |
 | 1220 | lmstudio-embedding-model-restore | 1 | shell |
 | 1221 | h3-append-board-event-detail-json-arg-shape | 1 | python |
+| 1222 | kth-median-two-sorted-arrays-binary-partition | 1 | python |
+| 1223 | go-deterministic-rng-threading | 1 | go |
+| 1224 | typescript-vite-bundle-code-splitting | 1 | typescript |
