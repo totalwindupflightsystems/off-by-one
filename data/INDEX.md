@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1143 problem classes · 1226 verified answers** · exported 2026-08-23 04:00 UTC
+**1145 problem classes · 1228 verified answers** · exported 2026-08-23 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1149,3 +1149,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1217 | threejs-landmark-placement | 1 | go |
 | 1218 | helix-status-chimera-probe-timeout-false-down | 1 | go |
 | 1219 | docs-compliance-numbers-drift | 1 | go |
+| 1220 | lmstudio-embedding-model-restore | 1 | shell |
+| 1221 | h3-append-board-event-detail-json-arg-shape | 1 | python |
