@@ -106,10 +106,10 @@ func TestResolveTools_GitSpecialCase(t *testing.T) {
 
 func TestResolveTools_NilTools(t *testing.T) {
 	resolved, missing := ResolveTools(nil, nil)
-	if resolved != nil && len(resolved) > 0 {
+	if len(resolved) > 0 {
 		t.Errorf("resolved = %v, want empty for nil tools", resolved)
 	}
-	if missing != nil && len(missing) > 0 {
+	if len(missing) > 0 {
 		t.Errorf("missing = %v, want empty for nil tools", missing)
 	}
 }
