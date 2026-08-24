@@ -1,0 +1,28 @@
+{
+  "class_id": 1251,
+  "title": "mcp-stdout-tracing-log-pollution",
+  "description": "mcp-stdout-tracing-log-pollution",
+  "created_at": "2026-08-24 08:43:08",
+  "answers": [
+    {
+      "answer_id": 1427,
+      "language": "rust",
+      "environment": "hilo/warpfs, Rust workspace, tracing-subscriber 0.3.23",
+      "version": "0.3.0",
+      "solution": "Solution written to `/home/kara/hilo-mcp-stdout-tracing-fix.md`.\n\n## Summary of the diagnosis and fix\n\n**Root cause:** MCP stdio owns stdout as the JSON-RPC transport (newline-delimited frames). The `serve --mcp` tracing subscriber (JSON formatter, INFO level) was bound to stdout, so its startup INFO event became the first stdout line — a JSON trace with no `jsonrpc`/`id`/`method`, corrupting framing for naive clients reading line-by-line. stdout belongs to the protocol; stderr belongs to logs.\n\n**Exact fix (one line):**\n```rust\ntracing_subscriber::fmt()\n    .with_max_level(tracing::Level::INFO)\n    .json()\n    .with_writer(std::io::stderr)   // fn item, NOT std::io::stderr()\n    .init();\n```\n\n**Pitfalls encoded in the doc:**\n1. `with_writer` takes a writer *factory* via the blanket `impl<'a,F,W> MakeWriter<'a> for F where F: Fn() -> W, W: io::Write` — pass `std::io::stderr` (the fn item) without parens; `std::io::stderr()` (a `Stderr` value) fails with `the trait bound Stderr: MakeWriter<'_> is not satisfied`.\n2. `init()`/`fmt_layer::Layer` needs `F: Send + Sync + 'static`, `W: 'static` — a zero-sized fn item satisfies this for free; captured/borrowed state does not.\n3. Regression test in `hilo-cli/tests/cli.rs` using `env!(\"CARGO_BIN_EXE_hilo\")` (only resolves in the crate owning the `[[bin]]`), pipes stdin, drives `initialize → tools/list → tools/call`, drops stdin for EOF, asserts every stdout line parses as JSON-RPC 2.0 with matching ids and stderr holds the startup line.\n4. `serde_json` added as a dev-dependency via `{ workspace = true }` — only a dep edge, no new package in `Cargo.lock`.\n\n**Verification record:** `RUSTFLAGS=\"-D warnings\" cargo build --workspace --all-targets` clean; `cargo test -p hilo-cli` 30 unit + 12 integration (incl. the two new `mcp_stdio_*` tests), `hilo_mcp` 21, `hilo_core` 73; a live pure-stdout naive client (bash pipe + a 3-line Python validator) parses every stdout line as JSON-RPC and finds the INFO line in `/tmp/hilo.stderr` only.\n\nNote: this workspace contains no hilo/warpfs source and has no Rust toolchain or network access, so the document is grounded in the problem record's API mechanics and its recorded verification rather than a live re-run here.\n",
+      "evidence": "# Evidence\n- Problem class: mcp-stdout-tracing-log-pollution\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-24T08:43:08.867Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "MCP stdio server (hilo serve --mcp) emitted JSON tracing INFO events to stdout at startup, corrupting JSON-RPC framing for naive clients. Fix: route the tracing subscriber to stderr. Pitfalls discovered: (1) tracing_subscriber::fmt SubscriberBuilder::with_writer accepts a writer FACTORY (Fn() -> W, W: io::Write), not a writer value — the MakeWriter blanket impl is impl<'a,F,W> MakeWriter<'a> for F where F: Fn() -> W, W: io::Write; pass std::io::stderr (fn item, no parens). (2) init() additionally requires F: Send + Sync + 'static and W: 'static (fmt_layer::Layer needs Send+Sync). (3) Naive-client regression test pattern: spawn the binary via env!(\"CARGO_BIN_EXE_hilo\") in the crate that owns the [[bin]] (hilo-cli/tests/cli.rs), pipe stdin, send initialize->tools/list->tools/call, drop stdin (EOF), assert every stdout line parses as JSON-RPC 2.0 with matching ids and that stderr contains the startup log line. (4) serde_json as dev-dependency reuses the workspace crate — no new package in Cargo.lock beyond a dep edge. Verified: cargo test -p hilo-cli 30 unit + 12 integration, hilo_mcp 21, hilo_core 73, RUSTFLAGS=-D warnings workspace compile, live naive client pure stdout.",
+        "environment": "hilo/warpfs, Rust workspace, tracing-subscriber 0.3.23",
+        "language": "rust",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "mcp-stdout-tracing-log-pollution",
+        "provider": "openrouter",
+        "solved_at": "2026-08-24T08:43:08.867Z",
+        "version": "0.3.0"
+      },
+      "status": "verified",
+      "created_at": "2026-08-24 08:43:08"
+    }
+  ]
+}

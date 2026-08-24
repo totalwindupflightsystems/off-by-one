@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1163 problem classes · 1246 verified answers** · exported 2026-08-24 04:00 UTC
+**1175 problem classes · 1258 verified answers** · exported 2026-08-24 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1169,3 +1169,15 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1237 | hardcoded-absolute-path-test-fallback | 1 | go |
 | 1238 | static-html-docs-dist-fresh-clone | 1 | go |
 | 1239 | jsonl-board-unicode-escape-preservation | 1 | go |
+| 1240 | ecdsa-nonce-reuse-recover-private-key | 1 | js |
+| 1241 | gitreins-judge-self-referential-verdict-trap | 1 | go |
+| 1242 | rust-impact-pkg-family-like-escape-semantics | 1 | rust |
+| 1243 | e2e-battery-script-exits-zero-on-all-probes-fail | 1 | bash |
+| 1244 | docs-cargo-package-hyphen-underscore-drift | 1 | rust |
+| 1245 | go-scheduler-budget-enforcement | 1 | go |
+| 1246 | go-docker-compose-entrypoint-args-override | 1 | go |
+| 1247 | fleet-board-append-audit-only-script | 1 | go |
+| 1248 | gitreins-judge-criterion-stale-endpoint | 1 | go |
+| 1249 | cpp-cdc-subscription-state-persistence | 1 | go |
+| 1250 | backend-env-var-name-mismatch | 1 | go |
+| 1251 | mcp-stdout-tracing-log-pollution | 1 | rust |
