@@ -24,6 +24,10 @@ type fakeQueue struct {
 	answers      map[string]int64
 	failText     map[string]string
 	dequeueCalls atomic.Int64
+	reapCalls    atomic.Int64
+	reapTTL      time.Duration
+	reapRows     int64
+	reapErr      error
 }
 
 func newFakeQueue(entries ...*ingest.Entry) *fakeQueue {
@@ -79,6 +83,17 @@ func (q *fakeQueue) SetStage(ctx context.Context, id, stage string) error {
 	defer q.mu.Unlock()
 	q.stage[id] = stage
 	return nil
+}
+
+// ReapStale records the call and returns the scripted (rows, err).
+// The fake has no TTL logic of its own — staleness is exercised
+// against the real SQLite queue in ingest's queue_test.go.
+func (q *fakeQueue) ReapStale(ctx context.Context, olderThan time.Duration) (int64, error) {
+	q.reapCalls.Add(1)
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.reapTTL = olderThan
+	return q.reapRows, q.reapErr
 }
 
 // fakeSolver is an in-memory Solver. The script fields let tests
@@ -599,5 +614,98 @@ func TestProbeLoadavgLive(t *testing.T) {
 	}
 	if load < 0 {
 		t.Errorf("load = %f, want >= 0", load)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestResolveConfigReapAfter — ReapAfter defaults to twice the solver
+// timeout (a solve that runs past 2x its own timeout is definitionally
+// wedged); an explicit value is never overridden.
+func TestResolveConfigReapAfter(t *testing.T) {
+	got := ResolveConfig(Config{})
+	want := 2 * solver.DefaultSolveTimeout
+	if got.ReapAfter != want {
+		t.Errorf("default ReapAfter = %s, want %s", got.ReapAfter, want)
+	}
+	custom := ResolveConfig(Config{ReapAfter: 5 * time.Minute})
+	if custom.ReapAfter != 5*time.Minute {
+		t.Errorf("explicit ReapAfter = %s, want 5m", custom.ReapAfter)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestTickReapsBeforeIdle — the reaper runs at the start of the tick,
+// BEFORE the idle check: even on a busy box the queue is swept, with
+// the configured TTL, and the dequeue path is never reached.
+func TestTickReapsBeforeIdle(t *testing.T) {
+	q := newFakeQueue(makeEntry("a"))
+	q.reapRows = 2
+	s := &fakeSolver{}
+	l := NewLoop(Config{
+		Queue:         q,
+		Solver:        s,
+		Interval:      time.Millisecond,
+		LoadThreshold: 0.5,
+		IdleProbe:     func() (float64, error) { return 1.0, nil }, // busy
+		ReapAfter:     42 * time.Minute,
+	})
+
+	if err := l.Tick(context.Background()); !errors.Is(err, ErrNoIdle) {
+		t.Fatalf("Tick err = %v, want ErrNoIdle", err)
+	}
+	if q.reapCalls.Load() != 1 {
+		t.Errorf("ReapStale calls = %d, want 1 (reaper runs even when busy)", q.reapCalls.Load())
+	}
+	q.mu.Lock()
+	ttl := q.reapTTL
+	q.mu.Unlock()
+	if ttl != 42*time.Minute {
+		t.Errorf("ReapStale TTL = %s, want 42m (configured ReapAfter)", ttl)
+	}
+	if q.dequeueCalls.Load() != 0 {
+		t.Errorf("Dequeue called %d times, want 0 (idle skip still applies after reap)", q.dequeueCalls.Load())
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestTickReapErrorNonFatal — a reaper failure is logged and the tick
+// proceeds; a broken reaper must never wedge the solver.
+func TestTickReapErrorNonFatal(t *testing.T) {
+	q := newFakeQueue(makeEntry("e1"))
+	q.reapErr = errors.New("db locked")
+	s := &fakeSolver{}
+	l := fastLoop(q, s)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick err: %v (reaper error must be non-fatal)", err)
+	}
+	if q.reapCalls.Load() != 1 {
+		t.Errorf("ReapStale calls = %d, want 1", q.reapCalls.Load())
+	}
+	m := l.Metrics().Snapshot()
+	if m.SolveSuccess != 1 {
+		t.Errorf("SolveSuccess = %d, want 1 (tick continued after reap error)", m.SolveSuccess)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestTickReapUsesDefaultTTL — with no explicit ReapAfter the tick
+// passes the resolved default (2x solver timeout) to the queue.
+func TestTickReapUsesDefaultTTL(t *testing.T) {
+	q := newFakeQueue()
+	s := &fakeSolver{}
+	l := fastLoop(q, s)
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick err: %v", err)
+	}
+	if q.reapCalls.Load() != 1 {
+		t.Fatalf("ReapStale calls = %d, want 1", q.reapCalls.Load())
+	}
+	q.mu.Lock()
+	ttl := q.reapTTL
+	q.mu.Unlock()
+	if want := 2 * solver.DefaultSolveTimeout; ttl != want {
+		t.Errorf("ReapStale TTL = %s, want default %s", ttl, want)
 	}
 }

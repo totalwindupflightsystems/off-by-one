@@ -473,6 +473,35 @@ func (q *Queue) MarkFailed(ctx context.Context, id string, reason string) error 
 	return nil
 }
 
+// ReapStale transitions in_progress entries whose started_at is older
+// than olderThan to failed, returning the number of rows affected.
+// Entries are wedged in in_progress when the server restarts mid-solve
+// (Dequeue sets started_at; only the cron loop's MarkComplete/MarkFailed
+// move them out, and a crashed solve never reaches either). Without a
+// reaper those rows inflate Depth forever.
+//
+// started_at is stored as a UTC string in SQLite datetime('now') format
+// ("YYYY-MM-DD HH:MM:SS"), which compares correctly as a string, so the
+// cutoff is formatted the same way. Entries with NULL started_at are
+// never reaped — an entry that was never claimed cannot be stale. The
+// reason column is untouched: MarkFailed already ignores it and no
+// failure-reason field exists on queue_entries.
+func (q *Queue) ReapStale(ctx context.Context, olderThan time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-olderThan).Format("2006-01-02 15:04:05")
+	res, err := q.db.ExecContext(ctx, `
+		UPDATE queue_entries
+		SET status = 'failed', stage = 'failed', completed_at = datetime('now')
+		WHERE status = 'in_progress' AND started_at IS NOT NULL AND started_at < ?`, cutoff)
+	if err != nil {
+		return 0, fmt.Errorf("reap stale: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reap stale: %w", err)
+	}
+	return n, nil
+}
+
 // SetStage updates only the stage column. Used by the solver to report
 // progress (sandbox_prepare, sandbox_solve, store_result).
 func (q *Queue) SetStage(ctx context.Context, id, stage string) error {

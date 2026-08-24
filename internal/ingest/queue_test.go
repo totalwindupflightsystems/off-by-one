@@ -363,6 +363,114 @@ func TestQueue_MarkFailed(t *testing.T) {
 	}
 }
 
+func TestQueue_ReapStale(t *testing.T) {
+	q, store := newTestQueue(t)
+	ctx := context.Background()
+
+	// Distinct cadences force a deterministic dequeue order:
+	// post-debug (3.0) > end-of-day (2.0) > pre-phase (1.0).
+	mustSubmit := func(class, cadence string) string {
+		t.Helper()
+		id, _, err := q.Submit(ctx, Submission{ProblemClass: class, Cadence: cadence})
+		if err != nil {
+			t.Fatalf("Submit %s: %v", class, err)
+		}
+		return id
+	}
+	mustDequeue := func(wantID string) {
+		t.Helper()
+		e, err := q.Dequeue(ctx)
+		if err != nil {
+			t.Fatalf("Dequeue: %v", err)
+		}
+		if e == nil || e.ID != wantID {
+			t.Fatalf("dequeued %+v, want %s", e, wantID)
+		}
+	}
+
+	staleID := mustSubmit("stale", CadencePostDebug)
+	freshID := mustSubmit("fresh", CadenceEndOfDay)
+	nullStartID := mustSubmit("null-start", CadencePrePhase)
+	mustDequeue(staleID)
+	mustDequeue(freshID)
+	mustDequeue(nullStartID)
+	// Submitted last and never dequeued — must be ignored by the reaper.
+	pendingID := mustSubmit("pending", CadencePrePhase)
+
+	// Backdate the stale entry past the TTL, and strip started_at from
+	// the null-start entry (claimed-but-never-started must survive).
+	oldTS := time.Now().UTC().Add(-2 * time.Hour).Format("2006-01-02 15:04:05")
+	if _, err := store.DB().ExecContext(ctx,
+		`UPDATE queue_entries SET started_at = ? WHERE id = ?`, oldTS, staleID); err != nil {
+		t.Fatalf("backdate stale: %v", err)
+	}
+	if _, err := store.DB().ExecContext(ctx,
+		`UPDATE queue_entries SET started_at = NULL WHERE id = ?`, nullStartID); err != nil {
+		t.Fatalf("null started_at: %v", err)
+	}
+
+	depth, err := q.Depth(ctx)
+	if err != nil {
+		t.Fatalf("Depth: %v", err)
+	}
+	if depth != 4 {
+		t.Fatalf("depth before reap = %d, want 4 (3 in_progress + 1 pending)", depth)
+	}
+
+	n, err := q.ReapStale(ctx, time.Hour)
+	if err != nil {
+		t.Fatalf("ReapStale: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("reaped = %d, want 1 (only the backdated entry)", n)
+	}
+
+	got, err := q.Get(ctx, staleID)
+	if err != nil {
+		t.Fatalf("Get stale: %v", err)
+	}
+	if got.Status != StatusFailed {
+		t.Errorf("stale status = %q, want failed", got.Status)
+	}
+	if got.Stage != "failed" {
+		t.Errorf("stale stage = %q, want failed", got.Stage)
+	}
+	if !got.CompletedAt.Valid {
+		t.Error("stale completed_at not set")
+	}
+
+	for id, want := range map[string]string{
+		freshID:     StatusInProgress, // live solve — never reaped by TTL
+		nullStartID: StatusInProgress, // NULL started_at — not reapable
+		pendingID:   StatusPending,    // never claimed — untouched
+	} {
+		e, err := q.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get %s: %v", id, err)
+		}
+		if e.Status != want {
+			t.Errorf("%s status = %q, want %q", id, e.Status, want)
+		}
+	}
+
+	depth, err = q.Depth(ctx)
+	if err != nil {
+		t.Fatalf("Depth: %v", err)
+	}
+	if depth != 3 {
+		t.Errorf("depth after reap = %d, want 3 (stale entry out of the count)", depth)
+	}
+
+	// Idempotent: a second sweep with nothing stale reaps nothing.
+	n, err = q.ReapStale(ctx, time.Hour)
+	if err != nil {
+		t.Fatalf("ReapStale (second): %v", err)
+	}
+	if n != 0 {
+		t.Errorf("second reap = %d, want 0", n)
+	}
+}
+
 func TestQueue_List_FilterByStatus(t *testing.T) {
 	q, _ := newTestQueue(t)
 	ctx := context.Background()

@@ -124,6 +124,13 @@ type Config struct {
 	// Set to a negative number to disable the idle check.
 	LoadThreshold float64
 
+	// ReapAfter is the age at which an in_progress queue entry is
+	// considered stale — orphaned by a restart or crash mid-solve —
+	// and reaped (marked failed) at the start of each tick. Entries
+	// newer than this are live solves and are never touched.
+	// Default: 2 * solver.DefaultSolveTimeout.
+	ReapAfter time.Duration
+
 	// Solver is the problem solver. Required.
 	Solver Solver
 
@@ -153,6 +160,11 @@ type Queue interface {
 	MarkComplete(ctx context.Context, id string, answerID int64) error
 	MarkFailed(ctx context.Context, id string, reason string) error
 	SetStage(ctx context.Context, id, stage string) error
+	// ReapStale marks in_progress entries older than olderThan as
+	// failed and returns the number reaped. Called once per tick so
+	// entries wedged by a restart mid-solve do not inflate Depth
+	// forever.
+	ReapStale(ctx context.Context, olderThan time.Duration) (int64, error)
 }
 
 // Solver abstracts the pi-agent executor. The production type is
@@ -170,6 +182,9 @@ func ResolveConfig(cfg Config) Config {
 	}
 	if cfg.LoadThreshold == 0 {
 		cfg.LoadThreshold = DefaultLoadThreshold
+	}
+	if cfg.ReapAfter <= 0 {
+		cfg.ReapAfter = 2 * solver.DefaultSolveTimeout
 	}
 	if cfg.IdleProbe == nil {
 		cfg.IdleProbe = probeLoadavg
@@ -243,6 +258,7 @@ func (l *Loop) Done() <-chan struct{} { return l.done }
 // once per Interval. Returns nil on a clean cancellation.
 //
 // On each tick:
+//  0. Reap stale in_progress entries (runs even when the box is busy)
 //  1. Check idle (skip if system is busy)
 //  2. Dequeue one entry (skip if queue is empty)
 //  3. Solve it via the Solver
@@ -287,6 +303,18 @@ func (l *Loop) Tick(ctx context.Context) error {
 		return ErrAlreadyRunning
 	}
 	defer l.inflight.Store(false)
+
+	// Reap stale in_progress entries before anything else. This runs
+	// even when the system is busy — a wedged entry is stale no
+	// matter the load, and skipping the reap on a busy box would let
+	// Depth stay inflated indefinitely. Reaper errors are non-fatal:
+	// a failed reap must not block a solve (same philosophy as the
+	// idle probe).
+	if n, err := l.cfg.Queue.ReapStale(ctx, l.cfg.ReapAfter); err != nil {
+		l.cfg.Logger.Printf("cron: reap stale failed: %v (continuing)", err)
+	} else if n > 0 {
+		l.cfg.Logger.Printf("cron: reaped %d stale in_progress queue entries (older than %s)", n, l.cfg.ReapAfter)
+	}
 
 	if err := l.checkIdle(ctx); err != nil {
 		return err
