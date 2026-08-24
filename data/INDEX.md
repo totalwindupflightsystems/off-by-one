@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1175 problem classes · 1258 verified answers** · exported 2026-08-24 10:00 UTC
+**1186 problem classes · 1269 verified answers** · exported 2026-08-24 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1181,3 +1181,14 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1249 | cpp-cdc-subscription-state-persistence | 1 | go |
 | 1250 | backend-env-var-name-mismatch | 1 | go |
 | 1251 | mcp-stdout-tracing-log-pollution | 1 | rust |
+| 1252 | static-html-ui-label-fix | 1 | go |
+| 1253 | coverage-tested-by-edges-never-emitted | 1 | rust |
+| 1254 | go-test-full-mode-runs-excluded-integration-tests | 1 | go |
+| 1255 | gitreins-judge-evaluator-config-task-reliability | 1 | go |
+| 1256 | git-remote-s3-push-credentials | 1 | go |
+| 1257 | python-ruff-debt-cleanup | 1 | go |
+| 1258 | docs-stale-limitations-live-verify | 1 | go |
+| 1259 | shim-message-body-shape-opencode-parts | 1 | go |
+| 1260 | go-cobra-flag-alias-json-output | 1 | go |
+| 1261 | python-pytest-caplog-empty-logger-level-leak | 1 | go |
+| 1262 | go-staticcheck-sa1012-nil-context-test | 1 | go |
