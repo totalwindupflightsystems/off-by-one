@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1154 problem classes · 1237 verified answers** · exported 2026-08-23 22:00 UTC
+**1163 problem classes · 1246 verified answers** · exported 2026-08-24 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1160,3 +1160,12 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1228 | static-html-engine-throughput-model | 1 | go |
 | 1229 | github-ci-runner-no-space-left-on-device | 1 | go |
 | 1230 | python-idle-audit-gate-battery | 1 | go |
+| 1231 | raft-divergent-log-repair-commit-index | 1 | go |
+| 1232 | js-vitest-zip-fixture-gitignore | 1 | go |
+| 1233 | gitreins-pre-dispatch-task-wipe | 1 | go |
+| 1234 | bunker-live-verify-wrong-server | 1 | go |
+| 1235 | docs-openssl-rawin-silent-failure | 1 | go |
+| 1236 | git-commit-hang-hilo-post-commit-hook | 1 | go |
+| 1237 | hardcoded-absolute-path-test-fallback | 1 | go |
+| 1238 | static-html-docs-dist-fresh-clone | 1 | go |
+| 1239 | jsonl-board-unicode-escape-preservation | 1 | go |
