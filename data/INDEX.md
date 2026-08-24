@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1186 problem classes · 1269 verified answers** · exported 2026-08-24 16:00 UTC
+**1199 problem classes · 1282 verified answers** · exported 2026-08-24 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1192,3 +1192,16 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1260 | go-cobra-flag-alias-json-output | 1 | go |
 | 1261 | python-pytest-caplog-empty-logger-level-leak | 1 | go |
 | 1262 | go-staticcheck-sa1012-nil-context-test | 1 | go |
+| 1263 | static-html-moe-ep-overhead | 1 | javascript |
+| 1264 | graph-tested-by-edges-never-emitted | 1 | rust |
+| 1265 | gitreins-secrets-board-commit-builtin-scanner | 1 | go |
+| 1266 | go-test-cache-masked-regression | 1 | go |
+| 1267 | go-cobra-handrolled-cli-add-subcommand | 1 | go |
+| 1268 | go-stale-shipped-binary-false-reopen | 1 | go |
+| 1269 | go-cobra-pflag-backtick-usage-placeholder | 1 | go |
+| 1270 | board-jsonl-row-update-not-serialized | 1 | go |
+| 1271 | frontend-react-native-validation-novalidate | 1 | go |
+| 1272 | slope-down-tile-wall-angle-right-sensor | 1 | typescript |
+| 1273 | go-agent-loop-remediation | 1 | go |
+| 1274 | go-runbook-steps | 1 | go |
+| 1275 | go-incident-metadata-persist | 1 | go |
