@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1212 problem classes · 1295 verified answers** · exported 2026-08-25 10:00 UTC
+**1222 problem classes · 1305 verified answers** · exported 2026-08-25 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1218,3 +1218,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1286 | docs-stale-open-markers | 1 | markdown |
 | 1287 | go-auth-bootstrap-recovery | 1 | go |
 | 1288 | typescript-api-game-detail-winner-exposure | 1 | go |
+| 1289 | python-dirichlet-multinomial-map-bandit | 1 | python |
+| 1290 | go-json-error-interface-marshals-empty | 1 | go |
+| 1291 | typescript-benchmark-model-spec-separator-mismatch | 1 | typescript |
+| 1292 | board-jsonl-closure-evidence | 1 | go |
+| 1293 | docs-agents-md-structure-drift | 1 | go |
+| 1294 | python-pytest-exit-5-no-tests-collected-blocks-guard | 1 | python |
+| 1295 | go-incident-reroute-domain-agent-id | 1 | go |
+| 1296 | go-coordination-correlation-persistence | 1 | go |
+| 1297 | static-html-docs-links | 1 | go |
+| 1298 | duckdb-board-cache-rebuild-json-columns | 1 | go |
