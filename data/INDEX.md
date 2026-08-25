@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1222 problem classes · 1305 verified answers** · exported 2026-08-25 16:00 UTC
+**1229 problem classes · 1312 verified answers** · exported 2026-08-25 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1228,3 +1228,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1296 | go-coordination-correlation-persistence | 1 | go |
 | 1297 | static-html-docs-links | 1 | go |
 | 1298 | duckdb-board-cache-rebuild-json-columns | 1 | go |
+| 1299 | python-power-iteration-deflation-stagnation | 1 | python |
+| 1300 | typescript-stats-winner-source-mix | 1 | go |
+| 1301 | typescript-api-spec-live-shape-drift | 1 | go |
+| 1302 | go-git-path-limited-commit-tree-error | 1 | go |
+| 1303 | go-api-json-field-name-drift | 1 | go |
+| 1304 | python-fastapi-register-ignores-name-field | 1 | go |
+| 1305 | git-release-tag-remote-drift | 1 | go |
