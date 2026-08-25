@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1209 problem classes · 1292 verified answers** · exported 2026-08-25 04:00 UTC
+**1212 problem classes · 1295 verified answers** · exported 2026-08-25 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1215,3 +1215,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1283 | flake-watch-verification | 1 | go |
 | 1284 | go-test-utc-midnight-budget-window | 1 | go |
 | 1285 | jsonl-torn-line-recovery | 1 | go |
+| 1286 | docs-stale-open-markers | 1 | markdown |
+| 1287 | go-auth-bootstrap-recovery | 1 | go |
+| 1288 | typescript-api-game-detail-winner-exposure | 1 | go |
