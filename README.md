@@ -110,7 +110,7 @@ For detailed integration examples and a per-route reference, see [`docs/integrat
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/taxonomy` | Full problem-class tree |
-| `GET` | `/api/v1/stats` | System statistics (hit rate, coverage, queue depth) |
+| `GET` | `/api/v1/stats` | System statistics — `coverage` = verified_answers/total_problems and can exceed 1.0 (a class may hold multiple verified answers); `hit_rate` = verified_answers/total_answers |
 | `GET` | `/openapi.json` | OpenAPI 3.0.3 specification |
 | `GET` | `/health` | Health check (status + uptime) |
 

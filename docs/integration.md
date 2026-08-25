@@ -211,19 +211,19 @@ curl -s http://localhost:8766/api/v1/stats
 
 ```json
 {
-  "total_problems": 854,
-  "total_answers": 992,
-  "verified_answers": 992,
-  "queue_depth": 4,
+  "total_problems": 1281,
+  "total_answers": 1457,
+  "verified_answers": 1457,
+  "queue_depth": 0,
   "hit_rate": 1,
-  "coverage": 1.17,
-  "avg_solve_time": "",
+  "coverage": 1.137,
+  "avg_solve_time": "2m16s",
   "readonly": false,
   "solver_available": true
 }
 ```
 
-`readonly` and `solver_available` tell you whether the running instance is a read-only catalog or has an active solver.
+`coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1). `readonly` and `solver_available` tell you whether the running instance is a read-only catalog or has an active solver.
 
 ---
 
