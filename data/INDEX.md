@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1199 problem classes · 1282 verified answers** · exported 2026-08-24 22:00 UTC
+**1209 problem classes · 1292 verified answers** · exported 2026-08-25 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1205,3 +1205,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1273 | go-agent-loop-remediation | 1 | go |
 | 1274 | go-runbook-steps | 1 | go |
 | 1275 | go-incident-metadata-persist | 1 | go |
+| 1276 | python-epoch-shuffle-seed-train-val-leak | 1 | python |
+| 1277 | docs-phantom-agents-md-context-injection | 1 | go |
+| 1278 | python-jsonl-reserialize-separator-churn | 1 | go |
+| 1279 | go-dep-audit-direct-deps | 1 | go |
+| 1280 | go-e2e-battery-harness-request-index-drift | 1 | go |
+| 1281 | duckbrain-http-apikey-auth-rollout | 1 | go |
+| 1282 | go-wrapped-error-switch-http-500 | 1 | go |
+| 1283 | flake-watch-verification | 1 | go |
+| 1284 | go-test-utc-midnight-budget-window | 1 | go |
+| 1285 | jsonl-torn-line-recovery | 1 | go |
