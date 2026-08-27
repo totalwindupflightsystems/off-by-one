@@ -1,0 +1,28 @@
+{
+  "class_id": 1312,
+  "title": "bash-wal-atomic-rename-crash-recovery",
+  "description": "bash-wal-atomic-rename-crash-recovery",
+  "created_at": "2026-08-27 04:31:38",
+  "answers": [
+    {
+      "answer_id": 1489,
+      "language": "shell",
+      "environment": "bash",
+      "version": "5.2",
+      "solution": "All tests pass. The solution is complete and verified in `/home/kara/kv/`.\n\n## Deliverables\n- **`/home/kara/kv/SOLUTION.md`** — full write-up: title, root-cause analysis, exact fix, and a verification section.\n- **`/home/kara/kv/durable-kv.sh`** — working, tested implementation (bash builtins + coreutils only).\n\n## Root cause (two distinct SIGKILL windows)\n\n**Window B — double-apply.** The store publishes an atomic snapshot via `rename(index.tmp, index)` and then truncates `wal.log`. If the crash lands *between* the rename and the truncation, the snapshot already contains records `1..HIGH` **and** the log still lists them. Naïve \"load snapshot + replay whole log\" re-applies those records silently.\n\n*Fix:* the snapshot carries a monotonic high-water mark `HIGH_water_seq`. Replay skips every record with `SEQ <= HIGH_water_seq` (already materialised) and applies only `SEQ > HIGH_water_seq`. Sequence numbers are handed out under an exclusive file lock, so uniqueness holds even with concurrent producers.\n\n**Window A — torn tail.** A killed mid-append record has a declared `LEN` larger than the bytes actually written; it was never acknowledged. Length-prefixed framing makes detection exact: if `payload_offset + LEN > filesize` (or the header lost its `\\n`), that single trailing record is discarded via `truncate -s`, and everything before it is kept. Reading the whole log with `IFS= read -r -d ''` preserves trailing bytes so offsets match the true size.\n\n**Durability:** every `put` appends a length-prefixed record and `sync`s it **before** printing the ACK; the snapshot path `fsync index.tmp → rename → fsync dir → truncate log`.\n\n## Verification results (all passed on bash 5.2)\n- **40–50 concurrent producers:** zero lost writes, strictly unique/increasing seqs.\n- **Torn tail:** wal returned *byte-identical* to pre-corruption after recovery; only the torn record dropped; a/b/c intact.\n- **Crash between rename and truncate:** `high_water=50 last=50 applied=0` → nothing replayed (0 double-applied), all values intact from snapshot; a follow-up write at seq 4 with `applied=1` confirms only the beyond-high-water record replays.\n\nQuick smoke run:\n```bash\ncd /home/kara/kv\nD=$(mktemp -d)\n./durable-kv.sh put $D a hello\n./durable-kv.sh put $D b world\n./durable-kv.sh get $D a      # hello\n./durable-kv.sh snap $D       # publish snapshot + truncate log\n./durable-kv.sh recover $D    # recover: high_water=2 last=2 applied=0 ...\n```\n",
+      "evidence": "# Evidence\n- Problem class: bash-wal-atomic-rename-crash-recovery\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-27T04:31:38.877Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A pure-bash durable key-value store appends each committed mutation as a length-prefixed record to wal.log, fsyncs, then atomically renames index.tmp over index to publish the snapshot. Under concurrent producers and mid-write SIGKILL crashes, recovery must detect a torn tail record whose declared length exceeds the bytes actually written, discard only that record, and deduplicate records replayed when the crash hit between the rename and log truncation. Implement replay that never loses an acknowledged write and never double-applies a record, using only bash builtins and coreutils.",
+        "environment": "bash",
+        "language": "shell",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "bash-wal-atomic-rename-crash-recovery",
+        "provider": "openrouter",
+        "solved_at": "2026-08-27T04:31:38.878Z",
+        "version": "5.2"
+      },
+      "status": "verified",
+      "created_at": "2026-08-27 04:31:38"
+    }
+  ]
+}

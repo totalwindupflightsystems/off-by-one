@@ -1,0 +1,28 @@
+{
+  "class_id": 1314,
+  "title": "lambda-update-vs-deliver-cancelled-error-race",
+  "description": "lambda-update-vs-deliver-cancelled-error-race",
+  "created_at": "2026-08-27 05:20:16",
+  "answers": [
+    {
+      "answer_id": 1491,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. The solution is written to **`/home/kara/lambda-update-vs-deliver-cancelled-error-race.md`** (221 lines), and all embedded shell blocks pass `bash -n` syntax checks.\n\n## Summary\n\n**Diagnosis — `CancelledError` race on Lambda update:**\n- `update_function_code` triggers a version rollover that stops the old version's executor (`lambda_service.py:580-588`).\n- The executor's `shutdown()` cancels the in‑flight `invocation_future` (`executor_endpoint.py:180-184`).\n- The cancellation surfaces as `asyncio.CancelledError` in the assignment layer (`assignment.py:94-97`), logged as \"Failed invocation.\"\n- The event manager treats it as undelivered and re‑queues with exponential backoff (`event_manager.py:311-344`), delivering the S3 event minutes later (at‑least‑once).\n- Non-deterministic by nature — only invocations in flight at the exact rollover instant are hit, which matches the live \"3rd of 4 bursts\" observation.\n\n**Fix (driver-side, since Core = DO-NOT-EDIT):**\n1. **Barrier** — wait for `State==Active` **and** `LastUpdateStatus==Successful` around every update, and serialize bursts with a settle window.\n2. **Warm** — one synchronous (`RequestResponse`) invoke after the barrier, before real S3 traffic.\n3. **Idempotent handlers** — dedupe on object identity to accept at‑least‑once delivery.\n4. **Sink poll 60‑90 s** before declaring success.\n\n**Verification** — four concrete checks: log assertion (0 `CancelledError`), exactly‑once sink count, idempotence/dedup proof, and a failure-mask check targeting the actual rollover race (with a PASS/FAIL gate).\n\nThe doc is fully self-contained: no runtime patches, all driver-side and directly runnable.\n\nNote: I couldn't find a LocalStack source tree on this host to cross-check the exact line numbers, so the cited line ranges are reproduced from the problem statement's mapping and validated for internal consistency with the described call flow. If you want, point me at a checkout (e.g., pip's `localstack-core` package) and I'll confirm those exact ranges and tighten the fix to the precise API names.\n",
+      "evidence": "# Evidence\n- Problem class: lambda-update-vs-deliver-cancelled-error-race\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-27T05:20:16.463Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "TotalStack/LocalStack: S3 event-source invocation cancelled right after update_function_code. Root cause: update triggers version rollover; lambda_service.py:580-588 stops old version manager/executor -> executor_endpoint.shutdown (:180-184) cancels in-flight invocation_future; assignment.py:94-97 logs Failed invocation CancelledError; event_manager.py:311-344 re-queues with exponential delay (at-least-once, minutes late). Workaround: after update_function_code wait State==Active AND LastUpdateStatus==Successful, warm with one RequestResponse invoke, idempotent handlers, poll sinks 60-90s. Core is DO-NOT-EDIT so fix = docs. Reproduced live: 3rd of 4 update bursts fired CancelledError.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "lambda-update-vs-deliver-cancelled-error-race",
+        "provider": "openrouter",
+        "solved_at": "2026-08-27T05:20:16.463Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-08-27 05:20:16"
+    }
+  ]
+}

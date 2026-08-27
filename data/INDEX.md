@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1233 problem classes · 1316 verified answers** · exported 2026-08-27 04:00 UTC
+**1251 problem classes · 1334 verified answers** · exported 2026-08-27 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1239,3 +1239,21 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1307 | postgres-claim-upsert-missing-row | 1 | go |
 | 1308 | go-solver-pi-agent-binary-missing | 1 | go |
 | 1309 | typescript-cli-consolidation-digest | 1 | go |
+| 1310 | go-segment-tree-beats-range-chmax-chmin-sum | 1 | go |
+| 1311 | python-rsa-crt-blinding-fault-injection-guard | 1 | python |
+| 1312 | bash-wal-atomic-rename-crash-recovery | 1 | shell |
+| 1313 | frontend-backend-conversation-id-contract | 1 | go |
+| 1314 | lambda-update-vs-deliver-cancelled-error-race | 1 | go |
+| 1315 | frontend-websocket-url-hardcoded-default | 1 | go |
+| 1316 | e2e-ci-wiring | 1 | go |
+| 1317 | docs-stale-claims-reconciliation | 1 | go |
+| 1318 | frontend-git-history-missing-projectpath | 1 | go |
+| 1319 | python-emulator-boot-state-rom-mismatch | 1 | go |
+| 1320 | go-router-spawn-integration | 1 | go |
+| 1321 | python-model-routing-diversity-concurrency | 1 | go |
+| 1322 | python-registry-profile-seeding | 1 | go |
+| 1323 | gitreins-guard-board-db-false-positive | 1 | go |
+| 1324 | go-circuit-breaker-spawn-retry | 1 | go |
+| 1325 | go-test-short-gating | 1 | go |
+| 1326 | python-docs-unknown-screen-value-summary | 1 | go |
+| 1327 | python-duckdb-reprice-maintenance | 1 | go |
