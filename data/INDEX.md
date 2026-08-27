@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1263 problem classes · 1346 verified answers** · exported 2026-08-27 16:00 UTC
+**1276 problem classes · 1359 verified answers** · exported 2026-08-27 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1269,3 +1269,16 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1337 | go-readme-fresh-install-toolchain | 1 |  |
 | 1338 | python-fastapi-uuid-path-validation | 1 | python |
 | 1339 | go-idle-audit-pass-all-gates | 1 | go |
+| 1340 | js-sliding-window-median-two-heaps | 1 | js |
+| 1341 | shell-atomic-rotation-crashloop-resilience | 1 | shell |
+| 1342 | go-lease-renewal-clock-drift-tolerance | 1 | go |
+| 1343 | jq-rewrite-pretty-prints-jsonl-board | 1 | python |
+| 1344 | jsonl-torn-line-no-trailing-newline-append | 1 | python |
+| 1345 | python-jsonl-mixed-str-int-event-ids | 1 | go |
+| 1346 | gitreins-judge-criterion-wording-idle-tick | 1 | go |
+| 1347 | docs-spec-code-drift | 1 | go |
+| 1348 | board-commit-batching-idle-churn | 1 | python |
+| 1349 | flaky-integration-test-retry | 1 | python |
+| 1350 | go-pg-concurrent-test-storm-crash | 1 | go |
+| 1351 | ci-fresh-checkout-gitignored-state-file-unit-tests | 1 | python |
+| 1352 | stale-pipx-install-test-failure | 1 |  |

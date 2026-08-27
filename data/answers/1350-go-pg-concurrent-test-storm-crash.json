@@ -1,0 +1,28 @@
+{
+  "class_id": 1350,
+  "title": "go-pg-concurrent-test-storm-crash",
+  "description": "go-pg-concurrent-test-storm-crash",
+  "created_at": "2026-08-27 21:44:02",
+  "answers": [
+    {
+      "answer_id": 1527,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. The solution document is written and validated at **`/home/kara/SOLUTION.md`** (207 lines).\n\n### What I determined\n\n**Root cause** — not a Go-code bug. Two independent test runners (foreman gate battery + gitreins judge tier1) run `go test` concurrently against the *same* shared local Postgres (`canopy:5437`). Both test-isolate by `DROP DATABASE`/`CREATE DATABASE`. The concurrent DDL storm plus a connection/WAL/checkpoint spike causes the postmaster to abort (`FATAL: database system is shutting down 57P03`) → every connection refused → container restarts. Two races, one crash:\n\n| Race | Effect |\n|------|--------|\n| Concurrent `DROP`/`CREATE DATABASE` on shared DB | lock convoy / aborted setup |\n| Connection+WAL/fsync spike exceeds container limits | postmaster OOM/shutdown → server-wide `57P03` → refused conns |\n\n**Fix (exact, verifiable):**\n- **Layer A (primary):** a shared `pgtest-lock` `flock` wrapper wrapping `go test` for **both** runners → serializes access to `:5437`; plus per-suite DB names (`gitreins_foreman_ci`/`gitreins_judge_ci`) to kill cross-suite `DROP` crosstalk.\n- **Layer B (defense):** `pgtest-retry` — `pg_isready` health gate + bounded retry so a transient restart no longer fails a green run.\n\n**Verification:** reproduce with both batteries unlocked (`57P03`/docker RESTARTS bump/refused), then green-gate criteria after the fix (serialization proven via `flock -n`, no new restart, 0 ping failures).\n\nI confirmed every embedded shell snippet parses (`bash -n`) and the `flock -e -w` wrapper arg-form executes correctly (exit 0).\n\nNote: this workspace has no repository to patch — the deliverable is the self-contained markdown, ready to apply at the orchestration layer. The real PG on `:5437` is currently healthy and accepting connections.\n",
+      "evidence": "# Evidence\n- Problem class: go-pg-concurrent-test-storm-crash\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-27T21:44:02.661Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Foreman gate battery + gitreins judge tier1 running go test concurrently against the same local PG (canopy :5437) crashed the postgres container mid-DROP-DATABASE (FATAL: database system is shutting down 57P03 -> connection refused). All failures were pure infra (ping errors), not code. Recovery: wait for container to come back healthy (docker ps shows restart), re-run the affected packages. Prevention: serialize judge tier1 and foreman battery, or expect one to hit DB-down and re-run. Verified e4fa142 run 2026-08-27.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "go-pg-concurrent-test-storm-crash",
+        "provider": "openrouter",
+        "solved_at": "2026-08-27T21:44:02.661Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-08-27 21:44:02"
+    }
+  ]
+}
