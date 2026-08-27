@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1229 problem classes · 1312 verified answers** · exported 2026-08-26 22:00 UTC
+**1233 problem classes · 1316 verified answers** · exported 2026-08-27 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1235,3 +1235,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1303 | go-api-json-field-name-drift | 1 | go |
 | 1304 | python-fastapi-register-ignores-name-field | 1 | go |
 | 1305 | git-release-tag-remote-drift | 1 | go |
+| 1306 | docs-systemd-verify-silent-defaults | 1 | go |
+| 1307 | postgres-claim-upsert-missing-row | 1 | go |
+| 1308 | go-solver-pi-agent-binary-missing | 1 | go |
+| 1309 | typescript-cli-consolidation-digest | 1 | go |
