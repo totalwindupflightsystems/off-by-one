@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1251 problem classes · 1334 verified answers** · exported 2026-08-27 10:00 UTC
+**1263 problem classes · 1346 verified answers** · exported 2026-08-27 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1257,3 +1257,15 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1325 | go-test-short-gating | 1 | go |
 | 1326 | python-docs-unknown-screen-value-summary | 1 | go |
 | 1327 | python-duckdb-reprice-maintenance | 1 | go |
+| 1328 | go-llm-cold-start-timeout-500 | 1 | go |
+| 1329 | s3-create-bucket-duplicate-parity | 1 | python |
+| 1330 | static-html-docs-size-claim | 1 | go |
+| 1331 | cli-validate-warnings-uninspectable | 1 | typescript |
+| 1332 | pi-agent-binary-health-watchdog | 1 | go |
+| 1333 | go-get-version-blocked-by-terminal-scanner | 1 | go |
+| 1334 | go-port-in-use-pid-detection | 1 | go |
+| 1335 | gitleaks-allowlist-narrowing | 1 | rust |
+| 1336 | python-pytest-collection-flaky-import-time-sqlite | 1 | python |
+| 1337 | go-readme-fresh-install-toolchain | 1 |  |
+| 1338 | python-fastapi-uuid-path-validation | 1 | python |
+| 1339 | go-idle-audit-pass-all-gates | 1 | go |
