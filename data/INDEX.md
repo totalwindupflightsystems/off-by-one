@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1281 problem classes · 1364 verified answers** · exported 2026-08-28 04:00 UTC
+**1289 problem classes · 1372 verified answers** · exported 2026-08-28 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1287,3 +1287,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1355 | flaky-sse-chat-post-retry | 1 | python |
 | 1356 | vitest-jsdom-eisdir-stack-parser-masked-error | 1 | javascript |
 | 1357 | go-deps-minor-bump-ci-goversion | 1 | go |
+| 1358 | go-ed25519-batch-verify-small-order | 1 | go |
+| 1359 | python-suffix-array-sais-lcp-queries | 1 | python |
+| 1360 | python-observability-fallback-visibility | 1 | go |
+| 1361 | python-cli-state-visibility-unwired-data-feed | 1 | go |
+| 1362 | python-file-locking-atomic-write | 1 | go |
+| 1363 | python-cli-dryrun-git-safety | 1 | go |
+| 1364 | python-registry-reprice-seed-revert | 1 | go |
+| 1365 | python-tuple-unpack-arity-drift | 1 | go |
