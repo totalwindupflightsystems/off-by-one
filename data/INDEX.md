@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1276 problem classes · 1359 verified answers** · exported 2026-08-27 22:00 UTC
+**1281 problem classes · 1364 verified answers** · exported 2026-08-28 01:54 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1282,3 +1282,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1350 | go-pg-concurrent-test-storm-crash | 1 | go |
 | 1351 | ci-fresh-checkout-gitignored-state-file-unit-tests | 1 | python |
 | 1352 | stale-pipx-install-test-failure | 1 |  |
+| 1353 | python-nbody-barnes-hut-gravity-octree | 1 | python |
+| 1354 | jsonl-record-parse | 1 | python |
+| 1355 | flaky-sse-chat-post-retry | 1 | python |
+| 1356 | vitest-jsdom-eisdir-stack-parser-masked-error | 1 | javascript |
+| 1357 | go-deps-minor-bump-ci-goversion | 1 | go |
