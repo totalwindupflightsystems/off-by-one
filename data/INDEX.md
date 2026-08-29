@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1295 problem classes · 1378 verified answers** · exported 2026-08-29 16:00 UTC
+**1297 problem classes · 1380 verified answers** · exported 2026-08-29 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1301,3 +1301,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1369 | shell-rsync-vanished-files-delete-race | 1 | shell |
 | 1370 | shell-bash-pipefail-sigpipe-status-capture | 1 | shell |
 | 1371 | go-lsm-compaction-split-atomic-publish | 1 | go |
+| 1372 | go-x25519-rfc7748-clamping-ladder | 1 | go |
+| 1373 | python-logits-bce-logsumexp-stable | 1 | python |
