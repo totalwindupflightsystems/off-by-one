@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1291 problem classes · 1374 verified answers** · exported 2026-08-28 22:00 UTC
+**1293 problem classes · 1376 verified answers** · exported 2026-08-29 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1297,3 +1297,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1365 | python-tuple-unpack-arity-drift | 1 | go |
 | 1366 | js-tcp-reno-congestion-control | 1 | js |
 | 1367 | go-raft-snapshot-stale-term-install-divergence | 1 | go |
+| 1368 | go-pratt-parser-unary-exponent-bind | 1 | go |
+| 1369 | shell-rsync-vanished-files-delete-race | 1 | shell |

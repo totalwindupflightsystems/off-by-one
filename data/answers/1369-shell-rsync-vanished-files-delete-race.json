@@ -1,0 +1,28 @@
+{
+  "class_id": 1369,
+  "title": "shell-rsync-vanished-files-delete-race",
+  "description": "shell-rsync-vanished-files-delete-race",
+  "created_at": "2026-08-28 22:51:16",
+  "answers": [
+    {
+      "answer_id": 1546,
+      "language": "shell",
+      "environment": "bash",
+      "version": "5.2",
+      "solution": "## Summary\n\nDelivered (all in `/home/kara/snapshot-fix/`):\n- **`snapshot.sh`** — the hardened script\n- **`test/snapshot_test.sh`** — the 56-assertion verification harness\n- **`SNAPSHOT-HARDENING.md`** — the self-contained deliverable (title, root-cause analysis, exact fix, verification)\n\n### Root cause\n1. `set -e` treats rsync's **exit 24** (\"vanished source files\" — benign, normal on busy trees) as fatal → rotation aborted.\n2. `--delete` ran **against the live snapshot tree**; a retry after an interrupted run deleted the only intact copy.\n3. Rotate step was unsynchronized → concurrent runs interleaved.\n\n### The fix (three structural guarantees)\n- **Exit-code classification:** `rsync ... || rc=$?` (the OR-list is what `set -e` can't kill before inspection). `0` and `24` → proceed; `11/12/23/25` and everything else → fatal, nothing published, previous snapshot kept. Real errors are never masked.\n- **Stage → verify → atomic publish:** transfer (with `--delete`) only ever targets `.staging`; publish happens only after a successful transfer via one atomic `mv` (rename) + one atomic symlink swap of `latest`. The previous snapshot is used purely read-only as `--link-dest` (cheap hardlinks). Any failure discards staging via an EXIT trap.\n- **flock mutex with timeout** (`flock -w $LOCK_TIMEOUT` on fd 9) held for the whole run, so transfer *and* rotate can never interleave; a blocked invocation times out and exits 1.\n\n### Verification (56/56 pass, real toolchain)\n- Raw reproduction confirmed real rsync exits **24** with \"file has vanished\" messages when files are deleted mid-transfer.\n- **T1** exit-code matrix: 0/24 publish; 23/11/12/1 exit with that code, no publish, previous snapshot byte-identical. **T2** SIGKILL mid-transfer: previous snapshot intact, stale staging discarded on rerun. **T3** two concurrent runs: serialized, lock-ordering verified. **T4** lock timeout: exits 1, publishes nothing. **T5** real rsync + 3 files deleted mid-run: exit 24 tolerated, every surviving file byte-identical in the new snapshot. **T6** delete isolation: deleted source file absent from new snapshot while the old snapshot retains it.\n\nThe tests also caught and the fix addresses two latent bugs: same-second snapshot-name collisions (would nest a snapshot *inside* the previous one via `mv` semantics — now guarded with `-NN` suffixes) and retention pruning that kept the oldest N instead of the newest (now `sort -zr`); plus `--max-delete` as the tripwire against a momentarily empty source becoming a mass deletion.\n",
+      "evidence": "# Evidence\n- Problem class: shell-rsync-vanished-files-delete-race\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-28T22:51:16.730Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A nightly snapshot script using rsync --delete under set -euo pipefail intermittently destroys the previous good snapshot: rsync exits 24 when files vanish mid-transfer, which the script treats as fatal and aborts the rotation, and the retry then runs --delete against a half-written destination, deleting the only intact copy. Harden the script so exit code 24 is tolerated without masking real errors (23/11/12 still fatal), deletions are only applied after a fully verified transfer via a staging dir plus atomic rename, and concurrent invocations cannot interleave the rotate step (flock-based mutex with timeout).",
+        "environment": "bash",
+        "language": "shell",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "shell-rsync-vanished-files-delete-race",
+        "provider": "openrouter",
+        "solved_at": "2026-08-28T22:51:16.731Z",
+        "version": "5.2"
+      },
+      "status": "verified",
+      "created_at": "2026-08-28 22:51:16"
+    }
+  ]
+}
