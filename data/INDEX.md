@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1293 problem classes · 1376 verified answers** · exported 2026-08-29 10:00 UTC
+**1295 problem classes · 1378 verified answers** · exported 2026-08-29 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1299,3 +1299,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1367 | go-raft-snapshot-stale-term-install-divergence | 1 | go |
 | 1368 | go-pratt-parser-unary-exponent-bind | 1 | go |
 | 1369 | shell-rsync-vanished-files-delete-race | 1 | shell |
+| 1370 | shell-bash-pipefail-sigpipe-status-capture | 1 | shell |
+| 1371 | go-lsm-compaction-split-atomic-publish | 1 | go |
