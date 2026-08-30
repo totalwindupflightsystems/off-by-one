@@ -80,6 +80,25 @@ func seedClass(t *testing.T, store *graph.Store, title, desc, env, lang, version
 	return pc.ID, id
 }
 
+// seedClassWithSigs is seedClass with an explicit signatures JSON blob,
+// for tests that need to exercise signature-aware aggregation
+// (OB-GAP-060: failed-signature answers must not count as verified).
+func seedClassWithSigs(t *testing.T, store *graph.Store, title, desc, env, lang, version, solution, status, signatures string) (int64, int64) {
+	t.Helper()
+	pc, _, err := store.UpsertProblemClass(context.Background(), title, desc)
+	if err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+	id, err := store.CreateAnswerNode(context.Background(), pc.ID, 0, env, lang, version, solution, "evidence: test", signatures)
+	if err != nil {
+		t.Fatalf("create answer: %v", err)
+	}
+	if err := store.UpdateAnswerStatus(context.Background(), id, status); err != nil {
+		t.Fatalf("update status: %v", err)
+	}
+	return pc.ID, id
+}
+
 // --- Health + OpenAPI ----------------------------------------------------
 
 func TestHealth(t *testing.T) {
@@ -848,6 +867,33 @@ func TestStats_Populated(t *testing.T) {
 	}
 	if st.HitRate < 0.49 || st.HitRate > 0.51 {
 		t.Errorf("hit_rate = %f, want ~0.5", st.HitRate)
+	}
+}
+
+// TestStats_FailedSignatureExcluded guards OB-GAP-060 at the API layer:
+// GET /api/v1/stats must report verified_answers that exclude status-
+// verified nodes whose signatures JSON carries result='failed', so
+// hit_rate stays below 1.0 while such rows exist.
+func TestStats_FailedSignatureExcluded(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	seedClassWithSigs(t, store, "a", "descA", "docker", "go", "1.0", "solA", graph.AnswerVerified, `{"result":"passed"}`)
+	seedClassWithSigs(t, store, "a", "descA", "docker", "go", "1.0", "solB", graph.AnswerVerified, `{"result":"passed"}`)
+	seedClassWithSigs(t, store, "a", "descA", "docker", "go", "1.0", "solC", graph.AnswerVerified, `{"result":"failed"}`)
+
+	rr := do(t, s, "GET", "/api/v1/stats", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var st graph.Stats
+	_ = json.Unmarshal(rr.Body.Bytes(), &st)
+	if st.TotalAnswers != 3 {
+		t.Errorf("total_answers = %d, want 3", st.TotalAnswers)
+	}
+	if st.VerifiedAnswers != 2 {
+		t.Errorf("verified_answers = %d, want 2 (failed-signature node excluded)", st.VerifiedAnswers)
+	}
+	if st.HitRate < 0.66 || st.HitRate > 0.67 {
+		t.Errorf("hit_rate = %f, want ≈0.667", st.HitRate)
 	}
 }
 

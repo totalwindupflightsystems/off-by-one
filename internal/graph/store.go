@@ -476,13 +476,19 @@ type Stats struct {
 // Coverage is verified / total problems. Avg solve time is left empty
 // here — the API layer computes it from queue_entries solve timings
 // (see Queue.AvgSolveTime) and fills the field in handleStats.
+//
+// verified_answers excludes answer_nodes whose signatures JSON carries
+// result='failed': those rows are status-verified but their solve
+// signature reports failure, so counting them would over-report the
+// cache's hit rate. Status remains the primary signal — 'passed',
+// 'completed', and absent or malformed signature JSON still count.
 func (s *Store) Stats(ctx context.Context) (*Stats, error) {
 	var st Stats
 	row := s.db.QueryRowContext(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM problem_classes),
 			(SELECT COUNT(*) FROM answer_nodes),
-			(SELECT COUNT(*) FROM answer_nodes WHERE status IN ('verified', 'ci_passed'))
+			(SELECT COUNT(*) FROM answer_nodes WHERE status IN ('verified', 'ci_passed') AND COALESCE(json_extract(signatures, '$.result'), '') != 'failed')
 	`)
 	if err := row.Scan(&st.TotalProblems, &st.TotalAnswers, &st.VerifiedAnswers); err != nil {
 		return nil, fmt.Errorf("stats: %w", err)

@@ -377,3 +377,49 @@ func TestStore_GetProblemClassStatus(t *testing.T) {
 func startsWith(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
 }
+
+// TestStore_Stats_ExcludesFailedSignature guards OB-GAP-060: answer_nodes
+// whose status is 'verified' but whose signatures JSON carries
+// result='failed' must not count toward VerifiedAnswers (and therefore
+// must depress HitRate below 1.0). The pre-fix query counted every
+// status-verified row, so this test fails against the old aggregation.
+func TestStore_Stats_ExcludesFailedSignature(t *testing.T) {
+	s := newSharedTestStore(t)
+	ctx := context.Background()
+
+	pc, _, err := s.UpsertProblemClass(ctx, "class-a", "desc")
+	if err != nil {
+		t.Fatalf("UpsertProblemClass: %v", err)
+	}
+	seed := func(sigs string) {
+		t.Helper()
+		id, err := s.CreateAnswerNode(ctx, pc.ID, 0, "linux", "go", "1.0", "sol", "ev", sigs)
+		if err != nil {
+			t.Fatalf("CreateAnswerNode: %v", err)
+		}
+		if err := s.UpdateAnswerStatus(ctx, id, AnswerVerified); err != nil {
+			t.Fatalf("UpdateAnswerStatus: %v", err)
+		}
+	}
+
+	// Two verified answers with passing signatures, one verified answer
+	// whose signature reports failure (the OB-GAP-060 divergence).
+	seed(`{"result":"passed","model":"m1"}`)
+	seed(`{"result":"passed","model":"m1"}`)
+	seed(`{"result":"failed","model":"m2"}`)
+
+	st, err := s.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if st.TotalAnswers != 3 {
+		t.Errorf("TotalAnswers = %d, want 3", st.TotalAnswers)
+	}
+	if st.VerifiedAnswers != 2 {
+		t.Errorf("VerifiedAnswers = %d, want 2 (failed-signature node excluded)", st.VerifiedAnswers)
+	}
+	if got, want := st.HitRate, 2.0/3.0; got < want-0.01 || got > want+0.01 {
+		t.Errorf("HitRate = %.3f, want ≈%.3f (must be < 1.0 while failed-verified rows exist)", got, want)
+	}
+}
+
