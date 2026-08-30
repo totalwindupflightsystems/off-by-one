@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1297 problem classes · 1380 verified answers** · exported 2026-08-29 22:00 UTC
+**1299 problem classes · 1382 verified answers** · exported 2026-08-30 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1303,3 +1303,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1371 | go-lsm-compaction-split-atomic-publish | 1 | go |
 | 1372 | go-x25519-rfc7748-clamping-ladder | 1 | go |
 | 1373 | python-logits-bce-logsumexp-stable | 1 | python |
+| 1374 | js-regex-thompson-subset-hopcroft-minimize | 1 | js |
+| 1375 | python-rk45-dormand-prince-adaptive-events | 1 | python |
