@@ -1,0 +1,28 @@
+{
+  "class_id": 1376,
+  "title": "go-epoll-edge-triggered-drain-starvation",
+  "description": "go-epoll-edge-triggered-drain-starvation",
+  "created_at": "2026-08-30 04:21:34",
+  "answers": [
+    {
+      "answer_id": 1553,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "Done. The problem is diagnosed, fixed, and verified end-to-end. Everything lives in `/home/kara/epoll-drain/`:\n\n- **`main.go`** — single-file demo with a buggy (`-mode=buggy`) and fixed (`-mode=fixed`) edge-triggered epoll echo server plus a 64 MiB segmented echo client\n- **`SOLUTION.md`** — the full deliverable: title, root-cause analysis, exact fix with the complete code listing, the one-shot re-arm race analysis, and verified results\n\n## Root cause\n\nWith `EPOLLET`, the kernel reports an fd only on the *not-ready → ready* transition — never while it stays ready. A server doing exactly one `read()` per `EPOLLIN` event can't drain a fast sender: the receive buffer never empties, the fd never returns to not-ready, **no further edge is ever generated**, and the connection deadlocks. It's insidious because a slow/paced client briefly masks it (each small segment generates its own edge) — which is exactly what the demo showed: 4–5 edges trickle in while the TCP window is small, then the window grows and the stream hard-stalls at 32–40 KiB (0.05%) of 64 MiB.\n\n## The fix (as implemented and verified)\n\n1. On `EPOLLIN`: **loop `readv()` until `EAGAIN`**, accumulating into a per-fd buffer (64 KiB/syscall via the kernel-layout `syscall.Iovec`; Go 1.26 dropped stdlib `Readv`, so it's issued via raw `SYS_READV`).\n2. After `EAGAIN`: flush, registering **`EPOLLOUT` only while a partial write is pending** (and draining writes until `EAGAIN` too — the write-side twin of the bug).\n3. The single `EPOLL_CTL_MOD` re-arm happens **strictly after** the drain, never mid-drain; `EPOLL_CTL_MOD`'s readiness re-check makes this lossless for data that lands during the drain.\n4. Same drain rule applied to `accept4` on the listener.\n\n## Why mid-drain re-arm is unsafe (in the doc)\n\n`EPOLL_CTL_MOD` re-checks readiness at syscall time — so a re-arm issued while another thread is still draining finds the fd readable and queues a *second* event, handing the same fd to a second worker. Two threads then `readv` into the same per-fd buffer (corruption), both re-arm again (event storm/livelock), and there is no kernel primitive that can synchronize a `MOD` with another thread's drain loop — only the exclusive-ownership protocol makes it safe.\n\n## Verification transcript\n\n```\n=== BUGGY ===                               === FIXED ===\nreceived 40960 B (5 events)                 payload        : 67108864 B in 1024 x 64 KiB segments\nSTALLED after 2.21s: only 0.0610%           server got     : 67108864 B in, 67108864 B out\nof the stream was ever drained;             elapsed        : 0.201 s\nfd stays readable, no new edge              throughput     : 318.6 MiB/s\n                                            client         : FNV-1a hashes VERIFIED\n```\n\n`go vet` clean; `-race` reports **0 data races**; fixed mode is repeatable at 320–340 MiB/s with a byte-exact echo hash over all 3 runs. One notable harness finding documented in the notes: **`close(epfd)` does not wake a blocked `epoll_wait` in another goroutine** (kernel holds a file reference mid-syscall), so the demo's stall detection uses bounded 50 ms waits instead of a close-based interrupt.\n",
+      "evidence": "# Evidence\n- Problem class: go-epoll-edge-triggered-drain-starvation\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-30T04:21:34.535Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "An edge-triggered (EPOLLET) epoll server stalls when a client streams a large payload: the loop performs exactly one read() per EPOLLIN event, so data still buffered in the socket after that read never triggers another event and the connection deadlocks. Implement the correct pattern: on each EPOLLIN, drain the fd with repeated readv calls until EAGAIN, accumulate into a per-fd buffer, and register EPOLLOUT only while a partial write is pending, never re-arming EPOLLIN mid-drain. Demonstrate throughput on a 64MiB segmented stream and explain why the one-shot re-arm race (EPOLL_CTL_MOD while another thread is draining) is unsafe.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "go-epoll-edge-triggered-drain-starvation",
+        "provider": "openrouter",
+        "solved_at": "2026-08-30T04:21:34.535Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-08-30 04:21:34"
+    }
+  ]
+}

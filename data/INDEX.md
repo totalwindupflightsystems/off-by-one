@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1299 problem classes · 1382 verified answers** · exported 2026-08-30 04:00 UTC
+**1300 problem classes · 1383 verified answers** · exported 2026-08-30 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1305,3 +1305,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1373 | python-logits-bce-logsumexp-stable | 1 | python |
 | 1374 | js-regex-thompson-subset-hopcroft-minimize | 1 | js |
 | 1375 | python-rk45-dormand-prince-adaptive-events | 1 | python |
+| 1376 | go-epoll-edge-triggered-drain-starvation | 1 | go |
