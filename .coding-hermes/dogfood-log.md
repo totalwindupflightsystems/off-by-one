@@ -63,3 +63,44 @@ Chronological record of dogfood field-test runs (real-use value checks, not test
 - **Friction count:** 7 (see docs/dogfood/2026-08-10-integration.md for details).
 - **Artifacts left:** 6 board tasks (OB-GAP-020..025), docs/dogfood/2026-08-10-integration.md, docs/dogfood/diagnostics.md, skills/off-by-one-usage/SKILL.md, this log. Commit: see git log.
 - **Foreman:** not woken (cooldown 7200s < 14400 threshold; Enabled=true). Tasks will be picked up on the normal ~2h cadence.
+
+## 2026-08-30 — 🟡 PROMISING-BUT-ROUGH (field-test run #3, target off-by-one-sync)
+
+- **Verdict:** 🟡 PROMISING-BUT-ROUGH — the sync workflow itself works
+  end-to-end (auth → preflight test-write → scan → verify → report) and the
+  lab's core loop is healthy (discover → found:true with full verified answer),
+  but the run surfaced two real gaps: a committed-but-undeployed fix and a
+  25-day-stalled feeder proof-key series.
+- **Promise statement:** "A sync agent can, every ~6h, verify the off-by-one
+  namespace is healthy and record fresh facts (server status, scheduler state,
+  git activity, findings) into DuckBrain." — **held up**; the sync ran clean
+  and the namespace is actively maintained (last-run 11:11Z today, 4 keys
+  written, all verified).
+- **Time-to-first-success:** ~8 min (auth discovery → successful test-write →
+  first verified recall). Friction count: 3 (auth key location undocumented,
+  `/api/health` 404 as liveness probe, `/api/keys` tree shape varies).
+- **Top 3 findings:**
+  1. **OB-GAP-062 (P1):** OB-GAP-060 fix (ee79fea, Aug 30 00:24) committed but
+     never deployed — live :8766 runs the Aug 24 binary (uptime 87h+), stats
+     still serve pre-fix verified counts. DuckBrain finding flagged it at
+     11:12Z but no board task existed.
+  2. **OB-GAP-063 (P2):** feeder proof keys stalled 25 days (last
+     /off-by-one/feeder/submissions/2026-08-05) while obo-problem-feeder runs
+     4×/day (last 05:06 today, 3 problems queued) — the feeder prompt has no
+     DuckBrain write step; the cheat sheet's "ingest-activity proof" is
+     missing while ingestion demonstrably continues.
+  3. **Docs gap (P2, no task):** the sync cheat sheet never documents where the
+     namespace auth key lives (`~/.duckbrain/auth.json`, token
+     `off-by-one-foreman`) or that the DuckBrain MCP server is disabled —
+     a new sync agent must reverse-engineer auth.
+- **What worked (evidence):** test-write 201 + recall verified; namespace sweep
+  100 keys (72 project / 15 sync / 12 findings / 1 test); live stats
+  1377/1554/queue 0/hit_rate 1.0; discover probe found:true; CI green 5/5;
+  0 unpushed; feeder cron alive (jobs.json 3ac3112f61b5, last_status ok).
+- **Artifacts left:** 2 board tasks (OB-GAP-062/063, JSONL format),
+  docs/dogfood/2026-08-30-integration.md, diagnostics.md §6 appended,
+  this log. Commit: see git log.
+- **Foreman:** not woken (cooldown 21600s ≥ 14400 threshold; fleet.toml pins
+  cooldown at 21600 — operator pin, "never PUT below operator pin" per
+  OB-GAP-039-era reasoning). The 2 new tasks will be picked up on the normal
+  ~6h cadence.

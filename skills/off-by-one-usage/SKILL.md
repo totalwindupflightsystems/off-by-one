@@ -121,6 +121,21 @@ data/COUNTS.md), corpus test junk (OB-GAP-025 — export filters it),
 `go-nil-pointer-deref` doc example (OB-GAP-022/045 — examples use
 `so-nil-pointer-deref`).
 
+## Ops health checks (verified 2026-08-30 — 10-second probes)
+
+```bash
+curl -s localhost:8766/api/v1/stats          # problems/answers/verified/queue/hit_rate
+curl -s localhost:8766/health                # uptime — compare vs binary mtime for deploy lag
+stat -c '%y' off-by-one                      # binary mtime; if older than HEAD commit → NOT deployed
+git log origin/master..HEAD --oneline        # unpushed work (branch IS master)
+gh run list -R totalwindupflightsystems/off-by-one --limit 3   # CI
+```
+
+**Deploy-lag trap (OB-GAP-062):** a committed fix is NOT live until the binary
+is rebuilt AND the server restarted. `verified_answers == total_answers` in
+stats is the pre-fix signature of OB-GAP-060. If binary mtime < HEAD commit
+time, the fix is not serving — file a board task, don't assume.
+
 ## Running a scratch instance (safe testing)
 
 ```bash
@@ -134,7 +149,9 @@ Full API on a throwaway DB, no sandbox/keys. Data survives restarts (SQLite WAL)
 ## Where the knowledge lives
 
 - `docs/integration.md` + `docs/api-reference.md` — the maintained API docs
-- `docs/dogfood/2026-08-10-integration.md` — this run's full evidence
+- `docs/dogfood/2026-08-10-integration.md` — run #1 full evidence
+- `docs/dogfood/2026-08-20-integration.md` — run #2 full evidence
+- `docs/dogfood/2026-08-30-integration.md` — run #3 (sync-focused) evidence
 - `docs/dogfood/diagnostics.md` — build anatomy, error history, right ways
 - `.coding-hermes/dogfood-log.md` — verdict log per run
 - Board: `.coding-hermes/board/tasks.jsonl` (JSONL-canonical; `tasks.md` is a

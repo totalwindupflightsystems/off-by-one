@@ -145,3 +145,57 @@ what was newly found.
   tunable via `OB1_BWRAP_TIMEOUT`.
 - Queue API window is per-class — use the DB (or `/api/v1/queue/<id>`) for the
   true picture; don't read the 100-window as global state.
+
+---
+
+## 6. Sync-focused field-test run — 2026-08-30 (dogfood #3, target off-by-one-sync)
+
+### What was tested
+
+The scheduler project `off-by-one-sync` is a **DuckBrain focused-sync job**,
+not a code repo: its workdir is intentionally empty and its product is the
+namespace sync itself. This run executed the sync protocol end-to-end (auth →
+preflight test-write → scan → verify) and probed the lab's core loop live.
+
+### How the sync is built (right way)
+
+- **Auth:** DuckBrain HTTP (`localhost:3000`) requires `X-API-Key`. Scoped
+  tokens live in `~/.duckbrain/auth.json` (`apiKeys[]`); the off-by-one
+  namespace token is named `off-by-one-foreman` (grant: ns `off-by-one`).
+  The MCP server (`duckbrain` in `~/.hermes/config.yaml`) is **disabled** —
+  sync agents use HTTP, not MCP.
+- **Preflight:** test-write `/sync/write-test-YYYY-MM-DD` (domain `config`),
+  verify by recall. 201 + recall hit = healthy. `/api/health` is NOT a valid
+  liveness path (404) — use the keys API or a test-write.
+- **Scan:** scheduler API (`127.0.0.1:9090`, nested `project` key), live
+  server (`:8766/health`, `/api/v1/stats`), git (`origin/master..HEAD`),
+  CI (`gh run list`), feeder proof keys.
+- **Write:** batches ≤4, domains `person|event|concept|message|config|raw_note`,
+  `/sync/last-run` LAST.
+
+### Errors hit this run (and the right way)
+
+| Error / friction | Right way |
+|---|---|
+| `GET /api/health` → 404 | Don't use it; liveness = keys API or test-write |
+| `/api/keys` tree shape varies (object vs list) | Walker must handle both |
+| Feeder proof keys stalled 25 days (Aug 5→30) while feeder runs 4×/day | Feeder prompt (jobs.json `3ac3112f61b5`) has NO DuckBrain write step; OB-GAP-063 filed |
+| OB-GAP-060 fix committed Aug 30 00:24, live server runs Aug 24 binary (uptime 87h+) | Deploy-lag check = binary mtime vs server uptime; OB-GAP-062 filed |
+
+### Live lab state (2026-08-30 ~11:00 local)
+
+- 1377 problems / 1554 answers, all "verified", queue 0, hit_rate 1.0,
+  coverage 1.13, solver available, uptime 87h45m.
+- Discover probe on `go-linear-scan-register-allocator` → `found:true` with
+  full solution/evidence/signatures — the core value prop holds.
+- CI green (5/5 recent runs incl. pages deploy); 0 unpushed commits.
+- Foreman tick 11:40Z idle (NO_CHANGES, commit 9e31f4a); board 60 complete /
+  7 pending (incl. 2 new from this run).
+
+### The right way to answer "does off-by-one work?"
+
+1. `curl localhost:8766/api/v1/stats` — problems/answers/verified/queue.
+2. `stat -c %y off-by-one` vs `curl localhost:8766/health` uptime — deploy lag.
+3. `git log origin/master..HEAD` — unpushed work.
+4. `gh run list -R totalwindupflightsystems/off-by-one` — CI.
+5. Discover a real class — the loop's end-to-end proof.
