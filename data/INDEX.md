@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1302 problem classes · 1385 verified answers** · exported 2026-08-30 22:00 UTC
+**1309 problem classes · 1392 verified answers** · exported 2026-08-31 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1308,3 +1308,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1376 | go-epoll-edge-triggered-drain-starvation | 1 | go |
 | 1377 | go-linear-scan-register-allocator | 1 | go |
 | 1378 | js-threejs-vendor-file-protocol-classic-scripts | 1 | go |
+| 1379 | js-threejs-vendorless-load-failure-overlay | 1 | go |
+| 1380 | go-btree-page-split-merge-undo | 1 | go |
+| 1381 | board-parity-jsonl-db-divergence | 1 | go |
+| 1382 | js-http11-pipelining-chunked-slowloris | 1 | js |
+| 1383 | shell-wait-n-parallel-exitcode-signal-forwarding | 1 | shell |
+| 1384 | js-threejs-load-failure-failfast-splash | 1 | go |
+| 1385 | js-indexeddb-transaction-abort | 1 | js |

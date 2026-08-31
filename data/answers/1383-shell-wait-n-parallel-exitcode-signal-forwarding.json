@@ -1,0 +1,28 @@
+{
+  "class_id": 1383,
+  "title": "shell-wait-n-parallel-exitcode-signal-forwarding",
+  "description": "shell-wait-n-parallel-exitcode-signal-forwarding",
+  "created_at": "2026-08-31 01:07:11",
+  "answers": [
+    {
+      "answer_id": 1560,
+      "language": "shell",
+      "environment": "bash",
+      "version": "5.2",
+      "solution": "Done — all 19/19 assertions pass, stable across consecutive runs. Deliverables in `/home/kara/parwait/`:\n\n- **`solution.md`** — the complete self-contained solution (title, root-cause analysis, exact fix, verification, reproducer)\n- **`run_parallel.sh`** — the verified working script\n- **`tests.sh`** + **`reset_sig.c`** — the verification suite (19 checks) and a tiny helper used only to make SIGINT trappable inside the test harness\n\n## Key findings (root cause)\n\n1. **Attribution must come from `wait -n -p`, never `kill -0` polling.** A finished-but-unreaped child is a zombie (`kill -0` succeeds), and after reaping the PID can be reused — both break \"find the job that finished.\" Bash inserts children into its own job table *synchronously at fork time, before `$!` is assigned*, so `wait -n -p` reliably reports a just-forked/just-exited child with its true status. That closes the *fork→register race*: the `RUNNING` map only needs to exist before the next `wait -n`, and attribution never depends on it having been populated in time.\n\n2. **Trapped SIGTERM wakes `wait -n` immediately** (returns >128, then the trap runs — bash manual, verified). The loop must then *keep reaping* the dying children via `wait -n` so each killed job's real status (e.g. 143) is recorded and reported as interrupted.\n\n3. **Two traps that orphan grandchildren or swallow SIGINT** — both fixed by `set -m` (job control), which works fine non-interactively/no-tty:\n   - Without job control, `&` children share the shell's process group, so no `kill -- -pgid` can target them; with `set -m`, every job is its own pgroup leader (**pgid == pid**), so `kill -s SIG -- -pid` reaches the job *and its whole subtree* (verified through `bash -c 'bash -c \"sleep …\" & sleep …'`).\n   - POSIX forces `&` children of non-interactive shells to inherit `SIGINT=SIG_IGN`, so forwarded SIGINT is *discarded by the kernel* (verified via `SigIgn`). As job-control children, SigIgn resets to 0 and forwarded SIGINT lands (script exits 130, jobs report `INTERRUPTED by signal 2`).\n   - The signal-path fork→register window is closed by forwarding to `jobs -p` (bash's own table) in addition to the `RUNNING` map.\n\n## Verification summary (bash 5.3.9)\n\n| Test | Result |\n|---|---|\n| 6 jobs, mixed pass/fail, out-of-order completion | summary in submission order `0..5`, exit 1, `job 2: FAILED (exit status 3)` |\n| 6 × sleep 0.5, `-c 3`, timestamp overlap log | max concurrent = **3**, wall 1.04 s |\n| 60 (and 300) jobs that exit instantly | all reported, no `wait:` errors, 0.03–0.09 s |\n| SIGTERM with grandchild-spawning jobs | exit 143, all `INTERRUPTED`, pending job `not started`, **0 orphans** |\n| SIGINT (trappable disposition) | exit 130, all `INTERRUPTED`, 0 orphans (deep tree too) |\n| Edge cases | `--help` rc 0, no jobs rc 2, `-c 0` clamped |\n\nOne note documented in the paper: if you *background* the runner from a non-interactive shell, SIGINT is untrappable by POSIX mandate (any bash script, not just this one) — real terminal Ctrl-C and foreground runs are unaffected; use SIGTERM in that context.\n",
+      "evidence": "# Evidence\n- Problem class: shell-wait-n-parallel-exitcode-signal-forwarding\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-31T01:07:11.699Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Write a bash script that launches N jobs with max concurrency K, tracks every job exit status, and exits non-zero iff any job failed, printing a per-job summary in original submission order. On SIGINT/SIGTERM it must forward the signal to all still-running children, reap them, and report which jobs were interrupted, never leaving orphans even when jobs spawn grandchildren. Implement slot scheduling with wait -n (or equivalent PID tracking) without busy-waiting, and handle the race where a child exits between fork and being added to the tracked set.",
+        "environment": "bash",
+        "language": "shell",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "shell-wait-n-parallel-exitcode-signal-forwarding",
+        "provider": "openrouter",
+        "solved_at": "2026-08-31T01:07:11.699Z",
+        "version": "5.2"
+      },
+      "status": "verified",
+      "created_at": "2026-08-31 01:07:11"
+    }
+  ]
+}
