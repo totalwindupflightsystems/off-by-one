@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1309 problem classes · 1392 verified answers** · exported 2026-08-31 04:00 UTC
+**1312 problem classes · 1395 verified answers** · exported 2026-08-31 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1315,3 +1315,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1383 | shell-wait-n-parallel-exitcode-signal-forwarding | 1 | shell |
 | 1384 | js-threejs-load-failure-failfast-splash | 1 | go |
 | 1385 | js-indexeddb-transaction-abort | 1 | js |
+| 1386 | python-fm-index-backward-search-dna | 1 | python |
+| 1387 | go-tcp-stream-reassembly-out-of-order | 1 | go |
+| 1388 | shell-argmax-batch-size-e2big-safe | 1 | shell |

@@ -1,0 +1,28 @@
+{
+  "class_id": 1387,
+  "title": "go-tcp-stream-reassembly-out-of-order",
+  "description": "go-tcp-stream-reassembly-out-of-order",
+  "created_at": "2026-08-31 04:39:38",
+  "answers": [
+    {
+      "answer_id": 1564,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "Done. The problem is diagnosed, solved, and verified. Everything lives in `/home/kara/reassembly/` (`SOLUTION.md`, `reassembler.go`, `reassembler_test.go`, `go.mod`), and the markdown is byte-identical to the verified source.\n\n## Summary\n\n**Diagnosis (root causes of naive failures):**\n1. **Order dependence** — segments arrive out of order, so you must key everything by byte *position*, not arrival order.\n2. **First-arrival-wins + no double-writes** — retransmissions/overlaps must be coalesced; a flat buffer overwrite violates both rules.\n3. **Sparse 2^64 stream space** — a `[]byte` of the whole stream is impossible; storage must be sparse interval chunks.\n4. **Modulo-2^64 wraparound** — `seq+len` and position math must stay in `uint64`; a segment crossing `2^64` must be split at the boundary.\n5. **FIN semantics** — the FIN consumes a seq number, so the stream is the half-open `[0, finSeq)`; bytes at/after it are outside (which is exactly why example 2 yields `\"AB\"` with hole `[2,4)`).\n6. **Buffer aliasing** — caller payloads may be reused; kept bytes must be copied.\n\n**The fix:** a sorted, disjoint chunk-interval store. `Add` runs a merge sweep that copies only *uncovered* gaps (existing bytes always win, never rewritten); `Add` splits wrap-crossing segments into `[seq,2^64)` (endMax sentinel) + `[0,end)`; `Finish` clamps every chunk to `[0, finSeq)`, concatenates arrived bytes in order, and emits `MissingRange`s between covered runs. O(k) per op, memory proportional to distinct arrived bytes.\n\n**Verification (Go 1.26, linux/amd64, all passing with `-race`):**\n- Both problem examples exactly, plus a variant where the retransmission arrives first (first-arrival-wins still holds)\n- 12 targeted edge cases: duplicate coalescing, partial overlap, FIN mid-segment, multi-hole streams, no segments, aliasing, adds-after-FIN\n- 4 wraparound tests, including streams spanning up to 2^64-1 with overlapping wrapped heads\n- 9,000 randomized property tests + a fuzz target (~2.8M executions) cross-checking data and missing ranges against an independent per-byte map oracle derived straight from the spec semantics — full agreement on every input\n\nCommands to reproduce: `cd reassembly && go vet ./... && go test -race -v ./... && go test -run '^$' -fuzz FuzzReassemblyAgainstReference -fuzztime 60s`\n",
+      "evidence": "# Evidence\n- Problem class: go-tcp-stream-reassembly-out-of-order\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-08-31T04:39:38.195Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement TCP stream reassembly: given segments {seq uint64, payload []byte} arriving out of order, possibly overlapping or retransmitted (first arrival wins per byte position), plus an optional FIN marking stream end, reconstruct the byte stream and report missing ranges [start,end) at FIN. Sequence numbers wrap modulo 2^64; coalesce duplicates/overlaps without double-writing and never emit a byte twice. Example 1: segments (0,Hello ), (12,world!), (6,brave ) then retransmission (6,BRVXX) must yield stream Hello brave world! with no holes. Example 2: (0,AB), (4,CD), FIN yields data AB with missing range [2,4).",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "go-tcp-stream-reassembly-out-of-order",
+        "provider": "openrouter",
+        "solved_at": "2026-08-31T04:39:38.195Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-08-31 04:39:38"
+    }
+  ]
+}
