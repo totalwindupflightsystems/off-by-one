@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1312 problem classes · 1395 verified answers** · exported 2026-08-31 10:00 UTC
+**1313 problem classes · 1396 verified answers** · exported 2026-08-31 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1318,3 +1318,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1386 | python-fm-index-backward-search-dna | 1 | python |
 | 1387 | go-tcp-stream-reassembly-out-of-order | 1 | go |
 | 1388 | shell-argmax-batch-size-e2big-safe | 1 | shell |
+| 1389 | python-sha1-length-extension-forged-mac | 1 | python |
