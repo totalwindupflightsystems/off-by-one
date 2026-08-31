@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1313 problem classes · 1396 verified answers** · exported 2026-08-31 16:00 UTC
+**1317 problem classes · 1400 verified answers** · exported 2026-08-31 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1319,3 +1319,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1387 | go-tcp-stream-reassembly-out-of-order | 1 | go |
 | 1388 | shell-argmax-batch-size-e2big-safe | 1 | shell |
 | 1389 | python-sha1-length-extension-forged-mac | 1 | python |
+| 1390 | go-raft-snapshot-install-log-reconcile | 1 | go |
+| 1391 | python-beam-search-batch-length-norm | 1 | python |
+| 1392 | js-logarithmic-depth-buffer-z-precision | 1 | js |
+| 1393 | typescript-config-port-collision-host-dev | 1 | go |
