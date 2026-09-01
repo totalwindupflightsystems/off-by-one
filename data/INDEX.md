@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1320 problem classes · 1403 verified answers** · exported 2026-09-01 10:00 UTC
+**1323 problem classes · 1406 verified answers** · exported 2026-09-01 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1326,3 +1326,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1394 | go-mpsc-channel-lockfree-drain | 1 | go |
 | 1395 | js-fixed-timestep-slide-float-overshoot | 1 | javascript |
 | 1396 | go-duckdb-board-dry-run-parity-heal | 1 | go |
+| 1397 | typescript-boot-seed-migration-ordering | 1 | go |
+| 1398 | go-docs-config-drift-batch-fix | 1 | go |
+| 1399 | go-board-jsonl-task-completed-appender | 1 | go |
