@@ -4551,3 +4551,13 @@ All phases shipped: OpenAPI spec, SQLite graph engine, ingest queue, HTTP API se
   Board must be git-uploadable JSONL (duckdb-native), not .db files. PASS: git ls-files .coding-hermes/board/ lists no board.db/*.parquet (git rm --cached); tasks.jsonl+events.jsonl tracked & authoritative (duckdb COPY export if migrating); .gitignore covers board.db+*.parquet; parity probe MATCH; commit with co-author trailer.
   | ✅ DONE (tick 264) | P1 | — | deepseek-v4-flash @ foreman | — | — |
   Complete per repo state: tasks/events/fixtures/schema.jsonl tracked & authoritative (6d7f0f7/b681041), board.db/parquet untracked, .gitignore covers; status repaired from bootstrap pending at Tick 264. tasks.md frozen as legacy log.
+
+## Dogfood Findings (2026-09-01)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"Single Go binary cmd/off-by-one — an HTTP server (REST API + embedded HTMX web UI + WebSocket chat on port 8766, configurable) with a  subcommand; no separate MCP server (it bridges to Muster via muster-config.yaml), requires bwrap + pi-agent + a solver API key for solving (oth
+
+- [P0] Documented solve setup cannot solve — Quick Start requires only DEEPSEEK_API_KEY, but the shipped pi-agent wrapper unconditionally maps deepseek-v4-flash to openrouter/deepseek/deepseek-v4-flash-0731 and deletes the DeepSeek key from pi's
+- [P1] WebSocket AI chat connects but never answers — /ws/chat streams 'Connected to Off-by-One AI Agent' but user messages get no reply in 70s; server logs 'chat: agent runner error: pi-agent exec: signal: killed'. Chat is advertised in README/AGENTS.md
+- [P1] PI_MODEL override is inert and README model resolution is fiction — README documents PI_MODEL as 'model override passed to pi verbatim' and claims the wrapper 'resolves the model per the available key' (deepseek path when DeepSeek key present); shipped code does neith
+- [P1] Solve failures are invisible to the submitter — Submit returns queued/estimated_time 30s; failure surfaces only in the server log and later queue polling, with status flipping queued → pending+stage queued → failed across endpoints. No return/notif
+- [P2] Weak error messages on documented routes — Invalid cadence 400 lists no accepted enum values (pre-phase/end-of-day/post-debug known only from docs); OpenRouter solve 404 'No endpoints available matching your guardrail restrictions and data pol

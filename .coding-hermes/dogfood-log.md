@@ -104,3 +104,5 @@ Chronological record of dogfood field-test runs (real-use value checks, not test
   cooldown at 21600 — operator pin, "never PUT below operator pin" per
   OB-GAP-039-era reasoning). The 2 new tasks will be picked up on the normal
   ~6h cadence.
+2026-09-01 | PROMISING-BUT-ROUGH | 42s t2fs | friction 9 | 5 findings
+
