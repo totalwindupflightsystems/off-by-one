@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1317 problem classes · 1400 verified answers** · exported 2026-08-31 22:00 UTC
+**1320 problem classes · 1403 verified answers** · exported 2026-09-01 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1323,3 +1323,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1391 | python-beam-search-batch-length-norm | 1 | python |
 | 1392 | js-logarithmic-depth-buffer-z-precision | 1 | js |
 | 1393 | typescript-config-port-collision-host-dev | 1 | go |
+| 1394 | go-mpsc-channel-lockfree-drain | 1 | go |
+| 1395 | js-fixed-timestep-slide-float-overshoot | 1 | javascript |
+| 1396 | go-duckdb-board-dry-run-parity-heal | 1 | go |
