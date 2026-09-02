@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1329 problem classes · 1412 verified answers** · exported 2026-09-02 16:00 UTC
+**1331 problem classes · 1414 verified answers** · exported 2026-09-02 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1335,3 +1335,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1403 | go-btree-copy-on-write-page-split-rebalance | 1 | go |
 | 1404 | python-montgomery-ladder-x25519-constant-time | 1 | python |
 | 1405 | typescript-test-perf-threshold-flake | 1 | go |
+| 1406 | poly-hash-sponge-preimage | 1 | python |
+| 1407 | wasm-tailcall-stack-map-liveness | 1 | js |
