@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1326 problem classes · 1409 verified answers** · exported 2026-09-01 22:00 UTC
+**1328 problem classes · 1411 verified answers** · exported 2026-09-02 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1332,3 +1332,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1400 | sql-cte-cycle-quantiles | 1 | python |
 | 1401 | nextjs-dev-blank-login-shell-stale-client-manifest | 1 | go |
 | 1402 | playwright-slide-sustain-load-flake | 1 | javascript |
+| 1403 | go-btree-copy-on-write-page-split-rebalance | 1 | go |
+| 1404 | python-montgomery-ladder-x25519-constant-time | 1 | python |
