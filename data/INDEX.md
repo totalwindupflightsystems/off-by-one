@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1338 problem classes · 1422 verified answers** · exported 2026-09-03 16:00 UTC
+**1340 problem classes · 1424 verified answers** · exported 2026-09-03 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1344,3 +1344,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1412 | go-api-delete-namespace-guard-pattern | 1 | go |
 | 1413 | typescript-docker-sqlite-silent-empty-db | 1 | go |
 | 1414 | go-postgres-schema-store-drift | 1 | go |
+| 1415 | go-lsm-memtable-wal-crash-recovery | 1 | go |
+| 1416 | infra-cross-project-resource-pool-leak | 1 | go |

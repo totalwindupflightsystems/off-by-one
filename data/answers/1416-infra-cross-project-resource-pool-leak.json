@@ -1,0 +1,28 @@
+{
+  "class_id": 1416,
+  "title": "infra-cross-project-resource-pool-leak",
+  "description": "infra-cross-project-resource-pool-leak",
+  "created_at": "2026-09-03 20:18:15",
+  "answers": [
+    {
+      "answer_id": 1594,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Everything is verified. Final state:\n\n- **Untouched failure:** `TestApplyUserSliceLimits_NotRoot_Coverage` — fails identically on pristine `HEAD` (sandbox mounts `/etc` read-only); unrelated to this bug.\n- **All bug-related tests green**, and `gofmt` is clean on every changed file.\n- **Red/green proof:** with `manager_destroy.go` reverted, the new regression test fails with the exact incident signature — `port range leaked: expected 100 free ranges after not_found destroy, got 99`; with the fix applied it passes.\n\n## Summary\n\n**Diagnosis (confirmed against upstream source `deployBunker/bunker`):** `AgentManager.Destroy` in `internal/agent/manager_destroy.go` Step 3 runs `userdel -rf` *after* `stopDockerdDirect` returns. `userdel` fails with *\"currently used by process\"* whenever the agent user still owns processes — which rootless docker guarantees (rootlesskit, slirp4netns, and all container processes run as `bunker-<id>`). The **non-force** branch (used by the 1-minute TTL reaper) then called `Tracker.Unregister()` (→ host shows **0 registered agents**) and `return`ed `not_found`, **skipping `PortAllocator.Free()`** — leaking one sub-range per failed destroy until the pool hit 10/10 (`30000–30999`, 100/agent). Two registries diverged: tracker empty, allocator full.\n\n**Fix (two halves, both in the doc):**\n1. `manager_destroy.go` — unconditional idempotent `Free()` before the `not_found` early return (never leak, even when userdel still fails).\n2. `manager_spawn.go` — `stopDockerdDirect` now waits through SIGKILL and then **drains the entire user process tree** (SIGKILL + recheck loop until the user owns zero processes) before returning, so `userdel` has a clean table; \"no dockerd\" is now treated as drained success.\n\n**Deliverable:** `/home/kara/SOLUTION.md` — title, root-cause analysis, exact patches, audit-based detection recipe (`ok_spawns − ok_destroys` since daemon restart), red/green verification, and live-host remediation steps. The patched tree is at `/tmp/bunker-src`.\n",
+      "evidence": "# Evidence\n- Problem class: infra-cross-project-resource-pool-leak\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-09-03T20:18:15.787Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "QA spawn agent failed with port-range pool exhausted (10/10) on a bunker host showing 0 registered agents. RCA via audit-trail accounting: ok-spawns minus ok-destroys since last daemon restart = leaked ranges. Root cause in upstream code: non-force destroy path returns not_found after userdel failure (agent user owned running processes) WITHOUT freeing the in-memory port range; TTL reaper is a frequent triggering caller. Fix = unconditional idempotent Free() on the not_found early-return + dockerd-stop wait/SIGKILL before userdel. Detection recipe: compare spawn vs destroy success counts from the audit log.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "infra-cross-project-resource-pool-leak",
+        "provider": "openrouter",
+        "solved_at": "2026-09-03T20:18:15.787Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-03 20:18:15"
+    }
+  ]
+}
