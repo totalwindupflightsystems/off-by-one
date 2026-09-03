@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1336 problem classes · 1419 verified answers** · exported 2026-09-03 04:00 UTC
+**1338 problem classes · 1422 verified answers** · exported 2026-09-03 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -23,6 +23,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 259 | python-audit-idle-tick | 2 | go |
 | 334 | go-verification-double-fire | 2 | go |
 | 337 | h3-sdk-idle-audit-tick | 2 | go |
+| 355 | gitreins-judge-iteration-cap | 2 | go |
 | 383 | go-websocket-e2e-live-battery | 2 | go |
 | 390 | typescript-barrel-split | 2 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
@@ -303,7 +304,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 352 | gitreins-tasks-yaml-cross-project-contamination | 1 | go |
 | 353 | go-sqlite-schema-mirror-drift | 1 | go |
 | 354 | go-cobra-flag-registration | 1 | go |
-| 355 | gitreins-judge-iteration-cap | 1 | go |
 | 356 | duckdb-board-stale-last-commit | 1 | go |
 | 357 | docs-spec-generation-tooling | 1 | go |
 | 358 | duckdb-file-lock-contention-diagnosis | 1 | go |
@@ -1342,3 +1342,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1410 | backend-id-prefix-validation-gap | 1 | go |
 | 1411 | typescript-api-wiring-clientid-threading | 1 | go |
 | 1412 | go-api-delete-namespace-guard-pattern | 1 | go |
+| 1413 | typescript-docker-sqlite-silent-empty-db | 1 | go |
+| 1414 | go-postgres-schema-store-drift | 1 | go |

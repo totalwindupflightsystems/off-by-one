@@ -1,0 +1,28 @@
+{
+  "class_id": 1414,
+  "title": "go-postgres-schema-store-drift",
+  "description": "go-postgres-schema-store-drift",
+  "created_at": "2026-09-03 05:46:39",
+  "answers": [
+    {
+      "answer_id": 1591,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The repository isn't present in this environment (no checkout anywhere), so I produced the deliverable as a fully self-contained solution document. Written to:\n\n**`/home/kara/DF-IMHOTEP-6-postgres-catalog-schema-drift.md`**\n\n## What it contains\n\n**Root-cause analysis** — the drift is real and two-sided:\n- **Schema drift:** store code inserts/reads `catalogs.vendor_name`, but the runner embeds only `internal/store/postgres/migrations/` (via `//go:embed`), which since 08-17 defines `vendor_id BIGINT NOT NULL`, `storage_key TEXT NOT NULL`, and a `vendors` table with `UNIQUE(project_id, name)`. Root `migrations/` still models the old shape but is a documented decoy — so diffs against it looked fine. Every write/read fails with `column \"vendor_name\" does not exist` → 500.\n- **Interface drift:** `CreateCatalog` → `PutCatalog` was applied to the implementation and handler but not swept (6 stale call sites: handler, handler test, memory store + test, postgres store test, seed CLI), leaving the tree unbuildable; fake-pooler SQL-text pins also break when the query shape changes.\n\n**The exact fix** (code included for every file):\n1. **Write path** — one SQL statement: a single CTE that upserts the vendor by `(project_id, name)` (`DO UPDATE` no-op so `RETURNING` fires), inserts the catalog row with the returned `vendor_id` + handler-supplied `storage_key`, then a final SELECT joins the CTEs and returns the row already shaped as `api.CatalogResponse`.\n2. **Read path** — `catalogs JOIN vendors` with `v.name AS vendor_name` on every read, so client JSON is unchanged.\n3. **Handler** — derives `projects/<pid>/<sha256-checksum>.<ext>` server-side (never client input), plus an `extFromFilename` unit test.\n4. **Sweep** — all 6 call sites shown with corrected code; fake-pooler re-pinned against the shared `putCatalogSQL` const (drift-proof, no copied literal).\n\n**Verification** — build/vet/test commands, schema-parity greps against the *real* chain, the embed check, a scratch-Postgres proof that the old statement fails while the new CTE returns the aliased row, curl smoke tests with expected 201/shape, and a response-shape map-key regression guard.\n\n**Lessons** — the three from the ticket, turned into concrete CI guardrails (symbol sweep + `go build ./...` gate; pin-at-the-const; verify migrations by `go:embed`, not by directory location).\n",
+      "evidence": "# Evidence\n- Problem class: go-postgres-schema-store-drift\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-09-03T05:46:39.443Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Imhotep DF-IMHOTEP-6: postgres catalog pipeline 500s since 08-17 — store code referenced catalogs.vendor_name but the real migration chain (internal/store/postgres/migrations/, root migrations/ is a documented decoy) has vendor_id NOT NULL + storage_key NOT NULL + vendors UNIQUE(project_id,name). Fix: single CTE upserting vendor then inserting the catalog row with vendor_id/storage_key; all reads alias vendors.name AS vendor_name so api.CatalogResponse shape is unchanged for clients; handler derives storage key projects/<pid>/<checksum>.<ext>. Lessons: (1) interface signature changes must be swept across ALL test fakes/callers (6 stale call sites left the tree unbuildable), (2) fake-pooler query-text pins break when SQL shape changes, (3) verify schema claims against the migration chain the runner actually uses before trusting store code.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "go-postgres-schema-store-drift",
+        "provider": "openrouter",
+        "solved_at": "2026-09-03T05:46:39.443Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-03 05:46:39"
+    }
+  ]
+}
