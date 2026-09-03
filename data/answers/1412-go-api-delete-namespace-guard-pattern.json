@@ -1,0 +1,28 @@
+{
+  "class_id": 1412,
+  "title": "go-api-delete-namespace-guard-pattern",
+  "description": "go-api-delete-namespace-guard-pattern",
+  "created_at": "2026-09-03 03:51:29",
+  "answers": [
+    {
+      "answer_id": 1589,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. The deliverable is **`/home/kara/solution.md`** (self-contained, 331 lines). Note: no scheduler repo was mounted in this environment, so instead of patching code I built a scratch module (`/tmp/godelete`) and a raw SQLite probe (`/tmp/fkprobe`) and **empirically verified every claim** before writing the doc.\n\n## What was verified (not assumed)\n\n**SQLite probes (CLI, 92k tick rows):**\n- `DELETE` with `foreign_keys=ON` → `FOREIGN KEY constraint failed` — the `NO ACTION` tick blocker is real\n- `PRAGMA foreign_keys=OFF` inside a transaction → **silent no-op** (prints `1`, still ON) — the purge window must run in autocommit\n- Wrong order (`DELETE` first under FK-off) → `dangling members: 1` — proves `SET NULL` is skipped while OFF, hence \"unassign before the window\"\n- Soft delete (retained row) → members still point at it (`1`) — retained row never fires `SET NULL`; explicit `UPDATE` required\n- FK enforcement restored after the window → subsequent bare delete blocked again (no pool leak)\n\n**Go integration test (httptest, go-sqlite3, `go vet`/`gofmt` clean) — 6/6 pass:**\n- `404`-first on unknown id, `400` without `confirm=true`, `409` listing `[\"p-1\"]`\n- Soft delete: 204, row retained with `deleted_at`, 0 members\n- Purge: 204 through the FK-off window with 92k ticks, 0 dangling members; FK back ON afterwards\n\n## Key fixes in the solution\n1. **Route** `DELETE /api/v1/namespaces/{id}` with guards: 404-first existence → confirm gate (400) → 409 listing enabled member projects → purge/soft branch (DOGFOOD-009 pattern).\n2. **Soft delete**: tombstone + *explicit* `UPDATE projects SET namespace_id=NULL` in one tx — never rely on `ON DELETE SET NULL` for a retained row.\n3. **Purge**: pin one `*sql.Conn` (PRAGMA is per-connection — pooled `db.Exec` would silently no-op), unassign members **before** `PRAGMA foreign_keys=OFF`, `DELETE`, then **deferred** restore of FK, plus `_foreign_keys=on` DSN hardening.\n4. **Verification section**: raw SQL/curl commands + CI regression guards, all with captured output matching what I ran.\n\nTwo extra insights the tests surfaced: the `:memory:` per-connection trap in Go tests (switched to temp-file DB), and the fact that your first instinct to purge ns-1 gets a legit 409 — the enabled member must be disabled first, which is exactly how the guard should behave.\n",
+      "evidence": "# Evidence\n- Problem class: go-api-delete-namespace-guard-pattern\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-09-03T03:51:29.229Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Exposed DELETE /api/v1/namespaces/{id} in the Go scheduler: DB soft-delete existed but the HTTP layer 405d. Mirror the DOGFOOD-009 project-delete guard pattern: 404-first existence check, confirm=true gate (400), 409 listing enabled member projects, purge=true hard delete with PRAGMA foreign_keys=OFF around the DELETE (namespace_ticks FK NO ACTION + 92k rows blocks it otherwise; PurgeProject precedent). Soft delete must explicitly UPDATE projects SET namespace_id=NULL — a retained row never fires ON DELETE SET NULL. Unassign members BEFORE the FK-disable window (SET NULL is skipped while foreign_keys=OFF).",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "go-api-delete-namespace-guard-pattern",
+        "provider": "openrouter",
+        "solved_at": "2026-09-03T03:51:29.229Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-03 03:51:29"
+    }
+  ]
+}

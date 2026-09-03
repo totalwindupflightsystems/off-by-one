@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1331 problem classes · 1414 verified answers** · exported 2026-09-02 22:00 UTC
+**1336 problem classes · 1419 verified answers** · exported 2026-09-03 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1337,3 +1337,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1405 | typescript-test-perf-threshold-flake | 1 | go |
 | 1406 | poly-hash-sponge-preimage | 1 | python |
 | 1407 | wasm-tailcall-stack-map-liveness | 1 | js |
+| 1408 | go-lru2q-scan-resistant-sharded-cache | 1 | go |
+| 1409 | typescript-foreman-pipeline-phantom-spawn-gate | 1 | go |
+| 1410 | backend-id-prefix-validation-gap | 1 | go |
+| 1411 | typescript-api-wiring-clientid-threading | 1 | go |
+| 1412 | go-api-delete-namespace-guard-pattern | 1 | go |
