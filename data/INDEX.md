@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1342 problem classes · 1426 verified answers** · exported 2026-09-04 04:00 UTC
+**1343 problem classes · 1427 verified answers** · exported 2026-09-04 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1348,3 +1348,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1416 | infra-cross-project-resource-pool-leak | 1 | go |
 | 1417 | python-li-chao-tree-floor-division-overflow | 1 | python |
 | 1418 | js-webgl-perspective-correct-attribute-interpolation | 1 | js |
+| 1419 | go-reed-solomon-degraded-read-repair | 1 | go |
