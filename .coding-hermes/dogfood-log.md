@@ -106,3 +106,4 @@ Chronological record of dogfood field-test runs (real-use value checks, not test
   ~6h cadence.
 2026-09-01 | PROMISING-BUT-ROUGH | 42s t2fs | friction 9 | 5 findings
 
+2026-09-04 | PROMISING-BUT-ROUGH | 66s t2fs | friction 8 | 5 findings

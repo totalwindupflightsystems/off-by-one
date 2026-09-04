@@ -4561,3 +4561,13 @@ Promise: {"entry_point":"Single Go binary cmd/off-by-one — an HTTP server (RES
 - [P1] PI_MODEL override is inert and README model resolution is fiction — README documents PI_MODEL as 'model override passed to pi verbatim' and claims the wrapper 'resolves the model per the available key' (deepseek path when DeepSeek key present); shipped code does neith
 - [P1] Solve failures are invisible to the submitter — Submit returns queued/estimated_time 30s; failure surfaces only in the server log and later queue polling, with status flipping queued → pending+stage queued → failed across endpoints. No return/notif
 - [P2] Weak error messages on documented routes — Invalid cadence 400 lists no accepted enum values (pre-phase/end-of-day/post-debug known only from docs); OpenRouter solve 404 'No endpoints available matching your guardrail restrictions and data pol
+
+## Dogfood Findings (2026-09-04)
+Verdict: PROMISING-BUT-ROUGH
+Promise: {"entry_point":"Single Go binary `off-by-one` (cmd/off-by-one) — an HTTP server (REST API on port 8766 with 15 endpoints: problems, queue, discover, taxonomy, stats, export/import, /health, /openapi.json) plus embedded web UI and an idle cron solver loop; the same binary has a `seed` subcommand that
+
+- [P1] Solve failures are silent — accepted submissions never surface a failure to the submitter — Queued submission reported estimated_time 30s but never solved (no API key in scratch env); the failure appears only in the server log ('cron: solve failed... no usable API key'). The submit flow as d
+- [P1] Solver is not auto-detected and Quick Start never wires it — A box with both bwrap and pi-agent on PATH still yields solver_available:false on bare ./off-by-one; only -pi-agent/-bwrap flags or OFF_BY_ONE_BWRAP/OFF_BY_ONE_PI_AGENT env vars enable the solver, and
+- [P2] seed is CWD-relative with no progress output — 'read corpus dir data/answers: open data/answers: no such file or directory' when run from /tmp (README doesn't say cd <repo>); the 32s run over 1343 files emits only a final log line, so the first do
+- [P2] Port collision is a dead end for new users — Port 8766 is occupied by the live fleet daemon and bare ./off-by-one dies with 'address already in use'; README Quick Start never mentions the --port flag, so the only recovery is reading further in d
+- [P2] Behavioral docs gaps: 409 dedup, cadence 400, web UI and health undiscoverable — Duplicate submit returns 409/deduplicated — correct but undocumented (README shows only the success shape); bad cadence 400 'ingest: invalid cadence' doesn't list allowed values (pre-phase/end-of-day/
