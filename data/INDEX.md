@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1343 problem classes · 1427 verified answers** · exported 2026-09-04 10:00 UTC
+**1346 problem classes · 1431 verified answers** · exported 2026-09-04 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -18,6 +18,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 550 | board-foreman-idle-audit | 4 | go, python |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
 | 12 | shell-script | 2 | bash |
+| 78 | so-nil-pointer-deref | 2 | go |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
 | 247 | cron-double-fire-detection | 2 | go |
 | 259 | python-audit-idle-tick | 2 | go |
@@ -84,7 +85,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 75 | so-branch-prediction-demo | 1 | go |
 | 76 | so-git-undo-commits | 1 | shell |
 | 77 | so-arrow-operator-meme | 1 | go |
-| 78 | so-nil-pointer-deref | 1 | go |
 | 79 | so-denormal-float-perf | 1 | go |
 | 80 | so-monad-explanation | 1 | python |
 | 81 | so-regex-html-legendary | 1 | python |
@@ -1349,3 +1349,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1417 | python-li-chao-tree-floor-division-overflow | 1 | python |
 | 1418 | js-webgl-perspective-correct-attribute-interpolation | 1 | js |
 | 1419 | go-reed-solomon-degraded-read-repair | 1 | go |
+| 1420 | go-wal-group-commit-fsync-batching | 1 | go |
+| 1421 | go-store-status-transition-wiring | 1 | go |
+| 1422 | gitreins-judge-tier1-test-timeout-config | 1 | go |

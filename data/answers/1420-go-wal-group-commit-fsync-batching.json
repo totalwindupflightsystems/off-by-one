@@ -1,0 +1,28 @@
+{
+  "class_id": 1420,
+  "title": "go-wal-group-commit-fsync-batching",
+  "description": "go-wal-group-commit-fsync-batching",
+  "created_at": "2026-09-04 10:28:25",
+  "answers": [
+    {
+      "answer_id": 1598,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. The solution is complete and fully verified.\n\n## Deliverables\n\n- **`/home/kara/solution.md`** — self-contained markdown: title, root-cause analysis, the exact fix (full `wal.go` + `wal_test.go` code), and a verification section.\n- **`/home/kara/wal/`** — working Go project (`go.mod`, `wal.go`, `wal_test.go`) that the markdown code was extracted from and re-verified against.\n\n## Root cause\n\n1. **Naive WAL** does one `fsync` per append under a global mutex → 100 fsyncs for 100 appends.\n2. **\"Leader flushes, followers wait\" alone fails**: with an injectable no-op fsync hook, the leader's flush is instant, so it races ahead of the followers and flushes tiny batches — measured **14 fsyncs** for 100 concurrent appends. The leader must wait for the **batch window to close**.\n3. **Crash recovery** needs framing (length + seq + CRC32) so a torn tail is truncated, never surfaced.\n\n## The fix\n\n- **Group commit**: first appender becomes batch leader; followers append to a shared pending buffer and wait on a condvar. The leader seals a batch only when it is **quiescent** (no new append for a grace period, with a max-wait cap for liveness), then writes the whole batch and issues **exactly one fsync** through the injectable `func() error` hook.\n- **Durability**: ack only after `flushedThrough` covers the record (i.e., after fsync). Seq numbers are assigned under the mutex in batch-seal order.\n- **Recovery**: maximal valid prefix — stops at the first incomplete, length-invalid, CRC-invalid, or out-of-sequence frame.\n\n## Verification (Go 1.26, `-race`, 10 consecutive runs)\n\n```\ngroup-commit: worst fsyncs for 100 concurrent appends over 50 rounds = 1\nlarge-scale: fsyncs for 500 concurrent appends = 1\nmixed-concurrency: recovered exactly records 1.. 200 after crash+reopen\ncrash-recovery: recovered exactly records 1.. 50 after torn tail ( 50 records)\nPASS  ok  wal  1.465s\n```\n\n- **Batching bound**: 100 concurrent appends → **1 fsync** (worst observed 1–2, always ≤ 3), even under `GOMAXPROCS=1` and the race detector.\n- **Crash-reopen durability**: recovery returns exactly the acknowledged prefix in sequence order — no missing records, no reordering, torn/corrupt tails dropped.\n\nRun it yourself with `cd /home/kara/wal && go test -test.v -race`.\n",
+      "evidence": "# Evidence\n- Problem class: go-wal-group-commit-fsync-batching\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-09-04T10:28:25.142Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement a write-ahead log with group commit: Append(record) must return only after the record is durable, and concurrent Appends landing in one batch window must share a single fsync via an injectable fsync hook, so that 100 concurrent appends trigger only a handful of fsyncs (e.g. <= 3), never one per append. Each record gets a monotonic sequence number in batch-seal order, and after a simulated crash (drop the file, no further writes) followed by reopen, the recovered log must be exactly the prefix of acknowledged records in sequence order — never missing an acknowledged record, never reordering, never surfacing a torn partial record. Deliver a Go test that counts fsyncs through the hook and proves both the batching bound and crash-reopen durability/ordering.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "go-wal-group-commit-fsync-batching",
+        "provider": "openrouter",
+        "solved_at": "2026-09-04T10:28:25.142Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-04 10:28:25"
+    }
+  ]
+}
