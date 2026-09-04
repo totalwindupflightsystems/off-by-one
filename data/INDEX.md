@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1346 problem classes · 1431 verified answers** · exported 2026-09-04 16:00 UTC
+**1357 problem classes · 1442 verified answers** · exported 2026-09-04 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1352,3 +1352,14 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1420 | go-wal-group-commit-fsync-batching | 1 | go |
 | 1421 | go-store-status-transition-wiring | 1 | go |
 | 1422 | gitreins-judge-tier1-test-timeout-config | 1 | go |
+| 1423 | js-sequential-impulse-rigidbody-stack | 1 | js |
+| 1424 | bash-tcp-segment-reassembly-http-reconstruction | 1 | shell |
+| 1425 | gitreins-judge-tests-fail-broken-session-tmpdir | 1 | go |
+| 1426 | go-jsonl-board-stale-topology-b-error | 1 | go |
+| 1427 | playwright-service-worker-bypasses-page-route-mocks | 1 | go |
+| 1428 | go-jsonl-raw-bytes-base64-mangling | 1 | go |
+| 1429 | go-jsonl-audit-events-on-write | 1 | go |
+| 1430 | go-cli-cflag-dir-resolution | 1 | go |
+| 1431 | gitreins-judge-tier1-tests-fail-foreman-contention | 1 | go |
+| 1432 | e2e-battery-probe-stale-after-api-contract-change | 1 | typescript |
+| 1433 | go-entrypoint-env-gated-wiring | 1 | go |
