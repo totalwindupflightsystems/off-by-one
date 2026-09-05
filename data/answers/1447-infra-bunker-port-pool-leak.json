@@ -1,0 +1,28 @@
+{
+  "class_id": 1447,
+  "title": "infra-bunker-port-pool-leak",
+  "description": "infra-bunker-port-pool-leak",
+  "created_at": "2026-09-05 04:31:30",
+  "answers": [
+    {
+      "answer_id": 1626,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. The solution is at `/home/kara/bunker-port-pool-leak-fix.md`.\n\n## What I did\n\n**Diagnosis (grounded in the actual 0.1.3 binary at `/usr/local/bin/bunkerd`, commit 33c9e00):**\n- Disassembled the relevant symbols (`resource.(*PortAllocator).Allocate/Free`, `agent.(*AgentManager).Spawn/Destroy/startTTLReaper/reapExpiredAgents`, `server.(*bunkerdService).ListAgents/DestroyAgent/SpawnAgent`) and extracted the proto/REST surface and config keys.\n- Confirmed the exact mechanism:\n  - Pool math `(30999-30000+1)/100 = 10` ranges vs `max_agents: 20` → ranges, not count, are the hard ceiling.\n  - `Allocate` runs first in `Spawn`, before capacity checks; failure string is exactly `no free port ranges available (pool exhausted: %d ranges)`.\n  - TTL → `expires_at = now + ttl` (ParseAgentTTL regex `^\\d+[hmd]$` or `default_ttl`); the 60s TTL reaper is the only cleanup and skips zero/missing `expires_at`, so expired agents keep their ranges pinned; `Destroy → Tracker.Unregister + PortAllocator.Free` is what returns a range.\n- Confirmed `bunker destroy` is safe on stale agents (tolerates missing OS user: `userdel failed, treating agent as not found`).\n\n**Verification:** No live bunkerd/Docker exists in this sandbox (systemd unit points at missing `/opt/bunker/bunkerd`), so I wrote a faithful simulator mirroring the disassembled allocator + reaper logic using the real config math and the binary's exact error strings. It reproduced the incident end-to-end: 10 leaks → `pool exhausted` on the 11th spawn → destroy-all-stale → probe spawn OK → destroy probe → pool 0/10. That trace is embedded in the doc's Appendix A.\n\n## Solution document contents\n- **Root cause** — per-agent range reservation, reaper failure, why count-based checks miss it (§2)\n- **Diagnose** — `bunker list` + `jq` cross-check of `expires_at` vs `now`, plus journal grep (§3)\n- **Fix** — destroy stale agents (one-liner + auditable version) (§4)\n- **Verification** — probe spawn → destroy probe → repeat, with expected outputs (§5)\n- **REST fallback** with verified connect endpoints (`/bunker.v1.Bunkerd/ListAgents|SpawnAgent|DestroyAgent`, Bearer token, JSON bodies) (§6)\n- **Escalation + hardening** — force flag, restart to clear in-memory allocator, alerts on pool exhaustion, heartbeat/upgrade/pool-sizing notes (§7–8)\n",
+      "evidence": "# Evidence\n- Problem class: infra-bunker-port-pool-leak\n- Model: openrouter/deepseek/deepseek-v4-flash-0731\n- Solved: 2026-09-05T04:31:29.821Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "bunkerd 0.1.3 on bunker-las-03: TTL-expired agent retains its port range and never auto-reaps; leaked ranges exhaust the 10-range pool so all spawns fail pool-exhausted while agent list looks nearly empty. Fix pattern: bunker list -> cross-check expires_at vs now -> destroy stale agents -> verify with a probe spawn -> destroy probe. Diagnose by spawn failure + expired agent, not by agent count.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4-flash-0731",
+        "problem_class": "infra-bunker-port-pool-leak",
+        "provider": "openrouter",
+        "solved_at": "2026-09-05T04:31:29.821Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-05 04:31:30"
+    }
+  ]
+}

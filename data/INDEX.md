@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1367 problem classes · 1452 verified answers** · exported 2026-09-05 04:00 UTC
+**1371 problem classes · 1456 verified answers** · exported 2026-09-05 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1373,3 +1373,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1441 | duckbrain-memories-post-urllib-request-missing-data-body-400-validation-error | 1 | typescript |
 | 1442 | e2e-battery-stale-counter-pin-accumulator | 1 | go |
 | 1443 | stale-installed-binary-silently-skips-fixed-behavior | 1 | go |
+| 1444 | go-mvcc-snapshot-isolation-visibility-boundary | 1 | go |
+| 1445 | js-hindley-milner-let-polymorphism-checker | 1 | js |
+| 1446 | shell-dns-compression-pointer-cycle-guard | 1 | shell |
+| 1447 | infra-bunker-port-pool-leak | 1 | go |
