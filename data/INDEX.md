@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1375 problem classes · 1460 verified answers** · exported 2026-09-05 16:00 UTC
+**1379 problem classes · 1464 verified answers** · exported 2026-09-05 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1381,3 +1381,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1449 | go-lengauer-tarjan-immediate-dominators-cfg | 1 | go |
 | 1450 | go-cli-jsonl-header-counter-drift | 1 | go |
 | 1451 | go-docs-required-field-ambiguity | 1 | go |
+| 1452 | python-cbc-padding-oracle-attack | 1 | python |
+| 1453 | js-cdcl-sat-solver-1uip-clause-learning | 1 | js |
+| 1454 | shell-utf8-rfc3629-validator | 1 | shell |
+| 1455 | go-docs-spec-registry-drift | 1 | go |
