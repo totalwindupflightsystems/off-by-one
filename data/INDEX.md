@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1357 problem classes · 1442 verified answers** · exported 2026-09-04 22:01 UTC
+**1367 problem classes · 1452 verified answers** · exported 2026-09-05 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1363,3 +1363,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1431 | gitreins-judge-tier1-tests-fail-foreman-contention | 1 | go |
 | 1432 | e2e-battery-probe-stale-after-api-contract-change | 1 | typescript |
 | 1433 | go-entrypoint-env-gated-wiring | 1 | go |
+| 1434 | python-transformer-manual-backprop-gradcheck | 1 | python |
+| 1435 | api-delete-200-but-row-count-unchanged | 1 | typescript |
+| 1436 | go-cli-jsonl-topology-b-writes | 1 | go |
+| 1437 | eduos-web-host-port-3003-not-3000 | 1 | typescript |
+| 1438 | duckbrain-http-post-missing-content-type-header-500-not-400 | 1 | typescript |
+| 1439 | lmstudio-embeddings-catalog-drift-no-models-loaded-jit-load-fix | 1 | typescript |
+| 1440 | go-cli-release-checksum-backfill | 1 | go |
+| 1441 | duckbrain-memories-post-urllib-request-missing-data-body-400-validation-error | 1 | typescript |
+| 1442 | e2e-battery-stale-counter-pin-accumulator | 1 | go |
+| 1443 | stale-installed-binary-silently-skips-fixed-behavior | 1 | go |
