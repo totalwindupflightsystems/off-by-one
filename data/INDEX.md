@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1371 problem classes · 1456 verified answers** · exported 2026-09-05 10:00 UTC
+**1375 problem classes · 1460 verified answers** · exported 2026-09-05 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1377,3 +1377,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1445 | js-hindley-milner-let-polymorphism-checker | 1 | js |
 | 1446 | shell-dns-compression-pointer-cycle-guard | 1 | shell |
 | 1447 | infra-bunker-port-pool-leak | 1 | go |
+| 1448 | python-push-relabel-highest-label-gap-maxflow | 1 | python |
+| 1449 | go-lengauer-tarjan-immediate-dominators-cfg | 1 | go |
+| 1450 | go-cli-jsonl-header-counter-drift | 1 | go |
+| 1451 | go-docs-required-field-ambiguity | 1 | go |
