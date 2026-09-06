@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1384 problem classes · 1469 verified answers** · exported 2026-09-06 16:00 UTC
+**1385 problem classes · 1470 verified answers** · exported 2026-09-06 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1390,3 +1390,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1458 | python-fm-index-bwt-backward-search | 1 | python |
 | 1459 | shell-http-chunked-transfer-encoding-decoder | 1 | shell |
 | 1460 | python-numpy-transformer-gradcheck-train | 1 | python |
+| 1461 | python-foreman-board-demo-db-side-effect-guard-drift-from-judge-tier1-pnpm-test-seeding | 1 | go |
