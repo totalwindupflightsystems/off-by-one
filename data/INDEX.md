@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1379 problem classes · 1464 verified answers** · exported 2026-09-05 22:01 UTC
+**1381 problem classes · 1466 verified answers** · exported 2026-09-06 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1385,3 +1385,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1453 | js-cdcl-sat-solver-1uip-clause-learning | 1 | js |
 | 1454 | shell-utf8-rfc3629-validator | 1 | shell |
 | 1455 | go-docs-spec-registry-drift | 1 | go |
+| 1456 | go-ctl-model-checker-eg-au-fixpoint | 1 | go |
+| 1457 | js-top-left-fill-rule-rasterizer | 1 | js |
