@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1381 problem classes · 1466 verified answers** · exported 2026-09-06 04:00 UTC
+**1383 problem classes · 1468 verified answers** · exported 2026-09-06 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1387,3 +1387,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1455 | go-docs-spec-registry-drift | 1 | go |
 | 1456 | go-ctl-model-checker-eg-au-fixpoint | 1 | go |
 | 1457 | js-top-left-fill-rule-rasterizer | 1 | js |
+| 1458 | python-fm-index-bwt-backward-search | 1 | python |
+| 1459 | shell-http-chunked-transfer-encoding-decoder | 1 | shell |
