@@ -4571,3 +4571,13 @@ Promise: {"entry_point":"Single Go binary `off-by-one` (cmd/off-by-one) — an H
 - [P2] seed is CWD-relative with no progress output — 'read corpus dir data/answers: open data/answers: no such file or directory' when run from /tmp (README doesn't say cd <repo>); the 32s run over 1343 files emits only a final log line, so the first do
 - [P2] Port collision is a dead end for new users — Port 8766 is occupied by the live fleet daemon and bare ./off-by-one dies with 'address already in use'; README Quick Start never mentions the --port flag, so the only recovery is reading further in d
 - [P2] Behavioral docs gaps: 409 dedup, cadence 400, web UI and health undiscoverable — Duplicate submit returns 409/deduplicated — correct but undocumented (README shows only the success shape); bad cadence 400 'ingest: invalid cadence' doesn't list allowed values (pre-phase/end-of-day/
+
+## Dogfood Findings (2026-09-07)
+Verdict: SHIPPABLE
+Promise: {"entry_point":"Single Go binary `off-by-one` (cmd/off-by-one): an HTTP server on port 8766 (REST API with 15 endpoints, embedded HTMX web UI, WebSocket chat, idle cron loop, Muster MCP auto-config via embedded OpenAPI spec) with a `seed` subcommand to load the bundled answer corpus; solving require
+
+- [P1] Port 8766 collision undocumented in Quick Start — Bare ./off-by-one on this host fails with 'listen tcp :8766: bind: address already in use' — live fleet daemon (PID 6689) holds 8766. -port flag and OFF_BY_ONE_PORT env exist in the flags table (READM
+- [P2] 'Embedded HTMX web UI' claim is inaccurate — Zero htmx references across the entire repo (grep .go/.html/.js/.md). The embedded UI is a vanilla-JS SPA (go:embed, 11 script tags, /js/*.js all 200, title 'Off-by-One — Pre-Solve Lab') — it works, b
+- [P2] seed corpus path is CWD-relative with cryptic failure — From any non-repo cwd, './off-by-one seed' fails with 'open data/answers: no such file or directory' (reproduced from /tmp). Works only because Quick Start does cd off-by-one; nothing documents the CW
+- [P2] API error messages omit allowed values; dedup 409 undocumented — Bad cadence → 400 'ingest: invalid cadence' without listing valid values (end-of-day/post-debug/pre-phase). Duplicate submit → 409 deduplicated, not mentioned in README submit section. Both are one-li
+- [P2] estimated_time is a fixed '30s' string, not derived — Submit response always claims 30s regardless of queue position or solver health; a keyless solve failed in ~1s (status:failed surfaced to API with started_at/completed_at — the prior silent-hang is fi
