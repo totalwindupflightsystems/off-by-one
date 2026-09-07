@@ -199,3 +199,43 @@ preflight test-write → scan → verify) and probed the lab's core loop live.
 3. `git log origin/master..HEAD` — unpushed work.
 4. `gh run list -R totalwindupflightsystems/off-by-one` — CI.
 5. Discover a real class — the loop's end-to-end proof.
+
+## 7. Export/import-focused field-test run — 2026-09-07 evening (dogfood #4) — verdict PROMISING-BUT-ROUGH
+
+**Why this run exists:** every prior dogfood run tested export/import only via the
+`501 not_configured` default path. The corpus-sharing workflow — the reason the
+export/import engines exist — had never been executed. This run spun a fully scratch
+instance (fresh seeded DB, dedicated port 18901, per-leg temp dirs) and drove both legs.
+
+**How this part is built (one paragraph):** both engines follow the same shape —
+`Config{RepoURL, Branch, LocalDir, SubtreePrefix, GitPath}` + a `prepareClone` that
+either fetches/pulls an existing clone in `LocalDir` or makes a fresh one, then walks
+the `pre-solve-answers/` subtree. Export serializes graph answers → flat files →
+commit → push; Import parses flat files → `importAnswer` upserts into the graph with
+content-diff dedup. The HTTP handlers in `internal/api/handlers.go` translate JSON
+requests into engine calls.
+
+### Errors hit this run, and what each means
+
+| Error | Meaning | Right way |
+|---|---|---|
+| `export_failed: export item class=0 answer=43: get problem class: graph: not found` (HTTP 500, EVERY request) | Handler bug, not your request: `handlers.go:788` builds `ExportItem{AnswerID}` with `ClassID` always 0; the engine then can't resolve class 0. Engine is fine — its tests pass `ClassID: pc.ID`. | None at API level as of `ad63507`. Use the graph → `scripts/export-answers.py` → git path, or fix DF-OFF-BY-ONE-6 (handler must resolve the answer's class before building items). |
+| `import` → `200 {"skipped":1}` for a **nonexistent** `source_repo` | Stale-clone reuse: `prepareClone` (import `git.go:196`) fetches/pulls the PREVIOUS import's origin; new URL never validated. First-import-to-dead-URL correctly 500s; the bug bites long-lived multi-import servers. | One source repo per `ImportLocalDir`; wipe the dir between sources until DF-OFF-BY-ONE-7 lands. Treat `skipped:1` on a first import as a red flag, not a dedup. |
+| `server error: listen tcp :PORT: bind: address already in use` (process dies after healthy-looking startup logs) | Port taken by another service. On this host 8766 = fleet daemon, 18767 = `crier`. | `ss -tlnp | grep <port>` BEFORE starting; pick a free port (`OFF_BY_ONE_PORT`). |
+| `q=raft&env=linux` → 0 results | Not a search bug: list filters match STORED `env` values; corpus is overwhelmingly `env:"docker"` while README's submit example uses `"environment": "linux"`. | Filter with values that exist in the store (check `data/answers/*.json`), or read DF-OFF-BY-ONE-9 for the docs fix. |
+
+### Layer-lesson (why "all tests green" hid a P0)
+
+The export engine is covered by tests that always pass `ClassID: pc.ID` (they test the
+engine through its real contract). The HTTP handler is covered by tests that only assert
+400/501. Nobody tested handler + engine together on the success path — exactly the
+L1-syntax → L2-runs → L3-works-for-a-user gap. The fix for the process, and the reason
+this file exists: drive the DOCUMENTED workflow end-to-end on a scratch instance, as a
+user would, and record what actually came back.
+
+### What worked (the import leg is genuinely good)
+
+Hand-authored community answer repo in the documented flat-file format → `POST
+/api/v1/import` → `added:1` → `discover` → `found:true` with full solution/evidence/
+signatures in ~90s start-to-finish. Re-import dedups via content diff (`skipped:1`).
+The parse-upsert pipeline and the flat-file contract are solid and contributor-friendly.

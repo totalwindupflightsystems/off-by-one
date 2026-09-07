@@ -108,3 +108,9 @@ Chronological record of dogfood field-test runs (real-use value checks, not test
 
 2026-09-04 | PROMISING-BUT-ROUGH | 66s t2fs | friction 8 | 5 findings
 2026-09-07 | SHIPPABLE | n/a t2fs | friction 0 | 5 findings
+2026-09-07 (evening) | PROMISING-BUT-ROUGH | ~90s t2fs (scratch :18901 up → import 200 added:1) | friction 4 | 4 findings (1 P0)
+  Focus: export/import git round trip — never exercised by prior runs (they hit only the 501-unconfigured path).
+  Promise: docs/integration.md §Import/Export corpus sharing. Import leg HOLDS end-to-end; export leg FAILS on every request (handler drops ClassID → 500; DF-OFF-BY-ONE-6). Import from bogus source_repo silently 200s via stale-clone reuse (DF-OFF-BY-ONE-7). commit_message accepted-then-ignored + internal-leaking 500 (DF-OFF-BY-ONE-8). integration.md example = the 500ing shape; env-filter vocabulary nuance (DF-OFF-BY-ONE-9).
+  What worked: scratch seed 14s → server on 18901 → hand-authored community answer repo → import 200 added:1 → discover found:true instantly → re-import dedup skipped:1. q= search matches answer bodies. Web UI 200. No code fixed (user rule); findings on board.
+  SKIPPED-install-bunker: bunker-las-03 offline 16h (ssh timeout ×2 + tailscale state). Install leg unproven this run.
+  Artifacts: docs/dogfood/2026-09-07b-integration.md, diagnostics.md §7, tasks.md evening section, board DF-6..9, this log.

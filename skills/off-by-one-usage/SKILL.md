@@ -152,7 +152,24 @@ Full API on a throwaway DB, no sandbox/keys. Data survives restarts (SQLite WAL)
 - `docs/dogfood/2026-08-10-integration.md` — run #1 full evidence
 - `docs/dogfood/2026-08-20-integration.md` — run #2 full evidence
 - `docs/dogfood/2026-08-30-integration.md` — run #3 (sync-focused) evidence
+- `docs/dogfood/2026-09-07b-integration.md` — run #4 (export/import round trip)
 - `docs/dogfood/diagnostics.md` — build anatomy, error history, right ways
 - `.coding-hermes/dogfood-log.md` — verdict log per run
 - Board: `.coding-hermes/board/tasks.jsonl` (JSONL-canonical; `tasks.md` is a
   frozen legacy log — append tasks as JSONL rows, not markdown)
+
+## Export / import corpus sharing (verified live 2026-09-07)
+
+- **IMPORT works end-to-end**: author
+  `pre-solve-answers/{class-title}/{env}/{version}/{solution.md,evidence.md,signatures.json}`
+  in a git repo → `POST /api/v1/import {source_repo, branch, conflict_strategy:"skip"}` →
+  `added:1` → immediately discoverable. Re-import dedups (`skipped:1`).
+- **IMPORT pitfall**: after any successful import, a later import from a
+  nonexistent `source_repo` still returns `200 {"skipped":1}` — `prepareClone`
+  re-fetches the PREVIOUS origin and never validates the new URL. Use one
+  source repo per import dir; wipe the dir between sources (DF-OFF-BY-ONE-7).
+- **EXPORT is broken at the API layer** (as of `ad63507`):
+  `POST /api/v1/export` 500s on EVERY request — handler drops `ClassID`
+  (DF-OFF-BY-ONE-6). Skip it; the corpus ships as flat files under `data/answers/`
+  (regenerate via `python3 scripts/export-answers.py`) until the fix lands.
+- Both endpoints need `-export-dir`/`-import-dir` (or env) at start, else 501.
