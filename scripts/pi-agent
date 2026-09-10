@@ -69,7 +69,7 @@ function parseArgs(argv) {
 // pi needs a provider-qualified model; map bare ids here. Add entries as
 // needed for your provider.
 const MODEL_MAP = {
-  'deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4-flash-0731',
+  'deepseek-v4-flash': 'openrouter/deepseek/deepseek-v4.1-flash',
 };
 
 /**
@@ -90,6 +90,14 @@ function resolveModel(m) {
   // $PI_MODEL wins verbatim (caller's override).
   if (process.env.PI_MODEL && process.env.PI_MODEL.trim() !== '') {
     return process.env.PI_MODEL.trim();
+  }
+  if (m && MODEL_MAP[m]) {
+    // Key-aware upgrade path: when a real DEEPSEEK_API_KEY is present,
+    // prefer DeepSeek direct (cheaper lane) over the OpenRouter mirror.
+    if (m === 'deepseek-v4-flash' && isUsableKey(process.env.DEEPSEEK_API_KEY)) {
+      return 'deepseek/deepseek-flash';
+    }
+    return MODEL_MAP[m];
   }
   if (!m) return null;
   if (MODEL_MAP[m]) return MODEL_MAP[m];
@@ -229,18 +237,23 @@ function main() {
   if (opts['api-key']) {
     // Propagate the explicit key to every provider var pi could read.
     piEnv.OPENAI_API_KEY = opts['api-key'];
-    if (model.includes('openrouter')) {
+    if (model.startsWith('openrouter/')) {
       piEnv.OPENROUTER_API_KEY = opts['api-key'];
     } else {
       piEnv.DEEPSEEK_API_KEY = opts['api-key'];
     }
   }
-  // Provider env hygiene: `deepseek/deepseek-v4-flash` is registered under
-  // BOTH the deepseek and openrouter registries — pi resolves by which key
-  // is present, so the losing key must not leak into the sandbox env.
-  if (model.includes('openrouter')) {
+  // Provider is derived from the model prefix — never hardcoded. Bare
+  // `deepseek-v4-flash` was resolved above to a provider-qualified id.
+  const provider = model.startsWith('openrouter/') ? 'openrouter'
+    : model.startsWith('deepseek/') ? 'deepseek'
+    : 'openrouter';
+  // Provider env hygiene: `deepseek/...` ids are registered under
+  // BOTH the deepseek and openrouter registries — pi resolves by which
+  // key is present, so the losing key must not leak into the sandbox env.
+  if (provider === 'openrouter') {
     delete piEnv.DEEPSEEK_API_KEY;
-  } else if (model.startsWith('deepseek/')) {
+  } else {
     delete piEnv.OPENROUTER_API_KEY;
   }
 
@@ -264,7 +277,7 @@ function main() {
 
   const deadlineMs = 25 * 60 * 1000; // under the server's 30m solve timeout
 
-  const piArgs = ['--provider', 'openrouter', '--model', model, '--print', prompt];
+  const piArgs = ['--provider', provider, '--model', model, '--print', prompt];
   // npm-layout installs run under node; ELF installs run directly.
   const childBin = piBin.isJs ? process.execPath : piBin.bin;
   const childArgs = piBin.isJs ? [piBin.bin, ...piArgs] : piArgs;
@@ -327,7 +340,7 @@ function main() {
         language: problem.language || '',
         version: problem.version || '',
         model,
-        provider: 'openrouter',
+        provider,
         solved_at: new Date().toISOString(),
       }, null, 2) + '\n');
     }
