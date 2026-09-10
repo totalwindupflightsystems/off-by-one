@@ -162,6 +162,12 @@
           chatSend.disabled = true;
           chatInput.placeholder = 'Chat disabled on this catalog';
           appendMessage('system', 'The AI agent is disabled on this read-only catalog instance — the corpus is fully searchable.');
+          // Dead panel is a distraction: start the sidebar collapsed on
+          // read-only catalogs (desktop included). The toggle button
+          // still works for anyone who wants to peek at the message.
+          document.body.classList.add('chat-collapsed');
+          var toggleBtn = document.getElementById('chat-toggle');
+          if (toggleBtn) toggleBtn.textContent = '»';
           return;
         }
         connect();
