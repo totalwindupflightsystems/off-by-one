@@ -86,15 +86,35 @@ function isUsableKey(value) {
   return !markers.some((m) => lower.includes(m));
 }
 
+function validateProblem(problem) {
+  if (!problem || typeof problem !== 'object' || Array.isArray(problem)) {
+    return 'expected a JSON object';
+  }
+  const hasText = (v) => typeof v === 'string' && v.trim() !== '';
+  const contextPresent =
+    problem.context && typeof problem.context === 'object' &&
+    !Array.isArray(problem.context) && Object.keys(problem.context).length > 0;
+  if (!hasText(problem.problem_class)) {
+    return 'missing required field "problem_class"';
+  }
+  if (!hasText(problem.description) && !hasText(problem.error_message) &&
+      !hasText(problem.stack_trace) && !contextPresent) {
+    return 'missing problem content (description/error_message/stack_trace/context)';
+  }
+  return null;
+}
+
 function resolveModel(m) {
   // $PI_MODEL wins verbatim (caller's override).
   if (process.env.PI_MODEL && process.env.PI_MODEL.trim() !== '') {
     return process.env.PI_MODEL.trim();
   }
   if (m && MODEL_MAP[m]) {
-    // Key-aware upgrade path: when a real DEEPSEEK_API_KEY is present,
-    // prefer DeepSeek direct (cheaper lane) over the OpenRouter mirror.
-    if (m === 'deepseek-v4-flash' && isUsableKey(process.env.DEEPSEEK_API_KEY)) {
+    // Lane priority: OpenRouter's V4.1-flash mirror is the fast, proven
+    // agentic lane (fits the 300s bwrap cap); DeepSeek direct resolves to
+    // the same V4.1 generation but runs long (thinking mode) — use it as
+    // the fallback when no usable OpenRouter key is present.
+    if (m === 'deepseek-v4-flash' && !isUsableKey(process.env.OPENROUTER_API_KEY) && isUsableKey(process.env.DEEPSEEK_API_KEY)) {
       return 'deepseek/deepseek-flash';
     }
     return MODEL_MAP[m];
@@ -176,7 +196,18 @@ function main() {
     process.exit(2);
   }
 
-  const problem = JSON.parse(fs.readFileSync(problemFile, 'utf8'));
+  let problem;
+  try {
+    problem = JSON.parse(fs.readFileSync(problemFile, 'utf8'));
+  } catch (err) {
+    process.stderr.write(`pi-agent: problem file is not valid JSON: ${err.message}\n`);
+    process.exit(2);
+  }
+  const problemError = validateProblem(problem);
+  if (problemError) {
+    process.stderr.write(`pi-agent: invalid problem file ${problemFile}: ${problemError}\n`);
+    process.exit(2);
+  }
   const model = resolveModel(modelArg);
   if (!model) {
     process.stderr.write(`pi-agent: cannot resolve model "${modelArg}" to a provider-qualified id\n`);
@@ -255,6 +286,21 @@ function main() {
     delete piEnv.DEEPSEEK_API_KEY;
   } else {
     delete piEnv.OPENROUTER_API_KEY;
+  }
+
+  // Guard: the selected provider must still have a usable key after
+  // hygiene. Without this, forcing a lane via PI_MODEL (or --api-key with a
+  // non-matching provider) silently deletes the only key and pi later fails
+  // with "No API key found" long after the wrapper reported success.
+  const providerKey =
+    provider === 'openrouter' ? piEnv.OPENROUTER_API_KEY : piEnv.DEEPSEEK_API_KEY;
+  if (!isUsableKey(providerKey)) {
+    process.stderr.write(
+      `pi-agent: model "${model}" selects the ${provider} provider but no usable ` +
+      `${provider === 'openrouter' ? 'OPENROUTER_API_KEY' : 'DEEPSEEK_API_KEY'} is available ` +
+      '(missing, placeholder, or removed by provider hygiene)\n'
+    );
+    process.exit(2);
   }
 
   // PI_CODING_AGENT_DIR isolation: a stale ~/.pi/agent store (from ANY
