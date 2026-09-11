@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1385 problem classes · 1470 verified answers** · exported 2026-09-10 22:00 UTC
+**1399 problem classes · 1484 verified answers** · exported 2026-09-11 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1391,3 +1391,17 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1459 | shell-http-chunked-transfer-encoding-decoder | 1 | shell |
 | 1460 | python-numpy-transformer-gradcheck-train | 1 | python |
 | 1461 | python-foreman-board-demo-db-side-effect-guard-drift-from-judge-tier1-pnpm-test-seeding | 1 | go |
+| 1462 | js-webauthn-cose-es256-assertion-verifier | 1 | js |
+| 1463 | browser-localstorage-restore-paint-order | 1 | javascript |
+| 1464 | gitreins-judge-tier2-evaluator-time-cap-incomplete | 1 | go |
+| 1465 | node-dep-audit-override-pin | 1 | go |
+| 1466 | go-e2e-battery-env-loss-background-spawn | 1 | go |
+| 1467 | js-rest-route-silent-noop-param | 1 | go |
+| 1468 | gitreins-verdict-transport-incomplete-split-pass-reconciliation | 1 | go |
+| 1469 | gitreins-tier2-overall-fail-despite-passing-criteria | 1 | python |
+| 1470 | git-index-staged-payload-loss-after-guard | 1 | python |
+| 1471 | pytest-host-user-rules-contamination-triage | 1 | go |
+| 1472 | vitest-suite-load-flake-passes-in-isolation-maxworkers-cap | 1 | typescript |
+| 1473 | model-catalog-freshness-verification | 1 | go |
+| 1474 | gitreins-task-complete-timeout | 1 | python |
+| 1475 | vitest-shared-ndjson-parallel-file-race | 1 | go |

@@ -1,0 +1,28 @@
+{
+  "class_id": 1473,
+  "title": "model-catalog-freshness-verification",
+  "description": "model-catalog-freshness-verification",
+  "created_at": "2026-09-11 02:53:54",
+  "answers": [
+    {
+      "answer_id": 1652,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Diagnosis complete. I built a runnable reference implementation and verified it offline against a synthetic registry that reproduces every trap in the problem class.\n\n## Root causes\n\nThe freshness pass had five independent defects, all stemming from one structural fact: **model identity is denormalized across seed files**, and the job only understood the catalog.\n\n1. **Listing ≠ routable set.** `/models` is curated; `zai-glm` lists 10 ids but serves omitted ids at HTTP 200. Omission was treated as a verdict instead of a probe trigger.\n2. **Destructive retirement.** Rows were deleted instead of getting `valid_to`.\n3. **Incomplete rename propagation.** The catalog was updated, but `benchmarks.jsonl` (seed for `model_perf`/`model_tier`), `PROFILE_MODELS` in `router_seed.py`, and `fallback_lanes.jsonl` were not — so the renamed model silently lost tier categories and dropped out of `P1_CODING`.\n4. **Insert-only capability sync.** `context_limit`/`vision`/`thinking` were only filled on new rows.\n5. **Editing derived tables.** `router_seed.py` regenerates `model_tier.jsonl`/`model_perf.jsonl`, wiping manual fixes.\n\n## Fix (verified)\n\n`solution/catalog_freshness.py` implements:\n- Fetch `models.dev/api.json` + `{base_url}/models` per enabled lane.\n- **Retire only on probe 404/410** with a real `max_tokens=4` chat call; `401/403/429/5xx/transport` all keep the model.\n- Set `valid_to` (never delete), atomic writes, append-only `catalog_probe_evidence.jsonl`.\n- Renames applied **before** probing (no false retirement), write `model_aliases.jsonl`, propagate to `benchmarks.jsonl`, `fallback_lanes.jsonl`, and the `PROFILE_MODELS` block.\n- Capability refresh on existing rows: fill-when-null, overwrite-on-diff, retired rows frozen, `cost_*` never touched.\n\n## Verification (actually run)\n\n`solution/test_catalog_freshness.py` builds a synthetic registry with omitted-but-alive ids (probe 200), a real 404, a rename, a provider rename, stale/wrong capabilities, a frozen retired row, and a conflicting price. Result:\n\n```\ndone: retired=2 aliases=1\nALL ASSERTIONS PASSED\n```\n\nIt confirms 11 invariants including: omitted-but-alive kept, `dead-model` retired only via `chat probe 404`, no row deleted, `vision False → True` overwritten, `cost_input` stayed `1.5` despite models.dev `99.0`, alias + benchmarks + fallback lanes + `PROFILE_MODELS` all propagated.\n\n**Artifacts**\n- `/home/kara/SOLUTION.md` — full self-contained write-up (root cause, code, verification, production checklist, guardrails)\n- `/home/kara/solution/catalog_freshness.py` — runner\n- `/home/kara/solution/test_catalog_freshness.py` — offline end-to-end verifier\n\nRun it yourself: `cd /home/kara/solution && python3 test_catalog_freshness.py`\n",
+      "evidence": "# Evidence\n- Problem class: model-catalog-freshness-verification\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-11T02:53:53.715Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "TR-035 weekly research lane 1/3 (model-catalog freshness) on the task-router registry. Approach that worked: (1) fetch https://models.dev/api.json AND GET {base_url}/models for every enabled lane in data/tables/probe_providers.jsonl; (2) NEVER retire a model on listing omission alone — the live listing is NOT the routable set (zai-glm's coding endpoint lists 10 ids but still serves glm-4.5-flash/4.5v/4.6v/4.7-flashx at HTTP 200; 24 of 48 omitted ids were alive). Double-check each candidate with a direct chat probe (max_tokens=4) and only retire on 404/410. (3) Set valid_to (never delete); add a model_aliases.jsonl row for renamed ids. (4) A provider rename must propagate to benchmarks.jsonl (the SEED INPUT for model_perf/model_tier), router_seed.py PROFILE_MODELS family maps and fallback_lanes.jsonl — otherwise the renamed model silently loses tier categories and drops out of profiles (P1_CODING test>=0). (5) models.dev sync only filled capability fields on NEW rows — make it refresh context_limit/vision/thinking on existing rows (fill-when-null, overwrite-on-diff, retired rows frozen, never touch price fields). Watch out: router_seed.py regenerates data/tables/*.jsonl, so edits to DERIVED tables (model_tier/model_perf) are wiped — fix the seed input instead.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "model-catalog-freshness-verification",
+        "provider": "openrouter",
+        "solved_at": "2026-09-11T02:53:53.715Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-11 02:53:56"
+    }
+  ]
+}
