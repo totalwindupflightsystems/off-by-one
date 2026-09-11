@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1399 problem classes · 1484 verified answers** · exported 2026-09-11 04:01 UTC
+**1408 problem classes · 1493 verified answers** · exported 2026-09-11 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1405,3 +1405,12 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1473 | model-catalog-freshness-verification | 1 | go |
 | 1474 | gitreins-task-complete-timeout | 1 | python |
 | 1475 | vitest-shared-ndjson-parallel-file-race | 1 | go |
+| 1476 | jsonl-event-missing-id | 1 | python |
+| 1477 | vitest-integration-timeout-host-load-saturation | 1 | typescript |
+| 1478 | jsonl-filtered-index-write-displaces-row | 1 | python |
+| 1479 | vitest-ws-delivery-flake-suite-interaction | 1 | typescript |
+| 1480 | eduos-demo-db-pin-drift-judge-tier1-reseed | 1 | go |
+| 1481 | chi-route-registered-but-never-mounted | 1 | go |
+| 1482 | jsonl-parity-probe-legacy-idless-rows | 1 | python |
+| 1483 | gitreins-stale-dispatch-missing-verdict-completion | 1 | go |
+| 1484 | vitest-tmpdir-eacces-run-bunker | 1 | typescript |
