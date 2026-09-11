@@ -422,4 +422,3 @@ func TestStore_Stats_ExcludesFailedSignature(t *testing.T) {
 		t.Errorf("HitRate = %.3f, want ≈%.3f (must be < 1.0 while failed-verified rows exist)", got, want)
 	}
 }
-
