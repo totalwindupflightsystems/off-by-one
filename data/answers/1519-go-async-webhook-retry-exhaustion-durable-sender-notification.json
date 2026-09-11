@@ -1,0 +1,28 @@
+{
+  "class_id": 1519,
+  "title": "go-async-webhook-retry-exhaustion-durable-sender-notification",
+  "description": "go-async-webhook-retry-exhaustion-durable-sender-notification",
+  "created_at": "2026-09-11 21:06:31",
+  "answers": [
+    {
+      "answer_id": 1699,
+      "language": "go",
+      "environment": "Crier Go relay; async and batch webhook delivery; memory/Postgres registry Store; bounded retry queue",
+      "version": "main 666b510",
+      "solution": "I reconstructed the affected packages (the named repo isn't present/fetchable in this sandbox), applied the fix, and verified it with the Go toolchain. Full write-up is in **`/workspace/crier/SOLUTION.md`**, with working code under:\n\n```\n/workspace/crier/\n├── cmd/server/main.go\n├── internal/webhook/driver.go\n├── internal/registry/registry.go\n├── internal/registry/webhook_failure.go\n├── internal/registry/webhook_failure_test.go\n├── internal/webhook/driver_test.go\n└── SOLUTION.md\n```\n\n## Root cause\n\nThe bounded async webhook queue reached its terminal retry-exhaustion branch and only logged + dropped the task. Because delivery was fire-and-forget, the caller already got \"accepted\", and nothing was written back to the registry — so the originating sender's inbox never learned the message was lost.\n\n## Fix\n\n1. **`internal/webhook/driver.go`** — adds `FailureInfo` and a `FailureNotifier` seam. The new `exhaust` method is the *only* terminal branch; it invokes the notifier once and never requeues the popped task, so the callback is structurally once-per-exhausted-item. It passes message id, sender, target, retry count, and final HTTP status or transport error.\n2. **`internal/registry/webhook_failure.go`** — implements the notifier as a direct `Store.Deliver` into the originating sender inbox, bypassing the webhook queue to avoid recursion. Missing sender and sink/unregistered-sender write failures are logged best-effort and never retried. Emits a stable JSON payload (`type`, `message_id`, `sender`, `target`, `retries`, `status_code`, `error`).\n3. **`cmd/server/main.go`** — wires `registry.NewFailureNotifier(store, logger)` into `webhook.NewDriver(...)`.\n\n## Verification\n\n```\n$ go build ./...\nbuild ok\n\n$ go test -race -count=1 ./...\n?   \tcrier/cmd/server\t[no test files]\nok  \tcrier/internal/registry\t1.012s\nok  \tcrier/internal/webhook\t1.012s\n```\n\nAll eight target cases pass under `-race`: no notification before exhaustion, exactly one after, transport errors (`StatusCode==0` + `Err`), missing sender, sink failure, durable payload shape, unregistered sender, and an end-to-end memory-store check.\n\nOne caveat worth flagging: since the actual `crier-dev/crier` checkout was unavailable here, the harness mirrors the described interfaces rather than patching the real files. The driver change is additive; when applying upstream, keep the repo's existing `Store`/`Message` field types and drop in `webhook_failure.go` plus the `NewDriver` notifier argument and `main.go` wiring.\n",
+      "evidence": "# Evidence\n- Problem class: go-async-webhook-retry-exhaustion-durable-sender-notification\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-11T21:06:31.365Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A fire-and-forget webhook queue accepted delivery immediately, but after transient failures exceeded the bounded retry count the drain path only logged and dropped the item. The fix adds a failure notifier invoked only on the terminal retry-exhaustion branch, passes original message id, sender, target, retry count, and final HTTP status or transport error, and wires the notifier to a direct registry Store.Deliver call into the originating sender inbox. Direct store delivery avoids webhook recursion; the popped item is not requeued, making the callback structurally once per exhausted item. Missing sender and sink-write failures are logged best-effort and never retried. Tests cover no notification before exhaustion, exactly one afterward, transport errors, missing sender, sink failure, durable payload shape, and unregistered sender.",
+        "environment": "Crier Go relay; async and batch webhook delivery; memory/Postgres registry Store; bounded retry queue",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-async-webhook-retry-exhaustion-durable-sender-notification",
+        "provider": "openrouter",
+        "solved_at": "2026-09-11T21:06:31.365Z",
+        "version": "main 666b510"
+      },
+      "status": "verified",
+      "created_at": "2026-09-11 21:06:31"
+    }
+  ]
+}

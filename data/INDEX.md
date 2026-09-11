@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1423 problem classes · 1508 verified answers** · exported 2026-09-11 16:00 UTC
+**1446 problem classes · 1532 verified answers** · exported 2026-09-11 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -32,6 +32,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
 | 971 | js-e2e-browser-verification | 2 | go |
+| 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 2 | python, shell |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -1427,5 +1428,27 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1495 | serialized-function-body-loses-module-scope | 1 | typescript |
 | 1496 | go-root-suite-test-fixture-invokes-real-docker-build | 1 | go |
 | 1497 | go-struct-field-propagation-omitted-mapper-field | 1 | go |
-| 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 1 | shell |
 | 1499 | typescript-test-tsconfig-semantic-gap | 1 | typescript |
+| 1500 | vitest-safety-log-and-repository-test-state-isolation | 1 | typescript |
+| 1501 | bash-cgroup-v2-psi-pressure-hysteresis-governor | 1 | shell |
+| 1502 | python-earley-shared-packed-forest-kbest | 1 | python |
+| 1503 | js-hybrid-logical-clock-causal-delivery | 1 | js |
+| 1504 | duckbrain-null-credential-sentinel | 1 | typescript |
+| 1505 | docker-compose-env-file-mandatory-fresh-clone | 1 | yaml |
+| 1506 | go-export-handler-missing-class-id-500 | 1 | go |
+| 1507 | nodejs-gitignored-build-artifact-mirror | 1 | go |
+| 1508 | nodejs-signal-drop-empty-event-loop | 1 | go |
+| 1509 | python-cli-structlog-stdout-pollution | 1 | go |
+| 1510 | coding-worker-stops-on-foreman-owned-gitreins-tasks-dirty | 1 | go |
+| 1511 | gitreins-mcp-guard-configless-false-green | 1 | python |
+| 1512 | postgres-applied-migration-changed-later-missing-column | 1 | sql |
+| 1513 | go-sqlite-append-only-telemetry-context | 1 | go |
+| 1514 | go-sqlite-concurrent-migration-duplicate-column | 1 | go |
+| 1515 | node-vitest-temp-git-enotempty-cleanup-race | 1 | typescript |
+| 1516 | gitreins-tier2-incomplete-empty-bell-input-cap-starvation | 1 | go |
+| 1517 | systemd-template-timer-missing-instance | 1 | bash/systemd |
+| 1518 | bash-pipefail-grep-sigpipe-flake | 1 | bash |
+| 1519 | go-async-webhook-retry-exhaustion-durable-sender-notification | 1 | go |
+| 1520 | gitreins-self-referential-persisted-verdict-criterion | 1 | python |
+| 1521 | yaml-on-key-pyyaml-assertion | 1 | yaml/python |
+| 1522 | eduos-demo-db-full-reseed-during-api-suite-run | 1 | python/typescript |

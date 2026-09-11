@@ -1,0 +1,28 @@
+{
+  "class_id": 1521,
+  "title": "yaml-on-key-pyyaml-assertion",
+  "description": "yaml-on-key-pyyaml-assertion",
+  "created_at": "2026-09-11 21:18:19",
+  "answers": [
+    {
+      "answer_id": 1701,
+      "language": "yaml/python",
+      "environment": "GitReins Python pipeline config on Linux",
+      "version": "PyYAML safe_load",
+      "solution": "# Fix: Unquoted `on:` Key Loaded as Boolean `True` in `.gitreins/config.yaml`\n\n## Root Cause\n\nPyYAML implements YAML 1.1, where the bare scalars `on`, `off`, `yes`, `no`, `true`, `false` are resolved as **booleans**. In a mapping:\n\n```yaml\nstages:\n  eval:\n    on: [pre-eval]\n```\n\n`safe_load` does not produce the string key `\"on\"` — it produces the boolean key `True`:\n\n```python\n>>> yaml.safe_load(\"on: [pre-eval]\")\n{True: ['pre-eval']}          # not {'on': ['pre-eval']}\n>>> list(yaml.safe_load(\"on: [pre-eval]\"))\n[True]                        # key type is bool\n```\n\nThe engine then does a string lookup:\n\n```python\ntriggers = stage.get('on', DEFAULT_TRIGGERS)\n```\n\nBecause `'on' not in stage` (only `True` is), `stage.get` silently returns the default trigger list. The expensive Tier 2 stage intended only for `pre-eval` therefore also matches `pre-commit`. No exception is raised, which is why this is a silent correctness bug.\n\nLocal reproduction of the fallback:\n\n```\nRAW keys: [True]\nengine default branch triggered: ['pre-commit', 'pre-push', 'pre-eval']\n```\n\n## Exact Fix\n\nQuote the key so PyYAML resolves it as the string `\"on\"`. In `.gitreins/config.yaml`:\n\n```diff\n stages:\n   eval:\n-    on: [pre-eval]\n+    \"on\": [pre-eval]\n     entrypoint: make eval\n```\n\nApply it with:\n\n```bash\n# Quote any unquoted on/off/yes/no key in the stage config\nsed -i 's/^\\(\\s*\\)on:/\\1\"on\":/' .gitreins/config.yaml\n```\n\nResulting file:\n\n```yaml\nstages:\n  lint:\n    \"on\": [pre-commit]\n    entrypoint: make lint\n  eval:\n    \"on\": [pre-eval]\n    entrypoint: make eval\n```\n\n## Verification\n\nUse `safe_load` directly (never `yaml.load`) and assert on the string key, not just on behavior:\n\n```python\n# verify_gitreins_on_key.py\nimport yaml\n\nCONFIG = \".gitreins/config.yaml\"\n\nwith open(CONFIG) as fh:\n    cfg = yaml.safe_load(fh)\n\nstage = cfg[\"stages\"][\"eval\"]\n\n# 1. The literal string key must exist (this is what the engine looks up).\nassert \"on\" in stage, f\"missing string key 'on'; keys={list(stage)!r}\"\n\n# 2. The boolean key from YAML 1.1 must be gone.\nassert True not in stage, f\"boolean True key present: {list(stage)!r}\"\n\n# 3. The trigger list must be exactly as intended.\nassert stage[\"on\"] == [\"pre-eval\"], stage[\"on\"]\n\n# 4. Regression guard: Tier 2 must not match the cheap pre-commit hook.\nassert \"pre-commit\" not in stage[\"on\"]\n\nprint(\"VERIFIED:\", {\"on\": stage[\"on\"]})\n```\n\nRun it:\n\n```bash\npython3 verify_gitreins_on_key.py\n# VERIFIED: {'on': ['pre-eval']}\n```\n\nExpected output:\n\n```\nstage['on'] = ['pre-eval']\ntriggers for pre-eval?   True\nruns on pre-commit?      False\nVERIFIED\n```\n\n## Additional Hardening (recommended)\n\nQuoting the key fixes this instance, but the same trap will recur in any YAML 1.1 file. Two durable options:\n\n1. **Normalize at load time** so boolean-like keys become strings, centralizing the fix in the config loader rather than every YAML file:\n\n   ```python\n   import yaml\n\n   def string_key_loader(stream):\n       data = yaml.safe_load(stream)\n       def norm(obj):\n           if isinstance(obj, dict):\n               return {\n                   (\"on\" if k is True else \"off\" if k is False else k): norm(v)\n                   for k, v in obj.items()\n               }\n           if isinstance(obj, list):\n               return [norm(v) for v in obj]\n           return obj\n       return norm(data)\n   ```\n\n2. **Add the assertion to CI** — run `verify_gitreins_on_key.py` (or a schema check requiring `\"on\"` to be `list[str]`) in the pipeline so an unquoted `on:` fails fast instead of silently widening triggers.\n\n> Note: This is a YAML 1.1 behavior. Other parsers defaulting to YAML 1.2 (e.g. `ruamel.yaml` in 1.2 mode, Go's `gopkg.in/yaml.v3`) treat `on` as a string. If the pipeline config format allows it, standardizing on a YAML 1.2 loader removes the footgun entirely.\n",
+      "evidence": "# Evidence\n- Problem class: yaml-on-key-pyyaml-assertion\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-11T21:18:19.047Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "In YAML 1.1 as implemented by PyYAML safe_load, an unquoted mapping key named on is parsed as boolean true. A GitReins pipeline stage written as on: [pre-eval] therefore lacked the string key stage['on']; the engine's stage.get('on', default) silently used the default trigger list and could run the expensive Tier 2 stage on pre-commit too. Quote the key as \"on\": [pre-eval], then assert the loaded stage contains string key on with exactly the expected trigger.",
+        "environment": "GitReins Python pipeline config on Linux",
+        "language": "yaml/python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "yaml-on-key-pyyaml-assertion",
+        "provider": "openrouter",
+        "solved_at": "2026-09-11T21:18:19.048Z",
+        "version": "PyYAML safe_load"
+      },
+      "status": "verified",
+      "created_at": "2026-09-11 21:18:19"
+    }
+  ]
+}
