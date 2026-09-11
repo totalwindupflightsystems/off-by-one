@@ -387,6 +387,191 @@ func TestDiscover_Found(t *testing.T) {
 	}
 }
 
+// boolPtr returns a pointer to b, for the optional include_related
+// request field (a *bool so "absent" is distinguishable from false).
+func boolPtr(b bool) *bool { return &b }
+
+// TestDiscover_EmptyArraysPresent locks the published DiscoverResponse
+// contract: a successful discover always carries `related` and
+// `version_warnings` as JSON arrays, even when the class has no edges
+// and no version warnings (OB-GAP-058).
+func TestDiscover_EmptyArraysPresent(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	seedClass(t, store, "no-edges", "no edges", "docker", "go", "1.0", "sol", graph.AnswerVerified)
+	body := discoverRequest{
+		ProblemClass: "no-edges",
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "1.0",
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/discover", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+	}
+
+	// Raw-body check: both keys must exist and be literal empty arrays.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw: %v, body = %s", err, rr.Body.String())
+	}
+	for _, key := range []string{"related", "version_warnings"} {
+		v, ok := raw[key]
+		if !ok {
+			t.Errorf("body = %s: key %q missing, want an array", rr.Body.String(), key)
+			continue
+		}
+		if got := strings.TrimSpace(string(v)); got != "[]" {
+			t.Errorf("%s = %s, want [] (empty array, not omitted/null)", key, got)
+		}
+	}
+
+	// Typed check: decoding must not yield nil slices (the wire value
+	// was null) — the empty-array contract is what clients depend on.
+	var resp discoverResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode typed: %v", err)
+	}
+	if resp.Related == nil {
+		t.Error("related decoded nil; want non-nil empty slice")
+	}
+	if resp.VersionWarnings == nil {
+		t.Error("version_warnings decoded nil; want non-nil empty slice")
+	}
+}
+
+// TestDiscover_RelatedEdgeHonored verifies populated related edges
+// still surface, and that include_related=false yields an EMPTY ARRAY
+// (not an omitted key) rather than dropping the field.
+func TestDiscover_RelatedEdgeHonored(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	classA, _ := seedClass(t, store, "class-a", "a", "docker", "go", "1.0", "solA", graph.AnswerVerified)
+	classB, _ := seedClass(t, store, "class-b", "b", "docker", "go", "1.0", "solB", graph.AnswerVerified)
+	if _, err := store.CreateEdge(context.Background(), classA, classB, graph.EdgeSameRootCause, 0.8); err != nil {
+		t.Fatalf("create edge: %v", err)
+	}
+
+	// include_related=true -> the seeded edge is returned.
+	rr := do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{
+		ProblemClass:   "class-a",
+		Environment:    "docker",
+		Language:       "go",
+		Version:        "1.0",
+		IncludeRelated: boolPtr(true),
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("include_related=true: status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var withEdges discoverResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &withEdges); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(withEdges.Related) != 1 {
+		t.Fatalf("include_related=true: related len = %d, want 1, body = %s", len(withEdges.Related), rr.Body.String())
+	}
+	if withEdges.Related[0].ProblemClass != "class-b" {
+		t.Errorf("related[0].problem_class = %q, want class-b", withEdges.Related[0].ProblemClass)
+	}
+	if withEdges.Related[0].Relationship != graph.EdgeSameRootCause {
+		t.Errorf("related[0].relationship = %q, want %q", withEdges.Related[0].Relationship, graph.EdgeSameRootCause)
+	}
+
+	// include_related=false -> key present, array empty.
+	rr = do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{
+		ProblemClass:   "class-a",
+		Environment:    "docker",
+		Language:       "go",
+		Version:        "1.0",
+		IncludeRelated: boolPtr(false),
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("include_related=false: status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	v, ok := raw["related"]
+	if !ok {
+		t.Fatalf("include_related=false: body = %s, want key \"related\" present", rr.Body.String())
+	}
+	if got := strings.TrimSpace(string(v)); got != "[]" {
+		t.Errorf("include_related=false: related = %s, want []", got)
+	}
+	var withoutEdges discoverResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &withoutEdges); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(withoutEdges.Related) != 0 {
+		t.Errorf("include_related=false: related len = %d, want 0", len(withoutEdges.Related))
+	}
+	if withoutEdges.Related == nil {
+		t.Error("include_related=false: related decoded nil; want non-nil empty slice")
+	}
+}
+
+// TestDiscover_VersionWarning verifies a seeded superseded_by edge to a
+// class whose verified answer is a different version produces a
+// non-empty version_warnings array.
+func TestDiscover_VersionWarning(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	classA, _ := seedClass(t, store, "class-a", "a", "docker", "go", "1.0", "solA", graph.AnswerVerified)
+	classB, _ := seedClass(t, store, "class-b", "b", "docker", "go", "2.0", "solB", graph.AnswerVerified)
+	if _, err := store.CreateEdge(context.Background(), classA, classB, graph.EdgeSupersededBy, 0.9); err != nil {
+		t.Fatalf("create edge: %v", err)
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{
+		ProblemClass: "class-a",
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "1.0",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var resp discoverResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.VersionWarnings) == 0 {
+		t.Fatalf("version_warnings = %v, want at least one warning, body = %s", resp.VersionWarnings, rr.Body.String())
+	}
+	if !strings.Contains(resp.VersionWarnings[0], "2.0") {
+		t.Errorf("version_warnings[0] = %q, want it to mention the newer version 2.0", resp.VersionWarnings[0])
+	}
+}
+
+// TestDiscover_VersionWarningsEmptyPresent verifies version_warnings is
+// still an empty array (not omitted, not null) when the superseded_by
+// target carries no differing version.
+func TestDiscover_VersionWarningsEmptyPresent(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	classA, _ := seedClass(t, store, "class-a", "a", "docker", "go", "1.0", "solA", graph.AnswerVerified)
+	classB, _ := seedClass(t, store, "class-b", "b", "docker", "go", "1.0", "solB", graph.AnswerVerified)
+	if _, err := store.CreateEdge(context.Background(), classA, classB, graph.EdgeSupersededBy, 0.9); err != nil {
+		t.Fatalf("create edge: %v", err)
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{
+		ProblemClass: "class-a",
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "1.0",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	v, ok := raw["version_warnings"]
+	if !ok {
+		t.Fatalf("body = %s, want key \"version_warnings\" present", rr.Body.String())
+	}
+	if got := strings.TrimSpace(string(v)); got != "[]" {
+		t.Errorf("version_warnings = %s, want [] (same version on both sides -> no warning)", got)
+	}
+}
+
 func TestDiscover_NotFound(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	body := discoverRequest{ProblemClass: "no-such-class"}

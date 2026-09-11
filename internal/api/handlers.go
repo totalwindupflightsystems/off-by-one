@@ -69,11 +69,17 @@ type relatedEntry struct {
 }
 
 // discoverResponse mirrors DiscoverResponse. Found=false signals 404.
+//
+// Related and VersionWarnings carry no `omitempty`: the published
+// contract (pkg/api/openapi.yaml, docs/api-reference.md) always emits
+// both keys as JSON arrays, so an edge-less class must return
+// `"related":[]` and an unwarned lookup `"version_warnings":[]` rather
+// than dropping the keys or emitting null (OB-GAP-058).
 type discoverResponse struct {
 	Found           bool           `json:"found"`
 	Answer          *answerWire    `json:"answer,omitempty"`
-	Related         []relatedEntry `json:"related,omitempty"`
-	VersionWarnings []string       `json:"version_warnings,omitempty"`
+	Related         []relatedEntry `json:"related"`
+	VersionWarnings []string       `json:"version_warnings"`
 }
 
 // answerWire is the JSON shape of an answer. Signatures is a
@@ -374,7 +380,15 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	out := discoverResponse{Found: res.Exact != nil}
+	// Initialize both collection fields to non-nil empty slices so the
+	// response always honors the published array contract, even when
+	// include_related=false or the class has no related edges /
+	// version warnings (OB-GAP-058).
+	out := discoverResponse{
+		Found:           res.Exact != nil,
+		Related:         []relatedEntry{},
+		VersionWarnings: []string{},
+	}
 	if res.Exact != nil {
 		out.Answer = answerToWire(res.Exact, slug)
 	}
@@ -386,7 +400,11 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 			Relevance:    re.Weight,
 		})
 	}
-	out.VersionWarnings = res.VersionWarnings
+	// Only overwrite the empty default when discovery actually produced
+	// warnings — a nil result would otherwise serialize as null.
+	if res.VersionWarnings != nil {
+		out.VersionWarnings = res.VersionWarnings
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 
