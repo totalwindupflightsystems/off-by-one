@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1047,6 +1049,126 @@ func TestExportBadRequest(t *testing.T) {
 	s.Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("malformed JSON: status = %d, want 400", w.Code)
+	}
+}
+
+// TestExportSuccess verifies the full export path end-to-end: a seeded
+// class + verified answer, a real local bare git repo as target_repo,
+// and a POST that must return 200 with a commit SHA and files_changed
+// (regression: the handler used to build ExportItem with ClassID always
+// 0, so every export request died with 500 export_failed).
+func TestExportSuccess(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed — skipping export integration test")
+	}
+	// Engine runs plain `git commit`; pin identity so the commit does
+	// not depend on ambient ~/.gitconfig.
+	t.Setenv("GIT_AUTHOR_NAME", "Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
+	t.Setenv("GIT_COMMITTER_NAME", "Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.com")
+
+	s, store, _ := newTestServer(t)
+	s.ExportLocalDir = t.TempDir()
+
+	ctx := context.Background()
+	pc, created, err := store.UpsertProblemClass(ctx, "export-handler-class", "handler success-path class")
+	if err != nil {
+		t.Fatalf("UpsertProblemClass: %v", err)
+	}
+	if !created {
+		t.Fatal("expected class to be created")
+	}
+	answerID, err := store.CreateAnswerNode(ctx, pc.ID, 0,
+		"docker", "go", "go-1.26",
+		"Use `COPY --chown=appuser:appuser` in Dockerfile.",
+		"Verified in Docker 24.0+.",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+	if err := store.UpdateAnswerStatus(ctx, answerID, graph.AnswerVerified); err != nil {
+		t.Fatalf("UpdateAnswerStatus: %v", err)
+	}
+
+	// Seed a bare repo with one commit so the engine can clone + push.
+	remote := initBareRepoForHandler(t, "main")
+	seedBareRepoForHandler(t, remote, "main")
+
+	rresp := do(t, s, "POST", "/api/v1/export", exportRequest{
+		TargetRepo: remote,
+		AnswerIDs:  []int64{answerID},
+	})
+	if rresp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rresp.Code, rresp.Body.String())
+	}
+	var body exportResponse
+	if err := json.Unmarshal(rresp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.CommitSHA == "" {
+		t.Error("commit_sha is empty")
+	}
+	if body.FilesChanged < 1 {
+		t.Errorf("files_changed = %d, want >= 1", body.FilesChanged)
+	}
+
+	// Unknown answer_id is a client error (4xx), not a 500 export_failed.
+	rresp = do(t, s, "POST", "/api/v1/export", exportRequest{
+		TargetRepo: remote,
+		AnswerIDs:  []int64{answerID + 9999},
+	})
+	if rresp.Code < 400 || rresp.Code >= 500 {
+		t.Errorf("unknown answer_id: status = %d, want 4xx; body: %s", rresp.Code, rresp.Body.String())
+	}
+}
+
+// initBareRepoForHandler creates a bare git repo with HEAD on branch.
+func initBareRepoForHandler(t *testing.T, branch string) string {
+	t.Helper()
+	dir := t.TempDir()
+	barePath := filepath.Join(dir, "remote.git")
+	cmd := exec.Command("git", "init", "--bare", "-b", branch, barePath)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v\n%s", err, out)
+	}
+	return barePath
+}
+
+// seedBareRepoForHandler pushes an initial commit to the bare repo so
+// the engine's clone --branch succeeds.
+func seedBareRepoForHandler(t *testing.T, barePath, branch string) {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "clone", barePath, dir).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v\n%s", err, out)
+	}
+	for _, args := range [][]string{
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", args[0], err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test Repo\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	for _, args := range [][]string{
+		{"add", "."},
+		{"commit", "-m", "initial"},
+		{"branch", "-M", branch},
+		{"push", "origin", branch},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", args[0], err, out)
+		}
 	}
 }
 

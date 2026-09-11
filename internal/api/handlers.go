@@ -783,9 +783,21 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve each answer's class before building the ExportItem — the
+	// export engine needs a valid ClassID to lay out the subtree; a
+	// missing answer is a client error (404), not an export failure.
 	items := make([]export.ExportItem, len(req.AnswerIDs))
 	for i, id := range req.AnswerIDs {
-		items[i] = export.ExportItem{AnswerID: id}
+		answer, err := s.Store.GetAnswerNode(r.Context(), id)
+		if err != nil {
+			if errors.Is(err, graph.ErrNotFound) {
+				writeError(w, http.StatusNotFound, "answer_not_found", fmt.Sprintf("answer %d not found", id))
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "lookup_failed", err.Error())
+			return
+		}
+		items[i] = export.ExportItem{AnswerID: id, ClassID: answer.ClassID}
 	}
 
 	engine := export.NewEngine(export.Config{
