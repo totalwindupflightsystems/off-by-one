@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1408 problem classes · 1493 verified answers** · exported 2026-09-11 10:00 UTC
+**1423 problem classes · 1508 verified answers** · exported 2026-09-11 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1414,3 +1414,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1482 | jsonl-parity-probe-legacy-idless-rows | 1 | python |
 | 1483 | gitreins-stale-dispatch-missing-verdict-completion | 1 | go |
 | 1484 | vitest-tmpdir-eacces-run-bunker | 1 | typescript |
+| 1485 | df-off-by-one-1-live-probe | 1 | go |
+| 1486 | gitreins-judge-cap-artifact-single-criterion | 1 | go |
+| 1487 | go-boot-sweep-marks-running-runs-failed | 1 | go |
+| 1488 | go-fresh-db-write-503-fk-missing-seed-user | 1 | go |
+| 1489 | python-rich-table-column-overflow | 1 | go |
+| 1490 | js-config-silent-fallback-to-default | 1 | go |
+| 1491 | yaml-mirror-user-rules-override | 1 | go |
+| 1492 | typescript-pnpm-phantom-dependency | 1 | go |
+| 1493 | rust-graph-go-file-package-resolution | 1 | go |
+| 1494 | gitreins-commit-cli-single-positional-message | 1 | go |
+| 1495 | serialized-function-body-loses-module-scope | 1 | typescript |
+| 1496 | go-root-suite-test-fixture-invokes-real-docker-build | 1 | go |
+| 1497 | go-struct-field-propagation-omitted-mapper-field | 1 | go |
+| 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 1 | shell |
+| 1499 | typescript-test-tsconfig-semantic-gap | 1 | typescript |
