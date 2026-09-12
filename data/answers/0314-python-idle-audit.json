@@ -5,22 +5,6 @@
   "created_at": "2026-08-01 15:36:32",
   "answers": [
     {
-      "answer_id": 400,
-      "language": "go",
-      "environment": "docker",
-      "version": "latest",
-      "solution": "**No fix exists to apply — the audit FAILED before any code review because the described project is absent from the environment.**\n\nThe tick claims an `h3-sdk-python` completed project with a specific verified state (106/106 tests, 76% coverage, ruff 0, idempotent `generate`, Hilo 94/21, guard PASS, pip-audit clean, CI 3 green, cooldown 7200, `fleet.toml` pinned, DuckDB board writes, board-only commit with co-author, push). The approach mandated is to *re-verify every claim fresh*, never copying prior tick numbers. Fresh verification is impossible here:\n\n- `/home/kara` (the working directory) contains only `.local/` and `.pi/` — no repo, no source tree.\n- No `pyproject.toml`, `fleet.toml`, `requirements*.txt`, `*.duckdb`, `*.parquet`, or `.git` exists anywhere accessible on the filesystem.\n- No `generate` or `guard` scripts exist, so their idempotency/PASS claims cannot be checked.\n- `pip-audit` is not even importable (`ModuleNotFoundError: No module named 'pip_audit'`).\n\nThere is no code, so there is no defect to fix and no remediation patch can be written. The correct action for an idle audit under these conditions is to **fail loudly with evidence** rather than fabricate verification of a state that does not exist on disk. If a project were meant to be present, remediation is provisioning the repo (clone/restore `h3-sdk-python` into the workspace) and *then* running the audit commands — never asserting pass based on the ticket's own numbers.",
-      "evidence": "All commands executed fresh in `/home/kara` (never copying tick #41's numbers):\n\n| Check | Command | Actual result |\n|---|---|---|\n| Tests | `python3 -m pytest` | `collected 0 items` — **0 tests exist** (claim: 106/106) |\n| Lint | `ruff check .` | \"All checks passed!\" — vacuous: zero project Python files |\n| Format | `ruff format --check .` | Flags only unrelated vendored `.local/bin/jp.py`; no project tree |\n| Generate | `ls generate*` | `no generate script` — idempotency unverifiable |\n| Guard | `ls guard*` | `no guard script` — guard PASS unverifiable |\n| Supply-chain | `pip-audit` | `ModuleNotFoundError: No module named 'pip_audit'` — tool not installed |\n| VCS | `git status` | `fatal: not a git repository` — no commit/co-author/push possible |\n| Board | `ls *.duckdb *.parquet` | none — no DuckDB event/parquet writes exist |\n| Config | `ls fleet.toml` | `no fleet.toml` — cooldown 7200 pinning unverifiable |\n\n**Edge cases tested:** full-filesystem search for `fleet.toml`, `pyproject.toml`, `.git` dirs, DuckDB/parquet artifacts (only system `lib/python*` test fixtures matched, excluded as non-project); git identity/config absent; `$HOME` writable but empty. Conclusion: this is a freshly provisioned, empty sandbox, not a \"completed project\" state. Reporting the claimed numbers as verified would be fabrication.",
-      "signatures": {
-        "model": "deepseek-v4-flash",
-        "problem_class": "python-idle-audit",
-        "result": "failed",
-        "tests": 0
-      },
-      "status": "verified",
-      "created_at": "2026-08-01 15:36:32"
-    },
-    {
       "answer_id": 507,
       "language": "go",
       "environment": "docker",
@@ -51,22 +35,6 @@
       },
       "status": "verified",
       "created_at": "2026-08-03 04:23:30"
-    },
-    {
-      "answer_id": 569,
-      "language": "go",
-      "environment": "docker",
-      "version": "latest",
-      "solution": "**Environment verdict: the `python-idle-audit` project is not present anywhere in this environment.** I performed a full inventory before attempting any fix (see EVIDENCE). There is no repository, no source tree, no fixtures, no board, and no test suite to run the 14-point gate against. The leftover shim binaries (`hermes-h3`, `ca9`, `ca9-mcp`) import `h3_shim` / `ca9`, but those packages are not installed — the environment was provisioned without the project payload.\n\nBecause no code exists to fix, fabricating a diff would be dishonest. What I can provide is the concrete fix this tick is described as carrying — the **idempotent board-update template script** — specified exactly to the four invariants named in the tick, so it drops in when the repo is restored:\n\n```sql\n-- board/templates/tick_upsert.sql\n-- Invariants:\n--   1. COUNT guard: fail the statement if the candidate window is not unique.\n--   2. COALESCE id: preserve the existing board row id instead of re-keying.\n--   3. naive-UTC last_tick: stored as ISO-8601 naive UTC from time.time()-style now.\n--   4. two-phase last_commit sync: last_commit only advances *after* the tick row is committed.\n\nBEGIN;\n\n-- Phase 1: deterministic single-row window resolution (both fixture windows open).\n-- Guard: exactly one candidate row must match the window key.\nSELECT COALESCE(\n    (SELECT id FROM board WHERE window_key = :window_key AND status = 'open'),\n    :new_uuid\n) INTO :resolved_id\nWHERE (SELECT COUNT(*) FROM board WHERE window_key = :window_key AND status = 'open') = 1;\n\n-- Phase 2a: insert the tick row, idempotent on the tick's natural key.\nINSERT INTO audit_tick (tick_no, window_id, last_tick_utc, status)\nVALUES (:tick_no, :resolved_id, :now_naive_utc, 'idle')\nON CONFLICT (tick_no, window_id) DO UPDATE\nSET last_tick_utc = EXCLUDED.last_tick_utc, status = 'idle';\n\nCOMMIT; -- phase-2a commit barrier: last_tick is durable before last_commit moves.\n\n-- Phase 2b: two-phase last_commit sync (only after commit succeeded).\nUPDATE board\nSET last_tick = :now_naive_utc,\n    last_commit = COALESCE(last_commit, :now_naive_utc)\nWHERE id = :resolved_id\n  AND last_tick < :now_naive_utc;   -- off-by-one safe: never regress a newer tick\n```\n\nThe wrapper driver (bash or Python, per repo convention) resolves `:now_naive_utc` via `datetime.utcnow().replace(tzinfo=None).isoformat()` and aborts with a non-zero exit and a `COUNT_GUARD_VIOLATION` diagnostic when the COUNT guard query returns 0 or >1 rows — turning the \"both fixture windows open\" condition into a loud failure rather than a silent mis-write. Idempotency is by natural key (`tick_no, window_id`) via `ON CONFLICT`, so re-running tick #190 N times converges to the same board state.",
-      "evidence": "Verification performed (all commands executed, all outputs negative):\n\n| Check | Command | Result |\n|---|---|---|\n| Working dir contents | `ls -la /home/kara` | only `.local/`, `.pi/` — no project |\n| Source trees anywhere | `find / -name \"pyproject.toml\" \\| grep -v /tmp/pi` | none |\n| Project markers | `find / -iname \"*idle*audit*\" -o -iname \"*board*\" -o -iname \"*fixture*\"` | none |\n| Gate identifiers | `grep -rliE \"gitreins\\|last_tick\\|deps-01\\|off.?by.?one.?health\" /home /tmp` | only the prompt file itself (plus a binary false positive in `~/.local/bin/dagger`) |\n| Git repos | `find / -type d -name \".git\"` (outside `/tmp/pi`) | none |\n| Shim packages | `python3 -c \"import h3_shim\"` | `ModuleNotFoundError` — `hermes-h3`/`ca9` binaries point at missing packages |\n| Remote fetch | `git ls-remote https://github.com/karaokenerd/python-idle-audit` | auth prompt → repo absent/unreachable |\n\nConsequences for the 14-point gate: **none of the 14 points are executable** — there is no test suite (so no 242/242), no `ruff`/`mypy` targets, no CLI, no docs, no CI, no issues, no `gitreins` 4/4, no off-by-one health probe, no ports, and no `DEPS-01` live re-verify. Claiming otherwise would require inventing results.\n\nEdge cases covered by the delivered template but **not runnable here** (documented for when the repo lands): re-run of an identical tick (natural-key conflict → no-op update); both windows open (COUNT guard → hard abort); window missing (COUNT = 0 → abort); `last_commit IS NULL` on first sync (`COALESCE` bootstrap); concurrent ticks racing `last_tick` (comparison `<` prevents regression); naive-UTC encoding (no tz-aware/naive comparison crash); phase ordering (last_commit advances only post-commit).\n\n**Verdict: this tick cannot pass — the project is absent. `result: failed`, not because the fix is wrong, but because there is nothing to fix against.**",
-      "signatures": {
-        "model": "deepseek-v4-flash",
-        "problem_class": "python-idle-audit",
-        "result": "failed",
-        "tests": 0
-      },
-      "status": "verified",
-      "created_at": "2026-08-03 06:02:11"
     }
   ]
 }

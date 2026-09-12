@@ -1,18 +1,17 @@
 # Off-by-One Answer Index
 
-**1458 problem classes · 1544 verified answers** · exported 2026-09-12 04:00 UTC
+**1446 problem classes · 1523 verified answers** · exported 2026-09-12 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|
-| 641 | python-aws-emulator-idle-audit | 22 | go, python |
-| 982 | python-sdk-e2e-battery | 13 | go |
-| 313 | python-audit-idle-maintenance | 8 | go |
+| 641 | python-aws-emulator-idle-audit | 19 | go, python |
+| 982 | python-sdk-e2e-battery | 12 | go |
+| 313 | python-audit-idle-maintenance | 7 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
-| 848 | go-cli-e2e-battery-harness | 7 | go |
+| 848 | go-cli-e2e-battery-harness | 6 | go |
 | 277 | python-sdk-idle-audit | 5 | go |
-| 314 | python-idle-audit | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
@@ -22,8 +21,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
 | 247 | cron-double-fire-detection | 2 | go |
 | 259 | python-audit-idle-tick | 2 | go |
+| 314 | python-idle-audit | 2 | go |
 | 334 | go-verification-double-fire | 2 | go |
-| 337 | h3-sdk-idle-audit-tick | 2 | go |
 | 355 | gitreins-judge-iteration-cap | 2 | go |
 | 383 | go-websocket-e2e-live-battery | 2 | go |
 | 390 | typescript-barrel-split | 2 | go |
@@ -204,7 +203,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 244 | jit-trace-linearizer | 1 | js |
 | 245 | lockfree-mpsc-bounded-queue | 1 | go |
 | 246 | zk-snark-verifier | 1 | python |
-| 248 | go-board-audit-idle-tick | 1 | go |
 | 249 | python-lint-remove-dead-noqa | 1 | go |
 | 250 | go-gitreins-judge-caps-sizing | 1 | go |
 | 251 | go-sql-duckdb-update-pk-constraint | 1 | go |
@@ -288,6 +286,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 333 | rust-deploy-stale-binary | 1 | go |
 | 335 | go-sqlite-db-split-workspace-lookup | 1 | go |
 | 336 | go-sqlite-multi-db-wiring | 1 | go |
+| 337 | h3-sdk-idle-audit-tick | 1 | go |
 | 338 | go-lint-errcheck-sweep | 1 | go |
 | 339 | board-hilo-metric-staleness | 1 | go |
 | 340 | go-tool-registry-schema-validation | 1 | go |
@@ -324,7 +323,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 372 | go-ci-locale-sort-determinism | 1 | go |
 | 373 | typescript-ui-mockup-parity-worker-stewardship | 1 | go |
 | 374 | ci-gh-repo-name-verification | 1 | go |
-| 375 | go-audit-tick-lean-verification | 1 | go |
 | 376 | go-cobra-flag-shorthand-collision | 1 | go |
 | 377 | typescript-backend-barrel-split | 1 | go |
 | 378 | go-benchmark-mock-fullcopy-sort | 1 | go |
@@ -336,7 +334,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 385 | typescript-idle-audit-config-drift | 1 | go |
 | 386 | go-sqlite-partial-unique-index-empty-string | 1 | go |
 | 387 | go-ci-windows-cross-platform | 1 | go |
-| 389 | audit-all-clean-tick | 1 | go |
 | 391 | go-docs-cli-surface-refresh | 1 | go |
 | 392 | docs-changelog-staleness | 1 | go |
 | 393 | python-cli-interruptor-e2e-battery | 1 | go |
@@ -380,7 +377,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 434 | go-middleware-skip-paths-auth-deadlock | 1 | go |
 | 435 | python-idle-audit-never-done | 1 | go |
 | 436 | python-gitreins-judge-tier1-test-timeout | 1 | go |
-| 437 | typescript-sdk-idle-audit | 1 | go |
 | 438 | go-scheduler-board-light-audit | 1 | go |
 | 439 | python-template-dependency-pin | 1 | go |
 | 440 | ci-go-test-per-package-timeout-edge | 1 | go |
@@ -400,7 +396,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 454 | godot-audit-idle-tick-jsonl-board | 1 | go |
 | 456 | go-yaml-ralph-loop-config-validation | 1 | go |
 | 458 | cli-warn-mode-silent-passthrough | 1 | go |
-| 459 | e2e-playwright-vitest-stack-run | 1 | go |
 | 460 | typescript-barrel-split-class-factory-full-parity | 1 | go |
 | 461 | go-spec-audit-verification | 1 | go |
 | 462 | go-e2e-api-battery | 1 | go |
@@ -420,7 +415,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 476 | python-gitleaks-config-regex | 1 | go |
 | 477 | python-security-pattern-gap-own-pgroup-kill | 1 | go |
 | 478 | typescript-barrel-split-file-lock | 1 | go |
-| 479 | go-idle-audit-gates | 1 | go |
 | 480 | go-sqlite-migration-schema-drift | 1 | go |
 | 481 | go-idle-audit | 1 | go |
 | 482 | typescript-e2e-fixture-run | 1 | go |
@@ -443,7 +437,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 499 | go-e2e-sandbox-pool-leak | 1 | go |
 | 500 | typescript-barrel-split-file-scope-judge | 1 | go |
 | 501 | python-packaging-hatchling-gitignore-wheel | 1 | go |
-| 502 | go-idle-audit-battery | 1 | go |
 | 503 | board-duckdb-parquet-idle-audit-append | 1 | go |
 | 504 | sql-rls-security-definer-bypass | 1 | go |
 | 505 | typescript-express-router-split | 1 | go |
@@ -456,12 +449,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 512 | go-sandbox-pool-leak-delete | 1 | go |
 | 513 | python-output-summary-tail | 1 | go |
 | 514 | go-maintenance-audit-idle-tick | 1 | go |
-| 515 | go-lint-goconst-slice | 1 | go |
 | 516 | typescript-barrel-split-submodule-class | 1 | go |
 | 517 | python-fleet-script-max-id-str-int | 1 | go |
 | 518 | js-sha256-length-extension-mac | 1 | js |
 | 519 | typescript-nl-date-parsing-regex | 1 | go |
-| 520 | typescript-module-split-zero-importer | 1 | go |
 | 521 | go-cli-e2e-json-wrapped-response | 1 | go |
 | 522 | go-lint-goconst-bulk-slice | 1 | go |
 | 523 | python-sdk-example-llmcalls-dicts | 1 | go |
@@ -680,7 +671,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 740 | javascript-nextjs-standalone-dynamic-imports | 1 | go |
 | 741 | typescript-cli-output-tree-renderer | 1 | go |
 | 742 | go-cli-progress-line-timing | 1 | go |
-| 743 | go-audit-neverdone-clean-gates | 1 | go |
 | 744 | python-subarray-divisible-negative-mod | 1 | python |
 | 745 | js-sliding-window-log-epoch-trap | 1 | js |
 | 746 | krakend-stale-config-after-bind-mount | 1 | go |
@@ -694,7 +684,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 754 | python-docs-vs-reality-route-inventory | 1 | go |
 | 755 | python-e2e-battery-due-cycle | 1 | go |
 | 756 | typescript-http-api-route-wrapping-mcp-tools | 1 | go |
-| 757 | go-audit-never-done-sweep | 1 | go |
 | 758 | python-rfc6979-deterministic-ecdsa-nonce | 1 | python |
 | 759 | docs-spec-inventory-stale-stub | 1 | go |
 | 760 | go-config-default-port-host-gateway-collision | 1 | go |
@@ -739,7 +728,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 800 | python-audit-never-done-clean-board | 1 | go |
 | 801 | typescript-vitest-live-benchmark-run-test-slow | 1 | go |
 | 802 | typescript-barrel-split-default-export-router | 1 | go |
-| 803 | typescript-barrel-split-25-symbol-llm-base | 1 | go |
 | 804 | docs-spec-count-drift | 1 | go |
 | 805 | js-vitest-period-filter-date-anchoring | 1 | go |
 | 806 | python-docs-battery-count-drift | 1 | go |
@@ -796,7 +784,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 858 | go-module-absolute-path-replace | 1 | go |
 | 859 | go-security-optin-auth-flag | 1 | go |
 | 860 | typescript-visual-regression-pagination-drift | 1 | go |
-| 861 | docs-health-example-drift | 1 | go |
 | 862 | crypto-aesgcm-timestamp-nonce-reuse | 1 | js |
 | 863 | shell-fifo-backpressure-deadlock | 1 | shell |
 | 864 | docs-test-count-drift-gitreins-criterion | 1 | go |
@@ -866,7 +853,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 929 | go-judge-live-verified-criterion | 1 | go |
 | 930 | js-websocket-frame-masking-bug | 1 | js |
 | 931 | go-gitreins-verdict-citation-integrity | 1 | go |
-| 932 | deployment-stale-binary-redeploy | 1 | go |
 | 933 | docs-readme-flag-table-drift | 1 | go |
 | 934 | board-jsonl-worker-status-normalization | 1 | go |
 | 935 | typescript-test-isolation-unique-slug-collision | 1 | go |
@@ -930,7 +916,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 995 | go-docs-toolchain-version-drift | 1 | go |
 | 996 | go-async-node-promise-swallow | 1 | go |
 | 997 | formal-buchi-emptiness-scc | 1 | python |
-| 998 | go-tests-lock-blocked-ddl-hang | 1 | go |
 | 999 | typescript-daemon-stale-after-commit | 1 | go |
 | 1000 | distributed-systems-iteration-budget-design-handoff | 1 | go |
 | 1001 | python-driver-cursor-timeout-kwarg | 1 | go |
@@ -1464,3 +1449,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1532 | jsonl-board-duplicate-task-id-last-write-wins-update | 1 | jsonl |
 | 1533 | spa-static-server-history-fallback-and-api-doc-parameter-drift | 1 | markdown |
 | 1534 | go-nested-pipeline-run-scope-cache-collision | 1 | go |
+| 1535 | distributed-raft-joint-consensus-membership-safety | 1 | python |
+| 1536 | go-cli-gitreins-judge-verdict-location | 1 | go |
+| 1537 | jsonl-partial-event-last-write-wins-generator | 1 | go |
