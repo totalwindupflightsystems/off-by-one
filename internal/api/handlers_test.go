@@ -581,6 +581,26 @@ func TestDiscover_NotFound(t *testing.T) {
 	}
 }
 
+// TestDiscover_PlaceholderClass_NotFound verifies that a placeholder
+// (self-test) class with a verified answer in the DB is served exactly
+// like an unknown class: 404 not_found (OB-GAP-061). Regression: a normal
+// class still discovers 200 found:true (covered by TestDiscover_Found).
+func TestDiscover_PlaceholderClass_NotFound(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	seedClass(t, store, "off-by-one-self-test", "probe", "", "", "", "placeholder solution", graph.AnswerVerified)
+	rr := do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{ProblemClass: "off-by-one-self-test"})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body = %s", rr.Code, rr.Body.String())
+	}
+	var errBody map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errBody["error"] != "not_found" {
+		t.Errorf("error = %v, want not_found", errBody["error"])
+	}
+}
+
 // --- Read-only catalog mode (OB-GAP-020) ---------------------------------
 
 // Discovery is a pure read, so it must keep working in read-only catalog
@@ -939,6 +959,40 @@ func TestListQueue(t *testing.T) {
 	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
 	if resp.Total != 2 {
 		t.Errorf("total = %d, want 2", resp.Total)
+	}
+}
+
+// TestListQueue_ExcludesPlaceholderClasses verifies placeholder-class
+// entries never appear in GET /api/v1/queue, non-placeholder entries are
+// unaffected, and Total/positions reflect the filtered set (OB-GAP-061).
+func TestListQueue_ExcludesPlaceholderClasses(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	for _, cls := range []string{"class-a", "off-by-one-self-test", "class-b"} {
+		body := submitProblemRequest{ProblemClass: cls, Cadence: ingest.CadencePrePhase}
+		rr := do(t, s, "POST", "/api/v1/problems/submit", body)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("submit %s: %d, body = %s", cls, rr.Code, rr.Body.String())
+		}
+	}
+	rr := do(t, s, "GET", "/api/v1/queue", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var resp queueListResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if resp.Total != 2 {
+		t.Errorf("total = %d, want 2 (placeholder filtered)", resp.Total)
+	}
+	for _, e := range resp.Entries {
+		if graph.IsPlaceholderClass(e.ProblemClass) {
+			t.Errorf("placeholder class %q leaked into queue listing", e.ProblemClass)
+		}
+	}
+	// Positions contiguous from 1 for the filtered set.
+	for i, e := range resp.Entries {
+		if e.Position != i+1 {
+			t.Errorf("entries[%d].position = %d, want %d", i, e.Position, i+1)
+		}
 	}
 }
 

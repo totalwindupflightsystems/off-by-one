@@ -315,6 +315,12 @@ func (q *Queue) Get(ctx context.Context, id string) (*Entry, error) {
 
 // List returns queue entries filtered by status (empty = all). Ordered
 // by priority DESC, created_at ASC.
+//
+// Placeholder (self-test/canary/probe) classes are filtered out BEFORE
+// limit/offset pagination so the public queue listing never leaks them and
+// positions stay contiguous (OB-GAP-061). Because the predicate is a Go
+// regexp (SQLite has no REGEXP), we fetch the full status-filtered set and
+// paginate in Go; queue sizes are small (hundreds of rows), so this is fine.
 func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]Entry, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
@@ -332,23 +338,35 @@ func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]E
 		qry += ` WHERE status = ?`
 		args = append(args, status)
 	}
-	qry += ` ORDER BY priority DESC, created_at ASC LIMIT ? OFFSET ?`
-	args = append(args, limit, offset)
+	qry += ` ORDER BY priority DESC, created_at ASC`
 
 	rows, err := q.db.QueryContext(ctx, qry, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list queue: %w", err)
 	}
 	defer rows.Close()
-	var out []Entry
+	var filtered []Entry
 	for rows.Next() {
 		e, err := scanEntryRows(rows)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, *e)
+		if graph.IsPlaceholderClass(e.ProblemClass) {
+			continue
+		}
+		filtered = append(filtered, *e)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if offset >= len(filtered) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	return filtered[offset:end], nil
 }
 
 // Depth returns the number of pending or in_progress entries in the

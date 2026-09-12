@@ -251,7 +251,7 @@ func TestStore_Discovery_ExactMatch(t *testing.T) {
 func TestStore_Discovery_WalksParentChain(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
-	cid, _ := s.CreateProblemClass(ctx, "test", "")
+	cid, _ := s.CreateProblemClass(ctx, "parent-chain", "")
 	a1, _ := s.CreateAnswerNode(ctx, cid, 0, "e", "l", "v1", "oldest", "", "{}")
 	a2, _ := s.CreateAnswerNode(ctx, cid, a1, "e", "l", "v2", "middle", "", "{}")
 	a3, _ := s.CreateAnswerNode(ctx, cid, a2, "e", "l", "v3", "newest", "", "{}")
@@ -262,7 +262,7 @@ func TestStore_Discovery_WalksParentChain(t *testing.T) {
 		}
 	}
 
-	res, err := s.Discovery(ctx, "test", "e", "l", "v3", false)
+	res, err := s.Discovery(ctx, "parent-chain", "e", "l", "v3", false)
 	if err != nil {
 		t.Fatalf("Discovery: %v", err)
 	}

@@ -559,6 +559,42 @@ func TestQueue_List_FilterByStatus(t *testing.T) {
 	}
 }
 
+// TestQueue_List_ExcludesPlaceholderClasses verifies List filters
+// placeholder-class entries BEFORE pagination: they are absent from the
+// result and do not consume limit/offset slots (OB-GAP-061).
+func TestQueue_List_ExcludesPlaceholderClasses(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+	for _, p := range []string{"real-a", "off-by-one-self-test", "real-b", "tick12-self-test"} {
+		if _, _, err := q.Submit(ctx, Submission{ProblemClass: p, Cadence: CadencePrePhase}); err != nil {
+			t.Fatalf("Submit %s: %v", p, err)
+		}
+	}
+
+	all, err := q.List(ctx, StatusPending, 100, 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("pending = %d, want 2 (placeholders filtered)", len(all))
+	}
+	for _, e := range all {
+		if graph.IsPlaceholderClass(e.ProblemClass) {
+			t.Errorf("placeholder %q leaked", e.ProblemClass)
+		}
+	}
+
+	// Pagination applies to the filtered set: limit=1/offset=1 must yield
+	// the second real entry, not a placeholder that sat between them.
+	page, err := q.List(ctx, StatusPending, 1, 1)
+	if err != nil {
+		t.Fatalf("List page: %v", err)
+	}
+	if len(page) != 1 || page[0].ID != all[1].ID {
+		t.Errorf("page = %v, want [all[1]]", page)
+	}
+}
+
 func TestSanitizeForID(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"file-ownership-after-container-transfer", "file-ownership-after-container-transfer"},

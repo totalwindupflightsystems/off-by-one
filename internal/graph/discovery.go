@@ -26,6 +26,13 @@ import (
 // env, lang, version may be empty. Empty values act as wildcards — the
 // query prefers more specific matches (filled in) over general ones.
 func (s *Store) Discovery(ctx context.Context, title, env, lang, version string, includeRelated bool) (*DiscoveryResult, error) {
+	// Placeholder (self-test/canary/probe) classes are served exactly like
+	// unknown classes: the handler maps ErrNotFound to 404. Their rows may
+	// still exist in the DB (live-DB pollution), but they are never answers
+	// (OB-GAP-061).
+	if IsPlaceholderClass(title) {
+		return nil, ErrNotFound
+	}
 	pc, err := s.GetProblemClassByTitle(ctx, title)
 	if err != nil {
 		return nil, err
