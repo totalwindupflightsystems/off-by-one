@@ -69,6 +69,11 @@ func (s *Store) Discovery(ctx context.Context, title, env, lang, version string,
 // rank by (env, lang, version) specificity: a row matching all three
 // beats one matching only env+lang, which beats one matching only env.
 // Within each specificity tier, the most recent verified answer wins.
+//
+// The signature backstop mirrors Store.Stats (store.go:491): status is
+// the primary signal, but an older binary could still have written a
+// verified-status row whose signature says result='failed'. Such a row
+// is not an answer and must not be served (OB-GAP-057).
 func (s *Store) bestAnswer(ctx context.Context, classID int64, env, lang, version string) (*AnswerNode, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, class_id, parent_id, env, lang, version, solution, evidence, signatures, status, created_at
@@ -78,6 +83,7 @@ func (s *Store) bestAnswer(ctx context.Context, classID int64, env, lang, versio
 		  AND (lang = ? OR ? = '')
 		  AND (version = ? OR ? = '')
 		  AND status IN ('verified', 'ci_passed')
+		  AND COALESCE(json_extract(signatures, '$.result'), '') != 'failed'
 		ORDER BY
 		  (CASE WHEN env = ? THEN 3 ELSE 0 END) +
 		  (CASE WHEN lang = ? THEN 2 ELSE 0 END) +

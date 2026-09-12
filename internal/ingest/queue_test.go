@@ -155,6 +155,68 @@ func TestQueue_Submit_DedupVerifiedAnswer(t *testing.T) {
 	}
 }
 
+// TestQueue_Submit_FailedSignatureDoesNotDedup guards OB-GAP-057 on the
+// dedup path: a stored row whose status says verified but whose signature
+// says result='failed' is not an answer, so it must not suppress a
+// re-submission of the same (class, env, lang, version) tuple. A row
+// with a passing signature still dedups.
+func TestQueue_Submit_FailedSignatureDoesNotDedup(t *testing.T) {
+	q, store := newTestQueue(t)
+	ctx := context.Background()
+
+	cid, err := store.CreateProblemClass(ctx, "failed-answer-class", "")
+	if err != nil {
+		t.Fatalf("create class: %v", err)
+	}
+	aid, err := store.CreateAnswerNode(ctx, cid, 0,
+		"docker", "go", "v1", "gave up", "", `{"result":"failed"}`)
+	if err != nil {
+		t.Fatalf("create answer: %v", err)
+	}
+	if err := store.UpdateAnswerStatus(ctx, aid, graph.AnswerVerified); err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+
+	// The failed-signature row must NOT dedup the submission.
+	id, _, err := q.Submit(ctx, Submission{
+		ProblemClass: "failed-answer-class",
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "v1",
+		Cadence:      CadencePrePhase,
+	})
+	if err != nil {
+		t.Fatalf("Submit after failed-signature answer: %v, want the submission accepted", err)
+	}
+	if id == "" {
+		t.Error("empty queue id")
+	}
+
+	// Non-regression: a passing signature still suppresses the submission.
+	cid2, err := store.CreateProblemClass(ctx, "real-answer-class", "")
+	if err != nil {
+		t.Fatalf("create class 2: %v", err)
+	}
+	aid2, err := store.CreateAnswerNode(ctx, cid2, 0,
+		"docker", "go", "v1", "the answer", "", `{"result":"passed"}`)
+	if err != nil {
+		t.Fatalf("create answer 2: %v", err)
+	}
+	if err := store.UpdateAnswerStatus(ctx, aid2, graph.AnswerVerified); err != nil {
+		t.Fatalf("verify 2: %v", err)
+	}
+	_, _, err = q.Submit(ctx, Submission{
+		ProblemClass: "real-answer-class",
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "v1",
+		Cadence:      CadencePrePhase,
+	})
+	if !errIs(err, ErrDuplicate) {
+		t.Errorf("err = %v, want ErrDuplicate", err)
+	}
+}
+
 func TestQueue_Priority_RecurrenceWeights(t *testing.T) {
 	// Same class submitted multiple times should have increasing priority.
 	if got := computePriority(CadencePrePhase, 0); got != 1.0 {

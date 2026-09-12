@@ -544,6 +544,97 @@ func TestExecutor_Commit_EmptySolution(t *testing.T) {
 	}
 }
 
+// TestExecutor_Commit_FailedSignatureStoredFailed guards OB-GAP-057: a
+// solve the validator marked failed ("result": "failed") must be parked
+// as failed. Pre-fix, Commit stamped every answer verified, so a solve
+// that gave up was advertised as a pre-verified answer by discovery and
+// suppressed re-submission of the same class via queue dedup.
+func TestExecutor_Commit_FailedSignatureStoredFailed(t *testing.T) {
+	ctx := context.Background()
+	ex, store, _ := newTestSolver(t, "")
+	sub := sampleEntry("sub-commit-failed")
+	sol, err := ex.Solve(ctx, sub)
+	if err != nil {
+		t.Fatalf("Solve: %v", err)
+	}
+	sol.Signatures = map[string]any{
+		"model":         "deepseek-v4-flash",
+		"problem_class": sub.ProblemClass,
+		"result":        "failed",
+		"tests":         0,
+	}
+	answerID, err := ex.Commit(ctx, sub, sol)
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	answer, err := store.GetAnswerNode(ctx, answerID)
+	if err != nil {
+		t.Fatalf("GetAnswerNode: %v", err)
+	}
+	if answer.Status != graph.AnswerFailed {
+		t.Errorf("answer.Status = %q, want %q", answer.Status, graph.AnswerFailed)
+	}
+	// Status and signature must agree — that agreement is what lets the
+	// query-level backstop (discovery/queue) catch rows written by older
+	// binaries.
+	if !strings.Contains(answer.Signatures, `"result":"failed"`) {
+		t.Errorf("stored signatures = %q, want result failed", answer.Signatures)
+	}
+}
+
+// TestExecutor_Commit_PassedSignatureStillVerified is the non-regression
+// case: only the failed verdict changes the stored status. A passing (or
+// absent) result keeps today's behaviour.
+func TestExecutor_Commit_PassedSignatureStillVerified(t *testing.T) {
+	ctx := context.Background()
+	ex, store, _ := newTestSolver(t, "")
+	sub := sampleEntry("sub-commit-passed")
+	sol, err := ex.Solve(ctx, sub)
+	if err != nil {
+		t.Fatalf("Solve: %v", err)
+	}
+	sol.Signatures = map[string]any{"problem_class": sub.ProblemClass, "result": "passed", "tests": 5}
+	answerID, err := ex.Commit(ctx, sub, sol)
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	answer, err := store.GetAnswerNode(ctx, answerID)
+	if err != nil {
+		t.Fatalf("GetAnswerNode: %v", err)
+	}
+	if answer.Status != graph.AnswerVerified {
+		t.Errorf("answer.Status = %q, want %q", answer.Status, graph.AnswerVerified)
+	}
+}
+
+// TestAnswerStatusFromSignatures pins the mapping and its parity with the
+// SQL backstop predicate COALESCE(json_extract(signatures,'$.result'),”)
+// != 'failed' — every non-"failed" verdict (including an absent result,
+// which legacy signature maps carry) stays verified.
+func TestAnswerStatusFromSignatures(t *testing.T) {
+	cases := []struct {
+		name string
+		sigs map[string]any
+		want string
+	}{
+		{"failed", map[string]any{"result": "failed"}, graph.AnswerFailed},
+		{"passed", map[string]any{"result": "passed"}, graph.AnswerVerified},
+		{"completed", map[string]any{"result": "completed"}, graph.AnswerVerified},
+		{"absent result", map[string]any{"model": "m1"}, graph.AnswerVerified},
+		{"empty map", map[string]any{}, graph.AnswerVerified},
+		{"nil map", nil, graph.AnswerVerified},
+		{"non-string result", map[string]any{"result": 0}, graph.AnswerVerified},
+		{"mixed case is not the sentinel", map[string]any{"result": "Failed"}, graph.AnswerVerified},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := answerStatusFromSignatures(tc.sigs); got != tc.want {
+				t.Errorf("answerStatusFromSignatures(%v) = %q, want %q", tc.sigs, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveConfig_Defaults(t *testing.T) {
 	cfg := ResolveConfig(Config{})
 	if cfg.Model != DefaultModel {

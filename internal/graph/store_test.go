@@ -422,3 +422,62 @@ func TestStore_Stats_ExcludesFailedSignature(t *testing.T) {
 		t.Errorf("HitRate = %.3f, want ≈%.3f (must be < 1.0 while failed-verified rows exist)", got, want)
 	}
 }
+
+// TestStore_Discovery_ExcludesFailedSignature guards OB-GAP-057 at the
+// query level: a row whose status says verified but whose signature says
+// result='failed' must not be served by Discovery, even though status is
+// the primary signal — an older binary could have written that pair (the
+// live graph holds 28 such rows). A normal verified sibling is still
+// returned.
+func TestStore_Discovery_ExcludesFailedSignature(t *testing.T) {
+	s := newSharedTestStore(t)
+	ctx := context.Background()
+
+	seed := func(classID int64, sigs, solution string) {
+		t.Helper()
+		id, err := s.CreateAnswerNode(ctx, classID, 0, "docker", "go", "1.0", solution, "ev", sigs)
+		if err != nil {
+			t.Fatalf("CreateAnswerNode: %v", err)
+		}
+		if err := s.UpdateAnswerStatus(ctx, id, AnswerVerified); err != nil {
+			t.Fatalf("UpdateAnswerStatus: %v", err)
+		}
+	}
+
+	// Class with one good answer and one failed-signature row that claims
+	// to be verified.
+	mixed, _, err := s.UpsertProblemClass(ctx, "mixed-class", "desc")
+	if err != nil {
+		t.Fatalf("UpsertProblemClass (mixed): %v", err)
+	}
+	seed(mixed.ID, `{"result":"passed"}`, "good answer")
+	seed(mixed.ID, `{"result":"failed"}`, "gave up")
+
+	res, err := s.Discovery(ctx, "mixed-class", "", "", "", false)
+	if err != nil {
+		t.Fatalf("Discovery (mixed): %v", err)
+	}
+	if res.Exact == nil {
+		t.Fatal("Discovery (mixed): no exact answer, want the verified sibling")
+	}
+	if res.Exact.Solution != "good answer" {
+		t.Errorf("Discovery (mixed) served %q, want the passing answer", res.Exact.Solution)
+	}
+
+	// Class whose only answer is the failed-signature row: discovery must
+	// report no exact answer instead of serving it (the live
+	// go-board-audit-idle-tick case).
+	onlyFailed, _, err := s.UpsertProblemClass(ctx, "only-failed-class", "desc")
+	if err != nil {
+		t.Fatalf("UpsertProblemClass (only-failed): %v", err)
+	}
+	seed(onlyFailed.ID, `{"result":"failed"}`, "gave up")
+
+	res, err = s.Discovery(ctx, "only-failed-class", "", "", "", false)
+	if err != nil {
+		t.Fatalf("Discovery (only-failed): %v", err)
+	}
+	if res.Exact != nil {
+		t.Errorf("Discovery served a failed-signature answer: %+v", res.Exact)
+	}
+}

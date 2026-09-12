@@ -58,9 +58,10 @@ type Stats struct {
 // lives in its answers/ subdirectory.
 //
 // Idempotent: classes are upserted by title, answers are deduplicated
-// against existing rows by (env, lang, version, solution). Seeded
-// answers are marked verified — the corpus is the verified-answer
-// export, so it carries the solver's verified status on import.
+// against existing rows by (env, lang, version, solution). Each answer's
+// status comes from its own corpus verdict (see corpusAnswerStatus) — a
+// signature marked failed is imported as failed, everything else keeps
+// the export's verified status.
 func Seed(ctx context.Context, store *graph.Store, dir string) (*Stats, error) {
 	answersDir := filepath.Join(dir, "answers")
 	entries, err := os.ReadDir(answersDir)
@@ -119,6 +120,11 @@ func seedFile(ctx context.Context, store *graph.Store, path string, stats *Stats
 	for _, ans := range cf.Answers {
 		key := answerKey(ans.Environment, ans.Language, ans.Version, ans.Solution)
 		if seen[key] {
+			// Skip path: an already-present answer keeps the status it
+			// already has. This deliberately does NOT rewrite the row
+			// (re-seeding is idempotent) — historical rows whose status
+			// disagrees with their signature are reclassified by the
+			// one-off migration, not by the seed.
 			stats.AnswersSkipped++
 			continue
 		}
@@ -132,13 +138,53 @@ func seedFile(ctx context.Context, store *graph.Store, path string, stats *Stats
 		if err != nil {
 			return fmt.Errorf("create answer node: %w", err)
 		}
-		if err := store.UpdateAnswerStatus(ctx, id, graph.AnswerVerified); err != nil {
-			return fmt.Errorf("mark answer verified: %w", err)
+		if err := store.UpdateAnswerStatus(ctx, id, corpusAnswerStatus(ans)); err != nil {
+			return fmt.Errorf("set answer status: %w", err)
 		}
 		seen[key] = true
 		stats.AnswersCreated++
 	}
 	return nil
+}
+
+// corpusAnswerStatus maps one corpus answer to the status the store
+// should record for it. The corpus verdict wins over the file's own
+// status field:
+//
+//   - signatures result "failed" → failed. The flat corpus is
+//     regenerated from the DB by scripts/export-answers.py, and
+//     historical exports blanket-stamped every row verified, so stored
+//     answers exist with status="verified" alongside a failed
+//     signature (OB-GAP-057). Trusting the verified stamp would
+//     re-import those failed solves as verified on every fresh install.
+//   - otherwise honour ans.Status when it is one of the store's valid
+//     status constants.
+//   - otherwise default to verified: legacy corpus files carry no
+//     status field at all and must still seed as verified.
+func corpusAnswerStatus(ans CorpusAnswer) string {
+	if signatureResultFailed(ans.Signatures) {
+		return graph.AnswerFailed
+	}
+	switch ans.Status {
+	case graph.AnswerVerified, graph.AnswerCIPassed, graph.AnswerFailed, graph.AnswerPending:
+		return ans.Status
+	}
+	return graph.AnswerVerified
+}
+
+// signatureResultFailed reports whether a corpus answer's signatures
+// JSON carries result="failed". Absent, empty, or malformed signatures
+// are not a failure verdict.
+func signatureResultFailed(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return false
+	}
+	res, ok := m["result"].(string)
+	return ok && res == graph.AnswerFailed
 }
 
 // answerKey is the dedup identity for one answer row.

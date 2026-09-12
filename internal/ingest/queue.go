@@ -269,6 +269,11 @@ func (q *Queue) findPendingDuplicate(ctx context.Context, sub Submission) (*Entr
 
 // hasVerifiedAnswer reports whether the graph already contains a verified
 // answer for the (class, env, lang, version) tuple.
+//
+// The signature backstop mirrors Store.Stats (store.go:491) and
+// Store.bestAnswer: a row whose status says verified but whose signature
+// says result='failed' is not an answer, so it must not suppress a
+// re-submission (OB-GAP-057).
 func (q *Queue) hasVerifiedAnswer(ctx context.Context, sub Submission) (bool, error) {
 	var n int
 	err := q.db.QueryRowContext(ctx, `
@@ -279,6 +284,7 @@ func (q *Queue) hasVerifiedAnswer(ctx context.Context, sub Submission) (bool, er
 		  AND a.lang = ?
 		  AND a.version = ?
 		  AND a.status IN ('verified', 'ci_passed')
+		  AND COALESCE(json_extract(a.signatures, '$.result'), '') != 'failed'
 	`, sub.ProblemClass, sub.Environment, sub.Language, sub.Version).Scan(&n)
 	if err != nil {
 		return false, err

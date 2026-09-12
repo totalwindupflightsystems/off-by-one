@@ -330,3 +330,146 @@ func TestSeedDuplicateTitlesAcrossFiles(t *testing.T) {
 		t.Errorf("totals: problems=%d answers=%d, want 3/5", st.TotalProblems, st.TotalAnswers)
 	}
 }
+
+// TestSeedHonoursFailedSignature guards OB-GAP-057 on the import path: a
+// corpus answer whose signatures say result="failed" is imported as
+// failed even though the file's own status field says "verified" (the
+// historical export blanket-stamped every row), while a normal answer
+// keeps its verified status. Pre-fix, seedFile marked every answer
+// verified, so a fresh install re-imported failed solves as answers.
+func TestSeedHonoursFailedSignature(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	dir := writeCorpus(t, map[string]string{
+		"0001-mixed-verdicts.json": `{
+  "class_id": 1,
+  "title": "mixed-verdicts",
+  "description": "one failed solve, one good answer",
+  "answers": [
+    {
+      "answer_id": 11,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "# Gave up\nThe solve could not be completed.",
+      "evidence": "tests:0",
+      "signatures": {"problem_class": "mixed-verdicts", "result": "failed", "tests": 0},
+      "status": "verified"
+    },
+    {
+      "answer_id": 12,
+      "language": "go",
+      "environment": "go1.27",
+      "version": "1.27",
+      "solution": "# Real answer\nCheck the pointer before dereferencing.",
+      "evidence": "tests:5",
+      "signatures": {"problem_class": "mixed-verdicts", "result": "passed", "tests": 5},
+      "status": "verified"
+    }
+  ]
+}`,
+	})
+
+	stats, err := Seed(ctx, store, dir)
+	if err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if stats.AnswersCreated != 2 {
+		t.Fatalf("AnswersCreated = %d, want 2", stats.AnswersCreated)
+	}
+
+	pc, err := store.GetProblemClassByTitle(ctx, "mixed-verdicts")
+	if err != nil {
+		t.Fatalf("GetProblemClassByTitle: %v", err)
+	}
+	answers, err := store.ListAnswers(ctx, pc.ID)
+	if err != nil {
+		t.Fatalf("ListAnswers: %v", err)
+	}
+	got := make(map[string]string, len(answers))
+	for _, a := range answers {
+		got[a.Version] = a.Status
+	}
+	if got["1.26"] != graph.AnswerFailed {
+		t.Errorf("failed-signature answer status = %q, want %q", got["1.26"], graph.AnswerFailed)
+	}
+	if got["1.27"] != graph.AnswerVerified {
+		t.Errorf("passing answer status = %q, want %q", got["1.27"], graph.AnswerVerified)
+	}
+
+	// Only the passing answer is discoverable — the failed solve must not
+	// be served as a pre-verified answer.
+	res, err := store.Discovery(ctx, "mixed-verdicts", "go1.26", "go", "1.26", false)
+	if err != nil {
+		t.Fatalf("Discovery (failed tuple): %v", err)
+	}
+	if res.Exact != nil {
+		t.Errorf("Discovery served the failed-signature answer: %+v", res.Exact)
+	}
+	res, err = store.Discovery(ctx, "mixed-verdicts", "go1.27", "go", "1.27", false)
+	if err != nil {
+		t.Fatalf("Discovery (verified tuple): %v", err)
+	}
+	if res.Exact == nil {
+		t.Error("Discovery did not return the verified answer")
+	}
+}
+
+// TestCorpusAnswerStatus pins the per-answer mapping: the signature
+// verdict wins over the file's own status, then a valid corpus status is
+// honoured, then the legacy default is verified.
+func TestCorpusAnswerStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		ans  CorpusAnswer
+		want string
+	}{
+		{
+			"failed signature beats a verified stamp",
+			CorpusAnswer{Status: graph.AnswerVerified, Signatures: json.RawMessage(`{"result":"failed"}`)},
+			graph.AnswerFailed,
+		},
+		{
+			"passing signature honours ci_passed",
+			CorpusAnswer{Status: graph.AnswerCIPassed, Signatures: json.RawMessage(`{"result":"passed"}`)},
+			graph.AnswerCIPassed,
+		},
+		{
+			"passing signature honours pending",
+			CorpusAnswer{Status: graph.AnswerPending, Signatures: json.RawMessage(`{"result":"passed"}`)},
+			graph.AnswerPending,
+		},
+		{
+			"passing signature honours failed status",
+			CorpusAnswer{Status: graph.AnswerFailed, Signatures: json.RawMessage(`{"result":"passed"}`)},
+			graph.AnswerFailed,
+		},
+		{
+			"legacy file with no status seeds verified",
+			CorpusAnswer{Signatures: json.RawMessage(`{"result":"passed"}`)},
+			graph.AnswerVerified,
+		},
+		{
+			"null signatures seed verified",
+			CorpusAnswer{Status: graph.AnswerVerified},
+			graph.AnswerVerified,
+		},
+		{
+			"unknown status falls back to verified",
+			CorpusAnswer{Status: "archived", Signatures: json.RawMessage(`{"result":"passed"}`)},
+			graph.AnswerVerified,
+		},
+		{
+			"malformed signatures are not a failure verdict",
+			CorpusAnswer{Status: graph.AnswerVerified, Signatures: json.RawMessage(`not json`)},
+			graph.AnswerVerified,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := corpusAnswerStatus(tc.ans); got != tc.want {
+				t.Errorf("corpusAnswerStatus(%+v) = %q, want %q", tc.ans, got, tc.want)
+			}
+		})
+	}
+}

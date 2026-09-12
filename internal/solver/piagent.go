@@ -305,12 +305,33 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 	return &sol, nil
 }
 
+// answerStatusFromSignatures derives the status to store for a newly
+// committed answer from the solve's own signature map.
+//
+// Invariant: a solve the validator marked failed must never be stored
+// as verified. The lab advertises pre-verified answers, so a failed
+// solve stored as verified is served by discovery as an answer and
+// suppresses re-submission of that class via queue dedup (OB-GAP-057).
+//
+// Every other verdict keeps the historical verified status: "passed",
+// "completed", a non-string result, and legacy signature maps with no
+// result key at all.
+func answerStatusFromSignatures(sigs map[string]any) string {
+	if res, ok := sigs["result"].(string); ok && res == graph.AnswerFailed {
+		return graph.AnswerFailed
+	}
+	return graph.AnswerVerified
+}
+
 // Commit persists a Solution into the graph: upsert the problem
 // class by title, then create a new answer node. Returns the new
 // answer ID.
 //
 // Signatures are stored as a JSON blob (the graph column is TEXT).
 // Empty signature maps become "{}" so the column is never NULL.
+//
+// The stored status is the solve's own verdict (see
+// answerStatusFromSignatures) — never a blanket verified stamp.
 func (e *Executor) Commit(ctx context.Context, sub *ingest.Entry, sol *Solution) (int64, error) {
 	if sol == nil {
 		return 0, errors.New("solver: nil solution")
@@ -353,7 +374,7 @@ func (e *Executor) Commit(ctx context.Context, sub *ingest.Entry, sol *Solution)
 	if err != nil {
 		return 0, fmt.Errorf("create answer_node: %w", err)
 	}
-	if err := e.store.UpdateAnswerStatus(ctx, answerID, graph.AnswerVerified); err != nil {
+	if err := e.store.UpdateAnswerStatus(ctx, answerID, answerStatusFromSignatures(sol.Signatures)); err != nil {
 		return 0, fmt.Errorf("update answer status: %w", err)
 	}
 	return answerID, nil
