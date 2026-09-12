@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1462 problem classes · 1540 verified answers** · exported 2026-09-12 16:00 UTC
+**1481 problem classes · 1559 verified answers** · exported 2026-09-12 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1468,3 +1468,22 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1551 | dependency-bump-unmasks-staticcheck-deprecation-sa1019 | 1 | go |
 | 1552 | gitreins-tier2-rerun-test-instability-after-tier1-pass | 1 | typescript |
 | 1553 | test-harness-twin-hides-production-handler-bugs | 1 | go |
+| 1554 | js-http2-per-stream-flow-control-starvation-guard | 1 | js |
+| 1555 | go-paged-kv-cache-block-manager-cow-prefix-share | 1 | go |
+| 1556 | eduos-board-update-partial-write-header-json-spacing | 1 | go |
+| 1557 | go-http-signature-decoded-path-vs-escaped-path | 1 | go |
+| 1558 | duckbrain-http-401-auth | 1 | python |
+| 1559 | hermes-worker-zero-output-provider-stall | 1 | shell/python |
+| 1560 | jsonl-event-max-id-missing-id-row | 1 | python |
+| 1561 | git-jsonl-reserialization-churn-preserve-lines | 1 | python/git |
+| 1562 | go-cli-id-format-validation | 1 | go |
+| 1563 | go-websocket-read-deadline-kills-inflight-llm-turn | 1 | go |
+| 1564 | playwright-default-testdir-collects-vitest-suites | 1 | typescript |
+| 1565 | test-tool-outputdir-points-at-a-tracked-directory | 1 | typescript |
+| 1566 | coverage-pkg-node-granularity-false-covered | 1 | rust |
+| 1567 | typescript-cached-inflight-promise-never-settles-hangs-endpoint | 1 | go |
+| 1568 | dagger-serve-rest-api-token-required | 1 | go |
+| 1569 | dagger-nested-execute-401 | 1 | go |
+| 1570 | rust-mcp-related-unknown-path-contract | 1 | rust |
+| 1571 | go-nested-runner-auth-context-propagation | 1 | go |
+| 1572 | nextjs-dev-bind-mounted-next-cache-chunk-corruption | 1 | typescript |

@@ -1,0 +1,28 @@
+{
+  "class_id": 1567,
+  "title": "typescript-cached-inflight-promise-never-settles-hangs-endpoint",
+  "description": "typescript-cached-inflight-promise-never-settles-hangs-endpoint",
+  "created_at": "2026-09-12 20:02:34",
+  "answers": [
+    {
+      "answer_id": 1748,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. I built a runnable reference implementation, verified it end-to-end, and wrote the solution.\n\n## Deliverables (`/home/kara/solution/`)\n\n- **`SOLUTION.md`** — the self-contained writeup: symptom, root-cause analysis, exact fix code, and verification with observed output.\n- **`src/embedding/health.ts`** — the fix: `withDeadline`, poison-proof in-flight cache, shared-deadline handler, `resetEmbeddingHealthCache`.\n- **`test/health.test.ts`** — 7 tests, all green.\n- **`scripts/health-watchdog.mjs`** — watchdog with distinct `HUNG` (exit 3) vs `DARK` (exit 2) classification.\n\n## Root cause\n\nThe cache released `inFlight` **only in `.finally()`** and wrote the TTL cache **only in `.then()`**. A probe whose awaited `fetch` never settled reached neither: `inFlight` stayed set forever and the cache was never populated, so the TTL branch was never satisfied and the fresh path was never taken. Every later caller received the same dead promise. This explains both the permanent poison and the 0% CPU / 0-socket signature (parked await, not a loop).\n\n## Fix highlights\n\n- `withDeadline` guarantees every probe settles → cleanup always runs.\n- Cache: inner deadline, cache only settled values, watchdog force-releases the slot, generation counter blocks stale writes, `reset()` for no-restart recovery.\n- Handler: **one absolute deadline**, each sub-probe gets only the *remaining* budget (two hung probes can't stack budgets), always answers `503 + deadline_exceeded:[...]` with the reason in each section's `note`.\n- Watchdog: `HUNG` → exit 3 so escalation can't restart-loop a healthy daemon.\n\n## Verification results\n\n```\n# pass 7  fail 0          (never-settling probe + keysProbe, no budget stacking, slot release, stale-generation, reset)\n\ne2e hung probe:  http=503 time=1.002s, deadline_exceeded=[\"probe\",\"keysProbe\"]; watchdog exit=4 DEGRADED\ne2e healthy:     watchdog exit=0 HEALTHY\nwatchdog matrix: healthy=0, hung=3, degraded=4, dark=2\n```\n\nThe healthy response body is byte-identical to the original (`200 {\"status\":\"ok\",...}`), so existing contract tests remain valid.\n",
+      "evidence": "# Evidence\n- Problem class: typescript-cached-inflight-promise-never-settles-hangs-endpoint\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-12T20:02:34.286Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Symptom: an Express/Node HTTP endpoint (GET /health) never answers at all (>90s) while every sibling route answers in <40ms, and the process shows 0% CPU on all threads and zero outbound sockets. Root cause class: a module-level 'in-flight promise' cache (here getEmbeddingHealth in src/embedding/health.ts) that (a) stored the probe promise in `inFlight`, clearing it only in .finally(), and (b) wrote the TTL cache only inside .then(). A single probe whose awaited fetch never settled therefore never wrote the cache AND kept inFlight set, so every later caller was handed the same dead promise -- permanent poisoning until process restart, with the 30s TTL unable to help because the fresh path was never taken. Diagnosis method that worked (no restart, no debugger): (1) contrast route latencies on the same process to prove it is handler-specific, not event-loop starvation (/api/* 1-37ms vs /health hang); (2) prove WHICH sub-probe parked by side effect -- the handler awaits probe() then keysProbe(); the per-namespace DuckDB scratch connection (duckbrain-<pid>-<hash>-0.db) is created on the first keys probe, so a scratch file that was never recycled (the connection is recreated at >=1h age) proves the keys probe had not run since a known timestamp => the handler was parked on the earlier await; (3) confirm 0 CPU / 0 sockets. Fix pattern: bound EVERY await in the handler with a shared outer deadline (Promise.race + remaining-budget so two hung sub-probes cannot stack budgets), always respond 503 + a machine-readable culprit list (deadline_exceeded:[...]) with the reason in that section's note; bound the probe itself with an inner deadline; guarantee the in-flight slot is always released (deadline makes finally run); never cache an unsettled promise; add a generation counter so a late result from an abandoned probe cannot overwrite a newer one; expose a cache-reset. Companion defect: a port watchdog that probes /health with a 5s timeout classified the hung-but-alive daemon as DARK -- give hung its own exit code (3) and message so escalations cannot restart-loop a healthy daemon. Test pattern: inject a never-settling probe (new Promise(()=>{})) into the handler factory and assert it answers within the deadline with 503 + degraded; inject the same for the keys probe; keep the healthy/degraded contract tests byte-identical.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "typescript-cached-inflight-promise-never-settles-hangs-endpoint",
+        "provider": "openrouter",
+        "solved_at": "2026-09-12T20:02:34.286Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-12 20:02:34"
+    }
+  ]
+}

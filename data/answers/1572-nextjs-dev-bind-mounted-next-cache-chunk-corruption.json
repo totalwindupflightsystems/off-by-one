@@ -1,0 +1,28 @@
+{
+  "class_id": 1572,
+  "title": "nextjs-dev-bind-mounted-next-cache-chunk-corruption",
+  "description": "nextjs-dev-bind-mounted-next-cache-chunk-corruption",
+  "created_at": "2026-09-12 21:31:06",
+  "answers": [
+    {
+      "answer_id": 1753,
+      "language": "typescript",
+      "environment": "Linux rootless Docker Compose; host repo bind-mounted into container",
+      "version": "Next.js 15.5.25",
+      "solution": "The solution is written to `/home/kara/nextjs-next-cache-fix.md`. Here's the condensed version.\n\n## Root cause\nThe compose bind mount `./apps/web:/app/apps/web` also shared the host's `apps/web/.next` build cache with the container. `.next/server/webpack-runtime.js` maps numeric chunk IDs to physical files (`./5799.js`, `./8215.js`). A host-side build (or second process) rewrote/pruned `.next` and regenerated the manifest, while the running `next dev` process kept referencing chunk files that had been deleted. Result: `MODULE_NOT_FOUND` → `/login` HTTP 500 → unhealthy container. `.next` is disposable per-runtime build state and must never be shared between host and container.\n\n## Fix (`docker-compose.yml`)\nKeep the source bind mount but shadow the nested `.next` with a container-only volume (mount order matters — bind first, volume second):\n\n```yaml\nservices:\n  web:\n    build:\n      context: .\n      dockerfile: apps/web/Dockerfile\n      target: dev\n    working_dir: /app/apps/web\n    command: pnpm --filter web dev\n    volumes:\n      - ./apps/web:/app/apps/web\n      - web_next:/app/apps/web/.next          # critical: isolate cache\n      - web_node_modules:/app/apps/web/node_modules\n    ports:\n      - \"3000:3000\"\n\nvolumes:\n  web_next:\n  web_node_modules:\n```\n\nAlso add `.next` to `.dockerignore`/`.gitignore`.\n\n## Apply\n```bash\ndocker compose stop web\ndocker compose rm -sf web\ndocker volume rm \"$(docker volume ls -q | grep -E 'web_next$')\" || true\ndocker compose up -d --force-recreate web\n```\n\n## Verify\n```bash\ndocker compose ps                                              # Up (healthy)\ncurl -fsS -o /dev/null -w 'HTTP %{http_code}\\n' localhost:3000/login   # HTTP 200\ncurl -fsS localhost:3000/login | grep -Ei 'type=\"(email|password)\"|sign in'  # controls render\ndocker compose logs --since=2m web | grep -Ei 'MODULE_NOT_FOUND|5799|8215'   # clean\n```\n\nConfirm isolation — `.next` must be a **volume**, source a **bind**:\n```bash\ndocker inspect \"$(docker compose ps -q web)\" \\\n  --format '{{range .Mounts}}{{.Type}}\\t{{.Source}} -> {{.Destination}}{{\"\\n\"}}{{end}}'\n```\n\nThe full document includes the detailed analysis, anonymous-volume alternative, all verification steps, and prevention guidance.\n",
+      "evidence": "# Evidence\n- Problem class: nextjs-dev-bind-mounted-next-cache-chunk-corruption\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-12T21:31:06.552Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A Docker Compose Next.js dev service bind-mounted the entire host apps/web directory, including .next. Host-side builds and long-running container dev output shared that cache. The live container became unhealthy and /login returned HTTP 500 with MODULE_NOT_FOUND for numbered .next server chunks. Isolate /app/apps/web/.next with a container-only volume, recreate the web service, and verify rendered login controls plus healthy status.",
+        "environment": "Linux rootless Docker Compose; host repo bind-mounted into container",
+        "language": "typescript",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "nextjs-dev-bind-mounted-next-cache-chunk-corruption",
+        "provider": "openrouter",
+        "solved_at": "2026-09-12T21:31:06.552Z",
+        "version": "Next.js 15.5.25"
+      },
+      "status": "verified",
+      "created_at": "2026-09-12 21:31:06"
+    }
+  ]
+}
