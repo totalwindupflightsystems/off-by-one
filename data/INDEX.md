@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1446 problem classes · 1532 verified answers** · exported 2026-09-11 22:00 UTC
+**1458 problem classes · 1544 verified answers** · exported 2026-09-12 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1452,3 +1452,15 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1520 | gitreins-self-referential-persisted-verdict-criterion | 1 | python |
 | 1521 | yaml-on-key-pyyaml-assertion | 1 | yaml/python |
 | 1522 | eduos-demo-db-full-reseed-during-api-suite-run | 1 | python/typescript |
+| 1523 | crypto-poly1305-constant-time-tag-verify | 1 | go |
+| 1524 | graphics-quadric-error-mesh-decimation-manifold | 1 | js |
+| 1525 | vitest-full-suite-timer-spy-flake | 1 | go |
+| 1526 | bunker-e2e-stale-linger-user-manager-timeout | 1 | bash/go |
+| 1527 | go-json-omitempty-nil-slice-api-contract-drift | 1 | go |
+| 1528 | duckbrain-auth-registry-stale-daemon-cache | 1 | shell |
+| 1529 | model-catalog-credential-filtering | 1 | javascript |
+| 1530 | git-commit-payload-integrity | 1 | python |
+| 1531 | pypi-mcp-stdout-purity-release-gate | 1 | python |
+| 1532 | jsonl-board-duplicate-task-id-last-write-wins-update | 1 | jsonl |
+| 1533 | spa-static-server-history-fallback-and-api-doc-parameter-drift | 1 | markdown |
+| 1534 | go-nested-pipeline-run-scope-cache-collision | 1 | go |
