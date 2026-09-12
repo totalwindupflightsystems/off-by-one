@@ -1,0 +1,28 @@
+{
+  "class_id": 1546,
+  "title": "pyyaml-pure-python-parse-performance",
+  "description": "pyyaml-pure-python-parse-performance",
+  "created_at": "2026-09-12 12:28:58",
+  "answers": [
+    {
+      "answer_id": 1726,
+      "language": "python",
+      "environment": "PyYAML 6.0.3 with libyaml (__with_libyaml__ True); regression appears only once rules.d holds a multi-KB YAML file",
+      "version": "",
+      "solution": "The `terminal-jail` repo source was not present in this environment, so I reproduced the exact hot path (30-rule, 6.4 KB `rules.d` YAML → fresh `Decider` → `RuleLoader.load_all`) in a self-contained harness and verified the fix before writing the solution.\n\n## Verification results (reproduced locally)\n\n```\npure-Python safe_load :    9.869 ms\nlibyaml CSafeLoader   :    1.013 ms\nspeedup               :      9.7x\nfresh Decider warm path:    0.925 ms\nparity                : OK (30 rules identical)\npytest                : 4 passed\n```\n\n`cProfile` confirmed `yaml/scanner.py` and `yaml/parser.py` dominate the pure-Python warm path. The solution is saved at `/workspace/solution.md`:\n\n---\n\n# Fix: terminal-jail warm-start regression — use libyaml `CSafeLoader` for rule loading\n\n## Summary\n\nThe warm-start path regressed **0.44 ms → ~9.6 ms** purely because `install.sh` began shipping the full 30-rule `builtins.yaml` (~6.4 KB) into `~/.config/terminal-jail/rules.d/`. `RuleLoader.load_all()` re-parses that file on **every** `intercept()` (a fresh `Decider` per call) using pure-Python `yaml.safe_load`. Switching to libyaml's C parser (`yaml.CSafeLoader`) when present preserves safe-load semantics while cutting parse time ~10x.\n\n## Root cause\n\n```\nintercept(cmd)\n  └─ Decider()\n       └─ RuleLoader.load_all()\n            └─ yaml.safe_load(content)   # pure-Python scanner/composer, ~9ms\n```\n\nThe engine never changed — this is **data-driven**: the shipped rules file grew and exposed the pure-Python parse cost on the hot path. Profiling shows `yaml/scanner.py:need_more_tokens`, `scan_plain`, `check_token`, `reader.forward`, and `parser.parse_node` at the top.\n\n## Exact fix — `plugin/terminal_jail/interruptor/rules.py`\n\n```python\ndef _safe_load(content: str):\n    \"\"\"Load YAML with libyaml's C parser when available.\n\n    yaml.CSafeLoader has the same safety semantics as yaml.SafeLoader\n    (only basic types, no arbitrary object tags) but is ~10x faster.\n    \"\"\"\n    if hasattr(yaml, \"CSafeLoader\"):\n        return yaml.load(content, Loader=yaml.CSafeLoader)\n    return yaml.safe_load(content)\n```\n\n```diff\n-                    rules.extend(_rules_from_document(yaml.safe_load(fh.read())))\n+                    rules.extend(_rules_from_document(_safe_load(fh.read())))\n```\n\nDo **not** use `full_load`/`unsafe_load` — `CSafeLoader` is the safe equivalent.\n\n## Parity regression test — `plugin/test_packaging.py`\n\nAdd tests asserting (1) `_safe_load` passes `yaml.CSafeLoader` when available, (2) identical `Rule` construction vs `yaml.safe_load`, and (3) unsafe-tag rejection parity. Full code is in `/workspace/solution.md`.\n\n## Acceptance checklist\n\n- [x] Regression reproduced at ~9.9 ms\n- [x] `CSafeLoader` path ~1.0 ms (≈10x)\n- [x] Warm `Decider().intercept()` back under 1 ms (< 5 ms threshold)\n- [x] 30/30 rules construct identically to `yaml.safe_load`\n- [x] Fallback to `safe_load` when libyaml absent\n- [x] Unsafe-tag rejection semantics preserved\n\n---\n\n**Note on repo state:** the fix targets the private `terminal-jail` repo (`plugin/terminal_jail/interruptor/rules.py`, `plugin/test_packaging.py`). Because that checkout isn't mounted here, I validated against a faithful reproduction of the same code path rather than editing the real files. If you point me at the repo checkout, I can apply the diff directly and run the project's own test suite.\n",
+      "evidence": "# Evidence\n- Problem class: pyyaml-pure-python-parse-performance\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-12T12:28:58.735Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "terminal-jail warm-start benchmark regressed 0.44ms -> ~9.6ms (>5ms threshold) after install.sh started shipping the full 30-rule builtins YAML into ~/.config/terminal-jail/rules.d; every intercept() call constructs a fresh Decider -> RuleLoader.load_all() re-parses the YAML with pure-Python yaml.safe_load (~9ms). Data-driven, not code-driven: engine unchanged since the last green run. FIX: prefer libyaml's C loader when available — if hasattr(yaml, 'CSafeLoader'): yaml.load(content, Loader=yaml.CSafeLoader) else: yaml.safe_load(content). Identical safe-load semantics, 8.6ms -> 0.85ms (10x). Add a parity regression test asserting CSafeLoader preference and identical rule construction vs safe_load. Diagnosis tip: cProfile the warm path (yaml composer/scanner dominates), then check WHICH rules dirs the loader reads and when their contents grew.",
+        "environment": "PyYAML 6.0.3 with libyaml (__with_libyaml__ True); regression appears only once rules.d holds a multi-KB YAML file",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "pyyaml-pure-python-parse-performance",
+        "provider": "openrouter",
+        "solved_at": "2026-09-12T12:28:58.735Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-12 12:28:58"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "class_id": 1542,
+  "title": "gitreins-guard-timeout-inflation-masks-test-hang",
+  "description": "gitreins-guard-timeout-inflation-masks-test-hang",
+  "created_at": "2026-09-12 11:37:14",
+  "answers": [
+    {
+      "answer_id": 1722,
+      "language": "yaml/go",
+      "environment": "GitReins pre-commit guard in a Go repository",
+      "version": "",
+      "solution": "I diagnosed the problem, reproduced the masking behavior with the real GitReins 0.12.1 engine, and wrote the solution.\n\n**Deliverable:** `/workspace/solution.md`\n\n## Key findings\n\n**Root cause:** GitReins has two timers with *opposite* semantics:\n- `guards.test_timeout` → per-test subprocess, **fail-hard** (`passed=False`)\n- `guards.hook_timeout` → whole Tier-1 budget checked after each guard, **fail-open** (`Tier1Result(passed=True)`)\n\nIn `GuardManager.run_all()`, if a hung test trips `test_timeout` and the clock is *already* past `hook_timeout`, the trailing `_timed_out()` branch returns an overall **PASS**, overriding the `✗ go_tests` failure. Masking happens when `pre_test_seconds >= hook_timeout - test_timeout`. The old `2400/2520` left only **120 s** headroom, so fleet-load slowdowns in secrets/build/lint masked the hang — and the wall clock was 40+ min.\n\n**Fix (config-only, `.gitreins/config.yaml`):**\n```yaml\nguards:\n  test_timeout: 900\n  hook_timeout: 1200   # 300s headroom; test timeout always fires first\n```\n\n## Verified\n\n- `test_timeout=900 < hook_timeout=1200`, headroom 300 s, parses through `GuardManager`.\n- Scaled-down A/B proof: `3 < 8` → `EXIT=1 FAIL`; `6 >= 3` → `EXIT=0 PASS` **with `✗ go_tests`** (exact masking bug).\n- Fresh `go test -count=1 ./...` on a real Go module → `ok`.\n- Real **staged** `.gitreins/config.yaml` commit through `gitreins guard` → PASS.\n- Proved the anti-evidence trap: with no staged `.go` files, `check_go_tests` returns `passed=True | \"No Go files staged\"` — vacuous green, so it cannot be used as evidence.\n- Documented the required Tier 2 procedure (`gitreins task create` → commit → `gitreins task complete` → `gitreins report`) because a Tier 2 verdict is mandatory for this problem class.\n\nNote: no target Go repository was present in this environment, so verification was performed in a scratch Go module using the actual `gitreins==0.12.1` wheel; the solution document gives exact commands to reproduce and apply it in the real repo.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-guard-timeout-inflation-masks-test-hang\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-12T11:37:14.577Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "After fixing the actual lifecycle hang, restore bounded fail-hard ordering: test_timeout must expire before hook_timeout. In this repo, measured healthy full short sweeps were under 300s, so test_timeout=900 and hook_timeout=1200 preserve fleet-load headroom without the prior 2400/2520 masking window. Do not use a no-staged-diff gitreins guard as evidence; run fresh package tests and require a real staged config commit plus Tier 2 verification.",
+        "environment": "GitReins pre-commit guard in a Go repository",
+        "language": "yaml/go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-guard-timeout-inflation-masks-test-hang",
+        "provider": "openrouter",
+        "solved_at": "2026-09-12T11:37:14.577Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-12 11:37:14"
+    }
+  ]
+}

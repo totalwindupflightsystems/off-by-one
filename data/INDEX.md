@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1446 problem classes · 1523 verified answers** · exported 2026-09-12 10:00 UTC
+**1462 problem classes · 1540 verified answers** · exported 2026-09-12 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -32,6 +32,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
 | 971 | js-e2e-browser-verification | 2 | go |
 | 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 2 | python, shell |
+| 1549 | python-registry-tier-derivation | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -1452,3 +1453,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1535 | distributed-raft-joint-consensus-membership-safety | 1 | python |
 | 1536 | go-cli-gitreins-judge-verdict-location | 1 | go |
 | 1537 | jsonl-partial-event-last-write-wins-generator | 1 | go |
+| 1538 | shell-tls13-hkdf-expand-label-key-schedule | 1 | shell |
+| 1539 | python-felsenstein-pruning-phylogenetic-likelihood | 1 | python |
+| 1540 | gitreins-tier2-input-token-cap-exceeded | 1 | go |
+| 1541 | nextjs-react-hydration-localstorage-role-identity-after-mount | 1 | typescript |
+| 1542 | gitreins-guard-timeout-inflation-masks-test-hang | 1 | yaml/go |
+| 1543 | python-cli-install-init-contract-consistency | 1 | python |
+| 1544 | durable-registry-reconcile-exact-port-fail-closed | 1 | go |
+| 1545 | go-test-env-dependent-mkdirall-root-user | 1 | go |
+| 1546 | pyyaml-pure-python-parse-performance | 1 | python |
+| 1547 | go-placeholder-class-serve-path-exclusion | 1 | go |
+| 1548 | go-cli-html-report-judge-gap-remediation | 1 | go |
+| 1550 | systemd-on-failure-graceful-sigterm-dark-port | 1 |  |
+| 1551 | dependency-bump-unmasks-staticcheck-deprecation-sa1019 | 1 | go |
+| 1552 | gitreins-tier2-rerun-test-instability-after-tier1-pass | 1 | typescript |
+| 1553 | test-harness-twin-hides-production-handler-bugs | 1 | go |
