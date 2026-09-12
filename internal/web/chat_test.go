@@ -268,6 +268,117 @@ func TestChatHandler_BinaryMessageIgnored(t *testing.T) {
 	}
 }
 
+// TestChatHandler_LongTurnSurvivesReadTimeout is the regression test for
+// DF-OFF-BY-ONE-2: a turn that takes longer than readTimeout must still
+// deliver the agent's reply. Before the fix, the read loop's per-read
+// deadline fired while the client waited for the answer, the loop
+// returned, and the deferred cancel killed the in-flight runner.
+func TestChatHandler_LongTurnSurvivesReadTimeout(t *testing.T) {
+	const readTimeout = 100 * time.Millisecond
+	const turnDuration = 5 * readTimeout // 500ms — well past the read timeout
+
+	agent := &mockAgent{
+		responses: []ChatMessage{{Type: "agent", Message: "slow but correct answer"}},
+		delay:     turnDuration,
+	}
+	h := NewChatHandler(agent)
+	h.readTimeout = readTimeout
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
+	defer c.Close(websocket.StatusNormalClosure, "done")
+
+	// Send the message before reading the greeting so the tiny idle
+	// window is irrelevant to the timing under test.
+	userData, _ := json.Marshal(ChatMessage{Type: "user", Message: "why does docker say permission denied?"})
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer writeCancel()
+	if err := c.Write(writeCtx, websocket.MessageText, userData); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	greeting := readMsg(t, c)
+	if greeting.Type != "system" {
+		t.Fatalf("greeting type: got %q, want system", greeting.Type)
+	}
+
+	// The reply must arrive even though the turn outlives readTimeout.
+	resp := readMsg(t, c)
+	if resp.Type != "agent" {
+		t.Fatalf("response type: got %q, want agent (message=%q)", resp.Type, resp.Message)
+	}
+	if resp.Message != "slow but correct answer" {
+		t.Errorf("response: got %q, want %q", resp.Message, "slow but correct answer")
+	}
+}
+
+// TestChatHandler_SecondMessageDuringTurnRejected asserts the explicit
+// "one turn at a time" policy: a message that arrives while a turn is in
+// flight is rejected with an error instead of running concurrently, and
+// the in-flight turn still delivers its answer.
+func TestChatHandler_SecondMessageDuringTurnRejected(t *testing.T) {
+	agent := &mockAgent{
+		responses: []ChatMessage{{Type: "agent", Message: "first answer"}},
+		delay:     time.Second,
+	}
+	h := NewChatHandler(agent)
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
+	defer c.Close(websocket.StatusNormalClosure, "done")
+
+	_ = readMsg(t, c) // greeting
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	first, _ := json.Marshal(ChatMessage{Type: "user", Message: "first"})
+	if err := c.Write(ctx, websocket.MessageText, first); err != nil {
+		t.Fatalf("write first: %v", err)
+	}
+	second, _ := json.Marshal(ChatMessage{Type: "user", Message: "second"})
+	if err := c.Write(ctx, websocket.MessageText, second); err != nil {
+		t.Fatalf("write second: %v", err)
+	}
+
+	// The second message is rejected while the first turn runs.
+	reject := readMsg(t, c)
+	if reject.Type != "error" {
+		t.Fatalf("second message: got type %q, want error", reject.Type)
+	}
+	if !strings.Contains(strings.ToLower(reject.Message), "in progress") {
+		t.Errorf("rejection should mention the in-flight turn, got %q", reject.Message)
+	}
+
+	// ... and the first turn still completes.
+	resp := readMsg(t, c)
+	if resp.Message != "first answer" {
+		t.Errorf("first turn answer: got %q, want %q", resp.Message, "first answer")
+	}
+}
+
+// TestChatHandler_IdleTimeoutClosesConnection asserts the readTimeout
+// still applies to a connection that is idle with NO turn in flight.
+func TestChatHandler_IdleTimeoutClosesConnection(t *testing.T) {
+	h := NewChatHandler(nil)
+	h.readTimeout = 200 * time.Millisecond
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+
+	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
+	defer c.CloseNow()
+
+	_ = readMsg(t, c) // greeting
+
+	// No message is sent; the server should close the idle connection.
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	if _, _, err := c.Read(ctx); err == nil {
+		t.Fatal("expected the idle connection to be closed by the server")
+	}
+}
+
 // TestChatHandler_ContextCancellation asserts that when the client
 // disconnects mid-response, the runner's context is cancelled.
 func TestChatHandler_ContextCancellation(t *testing.T) {
