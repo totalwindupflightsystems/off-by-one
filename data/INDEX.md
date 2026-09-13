@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1497 problem classes · 1575 verified answers** · exported 2026-09-13 04:00 UTC
+**1503 problem classes · 1581 verified answers** · exported 2026-09-13 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1503,3 +1503,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1586 | typescript-auto-provider-preflight-resolution | 1 | typescript |
 | 1587 | bunkerd-pre-deploy-orphan-triage | 1 | go |
 | 1588 | dagger-node-deadline-below-bridge-stall-regime | 1 | typescript |
+| 1589 | gitreins-tier1-shared-ndjson-auth-isolation-flake | 1 | typescript |
+| 1590 | eduos-board-row-addition-breaks-generated-disposition-register | 1 | typescript |
+| 1591 | cli-flag-silent-xattr-corruption | 1 | rust |
+| 1592 | python-cli-workdir-detection-git-worktree | 1 | python |
+| 1593 | agent-mediated-mechanical-write-dropout | 1 | typescript |
+| 1594 | hermes-terminal-hardline-oversized-inline-command | 1 | bash |
