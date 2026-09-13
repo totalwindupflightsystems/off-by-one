@@ -372,7 +372,7 @@ paths:
 ### 4.4 Tech Stack
 
 - **Backend:** Go server embeds HTML/JS/CSS via `embed.FS`
-- **Frontend:** Vanilla JS + HTMX for interactivity, D3.js for graph visualization
+- **Frontend:** Vanilla JS single-page app — no framework; D3.js for graph visualization
 - **Chat:** WebSocket, server relays to Pi Agent via bwrap sandbox
 - **Auth:** None initially (localhost only). API key for remote access later.
 - **Port:** 8766 (off-by-one on a phone keypad = 633-28-... ok that's forced. 8766 = "OFF-BY-ONE" adjacent to the pun.)

@@ -2,7 +2,7 @@
 
 > **Version:** 0.1.0
 > **Target:** Single-page application, embedded in Go binary
-> **Stack:** Vanilla JS + HTMX + D3.js, served via `embed.FS`
+> **Stack:** Vanilla JS single-page app + D3.js (lazy-loaded) for the related-problem graph, served via `embed.FS`
 
 ---
 

@@ -39,8 +39,8 @@ A system that converts idle compute cycles into pre-verified answers for AI agen
 │       │              │                                │
 │       ▼              ▼                                │
 │  ┌─────────┐   ┌─────────┐                           │
-│  │ Web UI  │   │ Cron    │                           │
-│  │ (HTMX)  │   │ Loop    │                           │
+│  │ Vanilla │   │ Cron    │                           │
+│  │  JS SPA │   │ Loop    │                           │
 │  └─────────┘   └─────────┘                           │
 └──────────────────────────────────────────────────────┘
 ```
