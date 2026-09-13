@@ -867,6 +867,13 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 
 	result, err := engine.Import(r.Context())
 	if err != nil {
+		// A source_repo that disagrees with the existing clone's origin is
+		// a client error: the import directory holds a clone of a different
+		// repository, so we refuse rather than silently importing from it.
+		if errors.Is(err, importgit.ErrRepoMismatch) {
+			writeError(w, http.StatusConflict, "source_repo_mismatch", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "import_failed", err.Error())
 		return
 	}

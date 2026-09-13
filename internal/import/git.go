@@ -127,6 +127,14 @@ var ErrNoRepoURL = errors.New("import: RepoURL is required")
 // Off-by-One answers.
 var ErrNoSubtree = errors.New("import: subtree directory not found in repo")
 
+// ErrRepoMismatch is returned when LocalDir already contains a clone whose
+// origin is a different repository than cfg.RepoURL. The clone is reused
+// across imports, so pulling it without checking the origin silently
+// imports answers from the wrong source repository and reports a normal
+// (dedup-looking) ImportResult. The engine refuses instead, before any
+// fetch or pull touches the clone.
+var ErrRepoMismatch = errors.New("import: source_repo does not match the existing clone")
+
 // Import runs the full import flow:
 //
 //  1. Clone or pull the source repo
@@ -196,7 +204,19 @@ func (e *Engine) Import(ctx context.Context) (*ImportResult, error) {
 func (e *Engine) prepareClone(ctx context.Context) error {
 	gitDir := filepath.Join(e.cfg.LocalDir, ".git")
 	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
-		// Existing clone — fetch + checkout + pull.
+		// Existing clone — it must belong to the repo we were asked for.
+		// Fetching/pulling a stale clone would read answers out of the
+		// wrong repository and still return a benign-looking result.
+		origin, err := e.gitOutput(ctx, e.cfg.LocalDir, "remote", "get-url", "origin")
+		if err != nil {
+			return fmt.Errorf("read clone origin: %w", err)
+		}
+		if normalizeRepoURL(origin) != normalizeRepoURL(e.cfg.RepoURL) {
+			return fmt.Errorf("%w: existing clone origin %q, requested source_repo %q",
+				ErrRepoMismatch, strings.TrimSpace(origin), e.cfg.RepoURL)
+		}
+
+		// Existing clone of the right repo — fetch + checkout + pull.
 		if err := e.runGit(ctx, e.cfg.LocalDir, "fetch", "origin"); err != nil {
 			return fmt.Errorf("fetch origin: %w", err)
 		}
@@ -413,6 +433,33 @@ func (e *Engine) runGit(ctx context.Context, dir string, args ...string) error {
 		return fmt.Errorf("%s %s: %w\n%s", e.cfg.GitPath, strings.Join(args, " "), err, string(out))
 	}
 	return nil
+}
+
+// gitOutput runs a git command and returns stdout as a string. Mirrors
+// the export engine's helper.
+func (e *Engine) gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	cmd := exec.CommandContext(ctx, e.cfg.GitPath, args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("%s %s: %w", e.cfg.GitPath, strings.Join(args, " "), err)
+	}
+	return string(out), nil
+}
+
+// normalizeRepoURL canonicalises a git remote URL for comparison: trims
+// surrounding whitespace and strips one trailing "/" plus one trailing
+// ".git", so "/src/repo.git/", "/src/repo.git" and "/src/repo" all compare
+// equal. The comparison stays strict otherwise — two different
+// repositories must never match.
+func normalizeRepoURL(u string) string {
+	s := strings.TrimSpace(u)
+	s = strings.TrimSuffix(s, "/")
+	s = strings.TrimSuffix(s, ".git")
+	s = strings.TrimSuffix(s, "/")
+	return s
 }
 
 // --- Parsing helpers ---------------------------------------------------

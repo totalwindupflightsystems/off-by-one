@@ -135,6 +135,12 @@ func NewEngine(cfg Config, store *graph.Store) *Engine {
 // answers is almost always a caller bug.
 var ErrNoItems = errors.New("export: no items to export")
 
+// ErrRepoMismatch is returned when LocalDir already contains a clone whose
+// origin is a different repository than cfg.RepoURL. Reusing that clone
+// would commit into (or push to) the wrong repository, so the engine
+// refuses before any fetch, checkout or commit.
+var ErrRepoMismatch = errors.New("export: RepoURL does not match the existing clone")
+
 // Export runs the full export flow for the given items:
 //
 //  1. Prepare the local clone (clone or pull)
@@ -218,6 +224,17 @@ func (e *Engine) DryRun(ctx context.Context, items []ExportItem) (*ExportResult,
 func (e *Engine) prepareClone(ctx context.Context) error {
 	gitDir := filepath.Join(e.cfg.LocalDir, ".git")
 	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+		// Existing clone — it must belong to the repo we were asked for.
+		// Committing into a stale clone would push the wrong repo.
+		origin, err := e.gitOutput(ctx, e.cfg.LocalDir, "remote", "get-url", "origin")
+		if err != nil {
+			return fmt.Errorf("read clone origin: %w", err)
+		}
+		if normalizeRepoURL(origin) != normalizeRepoURL(e.cfg.RepoURL) {
+			return fmt.Errorf("%w: existing clone origin %q, requested RepoURL %q",
+				ErrRepoMismatch, strings.TrimSpace(origin), e.cfg.RepoURL)
+		}
+
 		// Existing clone — fetch + checkout + pull.
 		if err := e.runGit(ctx, e.cfg.LocalDir, "fetch", "origin"); err != nil {
 			return fmt.Errorf("fetch origin: %w", err)
@@ -377,6 +394,19 @@ func (e *Engine) gitOutput(ctx context.Context, dir string, args ...string) (str
 		return "", fmt.Errorf("%s %s: %w", e.cfg.GitPath, strings.Join(args, " "), err)
 	}
 	return string(out), nil
+}
+
+// normalizeRepoURL canonicalises a git remote URL for comparison: trims
+// surrounding whitespace and strips one trailing "/" plus one trailing
+// ".git", so "/src/repo.git/", "/src/repo.git" and "/src/repo" all compare
+// equal. The comparison stays strict otherwise — two different
+// repositories must never match.
+func normalizeRepoURL(u string) string {
+	s := strings.TrimSpace(u)
+	s = strings.TrimSuffix(s, "/")
+	s = strings.TrimSuffix(s, ".git")
+	s = strings.TrimSuffix(s, "/")
+	return s
 }
 
 // --- Formatting (spec §5.1) ---------------------------------------------

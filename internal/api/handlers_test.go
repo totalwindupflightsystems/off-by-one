@@ -1445,6 +1445,93 @@ func TestImportBadRequest(t *testing.T) {
 	}
 }
 
+// TestImportSourceRepoMismatch_Conflict verifies that a source_repo which
+// does not match the origin of the existing import clone is rejected with
+// 409 source_repo_mismatch — never 200 with skipped>=1 from the stale clone
+// (DF-OFF-BY-ONE-7).
+func TestImportSourceRepoMismatch_Conflict(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed — skipping import integration test")
+	}
+	s, _, _ := newTestServer(t)
+
+	// Repo A holds a real answer, so pre-fix the stale clone would import
+	// it and answer 200.
+	repoA := initBareRepoForHandler(t, "main")
+	seedBareRepoForHandler(t, repoA, "main")
+	pushAnswerFilesForHandler(t, repoA, "main", "stale-clone-class", "docker", "go-1.26")
+
+	// ImportLocalDir already holds a clone of repo A.
+	localDir := filepath.Join(t.TempDir(), "clone")
+	if out, err := exec.Command("git", "clone", repoA, localDir).CombinedOutput(); err != nil {
+		t.Fatalf("manual clone: %v\n%s", err, out)
+	}
+	s.ImportLocalDir = localDir
+
+	bogusRepo := filepath.Join(t.TempDir(), "does-not-exist-repo")
+	rr := do(t, s, "POST", "/api/v1/import", importRequest{SourceRepo: bogusRepo})
+
+	if rr.Code == http.StatusOK {
+		t.Fatalf("status = 200 for mismatched source_repo — stale clone was reused; body: %s", rr.Body.String())
+	}
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body %q: %v", rr.Body.String(), err)
+	}
+	if body["error"] != "source_repo_mismatch" {
+		t.Errorf("error = %q, want source_repo_mismatch", body["error"])
+	}
+	for _, want := range []string{repoA, bogusRepo} {
+		if !strings.Contains(body["message"], want) {
+			t.Errorf("message %q does not name %q", body["message"], want)
+		}
+	}
+}
+
+// pushAnswerFilesForHandler pushes one minimal answer directory into the bare
+// repo, mirroring the export layout, so an import has something to import.
+func pushAnswerFilesForHandler(t *testing.T, barePath, branch, classTitle, env, version string) {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "clone", barePath, dir).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v\n%s", err, out)
+	}
+	ansDir := filepath.Join(dir, "pre-solve-answers", classTitle, env, version)
+	if err := os.MkdirAll(ansDir, 0o755); err != nil {
+		t.Fatalf("mkdir answer dir: %v", err)
+	}
+	solution := "# Problem: " + classTitle + "\n\n" +
+		"**Environment:** " + env + "\n" +
+		"**Language:** go " + version + "\n" +
+		"**Status:** verified\n\n---\n\n## Solution\n\nUse chmod.\n"
+	files := map[string]string{
+		"solution.md":     solution,
+		"evidence.md":     "# Evidence\n\n**Status:** verified\n\n---\n\nTested.\n",
+		"signatures.json": "{}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(ansDir, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	for _, args := range [][]string{
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+		{"add", "."},
+		{"commit", "-m", "add answers"},
+		{"push", "origin", branch},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", args[0], err, out)
+		}
+	}
+}
+
 // TestExportImportRouteRegistered verifies the routes are wired by
 // checking that a POST to them does NOT return 404 (it should return
 // 501 when not configured, proving the route exists).

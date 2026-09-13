@@ -3,6 +3,7 @@ package importing
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -620,5 +621,174 @@ func TestImportResult_Details(t *testing.T) {
 	}
 	if d.AnswerID == 0 {
 		t.Error("detail AnswerID = 0, want non-zero")
+	}
+}
+
+// --- DF-OFF-BY-ONE-7: stale-clone reuse guard ------------------------------
+
+// gitHEAD returns the current HEAD commit hash of the repo at dir.
+func gitHEAD(t *testing.T, dir string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD in %s: %v", dir, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// setOrigin points the clone's origin remote at url.
+func setOrigin(t *testing.T, dir, url string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "remote", "set-url", "origin", url)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git remote set-url: %v\n%s", err, out)
+	}
+}
+
+// TestNormalizeRepoURL pins the comparison rules used by the origin guard:
+// whitespace, one trailing slash and one trailing .git are stripped, and
+// distinct repositories never collide.
+func TestNormalizeRepoURL(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://github.com/org/repo.git", "https://github.com/org/repo"},
+		{"https://github.com/org/repo", "https://github.com/org/repo"},
+		{"https://github.com/org/repo/", "https://github.com/org/repo"},
+		{"  https://github.com/org/repo.git  ", "https://github.com/org/repo"},
+		{"git@github.com:org/repo.git", "git@github.com:org/repo"},
+		{"/tmp/x/remote.git", "/tmp/x/remote"},
+		{"/tmp/x/remote.git/", "/tmp/x/remote"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := normalizeRepoURL(c.in); got != c.want {
+			t.Errorf("normalizeRepoURL(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	// Strictness: a different repo must never normalise equal.
+	if normalizeRepoURL("https://github.com/org/repo-a.git") ==
+		normalizeRepoURL("https://github.com/org/repo-b.git") {
+		t.Error("distinct repos normalised equal")
+	}
+	if normalizeRepoURL("/tmp/x/remote.git") == normalizeRepoURL("/tmp/x/remote2.git") {
+		t.Error("distinct local repos normalised equal")
+	}
+}
+
+// TestImport_ExistingCloneMismatchedRepo_Errors verifies that Import refuses
+// to reuse a clone whose origin is a different repository than the requested
+// source_repo: it must return ErrRepoMismatch (naming both URLs), leave the
+// graph untouched, and touch neither HEAD nor the network.
+func TestImport_ExistingCloneMismatchedRepo_Errors(t *testing.T) {
+	skipIfNoGit(t)
+	store := makeStore(t)
+
+	// Repo A: has answers, and is what is actually cloned into LocalDir.
+	repoA := setupSourceRepo(t, "main")
+	// Repo B: a different repo, requested as source_repo.
+	repoB := initBareRepo(t, "main")
+	seedRemote(t, repoB, "main")
+
+	localDir := filepath.Join(t.TempDir(), "clone")
+	if out, err := exec.Command("git", "clone", repoA, localDir).CombinedOutput(); err != nil {
+		t.Fatalf("manual clone: %v\n%s", err, out)
+	}
+	headBefore := gitHEAD(t, localDir)
+
+	e := NewEngine(Config{
+		RepoURL:  repoB,
+		Branch:   "main",
+		LocalDir: localDir,
+	}, store)
+
+	res, err := e.Import(context.Background())
+	if err == nil {
+		t.Fatal("Import with mismatched source_repo: err = nil, want ErrRepoMismatch")
+	}
+	if !errors.Is(err, ErrRepoMismatch) {
+		t.Fatalf("Import err = %v, want errors.Is(err, ErrRepoMismatch)", err)
+	}
+	if res != nil {
+		t.Errorf("Import result = %+v, want nil", res)
+	}
+	// The message must name BOTH the clone's origin and the requested repo.
+	for _, want := range []string{repoA, repoB} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err.Error(), want)
+		}
+	}
+	// The stale clone must be untouched.
+	if got := gitHEAD(t, localDir); got != headBefore {
+		t.Errorf("clone HEAD moved %s → %s — prepareClone touched the stale clone", headBefore, got)
+	}
+	// Nothing may have been written into the graph.
+	if _, err := store.GetProblemClassByTitle(context.Background(), "docker-permission-denied"); err == nil {
+		t.Error("mismatched import still inserted answers into the graph store")
+	}
+}
+
+// TestImport_ExistingCloneMismatchedRepo_NoFetch points the stale clone's
+// origin at a repository that no longer exists. A fetch-first implementation
+// would surface a fetch error; the guard must fire first and return
+// ErrRepoMismatch, leaving HEAD untouched.
+func TestImport_ExistingCloneMismatchedRepo_NoFetch(t *testing.T) {
+	skipIfNoGit(t)
+	store := makeStore(t)
+
+	repoA := initBareRepo(t, "main")
+	seedRemote(t, repoA, "main")
+
+	localDir := filepath.Join(t.TempDir(), "clone")
+	if out, err := exec.Command("git", "clone", repoA, localDir).CombinedOutput(); err != nil {
+		t.Fatalf("manual clone: %v\n%s", err, out)
+	}
+	dead := filepath.Join(t.TempDir(), "gone.git")
+	setOrigin(t, localDir, dead)
+	headBefore := gitHEAD(t, localDir)
+
+	e := NewEngine(Config{
+		RepoURL:  repoA, // matches neither the new origin nor anything on disk
+		Branch:   "main",
+		LocalDir: localDir,
+	}, store)
+
+	_, err := e.Import(context.Background())
+	if !errors.Is(err, ErrRepoMismatch) {
+		t.Fatalf("Import err = %v, want ErrRepoMismatch (a fetch error means the origin check runs after fetch)", err)
+	}
+	if !strings.Contains(err.Error(), "gone.git") {
+		t.Errorf("error %q does not name the clone's dead origin", err.Error())
+	}
+	if got := gitHEAD(t, localDir); got != headBefore {
+		t.Errorf("clone HEAD moved %s → %s — prepareClone touched the stale clone", headBefore, got)
+	}
+}
+
+// TestImport_ExistingCloneMatchingRepo_Proceeds is the regression guard for
+// the fix: a clone of the requested repo is still reused and imported, even
+// when the RepoURL spelling differs by a trailing slash / ".git".
+func TestImport_ExistingCloneMatchingRepo_Proceeds(t *testing.T) {
+	skipIfNoGit(t)
+	store := makeStore(t)
+
+	repoA := setupSourceRepo(t, "main") // .../remote.git
+
+	localDir := filepath.Join(t.TempDir(), "clone")
+	if out, err := exec.Command("git", "clone", repoA, localDir).CombinedOutput(); err != nil {
+		t.Fatalf("manual clone: %v\n%s", err, out)
+	}
+
+	// Variant spelling of the same repo: trailing slash (+ implied .git).
+	e := NewEngine(Config{
+		RepoURL:  repoA + "/",
+		Branch:   "main",
+		LocalDir: localDir,
+	}, store)
+
+	res, err := e.Import(context.Background())
+	if err != nil {
+		t.Fatalf("Import with matching origin: %v", err)
+	}
+	if res.Added != 1 {
+		t.Errorf("Added = %d, want 1", res.Added)
 	}
 }
