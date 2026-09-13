@@ -270,6 +270,8 @@ go build ./cmd/off-by-one
 ./off-by-one
 ```
 
+> **Port 8766 already in use?** `./off-by-one` binds `:8766` by default; if another instance (or any other service) already holds it, startup fails with `listen tcp :8766: bind: address already in use`. Run on an alternate port instead: `./off-by-one --port 18766` (or set `OFF_BY_ONE_PORT=18766` in `.env`) — see [Configuration](#configuration).
+
 > **Rebuild after pulling:** the repo-root `./off-by-one` binary is gitignored (never committed) — after `git pull`, run `make build` and verify with `make check-binary-fresh` before running, so the binary matches HEAD instead of serving pre-fix behavior.
 
 > **Submissions need a solver:** without `bwrap` + `pi-agent` configured, `POST /api/v1/problems/submit` is rejected with `503 solver_unavailable` — the cron loop cannot process queued work, so nothing is accepted silently. Pre-verified answers remain discoverable via `POST /api/v1/problems/discover`.
