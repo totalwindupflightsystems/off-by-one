@@ -1,0 +1,28 @@
+{
+  "class_id": 1596,
+  "title": "go-inmemory-store-inline-lease-expiry-release",
+  "description": "go-inmemory-store-inline-lease-expiry-release",
+  "created_at": "2026-09-13 10:40:42",
+  "answers": [
+    {
+      "answer_id": 1777,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The repo `github.com/crier-dev/crier` was already at the fix commit (`fcec908`, fix in `b120ed7`). I located the root cause, verified it, and wrote the solution to **`/home/kara/DF-CRIER-33-inline-lease-expiry.md`**.\n\n# DF-CRIER-33 — In-memory store must release expired leases inline in `Retrieve`\n\n## Summary\n`MemoryStore.Retrieve` skipped any entry that still carried a `LeaseID`, with no check of whether that lease had expired. The only release path was `PurgeExpired`, run on the server's 30s ticker. On the default in-memory backend an un-ACKed message could not be redelivered until **lease (30s) + one purge tick (30s) = 60s**, despite a documented 30s lease. Postgres already releases inline via `lease_expires_at IS NULL OR lease_expires_at <= now`.\n\nFix: mirror the purge-loop expiry-release inside `Retrieve`. If `LeasedAt + LeaseDuration` is before `now`, clear `LeasedAt`/`LeaseID`/`LeaseDuration` and fall through to the leasing path in the same call. `PurgeExpired` remains the backstop.\n\n## Locations\n- `internal/registry/memory_store.go` → `(*MemoryStore).Retrieve` (bug/backstop `PurgeExpired`)\n- `internal/registry/postgres_store.go` → `(*PostgresStore).Retrieve` (inline-release precedent)\n- Default lease `internal/registry/handler.go:619` → `30 * time.Second`\n- Purge ticker `cmd/server/main.go` → `time.NewTicker(30 * time.Second)`\n\n## Root cause\nPre-fix:\n```go\n// Skip already leased messages (lease still active).\nif entry.LeasedAt != nil && entry.LeaseID != \"\" {\n    continue\n}\n```\nTime is never consulted; only `PurgeExpired` clears leases. Worst-case redelivery = `30s lease + up to 30s until next tick = 60s`.\n\n## Exact fix\n```go\nif entry.LeasedAt != nil && entry.LeaseID != \"\" {\n    leaseDuration := entry.LeaseDuration\n    if leaseDuration == 0 {\n        leaseDuration = 30 * time.Second\n    }\n    if entry.LeasedAt.Add(leaseDuration).Before(now) {\n        // Lease expired: release inline and treat as available.\n        entry.LeasedAt = nil\n        entry.LeaseID = \"\"\n        entry.LeaseDuration = 0\n    } else {\n        continue\n    }\n}\n```\nThe stored per-entry `LeaseDuration` (the lease in force) drives the expiry check; the function parameter drives the new lease. This matches commit `b120ed7`.\n\n## Regression test\n`TestRetrieve_LeaseExpiryReleasedInline` uses a 100ms lease, never calls `PurgeExpired`, and asserts: first retrieve returns the message, a retrieve inside the window returns none, and after sleeping 150ms `Retrieve` returns the message with a **new** `leaseID`. Full test source is in the saved markdown.\n\n## Verification\nRED before the fix (worktree at `b120ed7^`, test hunk only):\n```\n    memory_store_test.go:127: second retrieve returned 0 message(s), want 1 (msg-1 redelivered)\n--- FAIL: TestRetrieve_LeaseExpiryReleasedInline (0.15s)\n```\nGREEN after:\n```\n--- PASS: TestRetrieve_LeaseExpiryReleasedInline (0.15s)\nok  github.com/crier-dev/crier/internal/registry  0.154s\n```\nNo regressions:\n```\nok  github.com/crier-dev/crier/internal/registry  2.046s\n```\n\n## Outcome\nIn-memory redelivery now occurs at the documented lease boundary (30s) rather than 60s, matching Postgres. `PurgeExpired` is unchanged and still reclaims leases for never-retrieved messages and removes TTL-expired entries. The short-lease unit test is deterministic and DB/ticker-independent (RED pre-fix, GREEN post-fix).\n",
+      "evidence": "# Evidence\n- Problem class: go-inmemory-store-inline-lease-expiry-release\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-13T10:40:42.814Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "crier DF-CRIER-33: in-memory store Retrieve skipped leased entries with no inline expiry check, so redelivery waited lease + one purge tick (60s for a documented 30s lease) while the Postgres backend released inline. Fix: mirror the purge loop expiry-release inside Retrieve — if LeasedAt+LeaseDuration (default 30s) before now, clear LeasedAt/LeaseID/LeaseDuration and fall through to re-lease in the same call. Prove with a short-lease unit test that never calls PurgeExpired and is RED before the fix.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-inmemory-store-inline-lease-expiry-release",
+        "provider": "openrouter",
+        "solved_at": "2026-09-13T10:40:42.814Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-13 10:40:42"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1503 problem classes · 1581 verified answers** · exported 2026-09-13 10:00 UTC
+**1513 problem classes · 1591 verified answers** · exported 2026-09-13 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1509,3 +1509,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1592 | python-cli-workdir-detection-git-worktree | 1 | python |
 | 1593 | agent-mediated-mechanical-write-dropout | 1 | typescript |
 | 1594 | hermes-terminal-hardline-oversized-inline-command | 1 | bash |
+| 1595 | function-tostring-srcdoc-serialization-pitfalls | 1 | typescript |
+| 1596 | go-inmemory-store-inline-lease-expiry-release | 1 | go |
+| 1597 | duckbrain-auth-sidecar-hash-mismatch | 1 | bash |
+| 1598 | guardrail-blocked-model-registry-nonpersistent | 1 | python |
+| 1599 | go-test-wall-clock-assertion-flaky-under-race | 1 | go |
+| 1600 | hermes-minimax-provider-404 | 1 | python |
+| 1601 | github-oauth-workflow-scope-push-rejection | 1 | git |
+| 1602 | go-jsonl-header-timestamp-dialect-fallback | 1 | go |
+| 1603 | eduos-admin-route-tests-unbounded-n-plus-one-over-fixture-accumulating-shared-test-db | 1 | go |
+| 1604 | eduos-b2f001-keeper-stale-demo-db-absolute-constants | 1 | go |
