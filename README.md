@@ -170,7 +170,8 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
 | `OFF_BY_ONE_PI_AGENT` | No | `pi-agent` | Path to Pi Agent binary (resolved via PATH) |
 | `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
 | `OFF_BY_ONE_LOAD_THRESHOLD` | No | `1` | Max loadavg(1) for idle detection (negative = always idle) |
-| `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `30m` | Per-solve timeout |
+| `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `30m` | Solver-level per-solve timeout |
+| `OB1_BWRAP_TIMEOUT` | No | `300` | Outer bubblewrap sandbox cap per solve, in seconds (positive integer; unset or invalid values fall back to the 300s default with a warning) |
 | `OFF_BY_ONE_READONLY` | No | `false` | Public catalog mode: block all mutating endpoints and the AI chat (set `1`/`true`/`yes`) |
 | `OFF_BY_ONE_SKIP_SANDBOX` | No | `false` | Skip bwrap sandbox for dev/testing (set `1`/`true`/`yes`) |
 | `OFF_BY_ONE_EXPORT_DIR` | No | *(disabled)* | Working directory for git export clones — empty disables `POST /api/v1/export` (501) |

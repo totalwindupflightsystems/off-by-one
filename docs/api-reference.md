@@ -21,6 +21,7 @@ All timestamps are RFC 3339 strings. All endpoints return JSON unless otherwise 
 4. [Export / Import](#export--import)
 5. [Taxonomy / Stats](#taxonomy--stats)
 6. [System](#system)
+7. [Solve timeouts](#solve-timeouts)
 
 ---
 
@@ -584,3 +585,23 @@ curl -s http://localhost:8766/health
 ## Read-only catalog mode
 
 When the server is started with `--readonly` (or `OFF_BY_ONE_READONLY=1`), all mutating endpoints (`POST /api/v1/*`, `POST /api/v1/export`, `POST /api/v1/import`) return `403 Forbidden`. The WebSocket chat endpoint (`/ws/chat`) is also disabled. `GET` endpoints for discovery, taxonomy, stats, and answers remain available.
+
+---
+
+## Solve timeouts
+
+A solve is bounded by two independent timeouts, and both must be long enough before a long-running problem can complete:
+
+| Environment variable | Default | Scope |
+|----------------------|---------|-------|
+| `OB1_BWRAP_TIMEOUT` | `300` (seconds) | Outer cap on the `bwrap` subprocess running the solve. When it fires, the submission fails with `signal: killed` at the cap. |
+| `OFF_BY_ONE_SOLVE_TIMEOUT` | `30m` | Solver-level per-solve timeout (also exposed as `--solve-timeout`). |
+
+`OB1_BWRAP_TIMEOUT` takes a **positive integer number of seconds**. If it is unset, non-numeric, or non-positive, the server logs a warning at startup and falls back to the **300-second default** — an invalid value never disables the cap. Raise it when legitimate solves routinely need more than five minutes:
+
+```bash
+# 15-minute sandbox cap for this run
+OB1_BWRAP_TIMEOUT=900 ./off-by-one
+```
+
+Because the bwrap cap is the *outer* limit, raising only `OFF_BY_ONE_SOLVE_TIMEOUT` will not let a solve run past 300s by default — set `OB1_BWRAP_TIMEOUT` above the longest expected solve (and above `OFF_BY_ONE_SOLVE_TIMEOUT` if you intend that solver-level timeout to be the effective one). A repeated `signal: killed` at exactly the configured cap is the sandbox cap doing its job; verify the configured value before treating it as a solver failure.

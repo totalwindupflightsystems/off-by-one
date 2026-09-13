@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.1.0
+version: 1.2.0
 category: software-development
 ---
 
@@ -74,8 +74,12 @@ curl -s http://localhost:8766/api/v1/queue/<submission_id>
 ```
 
 `pending/queued` → `in_progress/solver_running` → `complete` (answer lands in the
-graph) or `failed`. Solves take 30s-30m; ~25-45% of fleet solves fail at the
-exact-300s bwrap cap (`signal: killed`) — normal, retry or discover later.
+graph) or `failed`. Solves take 30s-30m. A failure that lands at the exact
+configured bwrap cap (`signal: killed` at 300s by default) is the sandbox cap
+firing, not a solver bug — raise `OB1_BWRAP_TIMEOUT` (positive integer seconds,
+default `300`) for solves that legitimately need longer, then check the queue
+again. Unexpected or repeating cap kills: investigate before retrying (see
+pitfall 4).
 
 ### 4. Browse
 
@@ -103,9 +107,15 @@ python3 -c "import json; print(json.load(open('data/answers/0043-go-raft-log-rep
    ERROR line instead of a silent success. `OFF_BY_ONE_DB`/`-db` are honored.
 3. **Export/import are config-gated** — 501 unless started with `-export-dir`/
    `-import-dir`. Not a bug.
-4. **The 300s bwrap-cap** failure pattern (`signal: killed` at exactly 5m) is
-   normal fleet behavior, not a regression — don't chase it. `OB1_BWRAP_TIMEOUT`
-   raises the cap.
+4. **The bwrap cap is configurable — a `signal: killed` at exactly the cap**
+   (300s by default) means the sandbox timeout fired; it is evidence about your
+   configured cap, not a verdict on the solve. For problems that legitimately run
+   long, raise `OB1_BWRAP_TIMEOUT` (positive integer seconds, e.g. `900` for 15m).
+   Do NOT just re-submit when cap kills are unexpected or repeat — check host
+   resource pressure, a malformed tool flow inside the sandbox, and whether the
+   configured cap is still too low for the workload. Unset, non-numeric, or
+   non-positive values are ignored: the default 300s applies and a warning is
+   logged at startup.
 5. **Queue window is per-class** — `GET /api/v1/queue?limit=100` is dominated
    by `off-by-one-self-test` entries; the authoritative picture is the DB.
    Don't conclude "nothing is happening" from the API window.

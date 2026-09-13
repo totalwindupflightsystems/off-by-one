@@ -370,11 +370,14 @@ Database path resolution: the `-db` flag wins, then the `OFF_BY_ONE_DB` environm
 | `OFF_BY_ONE_PI_AGENT` | No | `pi-agent` | Pi Agent binary path |
 | `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
 | `OFF_BY_ONE_LOAD_THRESHOLD` | No | `1` | Max loadavg(1) for idle detection (negative = always idle) |
-| `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `30m` | Per-solve timeout (handled by solver) |
+| `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `30m` | Solver-level per-solve timeout (handled by solver) |
+| `OB1_BWRAP_TIMEOUT` | No | `300` | Outer bwrap subprocess cap per solve, in seconds (positive integer). Distinct from `OFF_BY_ONE_SOLVE_TIMEOUT`; invalid values fall back to 300 with a warning |
 | `OFF_BY_ONE_EXPORT_DIR` | No | — | Working dir for git export clones (empty = export disabled) |
 | `OFF_BY_ONE_IMPORT_DIR` | No | — | Working dir for git import clones (empty = import disabled) |
 | `OFF_BY_ONE_READONLY` | No | `false` | Public catalog mode (set `1`/`true`/`yes`) |
 | `OFF_BY_ONE_SKIP_SANDBOX` | No | `false` | Skip bwrap for dev/testing (set `1`/`true`/`yes`) |
+
+**Two timeouts, two layers.** `OB1_BWRAP_TIMEOUT` (default `300`) is the outer bubblewrap subprocess cap: it is a plain positive integer of seconds and kills the sandboxed solve when the bwrap process exceeds it. `OFF_BY_ONE_SOLVE_TIMEOUT` (default `30m`) is the solver-level timeout enforced inside the solver. Set the bwrap cap *above* the time your longest legitimate solve needs; a value that is not a positive integer is ignored and the default 300s applies, with a startup warning logged.
 
 ### Command-line flags
 
