@@ -3,6 +3,7 @@ package export
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -99,6 +100,56 @@ func seedRemote(t *testing.T, barePath, branch string) {
 			t.Fatalf("git %s: %v\n%s", args[0], err, out)
 		}
 	}
+}
+
+// gitIn runs git in dir and returns its trimmed stdout, failing the test
+// if git exits non-zero. Used to snapshot clone state.
+func gitIn(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s (in %s): %v", strings.Join(args, " "), dir, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// advanceRemote pushes a new commit to the bare repo at barePath and
+// returns the new commit SHA. Tests clone the bare repo first, advance it
+// afterwards, then assert the clone's origin/<branch> ref did not move —
+// which is only observable if a fetch really happened.
+func advanceRemote(t *testing.T, barePath, branch, filename string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if out, err := exec.Command("git", "clone", barePath, dir).CombinedOutput(); err != nil {
+		t.Fatalf("git clone (advance): %v\n%s", err, out)
+	}
+	for _, args := range [][]string{
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", args[0], err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, filename), []byte("advanced\n"), 0o644); err != nil {
+		t.Fatalf("write %s: %v", filename, err)
+	}
+	for _, args := range [][]string{
+		{"add", "."},
+		{"commit", "-m", "advance remote"},
+		{"push", "origin", branch},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", args[0], err, out)
+		}
+	}
+	return gitIn(t, dir, "rev-parse", "HEAD")
 }
 
 // makeStore creates an in-memory graph store with one problem class and
@@ -390,6 +441,127 @@ func TestExport_PullExistingClone(t *testing.T) {
 	}
 	if res.CommitSHA == "" {
 		t.Error("expected a commit when exporting to existing clone")
+	}
+}
+
+// TestExport_ExistingCloneMismatchedRepo_Errors covers the origin guard in
+// prepareClone (ErrRepoMismatch): when LocalDir already holds a clone of
+// repo A and the engine is asked to export into a different repo B, it must
+// fail with ErrRepoMismatch and must NOT touch the clone — no fetch, no
+// checkout, no pull-forward, no files written. Reusing that clone would
+// silently commit into (or push to) the wrong repository.
+//
+// The no-fetch assertion is behavioural, not just an error-type check: repo A
+// is advanced with a NEW commit after the clone is taken, so any fetch would
+// move the clone's refs/remotes/origin/main. The test asserts that ref (HEAD,
+// origin URL, working-tree cleanliness and the subtree dir too) is unchanged.
+func TestExport_ExistingCloneMismatchedRepo_Errors(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+
+	// Repo A — the repo the pre-existing clone belongs to.
+	repoA := initBareRepo(t, "main")
+	seedRemote(t, repoA, "main")
+
+	// Repo B — a different, real repository: the silent-corruption case.
+	repoB := initBareRepo(t, "main")
+	seedRemote(t, repoB, "main")
+	if repoA == repoB {
+		t.Fatal("premise: repo A and repo B must be different repositories")
+	}
+
+	// Simulate a previous run against repo A.
+	localDir := filepath.Join(t.TempDir(), "clone")
+	if out, err := exec.Command("git", "clone", repoA, localDir).CombinedOutput(); err != nil {
+		t.Fatalf("manual clone of repo A: %v\n%s", err, out)
+	}
+
+	// Snapshot the clone BEFORE the mismatched call.
+	headBefore := gitIn(t, localDir, "rev-parse", "HEAD")
+	originBefore := gitIn(t, localDir, "remote", "get-url", "origin")
+	originMainBefore := gitIn(t, localDir, "rev-parse", "refs/remotes/origin/main")
+
+	// Advance repo A after the clone: a fetch would now be observable.
+	advancedSHA := advanceRemote(t, repoA, "main", "post-clone.txt")
+	if advancedSHA == originMainBefore {
+		t.Fatalf("premise failed: advancing repo A did not move it past %s", originMainBefore)
+	}
+
+	cases := []struct {
+		name   string
+		target string
+		run    func(e *Engine) error
+	}{
+		{
+			name:   "different-real-repo (dry-run)",
+			target: repoB,
+			run: func(e *Engine) error {
+				_, err := e.DryRun(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+				return err
+			},
+		},
+		{
+			name:   "nonexistent-path (export, Push=false)",
+			target: filepath.Join(t.TempDir(), "not-a-repo.git"),
+			run: func(e *Engine) error {
+				_, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+				return err
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := NewEngine(Config{
+				RepoURL:  tc.target,
+				Branch:   "main",
+				LocalDir: localDir,
+				Push:     false,
+			}, store)
+
+			err := tc.run(e)
+
+			// 1. The mismatch must be reported as ErrRepoMismatch.
+			if err == nil {
+				t.Fatal("export with mismatched RepoURL: want error, got nil")
+			}
+			if !errors.Is(err, ErrRepoMismatch) {
+				t.Errorf("error = %v, want errors.Is(err, ErrRepoMismatch)", err)
+			}
+			// 2. The message must name BOTH URLs so the operator can see the
+			//    stale clone and the requested target.
+			for _, want := range []string{originBefore, tc.target} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not name %q", err.Error(), want)
+				}
+			}
+
+			// 3. NO fetch: origin/main must not have moved to the commit repo A
+			//    gained after the clone was taken.
+			if got := gitIn(t, localDir, "rev-parse", "refs/remotes/origin/main"); got != originMainBefore {
+				t.Errorf("clone origin/main moved: %s -> %s (guard fetched the clone)", originMainBefore, got)
+			}
+			// 4. NO pull-forward / checkout / commit.
+			if got := gitIn(t, localDir, "rev-parse", "HEAD"); got != headBefore {
+				t.Errorf("clone HEAD moved: %s -> %s (guard pulled the clone forward)", headBefore, got)
+			}
+			// 5. The clone still belongs to repo A, not the requested repo B.
+			if got := gitIn(t, localDir, "remote", "get-url", "origin"); got != originBefore {
+				t.Errorf("clone origin changed: %q -> %q", originBefore, got)
+			}
+			// 6. Working tree untouched (no checkout, no stray export files).
+			if got := gitIn(t, localDir, "status", "--porcelain"); got != "" {
+				t.Errorf("clone working tree dirty after mismatched export:\n%s", got)
+			}
+			if _, statErr := os.Stat(filepath.Join(localDir, "pre-solve-answers")); !os.IsNotExist(statErr) {
+				t.Errorf("export wrote into the clone despite the mismatch (stat err = %v)", statErr)
+			}
+			// 7. The clone's HEAD is still the pre-advance commit of repo A.
+			if headBefore == advancedSHA {
+				t.Fatalf("premise failed: clone HEAD already at repo A's advanced commit")
+			}
+		})
 	}
 }
 
