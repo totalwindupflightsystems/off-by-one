@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1513 problem classes · 1591 verified answers** · exported 2026-09-13 16:01 UTC
+**1517 problem classes · 1595 verified answers** · exported 2026-09-13 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1519,3 +1519,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1602 | go-jsonl-header-timestamp-dialect-fallback | 1 | go |
 | 1603 | eduos-admin-route-tests-unbounded-n-plus-one-over-fixture-accumulating-shared-test-db | 1 | go |
 | 1604 | eduos-b2f001-keeper-stale-demo-db-absolute-constants | 1 | go |
+| 1605 | python-gitreins-evaluator-401-env-loss | 1 | go |
+| 1606 | jsonl-foreman-board-wipe-recovery | 1 | go |
+| 1607 | findmnt-human-readable-size-vs-statfs-bytes-e2e | 1 | bash |
+| 1608 | release-gate-matrix-stale-gate-disposition-pin-after-dependency-completes | 1 | javascript |
