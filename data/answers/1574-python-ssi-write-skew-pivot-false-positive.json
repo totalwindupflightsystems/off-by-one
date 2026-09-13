@@ -1,0 +1,28 @@
+{
+  "class_id": 1574,
+  "title": "python-ssi-write-skew-pivot-false-positive",
+  "description": "python-ssi-write-skew-pivot-false-positive",
+  "created_at": "2026-09-12 22:39:38",
+  "answers": [
+    {
+      "answer_id": 1755,
+      "language": "python",
+      "environment": "python3",
+      "version": "3.11",
+      "solution": "Diagnosis complete and verified. Here's the solution.\n\n# python-ssi-write-skew-pivot-false-positive — Diagnosis & Fix\n\nEnvironment: Python 3.11 · Files: `ssi_analysis.py`, `test_ssi_analysis.py`, `SOLUTION.md`\n\n## Root cause\n\nAn rw-antidependency is directional: `T --rw--> U` iff `T` read version `v` of row `r` and `U` wrote a strictly later version `v' > v`. Cahill's dangerous structure is `T1 --rw--> T2 --rw--> T3`, where the pivot `T2` must have edges on **both sides**.\n\nThe bug is the pivot predicate counting *incident* rw-edges instead of requiring **one incoming AND one outgoing committed** edge. A read-only report `R` reads `x@1, y@1`; disjoint writers produce `R --rw--> W1` and `R --rw--> W2`. `R` has two outgoing edges and zero incoming, so it's a source, not a pivot — yet the naive `>= 2` rule aborts it. Same false positive when the only neighbour on one side is uncommitted.\n\n## Exact fix\n\nTwo changes to the pivot test:\n1. Require `>= 1` incoming **and** `>= 1` outgoing rw-edge.\n2. Filter neighbours to committed transactions.\n\n```python\ndef exact_pivots(rw, committed=None) -> Set[str]:\n    universe = set(rw) if committed is None else set(committed)\n    return {\n        p for p in universe\n        if {c for c in rw.get(p, ()) if c in universe and c != p}   # outbound\n        and _incoming(rw, p, universe)                               # inbound\n    }\n\ndef dangerous_structures(rw, committed=None):\n    universe = set(rw) if committed is None else set(committed)\n    out = []\n    for p in universe:\n        outs = {c for c in rw.get(p, ()) if c in universe and c != p}\n        ins = _incoming(rw, p, universe)\n        if not outs or not ins:\n            continue\n        for a in sorted(ins):\n            for c in sorted(outs):\n                out.append((a, p, c))\n    return out\n```\n\nThe minimal abort set is the minimum hitting set over dangerous triples (aborting a shared node can be cheaper than aborting every pivot). Since no dangerous structure ⇒ acyclic (Cahill), removing that set restores serializability.\n\nFull runnable module and test suite are in `/home/kara/ssi_analysis.py` and `/home/kara/test_ssi_analysis.py`.\n\n## Verification — 21/21 tests pass\n\n```\n$ cd /home/kara && python3 -m unittest test_ssi_analysis -v\nRan 21 tests in 0.001s\nOK\n```\n\nDecisive results:\n\n| History | rw edges | dangerous | exact pivots | naive (buggy) | abort set | acyclic |\n|---|---|---|---|---|---|---|\n| Read-only report + 2 disjoint writers | `R→W1, R→W2` | `[]` | `{}` | `{R}` ✗ | `{}` | yes |\n| Doctor-on-call write skew | `D1→D2, D2→D1` | `(D1,D2,D1),(D2,D1,D2)` | `{D1,D2}` | `{D1,D2}` | `{D1}` | yes |\n\nThe false-positive case confirms the naive heuristic flags `R` while the exact rule clears it with an empty abort set and serial order `R, W1, W2`. The true anomaly is cyclic before abort and acyclic after aborting one transaction. Regression tests also cover incoming-only, outgoing-only, uncommitted-neighbour, and minimum-hitting-set cases.\n",
+      "evidence": "# Evidence\n- Problem class: python-ssi-write-skew-pivot-false-positive\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-12T22:39:38.479Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Given a serialized multi-version history of committed transactions with declared reads/writes over versioned rows, implement Serializable Snapshot Isolation (Cahill SSI) analysis: build the rw-antidependency graph, detect dangerous structures (two adjacent rw edges through a pivot), and apply the exact inbound/outbound rule so that a pivot with no committed transaction rw-dependency on both sides is NOT aborted. Report the minimal abort set that makes the remaining history serializable and produce a distinguishing test where a naive pivot-only heuristic aborts an innocent transaction (e.g. a read-only report plus two disjoint writers) while true doctor-on-call write skew is correctly aborted.",
+        "environment": "python3",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "python-ssi-write-skew-pivot-false-positive",
+        "provider": "openrouter",
+        "solved_at": "2026-09-12T22:39:38.479Z",
+        "version": "3.11"
+      },
+      "status": "verified",
+      "created_at": "2026-09-12 22:39:38"
+    }
+  ]
+}

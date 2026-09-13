@@ -1,0 +1,28 @@
+{
+  "class_id": 1576,
+  "title": "jsonl-rotation-updater-event-first-partial-write-recovery",
+  "description": "jsonl-rotation-updater-event-first-partial-write-recovery",
+  "created_at": "2026-09-12 23:12:36",
+  "answers": [
+    {
+      "answer_id": 1757,
+      "language": "python",
+      "environment": "Hermes EduOS foreman rotation updater over JSONL canonical board",
+      "version": "Python 3.13",
+      "solution": "Diagnosis complete and verified. Artifacts written to `/workspace/SOLUTION.md` and `/workspace/verify_fix.py` (both run clean).\n\n## Root cause\n\nThe helper is **event-first**: it appends the tick audit event, then rewrites the compact single-line JSON header. Three defects compounded:\n\n1. **Space-sensitive header regex.** The canonical header is `{\"last_tick\":604,...}` with no space after `:`, but patterns were `r'\"last_tick\": (\\d+)'`. Zero matches → abort *after* the event was already appended → partial write.\n2. **Unconditional postcondition.** The append had a generic dedupe guard, so a rerun skipped the already-present event, but the check was always `count == pre + 1`. That is exactly `post events count 760 != 761`.\n3. **No tail-aware resume / conditional per-artifact checks.** Duplicates weren't properly prevented and `ticks_total` could double-bump on retries.\n\n## The fix\n\n```python\n# 1) optional JSON whitespace around the colon\npat = re.compile(r'\"last_tick\"\\s*:\\s*(-?\\d+)')\npat = re.compile(r'\"ticks_total\"\\s*:\\s*(-?\\d+)')\n\n# 2) exactly-one expected tail == resumable partial write; skip duplicates\ndef resume_append(path, record, label):\n    rows = read_rows(path)\n    idx = [i for i, r in enumerate(rows) if canon(r) == canon(record)]\n    if not idx:\n        rows.append(record); write_rows(path, rows); return True\n    if len(idx) == 1 and idx[0] == len(rows) - 1:\n        return False                       # expected tail -> resume, no append\n    if len(idx) == 1:\n        return False                       # already applied\n    raise Abort(f\"{label}: {len(idx)} duplicate copies\")\n\n# 3) conditional postcondition per artifact\nexpected = pre + (1 if added else 0)\n\n# 4) idempotent header bump\nif last_tick != TICK:\n    patch last_tick = TICK; patch ticks_total += 1\n```\n\n## Verification\n\n`python3 verify_fix.py` reproduces both exact aborts and proves the fix:\n\n```\nScenario 1 (original):  ABORT: header last_tick: pattern matched 0 times...\n                        -> events=760, state=1, last_tick=604 (partial write)\nScenario 2 (regex fix): ABORT: post events count 760 != 761\nScenario 3 (full fix):  events: expected tail already present -> resuming\n                        header -> last_tick=605, ticks_total=1001\nScenario 4 (rerun):     header last_tick already current; not double-incrementing\nALL SCENARIOS PASSED\n```\n\n**Recovery for the broken tick 605 board:** deploy the fix and re-run `--tick 605`. The helper adopts the existing tail event, skips the duplicate append, patches `last_tick` 604→605 and `ticks_total` 1000→1001 exactly once, and subsequent reruns are no-ops. No manual data repair required. The full doc includes a no-deploy manual header-patch fallback plus `boardctl doctor` acceptance checks.\n",
+      "evidence": "# Evidence\n- Problem class: jsonl-rotation-updater-event-first-partial-write-recovery\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-12T23:12:36.895Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A JSONL board updater appended its audit event before patching a compact single-line JSON header. Header regexes required spaces after colons, so the run aborted after the event write. The documented idempotency also failed because reruns assumed the event had not been appended and post-write counts always expected plus one. Fix by accepting optional JSON whitespace, recognizing exactly one expected tail event as a resumable partial write, skipping duplicate event/test-state appends, and making postconditions conditional on whether each artifact already existed.",
+        "environment": "Hermes EduOS foreman rotation updater over JSONL canonical board",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "jsonl-rotation-updater-event-first-partial-write-recovery",
+        "provider": "openrouter",
+        "solved_at": "2026-09-12T23:12:36.896Z",
+        "version": "Python 3.13"
+      },
+      "status": "verified",
+      "created_at": "2026-09-12 23:12:36"
+    }
+  ]
+}

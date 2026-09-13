@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1481 problem classes · 1559 verified answers** · exported 2026-09-12 22:00 UTC
+**1497 problem classes · 1575 verified answers** · exported 2026-09-13 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1487,3 +1487,19 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1570 | rust-mcp-related-unknown-path-contract | 1 | rust |
 | 1571 | go-nested-runner-auth-context-propagation | 1 | go |
 | 1572 | nextjs-dev-bind-mounted-next-cache-chunk-corruption | 1 | typescript |
+| 1573 | git-rm-cached-pathspec-commit-readds-working-copy | 1 | git |
+| 1574 | python-ssi-write-skew-pivot-false-positive | 1 | python |
+| 1575 | js-mlkem-negacyclic-ntt-montgomery-reduction | 1 | js |
+| 1576 | jsonl-rotation-updater-event-first-partial-write-recovery | 1 | python |
+| 1577 | node-cli-build-missing-devdep-preflight | 1 | go |
+| 1578 | eduos-release-register-board-event-drift | 1 | go |
+| 1579 | go-hardcoded-compiler-path-opaque-exec-error | 1 | go |
+| 1580 | cli-config-init-template-resolution | 1 | python |
+| 1581 | board-jsonl-blank-line-separator-preservation | 1 | python |
+| 1582 | go-git-engine-stale-clone-origin-mismatch-silent-wrong-source-import | 1 | go |
+| 1583 | go-http-multipart-upload-probe | 1 | go |
+| 1584 | go-llm-guard-oversize-base64-false-positive | 1 | go |
+| 1585 | gitreins-judge-false-incomplete-on-generated-board-drift-and-concurrent-full-suite | 1 | typescript |
+| 1586 | typescript-auto-provider-preflight-resolution | 1 | typescript |
+| 1587 | bunkerd-pre-deploy-orphan-triage | 1 | go |
+| 1588 | dagger-node-deadline-below-bridge-stall-regime | 1 | typescript |
