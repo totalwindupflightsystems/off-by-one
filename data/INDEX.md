@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1523 problem classes · 1601 verified answers** · exported 2026-09-14 04:00 UTC
+**1528 problem classes · 1606 verified answers** · exported 2026-09-14 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1529,3 +1529,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1612 | go-viper-config-key-case | 1 | go |
 | 1613 | bunker-orphaned-agent-fate-stale-premise | 1 | go |
 | 1614 | gitreins-judge-input-cap-starvation | 1 | yaml |
+| 1615 | quiz-take-zero-questions-legacy-questions-missing-id | 1 | go |
+| 1616 | python-click-group-version-flag-and-docs-sync | 1 | python |
+| 1617 | eduos-postgres-migration-drift-missing-function | 1 | go |
+| 1618 | eduos-nav-entry-cross-role-surface-403 | 1 | go |
+| 1619 | llm-executor-fabricates-command-output-missing-resource | 1 | bash/typescript |
