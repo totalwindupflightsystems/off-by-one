@@ -1335,9 +1335,11 @@ func TestExportSuccess(t *testing.T) {
 	remote := initBareRepoForHandler(t, "main")
 	seedBareRepoForHandler(t, remote, "main")
 
+	const wantMsg = "export: handler success-path answers"
 	rresp := do(t, s, "POST", "/api/v1/export", exportRequest{
-		TargetRepo: remote,
-		AnswerIDs:  []int64{answerID},
+		TargetRepo:    remote,
+		AnswerIDs:     []int64{answerID},
+		CommitMessage: wantMsg,
 	})
 	if rresp.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body: %s", rresp.Code, rresp.Body.String())
@@ -1353,6 +1355,18 @@ func TestExportSuccess(t *testing.T) {
 		t.Errorf("files_changed = %d, want >= 1", body.FilesChanged)
 	}
 
+	// DF-OFF-BY-ONE-8: commit_message from the request must drive the
+	// commit message. Read it back from the bare remote (not the
+	// clone) so the assertion covers the pushed commit.
+	cmd := exec.Command("git", "--git-dir", remote, "log", "-1", "--pretty=%s", "main")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("read remote commit subject: %v\n%s", err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != wantMsg {
+		t.Errorf("remote commit subject = %q, want %q (commit_message was dropped)", got, wantMsg)
+	}
+
 	// Unknown answer_id is a client error (4xx), not a 500 export_failed.
 	rresp = do(t, s, "POST", "/api/v1/export", exportRequest{
 		TargetRepo: remote,
@@ -1360,6 +1374,31 @@ func TestExportSuccess(t *testing.T) {
 	})
 	if rresp.Code < 400 || rresp.Code >= 500 {
 		t.Errorf("unknown answer_id: status = %d, want 4xx; body: %s", rresp.Code, rresp.Body.String())
+	}
+}
+
+// TestExportInvalidAnswerID400 verifies an answer_id that cannot be
+// exported is reported as an actionable 400 that names the offending
+// request field. Regression (DF-OFF-BY-ONE-8): the export path used to
+// answer with 500 export_failed and a message leaking internal
+// ExportItem fields ("export item class=0 answer=43: ...").
+func TestExportInvalidAnswerID400(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	s.ExportLocalDir = t.TempDir()
+
+	rr := do(t, s, "POST", "/api/v1/export", exportRequest{
+		TargetRepo: "https://github.com/example/repo.git",
+		AnswerIDs:  []int64{424242},
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+	msg := rr.Body.String()
+	if strings.Contains(msg, "class=") {
+		t.Errorf("error body leaks internal struct fields: %s", msg)
+	}
+	if !strings.Contains(msg, "answer_ids") {
+		t.Errorf("error body does not name the offending field answer_ids: %s", msg)
 	}
 }
 

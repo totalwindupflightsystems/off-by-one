@@ -802,14 +802,30 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve each answer's class before building the ExportItem — the
-	// export engine needs a valid ClassID to lay out the subtree; a
-	// missing answer is a client error (404), not an export failure.
+	// export engine needs a valid ClassID to lay out the subtree. An
+	// answer_id that cannot be resolved (unknown answer, or its class row
+	// is gone) is a client request problem: report it as 400 with a
+	// message that names the field the caller sent, never as a 500 that
+	// leaks engine internals.
 	items := make([]export.ExportItem, len(req.AnswerIDs))
 	for i, id := range req.AnswerIDs {
 		answer, err := s.Store.GetAnswerNode(r.Context(), id)
 		if err != nil {
 			if errors.Is(err, graph.ErrNotFound) {
-				writeError(w, http.StatusNotFound, "answer_not_found", fmt.Sprintf("answer %d not found", id))
+				writeError(w, http.StatusBadRequest, "invalid_answer_ids",
+					fmt.Sprintf("invalid answer_ids: answer %d does not exist or its class is missing", id))
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "lookup_failed", err.Error())
+			return
+		}
+		// The class must exist too: the engine lays files out under
+		// {class}/{env}/{version}, and a missing class would otherwise
+		// surface as a 500 export_failed mid-write.
+		if _, err := s.Store.GetProblemClass(r.Context(), answer.ClassID); err != nil {
+			if errors.Is(err, graph.ErrNotFound) {
+				writeError(w, http.StatusBadRequest, "invalid_answer_ids",
+					fmt.Sprintf("invalid answer_ids: answer %d does not exist or its class is missing", id))
 				return
 			}
 			writeError(w, http.StatusInternalServerError, "lookup_failed", err.Error())
@@ -823,6 +839,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		Branch:        req.Branch,
 		LocalDir:      s.ExportLocalDir,
 		SubtreePrefix: "pre-solve-answers",
+		CommitMessage: req.CommitMessage,
 		Push:          true,
 		GitPath:       "git",
 	}, s.Store)

@@ -56,6 +56,11 @@ type Config struct {
 	// CommitEmail overrides the git author email.
 	CommitEmail string
 
+	// CommitMessage overrides the export commit message verbatim. When
+	// empty (or whitespace-only), the engine writes its default summary
+	// message ("export: N pre-solve answers").
+	CommitMessage string
+
 	// Push controls whether the commit is pushed to the remote after
 	// writing. Set to false for dry-run / preview mode.
 	Push bool
@@ -170,7 +175,12 @@ func (e *Engine) Export(ctx context.Context, items []ExportItem) (*ExportResult,
 	for _, item := range items {
 		files, skip, err := e.writeItem(ctx, item)
 		if err != nil {
-			return nil, fmt.Errorf("export item class=%d answer=%d: %w", item.ClassID, item.AnswerID, err)
+			// Name the request field the caller controls: an item that
+			// cannot be resolved is a request problem (a bogus
+			// answer_ids entry), not an engine failure. Never leak the
+			// ExportItem struct fields (class=/answer=) here — callers
+			// cannot act on them.
+			return nil, fmt.Errorf("invalid answer_ids: answer %d does not exist or its class is missing: %w", item.AnswerID, err)
 		}
 		if skip != nil {
 			res.ItemsSkipped = append(res.ItemsSkipped, *skip)
@@ -340,9 +350,14 @@ func (e *Engine) stageAndCommit(ctx context.Context, res *ExportResult) error {
 		return nil
 	}
 
-	// Commit.
-	msg := fmt.Sprintf("export: %d pre-solve answers\n\nExported via Off-by-One at %s",
-		res.ItemsExported, time.Now().UTC().Format(time.RFC3339))
+	// Commit message: a caller-supplied message is used verbatim (no
+	// wrapping, no timestamp appended); otherwise fall back to the
+	// engine's default summary.
+	msg := e.cfg.CommitMessage
+	if strings.TrimSpace(msg) == "" {
+		msg = fmt.Sprintf("export: %d pre-solve answers\n\nExported via Off-by-One at %s",
+			res.ItemsExported, time.Now().UTC().Format(time.RFC3339))
+	}
 
 	commitArgs := []string{"commit", "-m", msg}
 	if e.cfg.CommitAuthor != "" && e.cfg.CommitEmail != "" {

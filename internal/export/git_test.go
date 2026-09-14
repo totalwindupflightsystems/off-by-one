@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -252,7 +253,21 @@ func TestExport_ClassMismatch(t *testing.T) {
 	})
 	// This will fail at GetProblemClass, which returns an error, not a skip.
 	if err == nil {
-		t.Error("expected error for non-existent class ID")
+		t.Fatal("expected error for non-existent class ID")
+	}
+
+	// DF-OFF-BY-ONE-8: the error must be actionable for the caller —
+	// it names the request field (answer_ids) and the offending answer,
+	// and never dumps internal ExportItem fields (class=/answer=).
+	msg := err.Error()
+	if !strings.Contains(msg, "answer_ids") {
+		t.Errorf("error = %q, want it to name the request field answer_ids", msg)
+	}
+	if !strings.Contains(msg, fmt.Sprintf("answer %d", answer.ID)) {
+		t.Errorf("error = %q, want it to name answer %d", msg, answer.ID)
+	}
+	if strings.Contains(msg, "class=") {
+		t.Errorf("error = %q leaks internal struct fields (class=)", msg)
 	}
 }
 
@@ -409,6 +424,85 @@ func TestExport_IdempotentNoChanges(t *testing.T) {
 	}
 	if res2.CommitSHA != "" {
 		t.Errorf("second export CommitSHA = %q, want empty (no changes)", res2.CommitSHA)
+	}
+}
+
+// TestExport_DefaultCommitMessage pins the fallback: with no
+// CommitMessage configured the engine writes its own summary message.
+func TestExport_DefaultCommitMessage(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+
+	barePath := initBareRepo(t, "main")
+	seedRemote(t, barePath, "main")
+
+	localDir := filepath.Join(t.TempDir(), "clone")
+	e := NewEngine(Config{
+		RepoURL:  barePath,
+		Branch:   "main",
+		LocalDir: localDir,
+		Push:     false,
+	}, store)
+
+	res, err := e.Export(context.Background(), []ExportItem{
+		{ClassID: pc.ID, AnswerID: answer.ID},
+	})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if res.CommitSHA == "" {
+		t.Fatal("no commit created")
+	}
+
+	const want = "export: 1 pre-solve answers"
+	if got := gitIn(t, localDir, "log", "-1", "--pretty=%s"); got != want {
+		t.Errorf("commit subject = %q, want default %q", got, want)
+	}
+}
+
+// TestExport_CommitMessageOverride verifies a caller-supplied
+// CommitMessage is used verbatim as the commit message subject and body
+// (DF-OFF-BY-ONE-8: the request field was accepted but silently
+// dropped).
+func TestExport_CommitMessageOverride(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+
+	barePath := initBareRepo(t, "main")
+	seedRemote(t, barePath, "main")
+
+	const want = "export: docker ownership answers for release 2"
+	localDir := filepath.Join(t.TempDir(), "clone")
+	e := NewEngine(Config{
+		RepoURL:       barePath,
+		Branch:        "main",
+		LocalDir:      localDir,
+		CommitMessage: want,
+		Push:          true,
+	}, store)
+
+	res, err := e.Export(context.Background(), []ExportItem{
+		{ClassID: pc.ID, AnswerID: answer.ID},
+	})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if res.CommitSHA == "" {
+		t.Fatal("no commit created")
+	}
+
+	if got := gitIn(t, localDir, "log", "-1", "--pretty=%s"); got != want {
+		t.Errorf("commit subject = %q, want %q", got, want)
+	}
+	// Verbatim: no default-message wrapping or timestamp appended.
+	if got := gitIn(t, localDir, "log", "-1", "--pretty=%B"); got != want {
+		t.Errorf("commit message = %q, want %q (unwrapped)", got, want)
+	}
+	// The pushed commit carries the same message.
+	if got := gitIn(t, "", "--git-dir="+barePath, "log", "-1", "--pretty=%s"); got != want {
+		t.Errorf("pushed commit subject = %q, want %q", got, want)
 	}
 }
 
