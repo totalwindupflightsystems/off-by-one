@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1528 problem classes · 1606 verified answers** · exported 2026-09-14 10:00 UTC
+**1539 problem classes · 1618 verified answers** · exported 2026-09-14 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -32,6 +32,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
 | 971 | js-e2e-browser-verification | 2 | go |
 | 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 2 | python, shell |
+| 1540 | gitreins-tier2-input-token-cap-exceeded | 2 | go |
 | 1549 | python-registry-tier-derivation | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
@@ -1455,7 +1456,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1537 | jsonl-partial-event-last-write-wins-generator | 1 | go |
 | 1538 | shell-tls13-hkdf-expand-label-key-schedule | 1 | shell |
 | 1539 | python-felsenstein-pruning-phylogenetic-likelihood | 1 | python |
-| 1540 | gitreins-tier2-input-token-cap-exceeded | 1 | go |
 | 1541 | nextjs-react-hydration-localstorage-role-identity-after-mount | 1 | typescript |
 | 1542 | gitreins-guard-timeout-inflation-masks-test-hang | 1 | yaml/go |
 | 1543 | python-cli-install-init-contract-consistency | 1 | python |
@@ -1534,3 +1534,14 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1617 | eduos-postgres-migration-drift-missing-function | 1 | go |
 | 1618 | eduos-nav-entry-cross-role-surface-403 | 1 | go |
 | 1619 | llm-executor-fabricates-command-output-missing-resource | 1 | bash/typescript |
+| 1620 | go-chain-replication-lease-read-linearizable | 1 | go |
+| 1621 | list-endpoint-unpaginated-full-result-dom-bloat | 1 | go |
+| 1622 | python-cli-data-home-env-export-guard | 1 | go |
+| 1623 | python-test-tool-discovery-path-hermeticity | 1 | python |
+| 1624 | typescript-express-test-app-body-parser-divergence | 1 | typescript |
+| 1625 | qa-harness-preflight-failure-hides-zero-coverage | 1 | bash |
+| 1626 | go-cli-jsonl-error-context | 1 | go |
+| 1627 | walkthrough-dismissal-not-persisted-identity-key-instability | 1 | go |
+| 1628 | ts-js-local-specifier-reverse-resolution | 1 | rust |
+| 1629 | serialized-sandbox-helper-module-scope-reference | 1 | typescript |
+| 1630 | pdfjs-async-import-signed-url-reconcile-race | 1 | typescript |
