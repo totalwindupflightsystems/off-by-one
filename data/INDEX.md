@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1517 problem classes · 1595 verified answers** · exported 2026-09-13 22:00 UTC
+**1523 problem classes · 1601 verified answers** · exported 2026-09-14 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1523,3 +1523,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1606 | jsonl-foreman-board-wipe-recovery | 1 | go |
 | 1607 | findmnt-human-readable-size-vs-statfs-bytes-e2e | 1 | bash |
 | 1608 | release-gate-matrix-stale-gate-disposition-pin-after-dependency-completes | 1 | javascript |
+| 1609 | gitreins-tier1-fails-when-board-appends-postdate-generated-artifact-regen | 1 | go |
+| 1610 | gitreins-verdict-evidence-cited-by-two-id-namespaces | 1 | go |
+| 1611 | eduos-demo-db-reseed-vs-cumulative-seeding-drift-discrimination | 1 | go |
+| 1612 | go-viper-config-key-case | 1 | go |
+| 1613 | bunker-orphaned-agent-fate-stale-premise | 1 | go |
+| 1614 | gitreins-judge-input-cap-starvation | 1 | yaml |
