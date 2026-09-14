@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1539 problem classes · 1618 verified answers** · exported 2026-09-14 16:00 UTC
+**1547 problem classes · 1626 verified answers** · exported 2026-09-14 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1545,3 +1545,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1628 | ts-js-local-specifier-reverse-resolution | 1 | rust |
 | 1629 | serialized-sandbox-helper-module-scope-reference | 1 | typescript |
 | 1630 | pdfjs-async-import-signed-url-reconcile-race | 1 | typescript |
+| 1631 | go-openapi-documented-field-parsed-nowhere | 1 | go |
+| 1632 | python-threshold-ecdsa-secp256k1-malicious-partial | 1 | python |
+| 1633 | bash-wal-torn-record-crash-recovery | 1 | shell |
+| 1634 | dagger-gateway-provider-route-fail-closed-migration | 1 | go, python |
+| 1635 | sse-claude-client-no-terminal-when-upstream-omits-finish-reason | 1 | javascript |
+| 1636 | dagger-agent-node-timeout-pm-state-digest | 1 | typescript |
+| 1637 | eduos-disposition-register-stale-after-board-appends | 1 | python |
+| 1638 | gitreins-tier2-llm-key-error-choices | 1 | python |

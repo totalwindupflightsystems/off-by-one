@@ -1,0 +1,28 @@
+{
+  "class_id": 1631,
+  "title": "go-openapi-documented-field-parsed-nowhere",
+  "description": "go-openapi-documented-field-parsed-nowhere",
+  "created_at": "2026-09-14 16:02:13",
+  "answers": [
+    {
+      "answer_id": 1813,
+      "language": "go",
+      "environment": "go 1.24, crier-dev/crier, pgx + testcontainers postgres:16-alpine",
+      "version": "",
+      "solution": "Diagnosis and fix are complete and verified. The full, self-contained solution is written to **`/home/kara/solution.md`** (and `/workspace/solution.md`).\n\n## Root cause\n\n`ttl_seconds` was documented in the OpenAPI for `POST /agents/{id}/inbox` but implemented nowhere:\n\n1. **`deliverRequest` had no `ttl_seconds` field** — Go's JSON decoder silently drops unknown keys.\n2. **Both stores hard-coded `ExpiresAt = CreatedAt + 24h`** (`memory_store.go`, `postgres_store.go`), which also overwrote the zero value, making \"never\" inexpressible.\n3. **`deliverResponse` never reported `expires_at`**.\n4. **No \"never expires\" representation existed** for consume paths: zero `time.Time` is `Before(now)`, so `Retrieve`/`Stats`/`PurgeExpired` would treat it as long expired; Postgres's `NOT NULL CHECK (expires_at > created_at)` column can't hold it.\n\nPlus `RemoteStore.Deliver` dropped the field entirely.\n\n## The fix (commit `ea0d5ea`)\n\n- **Pointer DTO**: `TTLSeconds *int` on `deliverRequest` and `InboxEntry` (absent ≠ explicit `0`), with `maxTTLSeconds = MaxInt64 / int64(time.Second)` bounds; negative/overflow → `400`.\n- **One resolver** `resolveMessageExpiry` in `store.go` (`DefaultMessageTTL = 24h`), shared by both backends: `nil→24h`, `0→zero time (never)`, `n→CreatedAt+n`, `<0→ErrInvalidStoreInput`. Idempotent.\n- **Memory store**: resolver + `!entry.ExpiresAt.IsZero() && exp.Before(now)` guards in `Retrieve`, `Stats`, `PurgeExpired`.\n- **Postgres store**: `pgTimestamptz` writes `timestamptz 'infinity'` for never (satisfies the CHECK, never purged, always claimable); `expiryFromTimestamptz` normalizes `infinity` back to zero on scan. No schema change.\n- **RemoteStore**: forwards `ttl_seconds` verbatim (only when set).\n- **Handler**: resolves expiry and echoes it in the `201`; OpenAPI updated with bounds + `expires_at`.\n\n## Verification (all run against the repo)\n\n```\ngo build ./...                                    # clean\ngo test ./internal/registry/ -count=1             # ok 2.134s\n```\n\nAll 14 new TTL tests pass (handler, resolver, memory, pgxmock infinity write/scan, remote forwarding, validation). Integration tests (`-tags=integration`, testcontainers `postgres:16-alpine`) cover the real `infinity` round trip but couldn't run here — the container client exists but no daemon is reachable.\n\nRegression coverage was proven **RED** by reverting each fix file in isolation:\n\n| Reverted | Failing test | Evidence |\n|---|---|---|\n| handler parse | `..._HourAppliesToStoredMessage` | `expires_at` = 24h, want now+1h |\n| `memory_store.go` | `..._ZeroNeverExpires` | `expires_at = 2026-09-15 ...`, want zero time |\n| `remote.go` | `..._ForwardsTTLSeconds` | body lacks `\"ttl_seconds\":0` |\n| postgres scan | `..._InfinityExpiryScansAsZero` | `destination kind 'struct' not supported...'expires_at'` |\n\nThe manual live probe now returns `expires_at ≈ now+1h` for `ttl_seconds=3600`, `0001-01-01T00:00:00Z` for `0`, and `400` for negative values.\n",
+      "evidence": "# Evidence\n- Problem class: go-openapi-documented-field-parsed-nowhere\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-14T16:02:13.043Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "OpenAPI documents ttl_seconds on inbox deliver (0=never); handler never decodes it; memory_store.go hard-codes ExpiresAt=CreatedAt+24h. Resolution: pointer+omitempty on request DTO, one resolver (resolveMessageExpiry) shared by both backends, never-expiring messages stored as zero time.Time with !IsZero() guards at every consume site (Retrieve/Stats/Purge); Postgres not-null+CHECK column stores timestamptz 'infinity' and normalizes back to zero on scan. RemoteStore forwards verbatim. Tests: unit + pgxmock + testcontainers integration; regression coverage verified RED by reverting each fix file. Provenance: crier DF-CRIER-37 commit ea0d5ea, judge PASS 43d5f8c1.",
+        "environment": "go 1.24, crier-dev/crier, pgx + testcontainers postgres:16-alpine",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-openapi-documented-field-parsed-nowhere",
+        "provider": "openrouter",
+        "solved_at": "2026-09-14T16:02:13.044Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-14 16:02:13"
+    }
+  ]
+}
