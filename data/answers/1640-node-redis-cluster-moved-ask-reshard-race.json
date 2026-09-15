@@ -1,0 +1,28 @@
+{
+  "class_id": 1640,
+  "title": "node-redis-cluster-moved-ask-reshard-race",
+  "description": "node-redis-cluster-moved-ask-reshard-race",
+  "created_at": "2026-09-14 22:25:18",
+  "answers": [
+    {
+      "answer_id": 1822,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "The complete, self-contained solution is written to **`/home/kara/redis-cluster-clients/SOLUTION.md`** (embedded code is byte-identical to the runnable `.js` files in that directory, and I verified it by extracting the fenced blocks into a clean dir and running them).\n\n## What it says\n\n**Root causes (each independent):**\n1. RESP has no request IDs — correct matching requires one strict FIFO **per connection**, one entry per frame written. Retargeting must create a *new* entry and `settled`-latch the request so a late frame can't double-deliver.\n2. `ASK` is transient (slot still owned by source → **don't** update the map); `MOVED` is permanent (→ **do** update).\n3. `ASKING` authorizes only the *next command in the byte stream*. Under pipelining it must be written atomically with its command (`Buffer.concat([ASKING, cmd])` in one `socket.write`).\n4. Background `CLUSTER SLOTS` reconciliation races `MOVED` — version the slot map so an older snapshot can't clobber a newer owner.\n5. One per-request `attempts` budget + deadline guarantees termination (no \"re-routed forever\").\n6. RESP3 `>` push frames must not consume a FIFO slot.\n7. `MOVED`/`ASK` retries are exactly-once safe; socket-drop retries are ambiguous and need idempotency keys for `INCR`-style commands.\n\n**The fix** (`resp.js`, `client.js`, `mock-cluster.js`, `test.js`):\n- `Connection.pending` — the only match table; parser pops exactly one entry per non-push reply.\n- `sendAsking` pushes `+OK` and command slots, then writes both frames in one buffer.\n- `onReply` handles `MOVED` (update map + retry), `ASK` (retry with `ASKING`, map untouched), `CLUSTERDOWN/TRYAGAIN` (bounded backoff).\n- `applySlots(ranges, seq)` rejects any slot write with `seq < slot.ver`; `MOVED` writes with `ver = ++topoSeq`.\n- `Request.settled` + `attempts`/`deadline` make `succeed`/`fail` idempotent and bounded.\n\n**Verification** (no Redis install needed — 3 mock RESP3 nodes on `127.0.0.1:17000-17002` really migrate a hot slot):\n\n```\n[1] Reply-to-caller matching under pipelining ............ PASS (300 GETs, 0 mismatches)\n[2] No drop/duplicate across live migration .............. PASS (400 SETs, 0 dup, ASK+=172)\n[3] INCR applied exactly once during a storm ............. PASS (final=300)\n[4] Slot-map versioning rejects stale reconciliations .... PASS\n[5] ASKING frame written atomically ...................... PASS (single write)\nRESULT: PASS\n```\n\nRun it with:\n```bash\ncd /home/kara/redis-cluster-clients && node test.js\n```\n\nThe document is directly usable as-is: copy the four fenced files, `node test.js`.\n",
+      "evidence": "# Evidence\n- Problem class: node-redis-cluster-moved-ask-reshard-race\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-14T22:25:18.719Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement a RESP3 pipelining client for a Redis Cluster that survives a live slot migration: it must follow MOVED, retarget individual commands with ASKING during ASK redirects, and reconcile its slot map while hundreds of in-flight requests span the migration. Guarantee per-connection reply to caller matching so no response is delivered to the wrong request, and show that no command is dropped, duplicated, or re-routed forever when the cluster keeps moving slots during a reshard.",
+        "environment": "node20",
+        "language": "js",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "node-redis-cluster-moved-ask-reshard-race",
+        "provider": "openrouter",
+        "solved_at": "2026-09-14T22:25:18.719Z",
+        "version": "20"
+      },
+      "status": "verified",
+      "created_at": "2026-09-14 22:25:18"
+    }
+  ]
+}

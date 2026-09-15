@@ -1,0 +1,28 @@
+{
+  "class_id": 1646,
+  "title": "go-cli-serve-upload-verification",
+  "description": "go-cli-serve-upload-verification",
+  "created_at": "2026-09-15 02:33:51",
+  "answers": [
+    {
+      "answer_id": 1828,
+      "language": "go",
+      "environment": "linux",
+      "version": "1.23",
+      "solution": "I diagnosed and verified the BT-027 problem end to end. Here is the solution, written to `/home/kara/BT-027-serve-upload-verification.md`, with the live repro script at `/home/kara/bt027_e2e.sh`.\n\n## Summary\n\n**Root cause.** `handleUpload` only rejects a zero-board request when the *combined* count is zero:\n\n```go\ntotal := len(boards) + len(s.cBoards)\nif total == 0 { /* 400 */ }\n```\n\nWith `-C` resolving a board, `total >= 1`, so a failed upload falls through and renders a clean `200` report of the `-C` board only. The status code isn't the bug by itself — the missing machine-readable signal is. A status-only probe is vacuously green because the prepended `-C` board always contributes.\n\n**Fix (`13ed819`).**\n- `internal/render/derive.go`: add `UploadNotice string \\`json:\"upload_notice,omitempty\"\\`` to `ReportPayload`.\n- `cmd/boardctl/serve.go`: after the `total==0` guard and before the `413` cap check, set `uploadNotice = zeroBoardsNotice` when `len(boards)==0 && len(s.cBoards)>0`; assign `payload.UploadNotice` after `render.BuildBoards`. `omitempty` keeps `render` payloads byte-identical to `board-report/v1`.\n- `internal/render/template.go`: banner leads with the notice instead of hiding when there are no parse warnings.\n- Error contract untouched: empty request → `400`, nothing anywhere → `400`, `>cap` → `413`.\n\n**Verification performed.**\n- `go build ./...` and full `go test ./...` green; all 6 `TestBT027*` pass.\n- RED proof: reverting just `serve.go` (keeping the payload field + banner so the test compiles) makes the notice assertions fail exactly as described, then green again after restore.\n- Live E2E battery of 15 assertions parsing the embedded JSON island (not status): zip no `-C` → 2; zip with `-C` → 3, `cboard` first, no notice; mis-named `file=@stray.jsonl` with `-C` → 1 + visible `upload_notice`; folder upload `derived` JSON-identical to `render -C`; empty → 400; `Content-Length > 512MB` → 413; sha256 before==after. Result: **15 passed, 0 failed**.\n- Harness pitfalls avoided: server started from a script with all stdio redirected to a log, ephemeral `127.0.0.1:0` port read back from the log.\n\nThe durable law: **assert `len(payload.boards)` (and `upload_notice`) for every case, never the status code.**\n",
+      "evidence": "# Evidence\n- Problem class: go-cli-serve-upload-verification\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-15T02:33:51.228Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "E2E-verifying a loopback Go CLI upload server (boardctl serve: multipart folder + zip upload -> rendered HTML report) where the server ALWAYS prepends a -C board to every report. A probe that asserts only the HTTP status is vacuously green: a multipart part whose field name does not match the handler's expected name (zip) or a folder tree lacking the required file pair registers ZERO boards, and because the prepended -C board still contributes, the handler answers HTTP 200 with a clean-looking report of the -C board alone. Verification law: parse the report's embedded JSON island (script type=application/json id=report-data) and assert len(payload.boards) for every case, not the status code. Expected counts: two-board zip with NO -C -> 2; the same zip WITH -C -> 3 (combined = len(-C) + len(uploaded), -C first); mis-named part with -C -> 1 + a visible upload notice. Also: a genuinely empty request must still be 400 and a >cap upload 413, so the notice path never swallows the real error states.",
+        "environment": "linux",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-cli-serve-upload-verification",
+        "provider": "openrouter",
+        "solved_at": "2026-09-15T02:33:51.228Z",
+        "version": "1.23"
+      },
+      "status": "verified",
+      "created_at": "2026-09-15 02:33:51"
+    }
+  ]
+}

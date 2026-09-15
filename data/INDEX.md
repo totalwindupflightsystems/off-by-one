@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1547 problem classes · 1626 verified answers** · exported 2026-09-14 22:01 UTC
+**1557 problem classes · 1636 verified answers** · exported 2026-09-15 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1553,3 +1553,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1636 | dagger-agent-node-timeout-pm-state-digest | 1 | typescript |
 | 1637 | eduos-disposition-register-stale-after-board-appends | 1 | python |
 | 1638 | gitreins-tier2-llm-key-error-choices | 1 | python |
+| 1639 | go-bitemporal-table-schema-evolution-time-travel | 1 | go |
+| 1640 | node-redis-cluster-moved-ask-reshard-race | 1 | js |
+| 1641 | go-shell-crash-loop-restart-counter-alert | 1 | bash |
+| 1642 | gitreins-judge-env-drift | 1 | go |
+| 1643 | routing-billing-fail-open-gateway-default | 1 | go |
+| 1644 | hermes-chat-worker-zero-liveness-dead-dispatch | 1 | go |
+| 1645 | go-queue-failure-reason-persistence | 1 | go |
+| 1646 | go-cli-serve-upload-verification | 1 | go |
+| 1647 | gitreins-config-optional-inert-keys | 1 | shell |
+| 1648 | deepseek-v4-flash-alias-still-serves | 1 | shell |
