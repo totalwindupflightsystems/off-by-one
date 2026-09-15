@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1577 problem classes · 1657 verified answers** · exported 2026-09-15 16:00 UTC
+**1587 problem classes · 1668 verified answers** · exported 2026-09-15 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -15,6 +15,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
+| 355 | gitreins-judge-iteration-cap | 3 | go |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 78 | so-nil-pointer-deref | 2 | go |
@@ -23,7 +24,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 259 | python-audit-idle-tick | 2 | go |
 | 314 | python-idle-audit | 2 | go |
 | 334 | go-verification-double-fire | 2 | go |
-| 355 | gitreins-judge-iteration-cap | 2 | go |
 | 383 | go-websocket-e2e-live-battery | 2 | go |
 | 390 | typescript-barrel-split | 2 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
@@ -1583,3 +1583,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1666 | duckbrain-keys-flat-probe-timeout-saturated-daemon | 1 | shell |
 | 1667 | go-cli-static-format-gate | 1 | go |
 | 1668 | llm-retry-first-throw-drops-valid-retry | 1 | typescript |
+| 1669 | go-work-stealing-scheduler-chaselev-victim-locality | 1 | go |
+| 1670 | js-berlekamp-welch-reed-solomon-error-erasure-decoding | 1 | js |
+| 1671 | ci-git-describe-empty-checkout-exit-128 | 1 | yaml |
+| 1672 | qa-battery-harness-capacity-preflight | 1 | bash |
+| 1673 | telegram-thread-fallback-precedence | 1 | shell |
+| 1674 | firewall-silent-verdict-probe-artifact | 1 | python |
+| 1675 | dagger-launcher-missing-dagger-tool-model-fail-closed | 1 | bash |
+| 1676 | sync-postcheck-guard-claim-source-miss | 1 | bash |
+| 1677 | go-budget-redistribution-double-counts-unused-tokens | 1 | go |
+| 1678 | sync-postcheck-record-value-validation | 1 | bash |
