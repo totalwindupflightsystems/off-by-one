@@ -1242,6 +1242,131 @@ func TestStats_AvgSolveTime(t *testing.T) {
 	}
 }
 
+// TestEstimateTime pins the submit-response ETA derivation.
+//
+// estimated_time is per-job cost x queued depth, rounded to the nearest
+// second: the per-job cost is the lab's observed mean solve time
+// (internal/ingest Queue.AvgSolveTime), falling back to
+// defaultPerJobEstimate when there is no history, and the total is
+// capped at maxEstimateTotal. A depth of 0 (nothing queued) stays "0s".
+//
+// The result must remain a Go duration string so the OpenAPI
+// `estimated_time: type: string` field stays parseable by
+// time.ParseDuration.
+func TestEstimateTime(t *testing.T) {
+	const observed = 2*time.Minute + 13*time.Second // 2m13s, the stats fixture
+
+	cases := []struct {
+		name   string
+		depth  int
+		perJob time.Duration
+		want   string
+	}{
+		{name: "nothing queued", depth: 0, perJob: observed, want: "0s"},
+		{name: "nothing queued keeps 0s even with no history", depth: 0, perJob: 0, want: "0s"},
+		{name: "negative depth", depth: -3, perJob: observed, want: "0s"},
+		{name: "no history falls back to the default per-job cost", depth: 1, perJob: 0, want: "30s"},
+		{name: "negative average falls back to the default per-job cost", depth: 2, perJob: -time.Second, want: "1m0s"},
+		{name: "observed average scales with depth", depth: 3, perJob: observed, want: "6m39s"},
+		{name: "rounds to the nearest second", depth: 1, perJob: 1500 * time.Millisecond, want: "2s"},
+		{name: "just under the cap is not capped", depth: 10, perJob: 2*time.Minute + 57*time.Second, want: "29m30s"},
+		{name: "caps at 30m", depth: 20, perJob: 2*time.Minute + 57*time.Second, want: "30m0s"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := estimateTime(tc.depth, tc.perJob)
+			if got != tc.want {
+				t.Fatalf("estimateTime(%d, %s) = %q, want %q", tc.depth, tc.perJob, got, tc.want)
+			}
+			// The field is typed string in the OpenAPI spec; the value
+			// must stay a parseable Go duration.
+			if _, err := time.ParseDuration(got); err != nil {
+				t.Fatalf("estimateTime(%d, %s) = %q is not a parseable duration: %v",
+					tc.depth, tc.perJob, got, err)
+			}
+		})
+	}
+
+	// Zero means "nothing ahead of you", not "no estimate": the depth 0
+	// short-circuit must win over any per-job cost.
+	if got := estimateTime(0, defaultPerJobEstimate); got != "0s" {
+		t.Errorf("estimateTime(0, default) = %q, want %q", got, "0s")
+	}
+	// The cap is a real ceiling, not a constant: a deeper queue at the
+	// same observed average must not exceed it.
+	if got := estimateTime(1000, observed); got != maxEstimateTotal.String() {
+		t.Errorf("estimateTime(1000, %s) = %q, want capped %q", observed, got, maxEstimateTotal.String())
+	}
+}
+
+// TestSubmit_EstimatedTimeFromObservedAverage asserts the submit
+// response's estimated_time is derived from the lab's observed mean
+// solve time rather than a fixed 30s per queue position (DF-OFF-BY-ONE-5).
+//
+// Fixture: one completed solve of 2m13s (same timestamps as
+// TestStats_AvgSolveTime) is the observed average, so a single queued
+// submission — the only pending row — is promised 2m13s, not "30s".
+// Seeding two more pending rows makes the post-enqueue depth 3 and the
+// promise 3 x 2m13s = 6m39s, proving the value scales with the queue.
+func TestSubmit_EstimatedTimeFromObservedAverage(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	// started 10:00:00, completed 10:02:13 -> 133s -> observed mean "2m13s".
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status, stage, started_at, completed_at)
+		VALUES ('sub_eta0', 'cls', 'complete', 'done',
+			'2026-08-21 10:00:00', '2026-08-21 10:02:13')`); err != nil {
+		t.Fatalf("insert completed entry: %v", err)
+	}
+
+	submit := func(t *testing.T, class string) submitProblemResponse {
+		t.Helper()
+		rr := do(t, s, "POST", "/api/v1/problems/submit", submitProblemRequest{
+			ProblemClass: class,
+			Environment:  "docker",
+			Language:     "go",
+			Cadence:      ingest.CadencePrePhase,
+		})
+		if rr.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+		}
+		var resp submitProblemResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+
+	// Depth 1: only the submission's own pending row is queued.
+	first := submit(t, "deadlock-in-worker-pool")
+	if first.Position != 1 {
+		t.Fatalf("position = %d, want 1 (own pending row)", first.Position)
+	}
+	if first.EstimatedTime != "2m13s" {
+		t.Errorf("estimated_time = %q, want %q (observed mean solve time, not the fixed 30s default)",
+			first.EstimatedTime, "2m13s")
+	}
+	if _, err := time.ParseDuration(first.EstimatedTime); err != nil {
+		t.Errorf("estimated_time = %q is not parseable: %v", first.EstimatedTime, err)
+	}
+
+	// Two more jobs queued ahead. The first submission is still pending
+	// (nothing solved it), so the queue now holds three pending rows and
+	// the next submission becomes depth 4 -> 4 x 2m13s = 8m52s.
+	for _, id := range []string{"sub_eta_p1", "sub_eta_p2"} {
+		if _, err := store.DB().Exec(`INSERT INTO queue_entries
+			(id, problem_class, status) VALUES (?, 'other-class', 'pending')`, id); err != nil {
+			t.Fatalf("insert pending entry %s: %v", id, err)
+		}
+	}
+	second := submit(t, "goroutine-leak-in-http-server")
+	if second.Position != 4 {
+		t.Fatalf("position = %d, want 4 (three queued + own row)", second.Position)
+	}
+	if second.EstimatedTime != "8m52s" {
+		t.Errorf("estimated_time = %q, want %q (4 x observed mean)", second.EstimatedTime, "8m52s")
+	}
+}
+
 // TestStats_SolverAvailable asserts the stats response always carries the
 // solver_available field and that it mirrors Server.SolverAvailable — the
 // signal that tells users why their submissions sit queued forever.

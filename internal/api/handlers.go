@@ -304,12 +304,16 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	depth, _ := s.Queue.Depth(r.Context())
+	// Estimated wait = observed mean solve time x jobs queued ahead of
+	// (and including) this one. Same error-ignore style as Depth: a
+	// failed read falls back to the default per-job estimate.
+	perJob, _ := s.Queue.AvgSolveTime(r.Context())
 	resp := submitProblemResponse{
 		SubmissionID:      id,
 		ProblemClass:      slug,
 		Status:            "queued",
 		Position:          depth,
-		EstimatedTime:     estimateTime(depth),
+		EstimatedTime:     estimateTime(depth, perJob),
 		ExistingSolutions: s.countAnswersFor(r, slug),
 		RelatedProblems:   s.relatedFor(r, slug),
 	}
@@ -938,18 +942,41 @@ func formatTimeRFC3339(t time.Time) string {
 	return t.UTC().Format(time.RFC3339)
 }
 
-// estimateTime is a placeholder ETA: 30s per queued entry, capped
-// at 10 minutes. The real value will be computed from historical
-// solve times once the cron loop starts producing them.
-func estimateTime(depth int) string {
+// defaultPerJobEstimate is the per-job cost used when the lab has no
+// observed solve history yet (Queue.AvgSolveTime returns 0).
+const defaultPerJobEstimate = 30 * time.Second
+
+// maxEstimateTotal caps the submit-response ETA so a deep queue cannot
+// promise an unbounded wait.
+const maxEstimateTotal = 30 * time.Minute
+
+// estimateTime derives the submit-response ETA from the lab's observed
+// mean solve time (perJob) multiplied by the number of queued jobs
+// (depth), rounded to the nearest second and capped at maxEstimateTotal.
+//
+// depth <= 0 means nothing is ahead of the caller, so it returns "0s".
+// A non-positive perJob — no completed solves yet, or an error reading
+// the average — falls back to defaultPerJobEstimate.
+//
+// The result is a Go duration string (time.Duration.String()), i.e.
+// always parseable by time.ParseDuration, matching the OpenAPI
+// estimated_time string field.
+func estimateTime(depth int, perJob time.Duration) string {
 	if depth <= 0 {
 		return "0s"
 	}
-	secs := depth * 30
-	if secs > 600 {
-		secs = 600
+	if perJob <= 0 {
+		perJob = defaultPerJobEstimate
 	}
-	return (time.Duration(secs) * time.Second).String()
+	total := time.Duration(depth) * perJob
+	// A negative product means the multiplication overflowed int64;
+	// treat that as "far beyond the cap" rather than letting it wrap.
+	// Capping before rounding is equivalent here because the cap is an
+	// exact whole-second multiple.
+	if total < 0 || total > maxEstimateTotal {
+		total = maxEstimateTotal
+	}
+	return total.Round(time.Second).String()
 }
 
 // compile-time check: sql is used by the package (e.g. NullString
