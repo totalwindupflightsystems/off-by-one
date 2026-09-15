@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1557 problem classes · 1636 verified answers** · exported 2026-09-15 04:00 UTC
+**1564 problem classes · 1643 verified answers** · exported 2026-09-15 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1563,3 +1563,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1646 | go-cli-serve-upload-verification | 1 | go |
 | 1647 | gitreins-config-optional-inert-keys | 1 | shell |
 | 1648 | deepseek-v4-flash-alias-still-serves | 1 | shell |
+| 1649 | go-hazard-pointer-epoch-reclamation-mpmc-queue | 1 | go |
+| 1650 | python-ssa-phi-destruction-parallel-copy-sequentialization | 1 | python |
+| 1651 | js-bsp-csg-solid-boolean-manifold-repair | 1 | js |
+| 1652 | hermes-canopy-fileviewer-request-shapes | 1 | go |
+| 1653 | go-cgo-disabled-undefined-conn-go-duckdb | 1 | go |
+| 1654 | github-actions-job-failed-all-steps-passed-post-step | 1 | yaml |
+| 1655 | hermes-chat-worker-silent-log-but-live-tree | 1 | shell |

@@ -1,0 +1,28 @@
+{
+  "class_id": 1652,
+  "title": "hermes-canopy-fileviewer-request-shapes",
+  "description": "hermes-canopy-fileviewer-request-shapes",
+  "created_at": "2026-09-15 04:38:51",
+  "answers": [
+    {
+      "answer_id": 1834,
+      "language": "go",
+      "environment": "hermes-canopy canopyd :8099 (HEAD c6e0496), dev JWT",
+      "version": "",
+      "solution": "Diagnosis complete. Note: `canopyd` is not present/running in this container, so I verified the root-cause mechanism directly with Go's JSON decoder (same struct tags) rather than fabricating live HTTP results. The solution is written to `/workspace/solution.md`:\n\n---\n\n# Fixing canopy file-viewer request shapes: snake_case bodies + required `viewer_slug`\n\n**Symptoms:**\n- `POST /api/v1/viewers/dispatch {\"fileId\":...}` → `404 FILE_NOT_FOUND_BY_ID`\n- `POST /api/v1/files/{id}/access {\"action\":\"view\"}` → `400 INVALID_REQUEST`\n\nThe routes are **not** broken. The bodies don't match the Go handler struct tags.\n\n## Root cause\n\n**Dispatch** binds `file_id` (snake_case). Go's `encoding/json` matching is case-insensitive but **underscore-sensitive**, so `fileId` never binds. Unknown keys are silently ignored (no `DisallowUnknownFields`), leaving `FileID` as the **zero UUID**; the lookup then returns `404 FILE_NOT_FOUND_BY_ID` — a lookup miss, not a shape error.\n\n**Access** requires `viewer_slug` (and enum-validates `action`). `{\"action\":\"view\"}` omits the required slug, so it fails `400 INVALID_REQUEST` before any logic. `view` isn't even a valid action.\n\n## Exact fix (client payloads)\n\nDispatch:\n```json\n{ \"file_id\": \"<file uuid>\", \"tree_id\": \"<tree uuid optional>\" }\n```\n\nAccess (valid actions: `open|download|thumbnail_fetch|preview_text|stream_start|stream_end|error`):\n```json\n{ \"action\": \"open\", \"viewer_slug\": \"<slug from dispatch>\", \"file_id\": \"<file uuid>\" }\n```\n\nDrop-in script:\n```bash\nBASE=\"${CANOPY_BASE:-http://localhost:8099}\"\nJWT=\"${CANOPY_JWT:?set CANOPY_JWT}\"; FILE_ID=\"${1:?usage: $0 <file-uuid>}\"\nAUTH=(-H \"Authorization: Bearer ${JWT}\" -H 'Content-Type: application/json')\n\nDISPATCH=\"$(curl -sS -X POST \"${BASE}/api/v1/viewers/dispatch\" \"${AUTH[@]}\" \\\n  -d \"{\\\"file_id\\\":\\\"${FILE_ID}\\\"}\")\"\nVIEWER_SLUG=\"$(printf '%s' \"${DISPATCH}\" | jq -r '.viewer_slug // .viewer.slug // .slug')\"\n\ncurl -sS -X POST \"${BASE}/api/v1/files/${FILE_ID}/access\" \"${AUTH[@]}\" \\\n  -d \"{\\\"action\\\":\\\"open\\\",\\\"viewer_slug\\\":\\\"${VIEWER_SLUG}\\\",\\\"file_id\\\":\\\"${FILE_ID}\\\"}\" \\\n  -w '\\nHTTP %{http_code}\\n'\n```\n\nOptional hardening (make future bad bodies a 400, not a misleading 404): use `dec.DisallowUnknownFields()`, and reject `req.FileID == uuid.Nil` / empty `viewer_slug` / invalid action with `400 INVALID_REQUEST`.\n\n## Verification\n\nLocally reproduced with the same tags (`go run`, Go 1.26):\n```\ncamelCase fileId  -> FileID=\"\" (zero!)\nsnake_case file_id-> FileID=\"11111111-1111-1111-1111-111111111111\"\nbare action       -> Action=\"view\" ViewerSlug=\"\" (missing slug)\naction+slug       -> Action=\"open\" ViewerSlug=\"viewer-abc\"\n```\n\nEnd-to-end success criteria against `canopyd`: dispatch with `file_id` returns `2xx` + a viewer slug; access with `{\"action\":\"open\",\"viewer_slug\":\"<slug>\"}` returns `2xx`. Controls (`fileId` body → 404, `{\"action\":\"view\"}` → 400) should still fail as described. No server change is required for the immediate fix.\n\n**Key takeaway:** read the handler struct tags first — `fileId` will never bind to `json:\"file_id\"`, and a missing required `viewer_slug` is what triggers `400 INVALID_REQUEST`.\n",
+      "evidence": "# Evidence\n- Problem class: hermes-canopy-fileviewer-request-shapes\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-15T04:38:51.701Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "The canopy file-viewer JSON bodies are snake_case and the access log needs a viewer slug: dispatch takes {\"file_id\":\"<uuid>\",\"tree_id\":\"<uuid optional>\"} (a camelCase fileId decodes to the ZERO uuid and surfaces as 404 FILE_NOT_FOUND_BY_ID, which reads like a missing file rather than a body-shape error); the access POST needs {\"action\":\"<open|download|thumbnail_fetch|preview_text|stream_start|stream_end|error>\",\"viewer_slug\":\"<valid slug>\",...} — a bare action is rejected 400 INVALID_REQUEST because viewer_slug is required. Check the handler struct tags before concluding a route is broken.",
+        "environment": "hermes-canopy canopyd :8099 (HEAD c6e0496), dev JWT",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "hermes-canopy-fileviewer-request-shapes",
+        "provider": "openrouter",
+        "solved_at": "2026-09-15T04:38:51.701Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-15 04:38:51"
+    }
+  ]
+}
