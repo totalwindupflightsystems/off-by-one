@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
+	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
 
 // TestLooksPlaceholderAPIKey covers the startup key-validation
@@ -184,4 +185,100 @@ func TestPrintUsage_ShowsSeedSubcommand(t *testing.T) {
 	if strings.Index(out, "Commands:") > strings.Index(out, "Flags:") {
 		t.Errorf("usage output: Commands section must precede Flags, got:\n%s", out)
 	}
+}
+
+// TestResolveSolverModel covers the PI_MODEL precedence rule: a set,
+// non-blank value wins verbatim (trimmed); unset/empty/whitespace-only
+// falls back to the built-in default. The wrapper applies the same rule
+// to its own environment, so the two paths must agree.
+func TestResolveSolverModel(t *testing.T) {
+	const override = "anthropic/claude-sonnet-4-20250514"
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"unset", map[string]string{}, solver.DefaultModel},
+		{"set", map[string]string{"PI_MODEL": override}, override},
+		{"padded", map[string]string{"PI_MODEL": "  " + override + "	"}, override},
+		{"empty", map[string]string{"PI_MODEL": ""}, solver.DefaultModel},
+		{"whitespace only", map[string]string{"PI_MODEL": "   "}, solver.DefaultModel},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			getenv := func(k string) string { return tc.env[k] }
+			if got := resolveSolverModel(getenv); got != tc.want {
+				t.Errorf("resolveSolverModel: got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSolverExtraEnv_ForwardsPI_MODELOnly asserts PI_MODEL reaches the
+// sandbox env when set (so scripts/pi-agent's own resolveModel returns
+// the same id verbatim) and that nothing is added when it is unset — the
+// wrapper must keep mapping the --model id itself in that case.
+func TestSolverExtraEnv_ForwardsPI_MODELOnly(t *testing.T) {
+	const override = "openrouter/deepseek/deepseek-v4.1-flash"
+	env := solverExtraEnv(func(k string) string {
+		if k == "PI_MODEL" {
+			return " " + override + " "
+		}
+		return ""
+	})
+	if len(env) != 1 || env[0] != "PI_MODEL="+override {
+		t.Errorf("solverExtraEnv: got %v, want [PI_MODEL=%s]", env, override)
+	}
+
+	for _, tc := range []struct {
+		name string
+		val  string
+	}{
+		{"unset", ""},
+		{"blank", "  	 "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := solverExtraEnv(func(string) string { return tc.val }); got != nil {
+				t.Errorf("solverExtraEnv(%q): got %v, want nil", tc.val, got)
+			}
+		})
+	}
+}
+
+// TestSolverModelFromProcessEnv wires the operator-facing path through the
+// real process environment and the exact builder main.go uses: PI_MODEL
+// set must (a) become Config.Model — the id handed to the wrapper as
+// --model — and (b) be propagated into Config.ExtraEnv so the sandbox env
+// carries the same value verbatim. Unset PI_MODEL must leave the default
+// model in place with no ExtraEnv entry, and the other config fields must
+// survive unchanged.
+func TestSolverModelFromProcessEnv(t *testing.T) {
+	const override = "anthropic/claude-sonnet-4-20250514"
+	const timeout = 90 * time.Second
+
+	t.Run("set", func(t *testing.T) {
+		t.Setenv("PI_MODEL", "  "+override+"  ")
+		cfg := solverConfigFor(os.Getenv, "/usr/local/bin/pi-agent", "sk-test-key-1234", timeout)
+		if cfg.Model != override {
+			t.Errorf("Config.Model = %q, want %q", cfg.Model, override)
+		}
+		want := "PI_MODEL=" + override
+		if len(cfg.ExtraEnv) != 1 || cfg.ExtraEnv[0] != want {
+			t.Errorf("Config.ExtraEnv = %v, want [%s]", cfg.ExtraEnv, want)
+		}
+		if cfg.PiAgentPath != "/usr/local/bin/pi-agent" || cfg.APIKey != "sk-test-key-1234" || cfg.Timeout != timeout {
+			t.Errorf("Config lost fields: %+v", cfg)
+		}
+	})
+
+	t.Run("unset", func(t *testing.T) {
+		t.Setenv("PI_MODEL", "")
+		cfg := solverConfigFor(os.Getenv, "/usr/local/bin/pi-agent", "sk-test-key-1234", timeout)
+		if cfg.Model != solver.DefaultModel {
+			t.Errorf("Config.Model = %q, want default %q", cfg.Model, solver.DefaultModel)
+		}
+		if cfg.ExtraEnv != nil {
+			t.Errorf("Config.ExtraEnv = %v, want nil", cfg.ExtraEnv)
+		}
+	})
 }

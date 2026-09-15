@@ -147,13 +147,9 @@ func main() {
 					log.Printf("DEEPSEEK_API_KEY empty — using OPENROUTER_API_KEY for solves")
 				}
 			}
-			solverExec = solver.NewExecutor(solver.Config{
-				PiAgentPath: *piAgentPath,
-				Model:       solver.DefaultModel,
-				APIKey:      apiKey,
-				Timeout:     *solveTimeout,
-			}, runner, store)
-			log.Printf("solver ready: pi-agent=%s bwrap=%s", *piAgentPath, *bwrapPath)
+			cfg := solverConfigFor(os.Getenv, *piAgentPath, apiKey, *solveTimeout)
+			solverExec = solver.NewExecutor(cfg, runner, store)
+			log.Printf("solver ready: pi-agent=%s bwrap=%s model=%s", *piAgentPath, *bwrapPath, cfg.Model)
 		}
 	} else {
 		log.Printf("sandbox skipped (--skip-sandbox)")
@@ -306,6 +302,51 @@ func sandboxTimeout() time.Duration {
 		log.Printf("warning: OB1_BWRAP_TIMEOUT=%q is not a positive integer — using default %s", raw, sandbox.DefaultBwrapTimeout)
 	}
 	return sandbox.DefaultBwrapTimeout
+}
+
+// --- solver model resolution -------------------------------------------
+
+// resolveSolverModel returns the model the solver asks Pi Agent for.
+// PI_MODEL, when set to a non-blank value, wins verbatim — the same rule
+// the shipped wrapper applies to its own environment
+// (scripts/pi-agent:resolveModel). Otherwise the built-in default is
+// used. An empty or whitespace-only PI_MODEL is treated as unset, again
+// matching the wrapper, so a blank export never misconfigures the lane.
+func resolveSolverModel(getenv func(string) string) string {
+	if m := strings.TrimSpace(getenv("PI_MODEL")); m != "" {
+		return m
+	}
+	return solver.DefaultModel
+}
+
+// solverExtraEnv returns the extra environment entries for a solve.
+// PI_MODEL is forwarded only when it is set, so the wrapper's own
+// resolveModel sees the same id verbatim and derives the same provider
+// from it. When it is unset the entry is omitted and the wrapper maps the
+// --model id itself (bare deepseek-v4-flash → the provider-qualified lane
+// that matches the available key); forwarding a value the operator never
+// set would take the wrapper's verbatim branch and skip that mapping.
+func solverExtraEnv(getenv func(string) string) []string {
+	if m := strings.TrimSpace(getenv("PI_MODEL")); m != "" {
+		return []string{"PI_MODEL=" + m}
+	}
+	return nil
+}
+
+// solverConfigFor builds the solver configuration from the process
+// environment. PI_MODEL, when set to a non-blank value, selects the model
+// and is also forwarded into the solve environment; otherwise the built-in
+// default model is used and nothing is forwarded (the wrapper then maps
+// the --model id itself). This is the single place main.go derives the
+// solve model, so an operator's PI_MODEL export cannot go unread.
+func solverConfigFor(getenv func(string) string, piAgentPath, apiKey string, timeout time.Duration) solver.Config {
+	return solver.Config{
+		PiAgentPath: piAgentPath,
+		Model:       resolveSolverModel(getenv),
+		APIKey:      apiKey,
+		Timeout:     timeout,
+		ExtraEnv:    solverExtraEnv(getenv),
+	}
 }
 
 // --- env helpers --------------------------------------------------------

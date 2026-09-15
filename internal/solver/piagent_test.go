@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -785,6 +786,111 @@ func TestExecutor_Solve_PropagatesAPIVars(t *testing.T) {
 	for _, a := range rec.lastHandle.lastArgs {
 		if a == "--api-key" {
 			t.Errorf("args contained --api-key; should rely on env vars only: %v", rec.lastHandle.lastArgs)
+		}
+	}
+}
+
+// TestExecutor_Solve_PropagatesExtraEnv asserts that Config.ExtraEnv —
+// where cmd/off-by-one forwards PI_MODEL — reaches the runner's Exec env
+// verbatim, next to the per-call API-key vars. This is the wiring the
+// wrapper depends on: scripts/pi-agent reads PI_MODEL from its process
+// env and returns it verbatim, so a Config that drops ExtraEnv would make
+// the operator's override inert again.
+func TestExecutor_Solve_PropagatesExtraEnv(t *testing.T) {
+	const model = "anthropic/claude-sonnet-4-20250514"
+
+	rec := &recordingRunner{root: t.TempDir()}
+	store, err := graph.OpenShared(fmt.Sprintf("test-solver-extraenv-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("graph.OpenShared: %v", err)
+	}
+	defer store.Close()
+
+	ex := NewExecutor(Config{
+		PiAgentPath: "/bin/true",
+		Model:       model,
+		APIKey:      "sk-test-key-1234",
+		Timeout:     5 * time.Second,
+		ExtraEnv:    []string{"PI_MODEL=" + model},
+	}, rec, store)
+	if _, err := ex.Solve(context.Background(), sampleEntry("sub-extraenv")); err != nil {
+		t.Fatalf("Solve: %v", err)
+	}
+
+	rec.mu.Lock()
+	if rec.lastHandle == nil {
+		rec.mu.Unlock()
+		t.Fatal("Exec was not called")
+	}
+	env := append([]string{}, rec.lastHandle.lastEnv...)
+	args := append([]string{}, rec.lastHandle.lastArgs...)
+	rec.mu.Unlock()
+
+	var gotModel string
+	found := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "PI_MODEL=") {
+			gotModel = strings.TrimPrefix(e, "PI_MODEL=")
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("env did not include PI_MODEL: %v", env)
+	}
+	if gotModel != model {
+		t.Errorf("PI_MODEL in sandbox env = %q, want %q (verbatim)", gotModel, model)
+	}
+	// The same id must be what the wrapper is asked for on the command
+	// line, so the two resolution paths cannot disagree.
+	if !slices.Contains(args, model) {
+		t.Errorf("args %v do not carry the resolved model %q", args, model)
+	}
+	// PI_MODEL must not clobber the per-call key vars.
+	hasKey := false
+	for _, e := range env {
+		if strings.HasPrefix(e, "DEEPSEEK_API_KEY=") {
+			hasKey = true
+		}
+	}
+	if !hasKey {
+		t.Errorf("env did not include DEEPSEEK_API_KEY alongside PI_MODEL: %v", env)
+	}
+}
+
+// TestExecutor_Solve_NoPIModelEnvWhenUnset pins the other half of the
+// forwarding rule: with no operator override there must be no PI_MODEL in
+// the child env, so scripts/pi-agent falls back to mapping the --model id
+// itself (bare deepseek-v4-flash → the provider-qualified lane that
+// matches the available key).
+func TestExecutor_Solve_NoPIModelEnvWhenUnset(t *testing.T) {
+	rec := &recordingRunner{root: t.TempDir()}
+	store, err := graph.OpenShared(fmt.Sprintf("test-solver-nopimodel-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("graph.OpenShared: %v", err)
+	}
+	defer store.Close()
+
+	ex := NewExecutor(Config{
+		PiAgentPath: "/bin/true",
+		Model:       DefaultModel,
+		APIKey:      "sk-test-key-1234",
+		Timeout:     5 * time.Second,
+	}, rec, store)
+	if _, err := ex.Solve(context.Background(), sampleEntry("sub-nopimodel")); err != nil {
+		t.Fatalf("Solve: %v", err)
+	}
+
+	rec.mu.Lock()
+	if rec.lastHandle == nil {
+		rec.mu.Unlock()
+		t.Fatal("Exec was not called")
+	}
+	env := append([]string{}, rec.lastHandle.lastEnv...)
+	rec.mu.Unlock()
+
+	for _, e := range env {
+		if strings.HasPrefix(e, "PI_MODEL=") {
+			t.Errorf("PI_MODEL leaked into the sandbox env with no operator override: %q", e)
 		}
 	}
 }
