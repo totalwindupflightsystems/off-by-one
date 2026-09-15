@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
@@ -363,6 +364,56 @@ func TestTickSolveError(t *testing.T) {
 	}
 	if s.commitCalls.Load() != 0 {
 		t.Errorf("Commit calls = %d, want 0 (Solve failed before commit)", s.commitCalls.Load())
+	}
+}
+
+// -----------------------------------------------------------------------------
+// TestTickSolveError_PersistsReasonToQueue drives the REAL ingest.Queue
+// through the loop's solve-failure path (DF-OFF-BY-ONE-4): the error
+// text the cron loop passes to MarkFailed must be readable back from
+// the queue, which is exactly what the API serves to a polling
+// submitter. The fakeQueue test above proves the call; this proves the
+// persistence.
+func TestTickSolveError_PersistsReasonToQueue(t *testing.T) {
+	store, err := graph.OpenShared("cron_fail_" + t.Name() + "_" + time.Now().Format("150405.000000"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	q, err := ingest.Open(store)
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+
+	ctx := context.Background()
+	id, _, err := q.Submit(ctx, ingest.Submission{
+		ProblemClass: "grpc-deadline-exceeded-on-retry",
+		Cadence:      ingest.CadencePostDebug,
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	const want = "pi-agent crashed: sandbox namespace unavailable"
+	s := &fakeSolver{
+		solveScript: func(*ingest.Entry) (*solver.Solution, error) {
+			return nil, errors.New(want)
+		},
+	}
+	l := fastLoop(q, s)
+	if err := l.Tick(ctx); err == nil {
+		t.Fatal("expected Tick to return the solve error")
+	}
+
+	got, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != ingest.StatusFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if got.FailureReason != want {
+		t.Errorf("failure_reason = %q, want %q (cron loop must pass err.Error() through)", got.FailureReason, want)
 	}
 }
 

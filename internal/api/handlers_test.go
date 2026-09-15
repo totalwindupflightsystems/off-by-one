@@ -1017,6 +1017,77 @@ func TestGetQueueStatus(t *testing.T) {
 	}
 }
 
+// TestGetQueueStatus_FailureReason guards DF-OFF-BY-ONE-4 at the API
+// layer: a failed solve must tell the submitter WHY over
+// GET /api/v1/queue/{submission_id}, not just status='failed'. Pending
+// entries must NOT carry the field at all.
+func TestGetQueueStatus_FailureReason(t *testing.T) {
+	s, _, queue := newTestServer(t)
+	ctx := context.Background()
+	body := submitProblemRequest{ProblemClass: "class-fail", Cadence: ingest.CadencePrePhase}
+	subResp := do(t, s, "POST", "/api/v1/problems/submit", body)
+	var sub submitProblemResponse
+	_ = json.Unmarshal(subResp.Body.Bytes(), &sub)
+	if sub.SubmissionID == "" {
+		t.Fatalf("submit did not return an id: %s", subResp.Body.String())
+	}
+
+	// Pending: no failure_reason key on the wire.
+	rr := do(t, s, "GET", "/api/v1/queue/"+sub.SubmissionID, nil)
+	var pending map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &pending)
+	if _, ok := pending["failure_reason"]; ok {
+		t.Errorf("pending entry carries failure_reason: %v", pending)
+	}
+
+	const reason = "solver: pi agent exited 1: sandbox timeout after 300s"
+	if _, err := queue.Dequeue(ctx); err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
+	if err := queue.MarkFailed(ctx, sub.SubmissionID, reason); err != nil {
+		t.Fatalf("MarkFailed: %v", err)
+	}
+
+	rr = do(t, s, "GET", "/api/v1/queue/"+sub.SubmissionID, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var entry queueEntryWire
+	if err := json.Unmarshal(rr.Body.Bytes(), &entry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if entry.Status != ingest.StatusFailed {
+		t.Fatalf("status = %q, want failed", entry.Status)
+	}
+	if entry.FailureReason == "" {
+		t.Fatal("failure_reason empty on a failed entry")
+	}
+	if entry.FailureReason != reason {
+		t.Errorf("failure_reason = %q, want %q", entry.FailureReason, reason)
+	}
+	// Raw-JSON check: the field must be on the wire, not only in the
+	// decoded struct (a tag typo would pass the struct comparison).
+	var raw map[string]any
+	_ = json.Unmarshal(rr.Body.Bytes(), &raw)
+	if raw["failure_reason"] != reason {
+		t.Errorf("raw failure_reason = %v, want %q", raw["failure_reason"], reason)
+	}
+
+	// The listing endpoint shares entryToWire — it must expose the
+	// reason too, so an agent polling the list is not left blind.
+	lr := do(t, s, "GET", "/api/v1/queue?status=failed", nil)
+	var list queueListResponse
+	if err := json.Unmarshal(lr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	if len(list.Entries) != 1 {
+		t.Fatalf("failed entries = %d, want 1", len(list.Entries))
+	}
+	if list.Entries[0].FailureReason != reason {
+		t.Errorf("list failure_reason = %q, want %q", list.Entries[0].FailureReason, reason)
+	}
+}
+
 func TestGetQueueStatus_NotFound(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	rr := do(t, s, "GET", "/api/v1/queue/sub_nonexistent", nil)

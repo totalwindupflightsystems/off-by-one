@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS queue_entries (
     result_answer_id INTEGER,                     -- FK to answer_nodes.id on success
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     started_at   TEXT,
-    completed_at TEXT
+    completed_at TEXT,
+    failure_reason TEXT NOT NULL DEFAULT ''          -- why a solve failed (empty until status='failed')
 );
 
 CREATE INDEX IF NOT EXISTS idx_queue_entries_status ON queue_entries(status);

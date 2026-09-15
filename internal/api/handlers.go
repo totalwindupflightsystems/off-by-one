@@ -135,6 +135,10 @@ type queueEntryWire struct {
 	EstimatedTime string `json:"estimated_time"`
 	StartedAt     string `json:"started_at,omitempty"`
 	CompletedAt   string `json:"completed_at,omitempty"`
+	// FailureReason is why the solve failed. omitempty keeps it absent
+	// for every non-failed entry, so a submitter polling the queue can
+	// tell "still queued" from "failed, here's why" (DF-OFF-BY-ONE-4).
+	FailureReason string `json:"failure_reason,omitempty"`
 }
 
 type queueListResponse struct {
@@ -715,13 +719,16 @@ func answerToWire(a *graph.AnswerNode, problemClass string) *answerWire {
 
 // entryToWire converts a queue.Entry into the API's JSON shape.
 // StartedAt/CompletedAt are sql.NullString in the store; we extract
-// the inner string when valid.
+// the inner string when valid. FailureReason is empty unless the entry
+// failed, and its omitempty tag keeps the key out of the response
+// entirely for pending/complete entries.
 func entryToWire(e *ingest.Entry) queueEntryWire {
 	w := queueEntryWire{
-		SubmissionID: e.ID,
-		ProblemClass: e.ProblemClass,
-		Status:       e.Status,
-		Stage:        e.Stage,
+		SubmissionID:  e.ID,
+		ProblemClass:  e.ProblemClass,
+		Status:        e.Status,
+		Stage:         e.Stage,
+		FailureReason: e.FailureReason,
 	}
 	if e.StartedAt.Valid {
 		w.StartedAt = e.StartedAt.String

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	schemasql "github.com/totalwindupflightsystems/off-by-one/sql/schema"
@@ -100,6 +101,34 @@ type Entry struct {
 	CreatedAt   string         `json:"created_at"`
 	StartedAt   sql.NullString `json:"started_at,omitempty"`
 	CompletedAt sql.NullString `json:"completed_at,omitempty"`
+	// FailureReason carries the solver/commit error text when the entry
+	// transitions to failed, so a submitter polling the queue sees WHY
+	// their solve failed instead of only status='failed'. Empty for
+	// every non-failed entry. Capped at maxFailureReasonLen on write.
+	FailureReason string `json:"failure_reason,omitempty"`
+}
+
+// maxFailureReasonLen caps the stored failure reason. Solver/commit
+// errors can carry large multi-line stack traces; the column is for a
+// human-readable explanation, so we truncate defensively rather than
+// letting one runaway error text bloat the queue table.
+const maxFailureReasonLen = 4000
+
+// StaleReapReason is written to failure_reason by ReapStale so entries
+// wedged by a server restart mid-solve are not silent either.
+const StaleReapReason = "stale in_progress reaped (server restart mid-solve)"
+
+// truncateFailureReason caps reason at maxFailureReasonLen bytes without
+// splitting a UTF-8 rune (error text often has non-ASCII in file paths).
+func truncateFailureReason(reason string) string {
+	if len(reason) <= maxFailureReasonLen {
+		return reason
+	}
+	cut := maxFailureReasonLen
+	for cut > 0 && !utf8.RuneStart(reason[cut]) {
+		cut--
+	}
+	return reason[:cut]
 }
 
 // Open creates a Queue backed by the given graph Store. The queue's
@@ -117,6 +146,15 @@ func Open(store *graph.Store) (*Queue, error) {
 	// Migrate existing databases: add required_tools column if missing
 	// (CREATE TABLE IF NOT EXISTS does not alter an existing table).
 	if err := store.ApplyExtra(`ALTER TABLE queue_entries ADD COLUMN required_tools TEXT NOT NULL DEFAULT '[]'`); err != nil {
+		// Column may already exist on upgraded databases — ignore.
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return nil, fmt.Errorf("migrate queue schema: %w", err)
+		}
+	}
+	// Migrate existing databases: add failure_reason column if missing.
+	// Same defensive pattern as required_tools above — upgraded DBs get
+	// the column via ALTER, new DBs get it from the CREATE TABLE.
+	if err := store.ApplyExtra(`ALTER TABLE queue_entries ADD COLUMN failure_reason TEXT NOT NULL DEFAULT ''`); err != nil {
 		// Column may already exist on upgraded databases — ignore.
 		if !strings.Contains(err.Error(), "duplicate column") {
 			return nil, fmt.Errorf("migrate queue schema: %w", err)
@@ -251,7 +289,7 @@ func (q *Queue) findPendingDuplicate(ctx context.Context, sub Submission) (*Entr
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
 		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
-		       result_answer_id, created_at, started_at, completed_at
+		       result_answer_id, created_at, started_at, completed_at, failure_reason
 		FROM queue_entries
 		WHERE problem_class = ?
 		  AND environment = ?
@@ -308,7 +346,7 @@ func (q *Queue) Get(ctx context.Context, id string) (*Entry, error) {
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
 		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
-		       result_answer_id, created_at, started_at, completed_at
+		       result_answer_id, created_at, started_at, completed_at, failure_reason
 		FROM queue_entries WHERE id = ?`, id)
 	return scanEntry(row)
 }
@@ -331,7 +369,7 @@ func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]E
 	qry := `
 		SELECT id, problem_class, environment, language, version, description,
 		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
-		       result_answer_id, created_at, started_at, completed_at
+		       result_answer_id, created_at, started_at, completed_at, failure_reason
 		FROM queue_entries`
 	args := []any{}
 	if status != "" {
@@ -458,7 +496,7 @@ func (q *Queue) pickPending(ctx context.Context) (*Entry, error) {
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
 		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
-		       result_answer_id, created_at, started_at, completed_at
+		       result_answer_id, created_at, started_at, completed_at, failure_reason
 		FROM queue_entries
 		WHERE status = 'pending'
 		ORDER BY priority DESC, created_at ASC
@@ -484,16 +522,20 @@ func (q *Queue) MarkComplete(ctx context.Context, id string, answerID int64) err
 	return nil
 }
 
-// MarkFailed transitions an in_progress entry to failed.
+// MarkFailed transitions an entry to failed and persists the reason so
+// the submitter can see WHY the solve failed when polling the queue —
+// without it a failed submission is indistinguishable from one still
+// waiting (DF-OFF-BY-ONE-4). reason is truncated defensively: solver
+// errors can carry large stack traces and only the head is useful.
 func (q *Queue) MarkFailed(ctx context.Context, id string, reason string) error {
 	_, err := q.db.ExecContext(ctx, `
 		UPDATE queue_entries
-		SET status = 'failed', stage = 'failed', completed_at = datetime('now')
-		WHERE id = ?`, id)
+		SET status = 'failed', stage = 'failed', completed_at = datetime('now'),
+		    failure_reason = ?
+		WHERE id = ?`, truncateFailureReason(reason), id)
 	if err != nil {
 		return fmt.Errorf("mark failed: %w", err)
 	}
-	_ = reason
 	return nil
 }
 
@@ -507,15 +549,18 @@ func (q *Queue) MarkFailed(ctx context.Context, id string, reason string) error 
 // started_at is stored as a UTC string in SQLite datetime('now') format
 // ("YYYY-MM-DD HH:MM:SS"), which compares correctly as a string, so the
 // cutoff is formatted the same way. Entries with NULL started_at are
-// never reaped — an entry that was never claimed cannot be stale. The
-// reason column is untouched: MarkFailed already ignores it and no
-// failure-reason field exists on queue_entries.
+// never reaped — an entry that was never claimed cannot be stale.
+// failure_reason is set to StaleReapReason so a reaped entry is not
+// silent: the submitter sees that the solve died with the server rather
+// than being told only status='failed'.
 func (q *Queue) ReapStale(ctx context.Context, olderThan time.Duration) (int64, error) {
 	cutoff := time.Now().UTC().Add(-olderThan).Format("2006-01-02 15:04:05")
 	res, err := q.db.ExecContext(ctx, `
 		UPDATE queue_entries
-		SET status = 'failed', stage = 'failed', completed_at = datetime('now')
-		WHERE status = 'in_progress' AND started_at IS NOT NULL AND started_at < ?`, cutoff)
+		SET status = 'failed', stage = 'failed', completed_at = datetime('now'),
+		    failure_reason = ?
+		WHERE status = 'in_progress' AND started_at IS NOT NULL AND started_at < ?`,
+		StaleReapReason, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("reap stale: %w", err)
 	}
@@ -551,6 +596,7 @@ func scanEntry(row rowScanner) (*Entry, error) {
 		&e.Description, &e.ErrorMessage, &e.StackTrace, &ctxJSON, &toolsJSON,
 		&e.Cadence, &e.Priority, &e.Status, &e.Stage,
 		&e.ResultAnswerID, &e.CreatedAt, &e.StartedAt, &e.CompletedAt,
+		&e.FailureReason,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

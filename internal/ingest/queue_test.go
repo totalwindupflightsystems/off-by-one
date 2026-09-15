@@ -3,9 +3,11 @@ package ingest
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 )
@@ -409,19 +411,165 @@ func TestQueue_MarkComplete(t *testing.T) {
 	}
 }
 
+// TestQueue_MarkFailed asserts a failure is not silent: the reason
+// passed to MarkFailed must come back from both Get and List
+// (DF-OFF-BY-ONE-4), and non-failed entries must carry no reason.
 func TestQueue_MarkFailed(t *testing.T) {
 	q, _ := newTestQueue(t)
 	ctx := context.Background()
-	id, _, _ := q.Submit(ctx, Submission{ProblemClass: "test", Cadence: CadencePrePhase})
+	// A non-placeholder class: List() filters self-test/canary classes
+	// before pagination, so a bare "test" class would be invisible there.
+	id, _, _ := q.Submit(ctx, Submission{ProblemClass: "grpc-deadline-exceeded-on-retry", Cadence: CadencePrePhase})
 	if _, err := q.Dequeue(ctx); err != nil {
 		t.Fatalf("Dequeue: %v", err)
 	}
-	if err := q.MarkFailed(ctx, id, "sandbox timeout"); err != nil {
+	const reason = "solver: bwrap exited 1: no /usr/bin/jq in namespace"
+	if err := q.MarkFailed(ctx, id, reason); err != nil {
 		t.Fatalf("MarkFailed: %v", err)
 	}
-	got, _ := q.Get(ctx, id)
+	got, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
 	if got.Status != StatusFailed {
 		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if got.FailureReason != reason {
+		t.Errorf("Get failure_reason = %q, want %q", got.FailureReason, reason)
+	}
+
+	// List uses the same scan path over a different SQL statement —
+	// both SELECT lists must carry the column.
+	failed, err := q.List(ctx, StatusFailed, 100, 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(failed) != 1 {
+		t.Fatalf("failed entries = %d, want 1", len(failed))
+	}
+	if failed[0].FailureReason != reason {
+		t.Errorf("List failure_reason = %q, want %q", failed[0].FailureReason, reason)
+	}
+
+	// A still-pending entry must not carry stale failure text.
+	otherID, _, err := q.Submit(ctx, Submission{ProblemClass: "redis-connection-refused", Cadence: CadencePrePhase})
+	if err != nil {
+		t.Fatalf("Submit other: %v", err)
+	}
+	other, err := q.Get(ctx, otherID)
+	if err != nil {
+		t.Fatalf("Get other: %v", err)
+	}
+	if other.FailureReason != "" {
+		t.Errorf("pending failure_reason = %q, want empty", other.FailureReason)
+	}
+}
+
+// TestQueue_MarkFailed_TruncatesLongReason covers the defensive cap:
+// solver errors can carry multi-KB stack traces and only the head is
+// useful in the queue table. Truncation must not split a UTF-8 rune.
+func TestQueue_MarkFailed_TruncatesLongReason(t *testing.T) {
+	q, _ := newTestQueue(t)
+	ctx := context.Background()
+	id, _, _ := q.Submit(ctx, Submission{ProblemClass: "long-reason", Cadence: CadencePrePhase})
+
+	long := strings.Repeat("e", maxFailureReasonLen+500)
+	if err := q.MarkFailed(ctx, id, long); err != nil {
+		t.Fatalf("MarkFailed: %v", err)
+	}
+	got, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.FailureReason) != maxFailureReasonLen {
+		t.Errorf("len(failure_reason) = %d, want %d", len(got.FailureReason), maxFailureReasonLen)
+	}
+	if got.FailureReason != long[:maxFailureReasonLen] {
+		t.Error("truncated reason is not the prefix of the original reason")
+	}
+
+	// Multi-byte text (2 bytes per rune) must be cut on a rune boundary.
+	multi := strings.Repeat("é", maxFailureReasonLen)
+	if err := q.MarkFailed(ctx, id, multi); err != nil {
+		t.Fatalf("MarkFailed multi: %v", err)
+	}
+	got, err = q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get multi: %v", err)
+	}
+	if len(got.FailureReason) > maxFailureReasonLen {
+		t.Errorf("len = %d, want <= %d", len(got.FailureReason), maxFailureReasonLen)
+	}
+	if !utf8.ValidString(got.FailureReason) {
+		t.Errorf("truncated reason is not valid UTF-8: %q", got.FailureReason)
+	}
+}
+
+// TestQueue_Open_MigratesFailureReason verifies the defensive ALTER for
+// databases created before failure_reason existed: Open adds the column
+// and MarkFailed persists into it, so an upgraded deployment's first
+// failure is not lost (and not a SQL error).
+func TestQueue_Open_MigratesFailureReason(t *testing.T) {
+	store, err := graph.OpenShared(fmt.Sprintf("legacy-%s-%d", t.Name(), time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("graph.OpenShared: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// The pre-change queue_entries shape (18 columns, no failure_reason).
+	if _, err := store.DB().Exec(`
+		CREATE TABLE queue_entries (
+		    id TEXT PRIMARY KEY,
+		    problem_class TEXT NOT NULL,
+		    environment TEXT NOT NULL DEFAULT '',
+		    language TEXT NOT NULL DEFAULT '',
+		    version TEXT NOT NULL DEFAULT '',
+		    description TEXT NOT NULL DEFAULT '',
+		    error_message TEXT NOT NULL DEFAULT '',
+		    stack_trace TEXT NOT NULL DEFAULT '',
+		    context_json TEXT NOT NULL DEFAULT '{}',
+		    required_tools TEXT NOT NULL DEFAULT '[]',
+		    cadence TEXT NOT NULL DEFAULT 'pre-phase',
+		    priority REAL NOT NULL DEFAULT 0.0,
+		    status TEXT NOT NULL DEFAULT 'pending',
+		    stage TEXT NOT NULL DEFAULT 'queued',
+		    result_answer_id INTEGER,
+		    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		    started_at TEXT,
+		    completed_at TEXT
+		)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+
+	q, err := Open(store)
+	if err != nil {
+		t.Fatalf("ingest.Open on legacy DB: %v", err)
+	}
+	// The column must now exist.
+	var cols int
+	if err := store.DB().QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('queue_entries') WHERE name = 'failure_reason'`,
+	).Scan(&cols); err != nil {
+		t.Fatalf("pragma table_info: %v", err)
+	}
+	if cols != 1 {
+		t.Fatalf("failure_reason column count = %d, want 1", cols)
+	}
+	// And a failure round-trips through the migrated DB.
+	ctx := context.Background()
+	id, _, err := q.Submit(ctx, Submission{ProblemClass: "legacy", Cadence: CadencePrePhase})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if err := q.MarkFailed(ctx, id, "boom"); err != nil {
+		t.Fatalf("MarkFailed on migrated DB: %v", err)
+	}
+	got, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.FailureReason != "boom" {
+		t.Errorf("failure_reason = %q, want %q", got.FailureReason, "boom")
 	}
 }
 
@@ -496,6 +644,9 @@ func TestQueue_ReapStale(t *testing.T) {
 	}
 	if got.Stage != "failed" {
 		t.Errorf("stale stage = %q, want failed", got.Stage)
+	}
+	if got.FailureReason != StaleReapReason {
+		t.Errorf("stale failure_reason = %q, want %q", got.FailureReason, StaleReapReason)
 	}
 	if !got.CompletedAt.Valid {
 		t.Error("stale completed_at not set")
