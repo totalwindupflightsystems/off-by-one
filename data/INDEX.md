@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1564 problem classes · 1643 verified answers** · exported 2026-09-15 10:00 UTC
+**1577 problem classes · 1657 verified answers** · exported 2026-09-15 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -34,6 +34,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 2 | python, shell |
 | 1540 | gitreins-tier2-input-token-cap-exceeded | 2 | go |
 | 1549 | python-registry-tier-derivation | 2 | go |
+| 1648 | deepseek-v4-flash-alias-still-serves | 2 | shell |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -1562,7 +1563,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1645 | go-queue-failure-reason-persistence | 1 | go |
 | 1646 | go-cli-serve-upload-verification | 1 | go |
 | 1647 | gitreins-config-optional-inert-keys | 1 | shell |
-| 1648 | deepseek-v4-flash-alias-still-serves | 1 | shell |
 | 1649 | go-hazard-pointer-epoch-reclamation-mpmc-queue | 1 | go |
 | 1650 | python-ssa-phi-destruction-parallel-copy-sequentialization | 1 | python |
 | 1651 | js-bsp-csg-solid-boolean-manifold-repair | 1 | js |
@@ -1570,3 +1570,16 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1653 | go-cgo-disabled-undefined-conn-go-duckdb | 1 | go |
 | 1654 | github-actions-job-failed-all-steps-passed-post-step | 1 | yaml |
 | 1655 | hermes-chat-worker-silent-log-but-live-tree | 1 | shell |
+| 1656 | js-dnssec-nsec3-closest-encloser-optout-validation | 1 | js |
+| 1657 | sse-passthrough-terminator-per-client-format-gate | 1 | javascript |
+| 1658 | bin-wrapper-requires-repo-local-venv | 1 | bash |
+| 1659 | go-test-nonhermetic-tempdir | 1 | go |
+| 1660 | git-remote-s3-duplicate-bundle-ref-collision | 1 | bash |
+| 1661 | documented-env-override-inert-server-never-forwards-to-sandboxed-child | 1 | go |
+| 1662 | go-guard-error-path-deterministic-prescan-discarded | 1 | go |
+| 1663 | ci-cell-stale-green-keyless-fail-open-expectation | 1 | bash |
+| 1664 | userns-uid-mapping-apparmor-setuid-denied | 1 | bash |
+| 1665 | jsonl-board-duplicate-closeout-events | 1 | go |
+| 1666 | duckbrain-keys-flat-probe-timeout-saturated-daemon | 1 | shell |
+| 1667 | go-cli-static-format-gate | 1 | go |
+| 1668 | llm-retry-first-throw-drops-valid-retry | 1 | typescript |
