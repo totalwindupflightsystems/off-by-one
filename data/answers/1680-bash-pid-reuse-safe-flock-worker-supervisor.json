@@ -1,0 +1,28 @@
+{
+  "class_id": 1680,
+  "title": "bash-pid-reuse-safe-flock-worker-supervisor",
+  "description": "bash-pid-reuse-safe-flock-worker-supervisor",
+  "created_at": "2026-09-15 22:20:45",
+  "answers": [
+    {
+      "answer_id": 1864,
+      "language": "bash",
+      "environment": "bash",
+      "version": "5.2",
+      "solution": "Done. Verified solution is in **`/home/kara/SOLUTION.md`** and the runnable script in **`/home/kara/wp-supervisor.sh`** (414 lines, extracted copy from the markdown is byte-identical and passes).\n\n## Diagnosis (root causes)\n\n1. **PID ≠ identity.** `kill -0 \"$pid\"` only asks whether *some* process holds that PID. Recycled PIDs make a dead owner look alive (job lost) or make an innocent process get signalled.\n2. **Unconditional `rm` of a lock** lets a fresh owner's claim be deleted, producing duplicate execution.\n3. **Takeover check/use race** across supervisors — must re-validate the owner under a shared `flock`.\n4. **`/proc/<pid>/stat` parsing** is wrong with naive `awk '{print $22}'` because field 2 (`comm`) can contain spaces/`)`; must strip through the last `) ` and take token 20.\n5. **`$BASHPID` inside `$( … )` is the subshell PID** — this was the bug that silently defeated crash recovery in the first run; the fix snapshots `me=$BASHPID` before the command substitution.\n6. **Exactly-once under arbitrary SIGKILL is impossible**; the correct guarantee is at-most-once *commit* (atomic `O_EXCL` result) with retry only when no commit happened.\n\n## Fix highlights\n\n- Owner identity = `pid` + `/proc/<pid>/stat` field 22 (`starttime`) + `boot_id`.\n- Claim = atomic `O_EXCL` file containing the full identity.\n- Takeover = per-job `flock` mutex, re-read + re-`owner_alive`, then `rm` **only** on a proven-dead/recycled owner.\n- Supervisor never signals anything; it reaps its children with `wait`.\n- Result record created `O_EXCL` ⇒ exactly one committing attempt.\n\n## Verification (all passing)\n\n- Unit tests: correct starttime honored; recycled starttime, missing PID, wrong boot_id detected.\n- **8 workers / 200 jobs**, one holder SIGKILLed → 200/200 done, 200 results, 0 duplicates, takeover logged, planted recycled-PID lock reclaimed.\n- Live-owner test: a correct live claim is never stolen; recovered only after kill *and reap*.\n- Concurrent-supervisor stress (2×4) and an ad-hoc 5-round 4×4 / 300-job / 12-stale-lock run → `done=300 results=300 dup=0` every round, with **no job ever taken over twice**.\n\nRun it yourself:\n\n```bash\nbash /home/kara/wp-supervisor.sh selftest\n```\n",
+      "evidence": "# Evidence\n- Problem class: bash-pid-reuse-safe-flock-worker-supervisor\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-15T22:20:45.561Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Write a POSIX bash worker-pool supervisor that runs N concurrent jobs from a shared queue with at-most-once claim semantics: no two workers may execute the same job, even if a worker is SIGKILLed between claim and completion, and the supervisor must reap orphaned workers after a crash without ever signalling an unrelated process. The hard part is process identity — a PID in a stale lock file may have been recycled by an unrelated live process, so ownership must be proven by comparing /proc/<pid>/stat field 22 (starttime in jiffies since boot) against the value recorded at lock creation, and takeover must be race-free across concurrent supervisors (flock plus O_EXCL/mkdir, never an unconditional rm of a live owner's lock). Ship a self-testing script whose stress mode (8 workers, 200 jobs, one worker SIGKILLed while holding a claim, plus a deliberately planted recycled-PID lock file) proves zero duplicate executions, zero lost jobs, and that the planted stale lock is detected rather than honoured.",
+        "environment": "bash",
+        "language": "bash",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "bash-pid-reuse-safe-flock-worker-supervisor",
+        "provider": "openrouter",
+        "solved_at": "2026-09-15T22:20:45.561Z",
+        "version": "5.2"
+      },
+      "status": "verified",
+      "created_at": "2026-09-15 22:20:45"
+    }
+  ]
+}

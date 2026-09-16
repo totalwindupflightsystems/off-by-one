@@ -1,0 +1,28 @@
+{
+  "class_id": 1688,
+  "title": "telegram-forum-dead-thread-id-masked-by-no-thread-retry",
+  "description": "telegram-forum-dead-thread-id-masked-by-no-thread-retry",
+  "created_at": "2026-09-16 00:16:05",
+  "answers": [
+    {
+      "answer_id": 1872,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Diagnosis and verified solution written to **`/home/kara/my-project/SOLUTION.md`** (copy at `/workspace/solution.md`), with a machine-checked control-flow reduction at **`/home/kara/my-project/repro/thread_fallback_repro.py`**.\n\nThe environment contained no hermes source or logs (only `/workspace/problem.json`), so I reduced the retry control flow to a runnable fake-bot and verified bug vs. fix.\n\n## Root cause\nThe standalone sender has two terminal fallbacks that don't compose:\n- `_is_parse_mode_error` → resend as plain text, **keeping `message_thread_id`**\n- `_is_thread_error` → resend **without** `message_thread_id`\n\nWhen a message hits a dead thread **and** a parse-mode failure, the parse branch runs first, retries with the still-dead id, raises again inside the `except`, and never reaches the no-thread branch. Result: ~80% silently land in General (one `retrying-without-message_thread_id` warning per OK delivery), ~20% hard-fail (each preceded ≤1s by `Parse-mode-fallen-back-to-plain-text`).\n\n## Exact fix (durable)\nReplace the two terminal returns with **one guarded loop** where each fallback re-enters the same guard (at most one parse drop + one thread drop, so ≤3 attempts, always terminates):\n\n```python\nmode, thread_id = parse_mode, message_thread_id\ndropped_parse_mode = dropped_thread_id = False\nwhile True:\n    try:\n        return await self.bot.send_message(\n            chat_id=chat_id, text=text,\n            message_thread_id=thread_id, parse_mode=mode)\n    except TelegramError as exc:\n        if mode and not dropped_parse_mode and _is_parse_mode_error(exc):\n            dropped_parse_mode, mode = True, None\n            logger.warning(\"Parse-mode-fallen-back-to-plain-text\"); continue\n        if thread_id is not None and not dropped_thread_id and _is_thread_error(exc):\n            dropped_thread_id, thread_id = True, None\n            logger.warning(\"retrying-without-message_thread_id\"); continue\n        raise\n```\n\nThis works in both orders and keeps a **live** thread id during a parse fallback. Operator fixes: **A** supply a live topic id (pause gateway → `getUpdates` → extract `message_thread_id`), or **B** blank the thread id to retarget General (no-op for readers).\n\n## Verification\nThe reduction output:\n\n```\nbuggy  calls=[(12345,'Markdown'), (12345,None)] -> HARD-FAIL(thread not found)\nfixed  calls=[(12345,'Markdown'), (12345,None), (None,None)] -> DELIVERED(no-thread=True)\nASSERT live-thread parse fallback keeps thread id: OK\nALL ASSERTIONS PASSED\n```\n\nPost-deploy acceptance: with fix A, `retrying-without-message_thread_id` count → 0 and messages return to the correct topic; with code-only/threadless, hard fails → 0, deliveries land in General, and one warning per delivery is expected. Add a permanent alert for `Parse-mode-fallen-back-to-plain-text` immediately followed by a delivery failure — that ordering must never occur in a healthy deployment. Full commands, classifiers, rollback, and acceptance table are in §3–§5 of the document.\n",
+      "evidence": "# Evidence\n- Problem class: telegram-forum-dead-thread-id-masked-by-no-thread-retry\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-16T00:16:05.355Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Forum-topic deliveries to a DEAD Telegram message_thread_id report ~80pct OK because hermes-agent standalone sender retries WITHOUT message_thread_id (lands in forum General); the ~20pct hard failures are messages that ALSO trip a parse-mode fallback, whose plain-text retry keeps the dead id and never recovers. Diagnosis (re-runnable): grep DELIVER lines per project in ~/.hermes/coding-hermes/scheduler.log; grep -h retrying-without-message_thread_id in ~/.hermes/logs/agent.log* — dead id = one warning per ok delivery (1:1 pairing), live id = zero; every hard fail preceded <=1s by a Parse-mode-fallen-back-to-plain-text line. Proven 2026-09-15 my-project GAP-050: thread 12345 dead; 13 no-thread-retry warnings map 1:1 to 13 ok deliveries; 37/192 hard fails each preceded by parse-mode fallback. Fixes: A) operator supplies a live topic id (Bot API has no topic-list, getUpdates unavailable while gateway polls); B) retarget to threadless chat (no-op for readers); durable = make parse-mode fallback thread-aware like the no-thread retry. Full recipe: /home/kara/my-project/docs/verification.md section 7.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "telegram-forum-dead-thread-id-masked-by-no-thread-retry",
+        "provider": "openrouter",
+        "solved_at": "2026-09-16T00:16:05.355Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-16 00:16:05"
+    }
+  ]
+}

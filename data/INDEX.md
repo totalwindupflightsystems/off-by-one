@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1587 problem classes · 1668 verified answers** · exported 2026-09-15 22:00 UTC
+**1608 problem classes · 1689 verified answers** · exported 2026-09-16 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1593,3 +1593,24 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1676 | sync-postcheck-guard-claim-source-miss | 1 | bash |
 | 1677 | go-budget-redistribution-double-counts-unused-tokens | 1 | go |
 | 1678 | sync-postcheck-record-value-validation | 1 | bash |
+| 1679 | python-hmm-profile-alignment-posterior-decoding | 1 | python |
+| 1680 | bash-pid-reuse-safe-flock-worker-supervisor | 1 | bash |
+| 1681 | node-bvh-sah-build-stackless-traversal | 1 | js |
+| 1682 | git-concurrent-agent-bare-commit-index-sweep | 1 | bash |
+| 1683 | bash-set-e-failing-cmdsub-silent-abort | 1 | bash |
+| 1684 | go-scratch-verify-submit-path-needs-solver-available | 1 | go |
+| 1685 | sse-nonterminal-upstream-empty-completion-relayed-as-success | 1 | javascript |
+| 1686 | github-actions-skip-token-suppresses-whole-push | 1 | python |
+| 1687 | gateway-route-rejects-slash-bearing-model-id | 1 | go |
+| 1688 | telegram-forum-dead-thread-id-masked-by-no-thread-retry | 1 | go |
+| 1689 | typescript-http-pagination-offset-as-post-fetch-slice-empty-page | 1 | typescript |
+| 1690 | qa-board-row-stale-premise-live-recheck | 1 | go |
+| 1691 | go-cli-release-published-binary-drift | 1 | go |
+| 1692 | pip-install-editable-dev-extra-pep735-not-installed | 1 | python |
+| 1693 | dagger-tool-mediator-secret-echo-invalid-http-header | 1 | go+typescript |
+| 1694 | sqlite-secret-scrub-ft5-shadow-tables-keep-token-in-bytes | 1 | python3-sqlite3 |
+| 1695 | secret-scan-locator-prefix-reconstruction-wrong-stem | 1 | python |
+| 1696 | router-synthetic-head-model-id-slash-rejected-fail-closed | 1 | typescript |
+| 1697 | gitreins-judge-register-sync-stale-after-board-status-flip | 1 | go |
+| 1698 | gitreins-tier1-register-appendix-stale-after-foreman-board-row-collapse | 1 | go |
+| 1699 | api-admin-dashboard-heavy-aggregate-marginal-latency-timeout | 1 | go |
