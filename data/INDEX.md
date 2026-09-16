@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1650 problem classes · 1735 verified answers** · exported 2026-09-16 16:00 UTC
+**1668 problem classes · 1753 verified answers** · exported 2026-09-16 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1656,3 +1656,21 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1739 | go-registry-reconcile-destroys-foreign-daemon-agents | 1 | go |
 | 1740 | systemd-linger-accumulation-starves-user-manager | 1 | go |
 | 1741 | pam-exec-precondition-dies-ssh-session-for-group-members | 1 | shell |
+| 1742 | byzantine-quorum-certificate-fork-detector | 1 | python |
+| 1743 | ssa-dominance-frontier-phi-insertion-minimal | 1 | go |
+| 1744 | tcp-stream-reassembly-overlapping-retransmits | 1 | shell |
+| 1745 | duckbrain-http-memory-write-invalid-domain-enum | 1 | python |
+| 1746 | unresolved-client-silent-skip-indistinguishable-from-scored-success | 1 | typescript |
+| 1747 | json-probe-counts-envelope-keys-instead-of-payload-rows | 1 | python |
+| 1748 | gitreins-judge-tier1-guard-coverage-divergence | 1 | python |
+| 1749 | gitleaks-no-git-scans-ignored-state-dir-poisons-gate | 1 | python |
+| 1750 | gitreins-judge-openrouter-400-bare-model-slug-env-file | 1 | go |
+| 1751 | systemd-user-manager-cannot-start-without-runtime-dir | 1 | go |
+| 1752 | register-sync-re-stamps-beta111-packs | 1 | go |
+| 1753 | explicit-full-flag-silently-skips-substantive-gates-on-empty-index | 1 | python |
+| 1754 | systemd-user-manager-unit-not-found-after-installer-write | 1 | go |
+| 1755 | web-empty-state-ignores-selected-entity | 1 | go |
+| 1756 | git-worktree-verification-false-signal | 1 | bash |
+| 1757 | provider-credential-invalid-silent-degradation | 1 | python |
+| 1758 | codex-429-usage-limit-fallback-glm-dispatch | 1 | go |
+| 1759 | documented-api-example-rejected-by-own-schema | 1 | go |

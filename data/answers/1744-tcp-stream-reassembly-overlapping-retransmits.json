@@ -1,0 +1,28 @@
+{
+  "class_id": 1744,
+  "title": "tcp-stream-reassembly-overlapping-retransmits",
+  "description": "tcp-stream-reassembly-overlapping-retransmits",
+  "created_at": "2026-09-16 16:16:06",
+  "answers": [
+    {
+      "answer_id": 1932,
+      "language": "shell",
+      "environment": "bash",
+      "version": "5.2",
+      "solution": "Done. I diagnosed the failure modes, implemented a verified reassembler, and wrote the full write-up to `/home/kara/SOLUTION.md` (script at `/home/kara/tcp_reassemble.sh`).\n\n## Root cause\nNaive solutions fail because they either (a) **sort segments by `seq` and concatenate** — which double-counts retransmitted bytes and cannot do first-arrived-byte-wins, or (b) **append on arrival** — which emits future bytes ahead of a hole. Segment-level dedup also fails on *partial* overlaps, and looping over sequence numbers to count gaps hangs on large absolute sequence spaces.\n\n## Fix\nKey bytes by **absolute position**, keep the **first** byte seen at each position, then read out only the **contiguous prefix** and count holes as jumps in the sorted position set. `len<=0` is ignored; a checked `len` vs `hex/2` guards truncated payloads.\n\nPipeline: `awk` (arrival-ordered, per-byte first-wins + discard count) → `sort -k1,1 -k2,2n` → `awk` (contiguous emission + gap-jump count) → `sha256sum`.\n\n```awk\n# pass 1\nif (pos in seen) { disc++ }                 # first-arrived-byte-wins\nelse { seen[pos]=1; print \"1 \" pos \" \" byte }\n# pass 2\nif (pos == prev+1) { if (emitting) out = out byte }\nelse if (pos > prev+1) { gaps++; emitting = 0 }\n```\n\nOutput is 4 lines: hex, sha256, discarded bytes, unresolved gap regions. Direction is auto-selected (busiest `src>dst`) or passed explicitly. Runtime uses only bash/awk/sort/sha256sum.\n\nNote on convention: default `HASH=hex` hashes the hex text; `HASH=bytes` hashes the reconstructed raw bytes (`printf '%b' \"\\\\x..\"`).\n\n## Verification\n- All deterministic cases pass (in-order, out-of-order, overlap-tail, reverse overlap, holes, keepalive/full-dup, buffered-ahead gap fill, SYN, multi-flow, huge gap).\n- **400/400 random differential fuzz traces** matched an independent Python reference on hex + discarded + gaps.\n- **120/120 traces** matched both hash modes (`HASH=hex` and `HASH=bytes` vs `hashlib`).\n- `FUZZ OK: 400 random traces matched reference` and `RAW+HEX HASH OK: 120 traces`.\n\nFull details, test table, and exact commands are in `/home/kara/SOLUTION.md`.\n",
+      "evidence": "# Evidence\n- Problem class: tcp-stream-reassembly-overlapping-retransmits\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-16T16:16:06.589Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Reassemble the TCP byte stream for one flow from a text packet trace using only bash/awk/sort/sha256sum (no python/perl). Each line is: ts src>dst flags seq len ack payload_hex. Required behaviour: out-of-order arrival is resolved by absolute sequence position; a retransmitted segment that overlaps already-delivered bytes is deduplicated with FIRST-ARRIVED-BYTE-WINS for the overlapping region and the non-overlapping tail appended; pure duplicate/keepalive segments (len 0 or fully covered) contribute nothing; and bytes for positions greater than (highest contiguous seq seen + receive window) must be buffered, not appended, until the gap is filled. Output: the contiguous stream as hex, its sha256, the count of bytes discarded as duplicate/overlap, and the count of gaps still unresolved at trace end.",
+        "environment": "bash",
+        "language": "shell",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "tcp-stream-reassembly-overlapping-retransmits",
+        "provider": "openrouter",
+        "solved_at": "2026-09-16T16:16:06.589Z",
+        "version": "5.2"
+      },
+      "status": "verified",
+      "created_at": "2026-09-16 16:16:06"
+    }
+  ]
+}
