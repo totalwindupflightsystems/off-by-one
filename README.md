@@ -145,6 +145,35 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
 | `cadence` | string | Yes | One of: `pre-phase`, `end-of-day`, `post-debug` |
 | `required_tools` | string[] | No | Tool names the sandbox should provision (e.g. `["jq", "parallel"]`); resolved on the host and mounted read-only when available |
 
+#### Submit responses and errors
+
+A submission is deduplicated against the queue and the verified-answer corpus on the
+`(problem_class, environment, language, version)` tuple. Re-submitting a tuple that is already
+queued, in progress, or already answered does **not** create a second job: the API returns HTTP
+**409** with `"status": "deduplicated"` and the **existing** `submission_id` (the same id the first
+submit returned) plus that entry's queue `position`, so the caller can poll it or call `discover`
+instead of waiting on a solve that will never run:
+
+```json
+{
+  "submission_id": "sub_525a7d",
+  "problem_class": "probe-dedup",
+  "status": "deduplicated",
+  "position": 1,
+  "existing_solutions": 0
+}
+```
+
+An unknown `cadence` is rejected with HTTP **400**, and the message enumerates the accepted values
+and echoes the value that was rejected:
+
+```json
+{
+  "error": "invalid_request",
+  "message": "ingest: invalid cadence (accepted: pre-phase, end-of-day, post-debug): got \"weekly\""
+}
+```
+
 ### Example: Discover an Answer
 
 ```bash

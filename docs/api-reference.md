@@ -64,6 +64,27 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
 
 **Status codes:** `200` (queued/duplicate), `400` (invalid submission), `409` (duplicate — same tuple already queued or answered), `500` (internal error).
 
+**Duplicate (`409`) response.** A submission is deduplicated on `(problem_class, environment, language, version)`. When that tuple is already queued/in progress or already has a verified answer, no second job is created: the response carries `"status": "deduplicated"` and the **existing** `submission_id` (the same id the original submit returned) with its queue `position`:
+
+```json
+{
+  "submission_id": "sub_525a7d",
+  "problem_class": "so-nil-pointer-deref",
+  "status": "deduplicated",
+  "position": 2,
+  "existing_solutions": 1
+}
+```
+
+**Invalid `cadence` (`400`).** An unknown `cadence` is rejected with a message that lists the accepted values and echoes the rejected one:
+
+```json
+{
+  "error": "invalid_request",
+  "message": "ingest: invalid cadence (accepted: pre-phase, end-of-day, post-debug): got \"weekly\""
+}
+```
+
 **Example**
 
 ```bash

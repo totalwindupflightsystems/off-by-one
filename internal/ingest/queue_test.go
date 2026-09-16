@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -64,8 +65,40 @@ func TestQueue_Submit_ValidatesCadence(t *testing.T) {
 		ProblemClass: "test",
 		Cadence:      "garbage",
 	})
-	if err != ErrInvalidCadence {
-		t.Errorf("err = %v, want ErrInvalidCadence", err)
+	if !errors.Is(err, ErrInvalidCadence) {
+		t.Errorf("err = %v, want errors.Is(err, ErrInvalidCadence)", err)
+	}
+}
+
+// TestSubmit_InvalidCadenceListsAcceptedValues pins the contract the API
+// 400 body depends on (DF-OFF-BY-ONE-4): the error text must name all
+// three accepted cadences AND stay wrappable so StatusForHTTP still maps
+// it to 400. Both halves are asserted because either one alone can be
+// satisfied by breaking the other (a bare string error passes the first,
+// a non-wrapped sentinel passes the second).
+func TestSubmit_InvalidCadenceListsAcceptedValues(t *testing.T) {
+	q, _ := newTestQueue(t)
+	_, _, err := q.Submit(context.Background(), Submission{
+		ProblemClass: "test",
+		Cadence:      "bogus-cadence",
+	})
+	if err == nil {
+		t.Fatal("Submit with cadence=bogus-cadence: got nil error, want ErrInvalidCadence")
+	}
+	msg := err.Error()
+	for _, want := range []string{CadencePrePhase, CadenceEndOfDay, CadencePostDebug} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error text %q does not list accepted cadence %q", msg, want)
+		}
+	}
+	if !strings.Contains(msg, "bogus-cadence") {
+		t.Errorf("error text %q does not name the rejected value", msg)
+	}
+	if !errors.Is(err, ErrInvalidCadence) {
+		t.Errorf("errors.Is(%v, ErrInvalidCadence) = false, want true", err)
+	}
+	if got := StatusForHTTP(err); got != 400 {
+		t.Errorf("StatusForHTTP(%v) = %d, want 400", err, got)
 	}
 }
 

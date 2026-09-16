@@ -35,8 +35,20 @@ const (
 	StatusFailed     = "failed"
 )
 
+// cadenceAcceptedValues renders the accepted cadence set for error
+// messages, in the order the constants above are declared. It lives in
+// one place so the sentinel's message and the API 400 body cannot drift
+// from the constants.
+const cadenceAcceptedValues = CadencePrePhase + ", " + CadenceEndOfDay + ", " + CadencePostDebug
+
 // ErrInvalidCadence signals a Submission with an unknown cadence value.
-var ErrInvalidCadence = errors.New("ingest: invalid cadence")
+//
+// The message enumerates the accepted values: this error is surfaced
+// verbatim in the API 400 body (internal/api/handlers.go), and a bare
+// "invalid cadence" told the submitter nothing about what to send
+// instead (DF-OFF-BY-ONE-4). Wrap it (never replace it) at validation
+// sites so errors.Is/StatusForHTTP keep mapping it to 400.
+var ErrInvalidCadence = fmt.Errorf("ingest: invalid cadence (accepted: %s)", cadenceAcceptedValues)
 
 // ErrEmptyProblemClass signals a Submission with no problem_class set.
 var ErrEmptyProblemClass = errors.New("ingest: problem_class required")
@@ -252,7 +264,10 @@ func validate(sub Submission) error {
 	switch sub.Cadence {
 	case CadencePrePhase, CadenceEndOfDay, CadencePostDebug:
 	default:
-		return ErrInvalidCadence
+		// Wrap, don't replace, the sentinel: errors.Is(err,
+		// ErrInvalidCadence) drives StatusForHTTP's 400 mapping, while
+		// the wrapped text names the value the caller actually sent.
+		return fmt.Errorf("%w: got %q", ErrInvalidCadence, sub.Cadence)
 	}
 	return nil
 }

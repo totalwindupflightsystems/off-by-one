@@ -366,7 +366,14 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 	sol, err := l.cfg.Solver.Solve(ctx, entry)
 	if err != nil {
 		_ = l.cfg.Queue.SetStage(ctx, entry.ID, "solver_failed")
-		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, err.Error())
+		// FailureHint appends an actionable line for the known
+		// provider-side failures (e.g. OpenRouter guardrail/data-policy
+		// blocks) and passes everything else through unchanged, so the
+		// stored failure_reason stays the raw solver error for unknown
+		// classes. The commit-failure path below is deliberately left
+		// raw: Commit only touches the graph (piagent.go:335), so no
+		// provider routing error can originate there.
+		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error()))
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
 		l.cfg.Logger.Printf("cron: solve failed for %s: %v", entry.ID, err)
 		return fmt.Errorf("solve: %w", err)

@@ -417,6 +417,59 @@ func TestTickSolveError_PersistsReasonToQueue(t *testing.T) {
 	}
 }
 
+// TestTickSolveError_GuardrailHintPersisted proves the FailureHint
+// wiring at the consumer surface (DF-OFF-BY-ONE-5): a solve that fails
+// with OpenRouter's guardrail/data-policy text must reach
+// queue_entries.failure_reason WITH the actionable hint appended, while
+// the raw provider text is still readable as the head of the stored
+// reason. The helper's own unit tests cover the string contract; only a
+// Tick through the real queue proves the loop calls it.
+func TestTickSolveError_GuardrailHintPersisted(t *testing.T) {
+	store, err := graph.OpenShared("cron_guardrail_" + t.Name() + "_" + time.Now().Format("150405.000000"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	q, err := ingest.Open(store)
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+
+	ctx := context.Background()
+	id, _, err := q.Submit(ctx, ingest.Submission{
+		ProblemClass: "guardrail-blocked-model-registry",
+		Cadence:      ingest.CadencePostDebug,
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	const raw = "solver: pi agent exited 1: No endpoints available matching your guardrail restrictions and data policy."
+	s := &fakeSolver{
+		solveScript: func(*ingest.Entry) (*solver.Solution, error) {
+			return nil, errors.New(raw)
+		},
+	}
+	l := fastLoop(q, s)
+	if err := l.Tick(ctx); err == nil {
+		t.Fatal("expected Tick to return the solve error")
+	}
+
+	got, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != ingest.StatusFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if !strings.Contains(got.FailureReason, "openrouter.ai/settings/privacy") {
+		t.Errorf("failure_reason = %q, want the actionable privacy URL appended", got.FailureReason)
+	}
+	if !strings.HasPrefix(got.FailureReason, raw) {
+		t.Errorf("failure_reason = %q, want the raw provider text preserved as the prefix", got.FailureReason)
+	}
+}
+
 // -----------------------------------------------------------------------------
 // TestTickCommitError — Solve succeeds but Commit fails. Entry is
 // marked failed, metrics record the failure.
