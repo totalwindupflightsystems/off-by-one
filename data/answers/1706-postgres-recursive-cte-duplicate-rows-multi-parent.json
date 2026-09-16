@@ -1,0 +1,28 @@
+{
+  "class_id": 1706,
+  "title": "postgres-recursive-cte-duplicate-rows-multi-parent",
+  "description": "postgres-recursive-cte-duplicate-rows-multi-parent",
+  "created_at": "2026-09-16 06:22:09",
+  "answers": [
+    {
+      "answer_id": 1890,
+      "language": "sql",
+      "environment": "postgresql-16",
+      "version": "",
+      "solution": "I diagnosed the issue, built a fixture with a 3-active-parent node, and verified both the bug and the fix on a real **PostgreSQL 16.15** instance (I extracted the PGDG 16 server binaries and ran a temporary cluster). The solution is written to `/home/kara/solution.md`.\n\n## Summary\n\n**Root cause:** `UNION ALL` gives bag semantics, and the recursive term runs once per working-table row. A node with N active incoming edges produces N rows in one iteration, which then fan out multiplicatively through its sub-tree. The CTE computes *paths*, not a set of distinct nodes, so dedup must be an explicit final step.\n\n**Important correction to the premise:** PostgreSQL 16 does **not** forbid `UNION` in a recursive CTE — the manual and parse code accept `non-recursive term UNION (or UNION ALL) recursive term`. Swapping to `UNION` still isn't the fix because:\n- `UNION`/`DISTINCT` compare the *whole row*; once the CTE carries `depth`/`path`, the per-path rows differ and nothing collapses (verified: still 13 rows).\n- `DISTINCT ON` inside the recursive term needs `ORDER BY`, and PG rejects `ORDER BY in a recursive query`; `GROUP BY`/aggregates are also rejected there.\n\n**The fix** (keep CTE unchanged, collapse in the final select):\n\n```sql\nWITH RECURSIVE walk(id, depth, path) AS (\n    SELECT 1, 0, ARRAY[1]::int[]\n  UNION ALL\n    SELECT e.child, w.depth + 1, w.path || e.child\n    FROM walk w JOIN edges e ON e.parent = w.id AND e.active\n)\nSELECT id, depth, path\nFROM (\n    SELECT DISTINCT ON (id) id, depth, path\n    FROM walk\n    ORDER BY id, depth, path      -- inner ORDER BY must start with the key\n) d\nORDER BY depth, id;               -- stable presentation order\n```\n\n**Verified results on PG 16.15** (node 50 has 3 active incoming edges; 1 inactive ignored):\n\n| | raw rows | distinct ids | node50 | node61 |\n|---|---|---|---|---|\n| Pre-fix (`UNION ALL`) | 13 | 7 | 3 | 3 |\n| Post-fix (`DISTINCT ON`) | 7 | 7 | 1 | 1 |\n\nDownstream `sum(amount)`: buggy `13` vs fixed `7` vs truth `7`. I also ran control queries showing whole-row `UNION` fails when `path` is present, and that `DISTINCT ON`/`GROUP BY` in the recursive term are rejected — confirming the fix belongs in the final `SELECT`. The markdown file is self-contained with fixture, commands, and the full verification matrix.\n",
+      "evidence": "# Evidence\n- Problem class: postgres-recursive-cte-duplicate-rows-multi-parent\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-16T06:22:09.517Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A recursive CTE that walks an edge table with UNION ALL emits a node once per incoming path, so a multi-parent node (N active incoming edges) appears N times and its whole subtree is duplicated too. PostgreSQL forbids a distinct UNION in the recursive term, so the fix cannot be \"swap UNION ALL for UNION\": keep the CTE for reachability/depth and collapse duplicates in the FINAL select, e.g. SELECT <cols> FROM (SELECT DISTINCT ON (id) <cols> FROM sub) d ORDER BY <stable ordering>. Verify with a pre-fix/post-fix row-count vs count(DISTINCT id) comparison on a fixture whose multi-parent node has 3 active incoming edges.",
+        "environment": "postgresql-16",
+        "language": "sql",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "postgres-recursive-cte-duplicate-rows-multi-parent",
+        "provider": "openrouter",
+        "solved_at": "2026-09-16T06:22:09.517Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-16 06:22:09"
+    }
+  ]
+}

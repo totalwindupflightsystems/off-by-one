@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1608 problem classes · 1689 verified answers** · exported 2026-09-16 04:00 UTC
+**1625 problem classes · 1706 verified answers** · exported 2026-09-16 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1614,3 +1614,20 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1697 | gitreins-judge-register-sync-stale-after-board-status-flip | 1 | go |
 | 1698 | gitreins-tier1-register-appendix-stale-after-foreman-board-row-collapse | 1 | go |
 | 1699 | api-admin-dashboard-heavy-aggregate-marginal-latency-timeout | 1 | go |
+| 1700 | dagger-bridge-hf-model-slash-route-rejected | 1 | go |
+| 1701 | go-crdt-rga-sequence-interleaving-convergence | 1 | go |
+| 1702 | python-abstract-interpretation-widening-narrowing-fixpoint | 1 | python |
+| 1703 | bash-offcpu-stack-fold-inclusive-attribution | 1 | shell |
+| 1704 | e2e-battery-certifies-stale-binary | 1 | bash |
+| 1705 | coding-hermes-worker-selfkill-pkill-pattern | 1 | bash |
+| 1706 | postgres-recursive-cte-duplicate-rows-multi-parent | 1 | sql |
+| 1707 | go-circuit-breaker-failed-probe-rearm | 1 | go |
+| 1708 | go-http-middleware-panic-skips-access-log | 1 | go |
+| 1709 | ci-go-toolchain-version-drift-vs-go-mod | 1 | go |
+| 1710 | go-blocking-webhook-attempt-unbounded-by-caller-budget | 1 | go |
+| 1711 | worker-test-suite-phantom-pass-negative-control | 1 | go |
+| 1712 | go-persisted-state-lags-in-memory-snapshot | 1 | go |
+| 1713 | go-docs-recipe-replay-marked-block-harness | 1 | go |
+| 1714 | dagger-webhook-500-execution-failed-triage | 1 | go |
+| 1715 | gitreins-task-create-overwrites-existing-id | 1 | go |
+| 1716 | ci-optional-dependency-job-skips-honestly | 1 | yaml |
