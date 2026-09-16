@@ -28,9 +28,14 @@ fi
 
 msg="ALERT: pi-agent binary UNHEALTHY (hollow-wipe class) — cli.js=$cli_ok pkg.json=$pkg_ok node_modules/.bin=$bin_ok wrapper=$wrapper_ok. Rebuild: mv $PI_DIR $PI_DIR.bak-$(date +%s) && git clone --depth 1 https://github.com/earendil-works/pi.git $PI_DIR && cd $PI_DIR && npm install --ignore-scripts && npm run build (verify $PI_DIR/packages/coding-agent/dist/cli.js). No server restart needed (bwrap ro-mounts per solve)."
 
+# Dedup signature is the probe STATE, never the message: the rebuild recipe
+# embeds `date +%s`, so comparing messages deduped only within the same wall
+# second — every 15-min run re-alerted (2026-09-15: 13 alerts / 3h12m for one
+# incident). A healthy run clears the stamp, so a recurring incident re-alerts.
+sig="cli=$cli_ok pkg=$pkg_ok bin=$bin_ok wrapper=$wrapper_ok dir=$PI_DIR wrapper_path=$WRAPPER"
 last=""; [ -f "$STAMP" ] && last="$(cat "$STAMP")"
-if [ "$last" != "$msg" ]; then
-  echo "$msg" > "$STAMP"
+if [ "$last" != "$sig" ]; then
+  echo "$sig" > "$STAMP"
   echo "[$(date '+%Y-%m-%d %H:%M:%S %Z')] $msg"
 fi
 exit 1
