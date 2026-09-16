@@ -1,0 +1,28 @@
+{
+  "class_id": 1726,
+  "title": "typescript-read-path-cache-freshness",
+  "description": "typescript-read-path-cache-freshness",
+  "created_at": "2026-09-16 12:09:47",
+  "answers": [
+    {
+      "answer_id": 1912,
+      "language": "typescript",
+      "environment": "node 22, duckdb fts extension, vitest 4, express",
+      "version": "",
+      "solution": "Diagnosed and fixed end-to-end. I built a runnable duckbrain repro (`/home/kara/duckbrain`), implemented the read-path freshness wiring, and verified with 7 vitest 4 tests — all green, typecheck clean.\n\nDeliverable: **`/home/kara/duckbrain/SOLUTION.md`**\n\n## Summary\n\n**Root cause** — the read path treated the rebuildable FTS sidecar as a hard dependency:\n1. `keywordSearch` called `searchIndex()` directly, so a namespace with no `.search/meta.json` threw `SearchIndexMissingError` → HTTP 500, and the write path never indexed.\n2. Nothing compared source JSONL `mtime` against `meta.indexedAt`, so a pre-write sidecar kept serving stale rows.\n3. `mode=auto` caught the missing-index error and silently swapped to the substring leg.\n\n**Fix (all read-side):**\n- `ensureFreshIndex()` compares `newestSourceMtimeMs()` vs `Date.parse(meta.indexedAt)`; missing or stale triggers a rebuild.\n- Bounded by `DUCKBRAIN_MAX_REBUILD_ROWS` (default 50000).\n- `singleFlight(nsPath, …)` coalesces concurrent cold reads on the resolved namespace path.\n- Refusals/failed rebuilds **return a `reason`** and never throw; `keywordSearch` attaches it to the existing `SearchIndexMissingError.note`, so the manual-rebuild hint stays reachable.\n- `mode=auto` now returns `leg:\"substring\"` + `fallbackReason`.\n- Write path only appends JSONL.\n- Atomic sidecar swap: build temp DB → `CHECKPOINT` → close → rename → write `meta.json` last.\n\n**Key gotcha found during verification:** `conn.closeSync()` alone does *not* checkpoint DuckDB — rows sat in `<tmp>.duckdb.wal`, so renaming only the main file produced a DB where `docs` didn't exist. The explicit `CHECKPOINT` is required.\n\n**Verification** (`cd /home/kara/duckbrain && npm install --legacy-peer-deps && npx vitest run`):\n\n```\nRUN  v4.1.11\n ✓ write path never builds the sidecar index\n ✓ cold namespace self-heals on the keyword surface and returns rows\n ✓ serves post-write rows on the next read and advances indexedAt\n ✓ coalesces concurrent cold reads into a single rebuild\n ✓ refuses an over-budget rebuild, degrades to the rebuild hint, keeps reason\n ✓ RED proof: without the read-path wiring the cold namespace 500s\n ✓ auto mode reports its fallback leg instead of silently swapping\n Test Files  1 passed (1)   Tests  7 passed (7)\n```\n\nThe RED proof flips only `readPathFreshness:false` — every other layer identical — and reproduces the original 500 with `buildStats.count === 0`, confirming the read-path wiring is the fix. `DUCKBRAIN_DISABLE_READ_PATH_FRESHNESS=1` is the production rollback lever accordingly.\n",
+      "evidence": "# Evidence\n- Problem class: typescript-read-path-cache-freshness\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-16T12:09:47.581Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A read path served by a rebuildable sidecar cache (DuckDB FTS index at <ns>/.search) leaked the cache lifecycle into every read: a namespace that never ran the manual rebuild answered the keyword surface with HTTP 500 (missing-index error surfaced as a server error) while a sibling query param silently fell back to another leg, and a sidecar that predated the newest write kept serving pre-write rows until a human intervened. Fix pattern: the read path owns freshness - compare the newest source JSONL mtime against the sidecar meta indexedAt, and when missing/stale perform a BOUNDED (max source rows, env-tunable) SINGLE-FLIGHT rebuild-before-answer; refusals and failed rebuilds degrade to the pre-change behavior and carry a reason string instead of throwing, so the manual-rebuild hint stays reachable; never index on the write path. Verification: scratch daemon with its own auth store and namespace root, no manual rebuild anywhere; assert the response body rows and that meta.indexedAt advanced, plus a RED-proof by reverting only the read-path wiring.",
+        "environment": "node 22, duckdb fts extension, vitest 4, express",
+        "language": "typescript",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "typescript-read-path-cache-freshness",
+        "provider": "openrouter",
+        "solved_at": "2026-09-16T12:09:47.582Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-16 12:09:47"
+    }
+  ]
+}

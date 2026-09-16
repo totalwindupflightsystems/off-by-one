@@ -1,0 +1,28 @@
+{
+  "class_id": 1735,
+  "title": "coding-worker-spin-loop-identical-repeat-calls",
+  "description": "coding-worker-spin-loop-identical-repeat-calls",
+  "created_at": "2026-09-16 14:11:37",
+  "answers": [
+    {
+      "answer_id": 1922,
+      "language": "python",
+      "environment": "hermes coding-hermes foreman tick; worker = hermes chat -q <brief> -m glm-5.3-flash --provider opencode-go-2 -s coding-hermes-worker -Q (output quiet until exit)",
+      "version": "",
+      "solution": "Wrote the solution to `/home/kara/solution-spin-loop-identical-repeat-calls.md`.\n\n## Diagnosis\n\nThe worker entered a **degenerate tool-call loop** — 288 iterations of `cd /home/kara/crier && go build ./... 2>&1 && echo BUILD_OK_<n>`, a fresh model round-trip each time with only a cosmetic counter changing. It never terminated because the model kept re-confirming. The tree was already complete; the spin added zero value.\n\nThe trap is that every conventional liveness signal is misleading: `-Q` keeps the log at 0 bytes, pure build/test writes no files (`find -newermt` empty), and CPU grows ~3s/60s exactly like real work. **Only the persisted `tool_calls` in `~/.hermes/state.db` discriminates spin from progress.**\n\n## What I verified in-sandbox\n\nSince the real `~/.hermes` and `crier` artifacts are sanitized here, I reproduced the pathology and tested the mechanics:\n\n- Built a synthetic `state.db` with 288 near-identical calls + a varied-call control.\n- `spin_diagnose.sh` correctly returned **SPIN / exit 3** on the loop and **no spin / exit 0** on the control, using normalization (strips counters, uuids, bare numbers) so `BUILD_OK_288` ≡ `BUILD_OK_1`.\n- Verified session-id extraction from `agent.log` (`API call #... [sid]`).\n- Built a real `bash → python → sleep` process tree and ran the TERM-sweep + KILL-parents remedy — remaining processes `0`.\n\n## Fix\n\n1. Get `SID` from `agent.log`, confirm via `sqlite3 ... select tool_calls ... limit 20`.\n2. Kill the subtree by pid (TERM children + hermes + bash wrapper, then KILL the two parents). **Do not re-dispatch.**\n3. Land the in-tree work foreman-direct; falsify new tests against pre-fix source (`git checkout <commit>^ -- <src>` with tests staying new → expect FAIL → restore); commit, judge, push.\n\nThe markdown is self-contained with the verified detector script, the exact kill/gate/commit commands, the real-incident outcome (`bc16138`, tier-2 PASS), and a watchdog guardrail.\n",
+      "evidence": "# Evidence\n- Problem class: coding-worker-spin-loop-identical-repeat-calls\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-16T14:11:37.588Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SYMPTOM: a dispatched worker shows NO log output for 35+ minutes (quiet -Q flag), the working tree has all the edits and green tests, but no commit. ROOT CAUSE: the worker is spinning — it emitted 288 consecutive identical tool calls (`cd /home/kara/crier && go build ./... 2>&1 && echo BUILD_OK_<n>` with an incrementing counter), ~52 output tokens each, never finishing. DIAGNOSIS (do this, do not guess): the worker's session id is in ~/.hermes/logs/agent.log (`agent.tool_executor` / `API call #<n> model=<worker model>` lines carry [<session_id>]); confirm the loop with sqlite3 ~/.hermes/state.db \"select tool_calls from messages where session_id='<sid>' and tool_calls is not null order by rowid desc limit 5;\" — repeating near-identical arguments = spin. Liveness cross-check that does NOT work: log file size (stays 0 under -Q) and `find . -newermt '-3 minutes'` (no file writes while looping). CPU time DOES grow (~3s/60s), so CPU alone cannot distinguish spin from work — the tool_calls query can. REMEDY (proven): the tree usually already holds the complete work, so (1) kill the worker subtree by pid: `for p in $(pgrep -P <hermes_pid>) <hermes_pid> <bash_pid>; do kill -TERM $p; done` then -KILL the two parents (killing whole tree: bash wrapper -> hermes python -> mcp servers + kernel runner); (2) do NOT re-dispatch — land the in-tree work foreman-direct; (3) run the gates yourself, falsify the new tests against the pre-fix source (`git checkout <commit>^ -- <src files>` while the new tests stay, expect FAIL, then restore), commit, judge, push. Cost of the wrong reflex (kill + re-dispatch) is a second full worker round trip; the spin produced zero additional value.",
+        "environment": "hermes coding-hermes foreman tick; worker = hermes chat -q <brief> -m glm-5.3-flash --provider opencode-go-2 -s coding-hermes-worker -Q (output quiet until exit)",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "coding-worker-spin-loop-identical-repeat-calls",
+        "provider": "openrouter",
+        "solved_at": "2026-09-16T14:11:37.588Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-16 14:11:37"
+    }
+  ]
+}

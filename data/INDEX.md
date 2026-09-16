@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1625 problem classes · 1706 verified answers** · exported 2026-09-16 10:00 UTC
+**1650 problem classes · 1735 verified answers** · exported 2026-09-16 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -12,11 +12,12 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 388 | typescript-barrel-split-large-file | 7 | go |
 | 848 | go-cli-e2e-battery-harness | 6 | go |
 | 277 | python-sdk-idle-audit | 5 | go |
+| 355 | gitreins-judge-iteration-cap | 4 | go |
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
-| 355 | gitreins-judge-iteration-cap | 3 | go |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
+| 1540 | gitreins-tier2-input-token-cap-exceeded | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 78 | so-nil-pointer-deref | 2 | go |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
@@ -29,10 +30,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
 | 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
+| 749 | docs-claims-vs-implementation-drift | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
 | 971 | js-e2e-browser-verification | 2 | go |
+| 1464 | gitreins-judge-tier2-evaluator-time-cap-incomplete | 2 | go |
 | 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 2 | python, shell |
-| 1540 | gitreins-tier2-input-token-cap-exceeded | 2 | go |
 | 1549 | python-registry-tier-derivation | 2 | go |
 | 1648 | deepseek-v4-flash-alias-still-serves | 2 | shell |
 | 1 | unknown | 1 | go |
@@ -679,7 +681,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 746 | krakend-stale-config-after-bind-mount | 1 | go |
 | 747 | go-host-mode-dsn-compose-network-names | 1 | go |
 | 748 | typescript-barrel-split-pure-fn-docs-gap-close | 1 | go |
-| 749 | docs-claims-vs-implementation-drift | 1 | go |
 | 750 | python-test-env-key-leak | 1 | go |
 | 751 | github-pr-clean-head-branch | 1 | go |
 | 752 | typescript-e2e-realtime-sync-test | 1 | go |
@@ -1382,7 +1383,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1461 | python-foreman-board-demo-db-side-effect-guard-drift-from-judge-tier1-pnpm-test-seeding | 1 | go |
 | 1462 | js-webauthn-cose-es256-assertion-verifier | 1 | js |
 | 1463 | browser-localstorage-restore-paint-order | 1 | javascript |
-| 1464 | gitreins-judge-tier2-evaluator-time-cap-incomplete | 1 | go |
 | 1465 | node-dep-audit-override-pin | 1 | go |
 | 1466 | go-e2e-battery-env-loss-background-spawn | 1 | go |
 | 1467 | js-rest-route-silent-noop-param | 1 | go |
@@ -1631,3 +1631,28 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1714 | dagger-webhook-500-execution-failed-triage | 1 | go |
 | 1715 | gitreins-task-create-overwrites-existing-id | 1 | go |
 | 1716 | ci-optional-dependency-job-skips-honestly | 1 | yaml |
+| 1717 | test-fixture-paraphrased-error-string-phantom-pass | 1 | go |
+| 1718 | python-lll-lattice-basis-reduction-exact-rational-gso | 1 | python |
+| 1719 | go-btree-latch-crabbing-concurrent-scan-consistency | 1 | go |
+| 1720 | eduos-foreman-ops-pointer-stack-inversion | 1 | go |
+| 1721 | api-session-id-alias-and-error-envelope-drift | 1 | typescript |
+| 1722 | optional-api-field-silent-default-orphans-client | 1 | typescript |
+| 1723 | graph-understand-anchor-ranking | 1 | rust |
+| 1724 | docker-compose-prod-missing-env-degraded-service | 1 | yaml |
+| 1725 | docs-stale-dated-capture-read-as-live-claim | 1 | go |
+| 1726 | typescript-read-path-cache-freshness | 1 | typescript |
+| 1727 | route-alias-key-dead-against-strict-schema | 1 | typescript |
+| 1728 | ci-job-level-red-masked-by-continue-on-error | 1 | go |
+| 1729 | ws-orchestrator-halt-no-terminal-stream-event | 1 | go |
+| 1730 | jsonl-foreman-board-duplicate-id-closeout | 1 | go |
+| 1731 | go-rollback-exec-under-cancelled-request-context | 1 | go |
+| 1732 | auth-demo-key-fallback-divergence-login-vs-middleware | 1 | go |
+| 1733 | bunker-daemon-capability-advertisement | 1 | go |
+| 1734 | demo-db-fixture-drift-after-gitreins-judge-tier1 | 1 | go |
+| 1735 | coding-worker-spin-loop-identical-repeat-calls | 1 | python |
+| 1736 | go-guard-rewrite-truncation-raw-byte-slice-mid-rune-json | 1 | go |
+| 1737 | zod-strict-outer-schema-rejects-top-level-field-accepted-by-inner-schema | 1 | typescript |
+| 1738 | ci-hardcoded-test-timeout-budget-cliff | 1 | go |
+| 1739 | go-registry-reconcile-destroys-foreign-daemon-agents | 1 | go |
+| 1740 | systemd-linger-accumulation-starves-user-manager | 1 | go |
+| 1741 | pam-exec-precondition-dies-ssh-session-for-group-members | 1 | shell |

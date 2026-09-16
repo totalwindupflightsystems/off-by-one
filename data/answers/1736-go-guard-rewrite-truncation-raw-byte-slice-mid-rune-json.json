@@ -1,0 +1,28 @@
+{
+  "class_id": 1736,
+  "title": "go-guard-rewrite-truncation-raw-byte-slice-mid-rune-json",
+  "description": "go-guard-rewrite-truncation-raw-byte-slice-mid-rune-json",
+  "created_at": "2026-09-16 14:14:48",
+  "answers": [
+    {
+      "answer_id": 1923,
+      "language": "go",
+      "environment": "Go 1.26.6, crier internal/guard; payload cap CR_GUARD_MAX_PAYLOAD_BYTES=65536, render cap CR_GUARD_RENDER_MAX_BYTES=32768",
+      "version": "",
+      "solution": "I diagnosed the defect against the real repo (`github.com/crier-dev/crier`, commit `bc16138`), applied/verified the fix, and confirmed falsifiability. The complete solution is written to `/workspace/solution.md`.\n\n## Summary\n\n**Root cause:** `rewritePayload` handed the sanitize LLM `string(payload)[:32768]` — a raw byte cut. It breaks JSON shape (the prompt requires same-shape JSON back) and can split a UTF-8 rune; the HTTP JSON encoder then silently replaces the broken bytes with `U+FFFD`, so the model input looks valid and the bug is invisible to a validity check. Same raw cut existed at two `render.go` sites. The window is exactly `(32768, 65536]`, because larger payloads short-circuit.\n\n**Fix:**\n- Added one shared `truncateRuneSafe(s, maxBytes)` in `internal/guard/render.go` (`cut := max; for cut > 0 && !utf8.RuneStart(s[cut]) { cut-- }; return s[:cut]`, unchanged when `len(s) <= maxBytes`).\n- Used it at the non-JSON envelope slice and the JSON-projection partial-tail line.\n- In `rewrite.go`, above the cap: valid JSON → the same `Render` structure-aware projection the classifier uses; non-JSON → rune-safe cut + `\\n[truncated]`. Below the cap → verbatim.\n- Spec §3.5 updated.\n\n**Verification evidence (actually run):**\n\n| Test | pre-fix source | post-fix |\n|---|---|---|\n| `...BoundedJSONInput` | FAIL — `32780` raw bytes, no markers | PASS |\n| `...NonJSONRuneSafe` | FAIL — U+FFFD from split `€` | PASS |\n| `TestRender_TextEnvelopeRuneSafe` | FAIL — invalid UTF-8 | PASS |\n| `...UnchangedBelowCap` | PASS | PASS |\n| `TestRender_TextEnvelopeASCIIByteIdentical` | PASS | PASS |\n| full `go test ./internal/guard/` | — | `ok ... 13.7s` |\n\nFalsification was done exactly as specified: `git checkout bc16138^ -- internal/guard/rewrite.go internal/guard/render.go` with the new tests left in place, then restored.\n",
+      "evidence": "# Evidence\n- Problem class: go-guard-rewrite-truncation-raw-byte-slice-mid-rune-json\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-16T14:14:48.131Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SYMPTOM: an LLM rewrite/sanitize path that was handed `string(payload)[:renderMaxBytes]` receives (a) invalid JSON — the prompt demands a same-shape JSON object back — and (b) truncated UTF-8: the model input contains a split multi-byte rune, which the HTTP JSON encoder silently turns into U+FFFD, so you cannot detect it by looking for invalid UTF-8 in the model input; assert the ABSENCE of utf8.RuneError/U+FFFD instead. The defect window is exactly (renderMax, maxPayload]: above maxPayload the LLM path short-circuits, so the bug only bites in that band and only for callers that slice at the smaller render cap. FIX (proven): add ONE shared rune-safe truncation helper — `cut := max; for cut > 0 && !utf8.RuneStart(s[cut]) { cut-- }; return s[:cut]` (returns s unchanged when len(s) <= max) — and use it at every such slice site (in this case also a JSON projection's partial-tail line and a non-JSON envelope slice). For JSON payloads above the cap, do NOT slice raw bytes at all: hand the model the SAME deterministic structure-aware projection the classifier already uses, so the named paths survive and the truncation is visible. TESTS THAT CATCH IT (each fails on the pre-fix line, verified by `git checkout <commit>^ -- <src>` with the new tests left in place): ~40KB valid-JSON payload asserting the model input contains the projection markers and is <= cap (pre-fix: 32780 bytes of raw prefix); ~40KB non-JSON payload whose 3-byte rune straddles the cap asserting an exact `prefix + marker` match and no U+FFFD (pre-fix: replacement char); and a <cap regression guard asserting byte-identical input so the common path cannot change. Capture what the model received by reading the httptest request body and json-decoding messages[role==user].content — do NOT assert on the response side.",
+        "environment": "Go 1.26.6, crier internal/guard; payload cap CR_GUARD_MAX_PAYLOAD_BYTES=65536, render cap CR_GUARD_RENDER_MAX_BYTES=32768",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-guard-rewrite-truncation-raw-byte-slice-mid-rune-json",
+        "provider": "openrouter",
+        "solved_at": "2026-09-16T14:14:48.131Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-16 14:14:48"
+    }
+  ]
+}
