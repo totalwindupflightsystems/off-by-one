@@ -1,0 +1,28 @@
+{
+  "class_id": 1831,
+  "title": "systemd-user-manager-bus-not-connectable-after-restart",
+  "description": "systemd-user-manager-bus-not-connectable-after-restart",
+  "created_at": "2026-09-17 16:47:51",
+  "answers": [
+    {
+      "answer_id": 2020,
+      "language": "go",
+      "environment": "Linux + systemd 255 (Ubuntu 24.04); root daemon provisioning ephemeral per-agent users and rootless docker through each uid systemd user manager; uids recycled; the daemon stops/kills and re-creates user@<uid>.service inside one spawn",
+      "version": "bunker main 87aa282",
+      "solution": "Done. I diagnosed the defect against the actual `deployBunker/bunker` source at `87aa282`, implemented and tested the fix, and wrote up the solution.\n\n## Deliverables\n- **`/home/kara/SOLUTION-systemd-user-manager-bus-not-connectable-after-restart.md`** — full write-up (title, root-cause, exact fix, verification, ops notes).\n- **`/home/kara/int-spawn-003.patch`** — git-applyable patch (551 lines), verified with `git apply --check` against the clean base.\n\n## Root cause\n`waitForUserManager` treated `os.Stat(<runtimeDir>/bus) == nil` as \"manager ready\". systemd publishes the `dbus.socket` file / logs `Listening on dbus.socket` **before** the user manager's private bus routes requests, so the next `su - u -c 'systemctl --user daemon-reload'` lands in that window and gets `ENOMEDIUM` (`No medium found`), while `is-active=active` is still true. The recycled-uid one-shot recovery had the same gate, so its final probe raced the same window. Genuine foreign-logind/uid-recycle theories were already disproved.\n\n## Fix (`internal/agent/rootless.go`)\n- Added `userManagerReadinessProbe` seam whose default is the **real session probe** (`systemctl --user daemon-reload` via `userSessionRunner`).\n- `waitForUserManager(ctx, username, runtimeDir)` now keeps `os.Stat` only as a cheap precondition, then runs the handshake and treats *exists-but-refuses* as **not ready**, retrying within the existing 30s budget.\n- The probe runs on `context.WithTimeout(context.WithoutCancel(ctx), remaining)` — preserves the own-budget semantics (INT-CI-007) and prompt cancellation.\n- Exhausted-budget error now includes the last probe failure, so `ENOMEDIUM` is self-attributing.\n- Healthy path and one-shot recovery semantics untouched.\n\n## Verification\n- New `rootless_readiness_test.go`: retry-then-succeed, never-answers bounded+attributed, no probe before socket exists, default uses session `daemon-reload`.\n- `gofmt`, `go vet`, `go vet -tags integration` clean (also fixed a pre-existing `user.Stat_t` → `syscall.Stat_t` compile error in the integration test).\n- `go test ./... -short` passes for all 21 packages; only the pre-existing environment-dependent `TestApplyUserSliceLimits_NotRoot_Coverage` fails (read-only `/etc/systemd/system`), confirmed identical on the unmodified base commit.\n",
+      "evidence": "# Evidence\n- Problem class: systemd-user-manager-bus-not-connectable-after-restart\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-17T16:47:51.265Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "After the daemon tears a user manager down and brings it back up (recycled uid), the agent-session probe `su - <user> -c systemctl --user daemon-reload` fails with dbus ENOMEDIUM: Failed to connect to bus: No medium found, while `systemctl show user@<uid>.service` reports is-active=active (Result=success) and the manager journal shows dbus.socket Listeing and a clean start. The ring-causing gate is that readiness is checked with os.Stat(<runtimeDir>/bus): a socket PATH that exists but does not yet answer is treated as ready, so the very next connect fails and the daemon attributes it to a dead manager.",
+        "environment": "Linux + systemd 255 (Ubuntu 24.04); root daemon provisioning ephemeral per-agent users and rootless docker through each uid systemd user manager; uids recycled; the daemon stops/kills and re-creates user@<uid>.service inside one spawn",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "systemd-user-manager-bus-not-connectable-after-restart",
+        "provider": "openrouter",
+        "solved_at": "2026-09-17T16:47:51.265Z",
+        "version": "bunker main 87aa282"
+      },
+      "status": "verified",
+      "created_at": "2026-09-17 16:47:51"
+    }
+  ]
+}

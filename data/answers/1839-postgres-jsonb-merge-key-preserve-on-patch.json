@@ -1,0 +1,28 @@
+{
+  "class_id": 1839,
+  "title": "postgres-jsonb-merge-key-preserve-on-patch",
+  "description": "postgres-jsonb-merge-key-preserve-on-patch",
+  "created_at": "2026-09-17 18:17:12",
+  "answers": [
+    {
+      "answer_id": 2028,
+      "language": "sql",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. Solution written to `/home/kara/postgres-jsonb-merge-key-preserve-on-patch.md` and verified live against PostgreSQL 18 (I initialized a throwaway cluster, ran the full test suite, then stopped it).\n\n**Summary of the diagnosis and fix:**\n\n- **Root cause:** `metadata = COALESCE($4, metadata)` is all-or-nothing replacement, not a merge — any non-NULL partial body discards the whole document, wiping reserved sub-objects like `metadata.multi_reference`. A `SELECT`-then-`UPDATE` fix would introduce a lost-update race.\n- **The trap:** naive `metadata || '{\"pinned\":true}'` works only when `metadata` is a JSON object; on `NULL`, JSON `null`, arrays, strings, or numbers, `||` concatenates and **array-wraps** the result (verified: `'[]'::jsonb || '{\"pinned\":true}'` → `[{\"pinned\":true}]`). Hence the `jsonb_typeof(metadata) <> 'object'` guard is load-bearing.\n- **Fix (same UPDATE, atomic):**\n  ```sql\n  SET metadata =\n        (CASE WHEN metadata IS NULL OR jsonb_typeof(metadata) <> 'object'\n              THEN '{}'::jsonb ELSE metadata END)\n        || '{\"pinned\":true}'::jsonb\n  -- unpin: ... END) - 'pinned'\n  ```\n\n**Verification performed:**\n1. Reproduced the clobber with the old `COALESCE` form.\n2. Assertions confirming `multi_reference` survives **verbatim** through pin + unpin.\n3. Non-object inputs (`NULL`, `[]`, `\"scalar\"`, `null`) normalize to `{\"pinned\":true}` — no array wrap.\n4. Two-session concurrency test: a pin and an unrelated key merge both survive, reserved key intact — proving no read-modify-write race.\n\nThe markdown is self-contained with runnable SQL/bash, exact observed outputs, reusable helper functions, and caveats (shallow merge, policy on explicitly patching reserved keys).\n",
+      "evidence": "# Evidence\n- Problem class: postgres-jsonb-merge-key-preserve-on-patch\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-17T18:17:12.306Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A PATCH endpoint that accepted a whole-document jsonb replace (metadata = COALESCE($4, metadata)) clobbers reserved sub-objects when a client sends only a partial document (e.g. {\"pinned\":true} erasing metadata.multi_reference). Fix idiom without a read-modify-write race, in the SAME UPDATE: pin -> (CASE WHEN metadata IS NULL OR jsonb_typeof(metadata) <> 'object' THEN '{}'::jsonb ELSE metadata END) || '{\"pinned\":true}'::jsonb ; unpin -> ... - 'pinned'. The jsonb_typeof guard is load-bearing: || on a non-object operand wraps operands in an ARRAY instead of merging. Verified live: reserved key survived verbatim through pin+unpin.",
+        "environment": "",
+        "language": "sql",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "postgres-jsonb-merge-key-preserve-on-patch",
+        "provider": "openrouter",
+        "solved_at": "2026-09-17T18:17:12.307Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-17 18:17:12"
+    }
+  ]
+}

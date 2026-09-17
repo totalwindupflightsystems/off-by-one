@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1734 problem classes · 1820 verified answers** · exported 2026-09-17 16:00 UTC
+**1765 problem classes · 1851 verified answers** · exported 2026-09-17 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1740,3 +1740,34 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1823 | litellm-provider-blind-credential-error | 1 | python |
 | 1824 | assert-a-module-level-import-meta-env-read-in-vitest | 1 | typescript |
 | 1825 | harness-cell-asserts-cli-exit-code-contract-that-does-not-exist | 1 | bash |
+| 1826 | go-transaction-rollback-created-directories | 1 | go |
+| 1827 | go-truetime-commit-wait-external-consistency | 1 | go |
+| 1828 | python-sphincsplus-hypertree-fors-wots-chain | 1 | python |
+| 1829 | bash-deflate-dynamic-huffman-lz77-inflate-reconstruction | 1 | shell |
+| 1830 | litellm-custom-provider-base-url-not-plumbed | 1 | python |
+| 1831 | systemd-user-manager-bus-not-connectable-after-restart | 1 | go |
+| 1832 | harness-probe-false-negative-wrong-json-field-path | 1 | go |
+| 1833 | litellm-openai-base-url-namespaced-model-id | 1 | python |
+| 1834 | su-login-strips-session-bus-environment | 1 | go |
+| 1835 | free-tier-provider-credentialless-usable-probe | 1 | javascript |
+| 1836 | python-mcp-sdk-serverinfo-version-fallback | 1 | python |
+| 1837 | gitreins-judge-self-matching-poll-hang | 1 | go |
+| 1838 | browser-harness-js-eval-timeout-on-image-pixel-probe | 1 | python |
+| 1839 | postgres-jsonb-merge-key-preserve-on-patch | 1 | sql |
+| 1840 | go-cross-revision-parity-digest-worktree | 1 | go |
+| 1841 | bash-test-gate-setup-failure-false-red | 1 | bash |
+| 1842 | nodejs-unpinned-npx-major-drift | 1 | javascript |
+| 1843 | llm-classifier-verdict-path-unreachable-prompt-contract-drift | 1 | go |
+| 1844 | go-unit-test-asserts-clock-read-after-rpc-returns | 1 | go |
+| 1845 | go-unit-test-reaches-production-acme-certmagic | 1 | go |
+| 1846 | ci-needs-gating-amplifies-unit-flake | 1 | bash |
+| 1847 | python-cron-wrapper-process-env-dotenv-gate | 1 | python |
+| 1848 | go-build-identity-hardcoded-handshake-and-unstamped-image | 1 | go |
+| 1849 | newest-vs-oldest-index-inversion-in-budget-walk | 1 | go |
+| 1850 | go-fs-errnotexist-enotdir-parent | 1 | go |
+| 1851 | cli-warning-rendering-double-prefix-and-midtoken-truncation | 1 | go |
+| 1852 | counter-counted-before-keep-decision | 1 | go |
+| 1853 | eduos-exec-tick-voice-text-fallback-shared-decision-module | 1 | go |
+| 1854 | bash-gate-selftest-asserts-repo-state-nonhermetic | 1 | bash |
+| 1855 | gitignore-bare-pattern-shadows-source-directory | 1 | git |
+| 1856 | fail-loud-framing-silently-skips-blank-lines | 1 | go |
