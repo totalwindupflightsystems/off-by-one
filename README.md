@@ -110,7 +110,7 @@ For detailed integration examples and a per-route reference, see [`docs/integrat
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/taxonomy` | Full problem-class tree |
-| `GET` | `/api/v1/stats` | System statistics — `coverage` = verified_answers/total_problems and can exceed 1.0 (a class may hold multiple verified answers); `hit_rate` = verified_answers/total_answers |
+| `GET` | `/api/v1/stats` | System statistics — `verified_answers` counts answers whose status is `verified`/`ci_passed` **and** whose signatures JSON does not record `result: "failed"` (a status-verified answer whose solve failed is excluded); `coverage` = verified_answers/total_problems and can exceed 1.0 (a class may hold multiple verified answers); `hit_rate` = verified_answers/total_answers |
 | `GET` | `/openapi.json` | OpenAPI 3.0.3 specification |
 | `GET` | `/health` | Health check (status + uptime) |
 
@@ -381,6 +381,7 @@ off-by-one/
 ├── muster-config.yaml       # Muster connection config
 ├── scripts/connect-muster.sh # Muster connection script
 ├── scripts/sync-answers.sh  # Answer corpus sync script
+├── scripts/pi-agent-watchdog.sh # pi-agent health probe — checks WRAPPER RESOLUTION, not mere presence (packages/coding-agent/dist/cli.js, package.json, non-empty node_modules/.bin, executable wrapper); silent when healthy, prints one ALERT per incident (stamp-deduped) with the rebuild recipe when the binary is missing or hollowed — schedule it (cron, ~15 min)
 ├── Makefile                 # Build targets
 ├── AGENTS.md                # Agent development guide
 ├── CONTRIBUTING.md          # Contribution guide
@@ -413,7 +414,7 @@ git clone --depth 1 https://github.com/totalwindupflightsystems/off-by-one
 grep -l '"title": ".*raft.*"' data/answers/*.json
 ```
 
-Every answer is 100% verified (hit rate 1.0). Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more. To contribute, open a PR adding/updating a file under `data/answers/`. Regenerate the export anytime with `python3 scripts/export-answers.py`.
+The exported corpus is the set of verified answers. `GET /api/v1/stats` applies one further exclusion on top of that set: an answer whose signatures JSON records a failed solve (`result: "failed"`) is not counted in `verified_answers`, so `hit_rate` (= verified_answers/total_answers) is computed from the live database and is not a fixed constant. Observed on the running lab while this section was written — the values move as the corpus grows, so query your own instance with `curl -s http://localhost:8766/api/v1/stats` instead of trusting them: `total_problems` 1847, `total_answers` 2036, `verified_answers` 2008, `hit_rate` 0.9862475442043221, `coverage` 1.0871683811586357. Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more. To contribute, open a PR adding/updating a file under `data/answers/`. Regenerate the export anytime with `python3 scripts/export-answers.py`.
 
 ## Related Projects
 

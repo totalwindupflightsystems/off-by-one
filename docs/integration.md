@@ -211,19 +211,19 @@ curl -s http://localhost:8766/api/v1/stats
 
 ```json
 {
-  "total_problems": 1281,
-  "total_answers": 1457,
-  "verified_answers": 1457,
+  "total_problems": 1847,
+  "total_answers": 2036,
+  "verified_answers": 2008,
   "queue_depth": 0,
-  "hit_rate": 1,
-  "coverage": 1.137,
-  "avg_solve_time": "2m16s",
+  "hit_rate": 0.9862475442043221,
+  "coverage": 1.0871683811586357,
+  "avg_solve_time": "2m58s",
   "readonly": false,
   "solver_available": true
 }
 ```
 
-`coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1). `readonly` and `solver_available` tell you whether the running instance is a read-only catalog or has an active solver.
+Observed on the running lab at the time of writing; the counts drift as the corpus grows. `verified_answers` counts answers whose status is `verified`/`ci_passed` **and** whose signatures JSON does not record a failed solve (`result: "failed"`), so a status-verified answer whose solve failed is excluded and `verified_answers` can be below `total_answers`. `coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1), computed at runtime. `readonly` and `solver_available` tell you whether the running instance is a read-only catalog or has an active solver.
 
 ---
 
@@ -232,6 +232,8 @@ curl -s http://localhost:8766/api/v1/stats
 These endpoints require the binary to be started with `-export-dir` / `-import-dir` (or `OFF_BY_ONE_EXPORT_DIR` / `OFF_BY_ONE_IMPORT_DIR`). If the directory is not configured, the endpoint returns `501 Not Implemented`.
 
 ### Export verified answers to a git repo
+
+**Precondition:** the server must have been started with `-export-dir` (or `OFF_BY_ONE_EXPORT_DIR`), per the preamble above. On a default install — no export directory configured — the endpoint answers `501` with `{"error":"not_configured","message":"export directory not configured"}` (measured against the running lab instance, which is started without it), so the example below cannot succeed as printed. The import example below likewise needs `-import-dir` / `OFF_BY_ONE_IMPORT_DIR`. Both endpoints are documented under [Export / Import](api-reference.md#export--import).
 
 ```bash
 curl -s -X POST http://localhost:8766/api/v1/export \

@@ -112,11 +112,13 @@ List or search problem classes. Supports full-text search via `q` and filtering 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `q` | string | Full-text search query |
-| `env` | string | Filter by environment |
-| `lang` | string | Filter by language |
+| `env` | string | Filter by environment — matched **exactly** against the `env` stored on the class's answer rows |
+| `lang` | string | Filter by language — matched **exactly** against the `lang` stored on the class's answer rows |
 | `status` | string | Filter by status (`pending`, `verified`, `failed`, `ci_passed`) |
 | `limit` | integer | Page size (default 20, max 100) |
 | `offset` | integer | Pagination offset (default 0) |
+
+`env` and `lang` are exact matches (`a.env = ?`, `a.lang = ?`) against the value stored on the class's answer rows — not substring, case-insensitive, or alias matches — and a class is filtered out unless one of its answers carries that exact value. A filter copied from the [README submit example](../README.md#example-submit-a-problem) (`environment: "linux"`, `language: "go"`) can therefore legitimately return 0 rows: the stored values are whatever the corpus recorded, and they are not normalized (observed live: `GET /api/v1/problems?q=raft&env=linux` → `{"problems":[],"total":0}`, while `q=raft` alone returns the matching classes, whose answers carry `env` values such as `go1.26`). Check the stored values first — `GET /api/v1/problems/{class}/answers` returns `env` and `lang` for every answer. The same exact-match rule governs `POST /api/v1/problems/discover`'s `environment` / `language` filters — see [Discover Cached Solutions](integration.md#discover-cached-solutions).
 
 **Response `200 OK`**
 
@@ -543,21 +545,23 @@ Return system-level statistics.
 
 **Response `200 OK`**
 
+Values below were observed on the running lab at the time of writing — they drift as the corpus grows, so query your own instance for current numbers.
+
 ```json
 {
-  "total_problems": 1281,
-  "total_answers": 1457,
-  "verified_answers": 1457,
+  "total_problems": 1847,
+  "total_answers": 2036,
+  "verified_answers": 2008,
   "queue_depth": 0,
-  "hit_rate": 1,
-  "coverage": 1.137,
-  "avg_solve_time": "2m16s",
+  "hit_rate": 0.9862475442043221,
+  "coverage": 1.0871683811586357,
+  "avg_solve_time": "2m58s",
   "readonly": false,
   "solver_available": true
 }
 ```
 
-`coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1). `readonly` and `solver_available` indicate whether the server is in public catalog mode and whether an active solver is wired up.
+`verified_answers` counts answer rows whose status is `verified` or `ci_passed` **and** whose signatures JSON does not record a failed solve — the predicate is `COALESCE(json_extract(signatures, '$.result'), '') != 'failed'`, so a row with absent, empty, or unparseable signature JSON still counts and only an explicit `result: "failed"` is excluded. A status-verified answer whose signature reports failure is therefore *not* counted: `verified_answers` can be lower than `total_answers` even when nearly every answer is verified, and `hit_rate` is a runtime value, not a constant. `coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1). `readonly` and `solver_available` indicate whether the server is in public catalog mode and whether an active solver is wired up.
 
 **Status codes:** `200`, `500`.
 
