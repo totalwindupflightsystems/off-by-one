@@ -1,0 +1,177 @@
+commit 2f2b5a65ba603fd5a9c9f5b43b17e36b4b03b58c
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Thu Sep 17 14:48:51 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Thu Sep 17 14:48:51 2026 -0500
+
+    docs: correct stats/verified_answers claims, export precondition, env/lang filters. Addresses DF-OFF-BY-ONE-9, DOC-1, DOC-2.
+    
+    README.md
+    - Removed the false "Every answer is 100% verified (hit rate 1.0)" claim. It now says the
+      exported corpus is the set of verified answers and that GET /api/v1/stats applies one
+      further exclusion: answers whose signatures JSON records a failed solve are not counted
+      in verified_answers, so hit_rate is computed at runtime and is not a fixed constant.
+      Live numbers are printed with an observed-at-time-of-writing label.
+    - Stats endpoint row in the endpoint table now states the failed-signature exclusion.
+    - Scripts layout block: added scripts/pi-agent-watchdog.sh, described from the script's own
+      header - it probes pi-agent WRAPPER RESOLUTION (dist/cli.js, package.json, non-empty
+      node_modules/.bin, executable wrapper), is silent when healthy, and prints one deduped
+      ALERT with the rebuild recipe when the binary is missing or hollowed; schedule via cron.
+    
+    docs/api-reference.md
+    - GET /api/v1/stats: sample JSON refreshed to the live response (counts no longer equal,
+      hit_rate no longer 1) and labelled as observed-at-time-of-writing; the verified_answers
+      and hit_rate definition now states the failed-signature exclusion and names the
+      predicate COALESCE(json_extract(signatures, '$.result'), '') != 'failed'.
+    - GET /api/v1/problems: env and lang are documented as exact matches against the value
+      stored on the class's answer rows, so a filter copied from the submit example
+      (environment "linux") can legitimately return 0 rows; tells the reader to check the
+      stored values first and cross-references the same rule for discover in integration.md.
+    
+    docs/integration.md
+    - Export subsection: the -export-dir / 501 not_configured precondition now sits with the
+      example in the same subsection (and names -import-dir for the import example), with a
+      cross-reference to the Export / Import section of api-reference.md.
+    - Stats sample aligned with the corrected definition, values refreshed and labelled.
+    
+    Measured live this session (server on :8766)
+    - GET /api/v1/stats -> total_problems 1847, total_answers 2036, verified_answers 2008,
+      queue_depth 0, hit_rate 0.9862475442043221, coverage 1.0871683811586357,
+      avg_solve_time 2m58s, readonly false, solver_available true
+    - POST /api/v1/export {"answer_ids":[42,43]} -> HTTP 501
+      {"error":"not_configured","message":"export directory not configured"}
+    - GET /api/v1/problems?q=raft&env=linux -> {"problems":[],"total":0}; q=raft without env
+      returns the matching classes, whose answers carry env values such as go1.26
+    
+    Gates: go build ./... OK; go vet ./... OK; gofmt -l cmd/ internal/ pkg/ sql/ clean;
+    go test ./... -short -p 1 -count=1 -timeout 120s all packages ok.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ README.md             |  5 +++--
+ docs/api-reference.md | 22 +++++++++++++---------
+ docs/integration.md   | 16 +++++++++-------
+ 3 files changed, 25 insertions(+), 18 deletions(-)
+
+diff --git a/README.md b/README.md
+index 1904f6d..5eca56c 100644
+--- a/README.md
++++ b/README.md
+@@ -110,7 +110,7 @@ For detailed integration examples and a per-route reference, see [`docs/integrat
+ | Method | Endpoint | Description |
+ |--------|----------|-------------|
+ | `GET` | `/api/v1/taxonomy` | Full problem-class tree |
+-| `GET` | `/api/v1/stats` | System statistics — `coverage` = verified_answers/total_problems and can exceed 1.0 (a class may hold multiple verified answers); `hit_rate` = verified_answers/total_answers |
++| `GET` | `/api/v1/stats` | System statistics — `verified_answers` counts answers whose status is `verified`/`ci_passed` **and** whose signatures JSON does not record `result: "failed"` (a status-verified answer whose solve failed is excluded); `coverage` = verified_answers/total_problems and can exceed 1.0 (a class may hold multiple verified answers); `hit_rate` = verified_answers/total_answers |
+ | `GET` | `/openapi.json` | OpenAPI 3.0.3 specification |
+ | `GET` | `/health` | Health check (status + uptime) |
+ 
+@@ -381,6 +381,7 @@ off-by-one/
+ ├── muster-config.yaml       # Muster connection config
+ ├── scripts/connect-muster.sh # Muster connection script
+ ├── scripts/sync-answers.sh  # Answer corpus sync script
++├── scripts/pi-agent-watchdog.sh # pi-agent health probe — checks WRAPPER RESOLUTION, not mere presence (packages/coding-agent/dist/cli.js, package.json, non-empty node_modules/.bin, executable wrapper); silent when healthy, prints one ALERT per incident (stamp-deduped) with the rebuild recipe when the binary is missing or hollowed — schedule it (cron, ~15 min)
+ ├── Makefile                 # Build targets
+ ├── AGENTS.md                # Agent development guide
+ ├── CONTRIBUTING.md          # Contribution guide
+@@ -413,7 +414,7 @@ git clone --depth 1 https://github.com/totalwindupflightsystems/off-by-one
+ grep -l '"title": ".*raft.*"' data/answers/*.json
+ ```
+ 
+-Every answer is 100% verified (hit rate 1.0). Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more. To contribute, open a PR adding/updating a file under `data/answers/`. Regenerate the export anytime with `python3 scripts/export-answers.py`.
++The exported corpus is the set of verified answers. `GET /api/v1/stats` applies one further exclusion on top of that set: an answer whose signatures JSON records a failed solve (`result: "failed"`) is not counted in `verified_answers`, so `hit_rate` (= verified_answers/total_answers) is computed from the live database and is not a fixed constant. Observed on the running lab while this section was written — the values move as the corpus grows, so query your own instance with `curl -s http://localhost:8766/api/v1/stats` instead of trusting them: `total_problems` 1847, `total_answers` 2036, `verified_answers` 2008, `hit_rate` 0.9862475442043221, `coverage` 1.0871683811586357. Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more. To contribute, open a PR adding/updating a file under `data/answers/`. Regenerate the export anytime with `python3 scripts/export-answers.py`.
+ 
+ ## Related Projects
+ 
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index bd52b7a..d3d1081 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -112,12 +112,14 @@ List or search problem classes. Supports full-text search via `q` and filtering
+ | Parameter | Type | Description |
+ |-----------|------|-------------|
+ | `q` | string | Full-text search query |
+-| `env` | string | Filter by environment |
+-| `lang` | string | Filter by language |
++| `env` | string | Filter by environment — matched **exactly** against the `env` stored on the class's answer rows |
++| `lang` | string | Filter by language — matched **exactly** against the `lang` stored on the class's answer rows |
+ | `status` | string | Filter by status (`pending`, `verified`, `failed`, `ci_passed`) |
+ | `limit` | integer | Page size (default 20, max 100) |
+ | `offset` | integer | Pagination offset (default 0) |
+ 
++`env` and `lang` are exact matches (`a.env = ?`, `a.lang = ?`) against the value stored on the class's answer rows — not substring, case-insensitive, or alias matches — and a class is filtered out unless one of its answers carries that exact value. A filter copied from the [README submit example](../README.md#example-submit-a-problem) (`environment: "linux"`, `language: "go"`) can therefore legitimately return 0 rows: the stored values are whatever the corpus recorded, and they are not normalized (observed live: `GET /api/v1/problems?q=raft&env=linux` → `{"problems":[],"total":0}`, while `q=raft` alone returns the matching classes, whose answers carry `env` values such as `go1.26`). Check the stored values first — `GET /api/v1/problems/{class}/answers` returns `env` and `lang` for every answer. The same exact-match rule governs `POST /api/v1/problems/discover`'s `environment` / `language` filters — see [Discover Cached Solutions](integration.md#discover-cached-solutions).
++
+ **Response `200 OK`**
+ 
+ ```json
+@@ -543,21 +545,23 @@ Return system-level statistics.
+ 
+ **Response `200 OK`**
+ 
++Values below were observed on the running lab at the time of writing — they drift as the corpus grows, so query your own instance for current numbers.
++
+ ```json
+ {
+-  "total_problems": 1281,
+-  "total_answers": 1457,
+-  "verified_answers": 1457,
++  "total_problems": 1847,
++  "total_answers": 2036,
++  "verified_answers": 2008,
+   "queue_depth": 0,
+-  "hit_rate": 1,
+-  "coverage": 1.137,
+-  "avg_solve_time": "2m16s",
++  "hit_rate": 0.9862475442043221,
++  "coverage": 1.0871683811586357,
++  "avg_solve_time": "2m58s",
+   "readonly": false,
+   "solver_available": true
+ }
+ ```
+ 
+-`coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1). `readonly` and `solver_available` indicate whether the server is in public catalog mode and whether an active solver is wired up.
++`verified_answers` counts answer rows whose status is `verified` or `ci_passed` **and** whose signatures JSON does not record a failed solve — the predicate is `COALESCE(json_extract(signatures, '$.result'), '') != 'failed'`, so a row with absent, empty, or unparseable signature JSON still counts and only an explicit `result: "failed"` is excluded. A status-verified answer whose signature reports failure is therefore *not* counted: `verified_answers` can be lower than `total_answers` even when nearly every answer is verified, and `hit_rate` is a runtime value, not a constant. `coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1). `readonly` and `solver_available` indicate whether the server is in public catalog mode and whether an active solver is wired up.
+ 
+ **Status codes:** `200`, `500`.
+ 
+diff --git a/docs/integration.md b/docs/integration.md
+index 2d163dd..fbabf68 100644
+--- a/docs/integration.md
++++ b/docs/integration.md
+@@ -211,19 +211,19 @@ curl -s http://localhost:8766/api/v1/stats
+ 
+ ```json
+ {
+-  "total_problems": 1281,
+-  "total_answers": 1457,
+-  "verified_answers": 1457,
++  "total_problems": 1847,
++  "total_answers": 2036,
++  "verified_answers": 2008,
+   "queue_depth": 0,
+-  "hit_rate": 1,
+-  "coverage": 1.137,
+-  "avg_solve_time": "2m16s",
++  "hit_rate": 0.9862475442043221,
++  "coverage": 1.0871683811586357,
++  "avg_solve_time": "2m58s",
+   "readonly": false,
+   "solver_available": true
+ }
+ ```
+ 
+-`coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1). `readonly` and `solver_available` tell you whether the running instance is a read-only catalog or has an active solver.
++Observed on the running lab at the time of writing; the counts drift as the corpus grows. `verified_answers` counts answers whose status is `verified`/`ci_passed` **and** whose signatures JSON does not record a failed solve (`result: "failed"`), so a status-verified answer whose solve failed is excluded and `verified_answers` can be below `total_answers`. `coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1), computed at runtime. `readonly` and `solver_available` tell you whether the running instance is a read-only catalog or has an active solver.
+ 
+ ---
+ 
+@@ -233,6 +233,8 @@ These endpoints require the binary to be started with `-export-dir` / `-import-d
+ 
+ ### Export verified answers to a git repo
+ 
++**Precondition:** the server must have been started with `-export-dir` (or `OFF_BY_ONE_EXPORT_DIR`), per the preamble above. On a default install — no export directory configured — the endpoint answers `501` with `{"error":"not_configured","message":"export directory not configured"}` (measured against the running lab instance, which is started without it), so the example below cannot succeed as printed. The import example below likewise needs `-import-dir` / `OFF_BY_ONE_IMPORT_DIR`. Both endpoints are documented under [Export / Import](api-reference.md#export--import).
++
+ ```bash
+ curl -s -X POST http://localhost:8766/api/v1/export \
+   -H "Content-Type: application/json" \
