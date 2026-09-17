@@ -372,6 +372,15 @@ List all queued submissions. Optionally filter by `status`.
 
 `status` is one of `pending`, `in_progress`, `complete`, `failed`. `stage` may be `queued`, `sandbox_prepare`, `sandbox_solve`, `done`, or `failed`.
 
+**`position` and `estimated_time` semantics**
+
+| Field | `GET /api/v1/queue` (list) | `GET /api/v1/queue/{submission_id}` |
+|-------|----------------------------|-------------------------------------|
+| `position` | The entry's 1-based place in the returned page — `offset + index + 1` | The entry's 1-based place in the **pending** queue, or `0` when the entry is not waiting (`in_progress`, `complete`, `failed`) |
+| `estimated_time` | Wait left for this entry: `estimateTime(place in the pending queue, observed mean solve time)` while `pending`; one job while `in_progress`; empty for `complete` / `failed` | Same rule as the list |
+
+`estimated_time` is the lab's observed mean solve time (`avg_solve_time` on `GET /api/v1/stats`, derived from completed solves) multiplied by the number of jobs ahead of the entry, rounded to the nearest second and capped at `30m`. A lab with no completed solves yet falls back to `30s` per job — which is why the sample above shows `"estimated_time": "30s"` for the first pending entry. A finished entry is no longer waiting, so `complete` and `failed` entries always return `"estimated_time": ""`.
+
 **Status codes:** `200`, `500`.
 
 **Example**
@@ -394,7 +403,7 @@ Get the status of a single submission.
 
 **Response `200 OK`**
 
-Same `QueueEntry` shape as the list endpoint.
+Same `QueueEntry` shape as the list endpoint, and the same `position` / `estimated_time` semantics documented there — `position` is the entry's 1-based place in the pending queue (`0` when the entry is not waiting) and `estimated_time` is empty once the entry is `complete` or `failed`.
 
 **Status codes:** `200`, `404` (submission not found), `500`.
 

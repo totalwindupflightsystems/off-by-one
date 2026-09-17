@@ -609,7 +609,10 @@ func (s *Server) handleGetRelated(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleListQueue returns the queue contents filtered by status.
+// handleListQueue returns the queue contents filtered by status. Every
+// entry carries a derived estimated_time (see queueWireEntry); position
+// stays the entry's 1-based place in the returned page, which is what the
+// documented list contract promises.
 func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	status := q.Get("status")
@@ -620,9 +623,14 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
+	// One observed per-job cost read per request, plus a single
+	// pending-list fetch shared by every entry's ETA — never a fresh DB
+	// read per entry.
+	perJob, _ := s.Queue.AvgSolveTime(r.Context())
+	pending := s.pendingPositions(r)
 	out := queueListResponse{Total: len(entries)}
 	for i, e := range entries {
-		wire := entryToWire(&e)
+		wire := queueWireEntry(&e, pending[e.ID], perJob)
 		wire.Position = offset + i + 1
 		out.Entries = append(out.Entries, wire)
 	}
@@ -641,7 +649,11 @@ func (s *Server) handleGetQueueStatus(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, entryToWire(e))
+	// position and estimated_time are derived, not stored: read the
+	// observed mean solve time once and resolve this entry's 1-based
+	// place in the pending queue with a single pending-list fetch.
+	perJob, _ := s.Queue.AvgSolveTime(r.Context())
+	writeJSON(w, http.StatusOK, queueWireEntry(e, s.pendingPositions(r)[e.ID], perJob))
 }
 
 // handleTaxonomy returns the full problem-class tree. The current
@@ -741,6 +753,54 @@ func entryToWire(e *ingest.Entry) queueEntryWire {
 		w.CompletedAt = e.CompletedAt.String
 	}
 	return w
+}
+
+// queueWireEntry converts a queue.Entry into the API's JSON shape and fills
+// the two derived fields the spec declares on QueueEntry but the queue table
+// does not store (DF-OFF-BY-ONE-11):
+//
+//   - position is the entry's 1-based place in the pending queue, and 0 when
+//     it is not waiting (in_progress / complete / failed).
+//     handleListQueue overwrites it with the entry's place in the page.
+//   - estimated_time is the remaining wait as a Go duration string: the jobs
+//     ahead of a pending entry, one job while an in_progress entry occupies
+//     the bench, and empty once the entry can no longer be waited on.
+//
+// pendingIndex is the entry's 1-based place in the pending list, 0 when the
+// entry is not pending or when that list could not be read — a pending entry
+// then falls back to position 1, matching queuePosition. perJob is the mean
+// observed solve time, read once per request by the caller.
+func queueWireEntry(e *ingest.Entry, pendingIndex int, perJob time.Duration) queueEntryWire {
+	w := entryToWire(e)
+	switch e.Status {
+	case ingest.StatusPending:
+		if pendingIndex <= 0 {
+			pendingIndex = 1
+		}
+		w.Position = pendingIndex
+		w.EstimatedTime = estimateTime(pendingIndex, perJob)
+	case ingest.StatusInProgress:
+		// No longer waiting in the queue: the job holds the bench now, so
+		// the wait left is one job.
+		w.EstimatedTime = estimateTime(1, perJob)
+	}
+	return w
+}
+
+// pendingPositions maps each pending entry's ID to its 1-based place in the
+// pending queue. It is one fetch per request (shared by the entry's position
+// and its ETA); a read error yields a nil map so callers fall back to
+// position 1 rather than dropping the estimate.
+func (s *Server) pendingPositions(r *http.Request) map[string]int {
+	entries, err := s.Queue.List(r.Context(), ingest.StatusPending, 1000, 0)
+	if err != nil {
+		return nil
+	}
+	pos := make(map[string]int, len(entries))
+	for i, e := range entries {
+		pos[e.ID] = i + 1
+	}
+	return pos
 }
 
 // queuePosition returns 1-based position of e in the pending queue.

@@ -1096,6 +1096,348 @@ func TestGetQueueStatus_NotFound(t *testing.T) {
 	}
 }
 
+// seedObservedSolveTime inserts one completed queue entry whose solve took
+// 133s (10:00:00 -> 10:02:13), so Queue.AvgSolveTime reports 2m13s — the
+// same fixture TestStats_AvgSolveTime and
+// TestSubmit_EstimatedTimeFromObservedAverage use.
+func seedObservedSolveTime(t *testing.T, store *graph.Store, id string) {
+	t.Helper()
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status, stage, started_at, completed_at)
+		VALUES (?, 'cls-observed', 'complete', 'done',
+			'2026-08-21 10:00:00', '2026-08-21 10:02:13')`, id); err != nil {
+		t.Fatalf("insert completed entry: %v", err)
+	}
+}
+
+// submitForTest posts a pre-phase submission and returns the decoded body.
+func submitForTest(t *testing.T, s *Server, class string) submitProblemResponse {
+	t.Helper()
+	rr := do(t, s, "POST", "/api/v1/problems/submit", submitProblemRequest{
+		ProblemClass: class,
+		Environment:  "docker",
+		Language:     "go",
+		Cadence:      ingest.CadencePrePhase,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("submit %s: status = %d, body = %s", class, rr.Code, rr.Body.String())
+	}
+	var resp submitProblemResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode submit response: %v", err)
+	}
+	if resp.SubmissionID == "" {
+		t.Fatalf("submit %s returned no submission_id: %s", class, rr.Body.String())
+	}
+	return resp
+}
+
+// getQueueEntry GETs one queue entry and returns both the raw JSON object
+// (so a missing or mis-tagged key is caught) and the decoded struct.
+func getQueueEntry(t *testing.T, s *Server, id string) (map[string]any, queueEntryWire) {
+	t.Helper()
+	rr := do(t, s, "GET", "/api/v1/queue/"+id, nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET queue/%s: status = %d, body = %s", id, rr.Code, rr.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw queue/%s: %v", id, err)
+	}
+	var entry queueEntryWire
+	if err := json.Unmarshal(rr.Body.Bytes(), &entry); err != nil {
+		t.Fatalf("decode queue/%s: %v", id, err)
+	}
+	return raw, entry
+}
+
+// TestGetQueueStatus_PositionAndEstimatedTime guards DF-OFF-BY-ONE-11 at the
+// API layer: GET /api/v1/queue/{submission_id} must fill the two fields the
+// spec declares on QueueEntry instead of returning position 0 and an empty
+// estimated_time.
+//
+// Fixture: one completed solve of 2m13s is the observed per-job cost, then
+// three pending rows in a deterministic order (the extra rows get created_at
+// values in the future so they cannot tie with the submitted row's now()).
+// A pending entry reports its 1-based place in the pending queue and
+// estimateTime(place, observed mean); a terminal entry reports 0 and "";
+// an in_progress entry reports 0 and one job's wait.
+func TestGetQueueStatus_PositionAndEstimatedTime(t *testing.T) {
+	s, store, queue := newTestServer(t)
+	ctx := context.Background()
+	seedObservedSolveTime(t, store, "sub_eta_done")
+
+	// Real submit path first: its position/ETA must agree with the detail
+	// endpoint (pre-fix the submit said position 1 / 2m13s while the detail
+	// endpoint said 0 / "").
+	submitted := submitForTest(t, s, "cls-eta-submitted")
+	if submitted.Position != 1 {
+		t.Fatalf("submit position = %d, want 1 (only pending row)", submitted.Position)
+	}
+	if submitted.EstimatedTime == "" {
+		t.Fatalf("submit estimated_time empty: %+v", submitted)
+	}
+
+	// Two more pending rows, queued behind the submitted one.
+	for i, id := range []string{"sub_eta_p2", "sub_eta_p3"} {
+		if _, err := store.DB().Exec(`INSERT INTO queue_entries
+			(id, problem_class, status, stage, created_at)
+			VALUES (?, 'cls-eta-queued', 'pending', 'queued', ?)`,
+			id, []string{"2030-01-01 00:00:01", "2030-01-01 00:00:02"}[i]); err != nil {
+			t.Fatalf("insert pending %s: %v", id, err)
+		}
+	}
+
+	perJob, err := queue.AvgSolveTime(ctx)
+	if err != nil {
+		t.Fatalf("AvgSolveTime: %v", err)
+	}
+	if perJob <= 0 {
+		t.Fatalf("fixture observed average = %s, want > 0", perJob)
+	}
+
+	// Pending: 1-based pending position + ETA from the observed mean.
+	for _, tc := range []struct {
+		id  string
+		pos int
+	}{
+		{submitted.SubmissionID, 1},
+		{"sub_eta_p2", 2},
+		{"sub_eta_p3", 3},
+	} {
+		raw, entry := getQueueEntry(t, s, tc.id)
+		wantETA := estimateTime(tc.pos, perJob)
+		if entry.Status != ingest.StatusPending {
+			t.Fatalf("%s status = %q, want pending", tc.id, entry.Status)
+		}
+		if entry.Position != tc.pos {
+			t.Errorf("%s position = %d, want %d", tc.id, entry.Position, tc.pos)
+		}
+		if entry.EstimatedTime == "" {
+			t.Errorf("%s estimated_time is empty for a waiting entry", tc.id)
+		}
+		if entry.EstimatedTime != wantETA {
+			t.Errorf("%s estimated_time = %q, want %q", tc.id, entry.EstimatedTime, wantETA)
+		}
+		// Raw-JSON key checks: a struct-only assertion misses a json tag
+		// typo or a field the handler never writes.
+		rawPos, ok := raw["position"]
+		if !ok {
+			t.Fatalf("%s: no position key on the wire: %v", tc.id, raw)
+		}
+		if got, isNum := rawPos.(float64); !isNum || int(got) != tc.pos {
+			t.Errorf("%s raw position = %v, want %d", tc.id, rawPos, tc.pos)
+		}
+		rawETA, ok := raw["estimated_time"]
+		if !ok {
+			t.Fatalf("%s: no estimated_time key on the wire: %v", tc.id, raw)
+		}
+		if rawETA != wantETA {
+			t.Errorf("%s raw estimated_time = %v, want %q", tc.id, rawETA, wantETA)
+		}
+	}
+
+	// Terminal (complete): not waiting, so no position and no ETA.
+	raw, entry := getQueueEntry(t, s, "sub_eta_done")
+	if entry.Status != ingest.StatusComplete {
+		t.Fatalf("sub_eta_done status = %q, want complete", entry.Status)
+	}
+	if entry.Position != 0 {
+		t.Errorf("complete entry position = %d, want 0", entry.Position)
+	}
+	if entry.EstimatedTime != "" {
+		t.Errorf("complete entry estimated_time = %q, want empty", entry.EstimatedTime)
+	}
+	if raw["position"] != float64(0) {
+		t.Errorf("complete entry raw position = %v, want 0", raw["position"])
+	}
+	if got, ok := raw["estimated_time"]; !ok || got != "" {
+		t.Errorf("complete entry raw estimated_time = %v (present=%v), want \"\"", got, ok)
+	}
+
+	// Terminal (failed): same rule as complete.
+	if err := queue.MarkFailed(ctx, "sub_eta_p3", "solver: pi agent exited 1"); err != nil {
+		t.Fatalf("MarkFailed: %v", err)
+	}
+	for _, id := range []string{"sub_eta_p3"} {
+		raw, entry := getQueueEntry(t, s, id)
+		if entry.Status != ingest.StatusFailed {
+			t.Fatalf("%s status = %q, want failed", id, entry.Status)
+		}
+		if entry.Position != 0 {
+			t.Errorf("%s (failed) position = %d, want 0", id, entry.Position)
+		}
+		if entry.EstimatedTime != "" {
+			t.Errorf("%s (failed) estimated_time = %q, want empty", id, entry.EstimatedTime)
+		}
+		if got, ok := raw["estimated_time"]; !ok || got != "" {
+			t.Errorf("%s (failed) raw estimated_time = %v (present=%v), want \"\"", id, got, ok)
+		}
+	}
+
+	// in_progress: off the queue but holding the bench — one job's wait.
+	solving, err := queue.Dequeue(ctx)
+	if err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
+	if solving == nil {
+		t.Fatal("Dequeue returned no entry")
+	}
+	_, entry = getQueueEntry(t, s, solving.ID)
+	if entry.Status != ingest.StatusInProgress {
+		t.Fatalf("%s status = %q, want in_progress", solving.ID, entry.Status)
+	}
+	if entry.Position != 0 {
+		t.Errorf("in_progress position = %d, want 0 (not waiting in the queue)", entry.Position)
+	}
+	if want := estimateTime(1, perJob); entry.EstimatedTime != want {
+		t.Errorf("in_progress estimated_time = %q, want %q (one job)", entry.EstimatedTime, want)
+	}
+}
+
+// TestListQueue_PositionAndEstimatedTime guards DF-OFF-BY-ONE-11 on the list
+// endpoint: position stays the entry's 1-based place in the returned page
+// (offset+i+1, the documented behaviour) while estimated_time is filled per
+// entry — the jobs ahead for a pending entry, one job for an in_progress
+// entry, and empty for a terminal one.
+func TestListQueue_PositionAndEstimatedTime(t *testing.T) {
+	s, store, queue := newTestServer(t)
+	ctx := context.Background()
+	seedObservedSolveTime(t, store, "sub_eta_done")
+
+	submitted := submitForTest(t, s, "cls-list-submitted")
+	for i, id := range []string{"sub_list_p2", "sub_list_p3"} {
+		if _, err := store.DB().Exec(`INSERT INTO queue_entries
+			(id, problem_class, status, stage, created_at)
+			VALUES (?, 'cls-list-queued', 'pending', 'queued', ?)`,
+			id, []string{"2030-01-01 00:00:01", "2030-01-01 00:00:02"}[i]); err != nil {
+			t.Fatalf("insert pending %s: %v", id, err)
+		}
+	}
+	// One pending row starts solving.
+	solving, err := queue.Dequeue(ctx)
+	if err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
+	if solving == nil {
+		t.Fatal("Dequeue returned no entry")
+	}
+	// Deterministic: the submitted row's created_at is "now" while the two
+	// extra pending rows are pinned to 2030, so FIFO picks the submission.
+	if solving.ID != submitted.SubmissionID {
+		t.Fatalf("Dequeue returned %s, want the submitted row %s (pending order is created_at ASC)",
+			solving.ID, submitted.SubmissionID)
+	}
+
+	perJob, err := queue.AvgSolveTime(ctx)
+	if err != nil {
+		t.Fatalf("AvgSolveTime: %v", err)
+	}
+	if perJob <= 0 {
+		t.Fatalf("fixture observed average = %s, want > 0", perJob)
+	}
+
+	// Expected ETA per entry, keyed by ID: pending entries scale with their
+	// place in the pending queue, the solving entry is one job.
+	pendingRows, err := queue.List(ctx, ingest.StatusPending, 1000, 0)
+	if err != nil {
+		t.Fatalf("pending list: %v", err)
+	}
+	wantETA := map[string]string{}
+	for i, e := range pendingRows {
+		wantETA[e.ID] = estimateTime(i+1, perJob)
+	}
+	wantETA[solving.ID] = estimateTime(1, perJob)
+
+	rr := do(t, s, "GET", "/api/v1/queue?limit=5", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+	}
+	var resp queueListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	var raw struct {
+		Entries []map[string]any `json:"entries"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw list: %v", err)
+	}
+	if len(resp.Entries) != 4 {
+		t.Fatalf("entries = %d, want 4 (1 complete + 3 pending/solving): %s", len(resp.Entries), rr.Body.String())
+	}
+	if len(raw.Entries) != len(resp.Entries) {
+		t.Fatalf("raw entries = %d, decoded entries = %d", len(raw.Entries), len(resp.Entries))
+	}
+
+	seen := map[string]string{}
+	for i, e := range resp.Entries {
+		seen[e.SubmissionID] = e.Status
+		// List position is unchanged: offset (0) + index + 1.
+		if e.Position != i+1 {
+			t.Errorf("entries[%d] (%s) position = %d, want %d (offset+i+1)", i, e.SubmissionID, e.Position, i+1)
+		}
+		rawETA, ok := raw.Entries[i]["estimated_time"]
+		if !ok {
+			t.Fatalf("entries[%d] (%s) has no estimated_time key: %v", i, e.SubmissionID, raw.Entries[i])
+		}
+		switch e.Status {
+		case ingest.StatusPending:
+			if e.EstimatedTime == "" {
+				t.Errorf("pending %s estimated_time is empty", e.SubmissionID)
+			}
+			if e.EstimatedTime != wantETA[e.SubmissionID] {
+				t.Errorf("pending %s estimated_time = %q, want %q",
+					e.SubmissionID, e.EstimatedTime, wantETA[e.SubmissionID])
+			}
+		case ingest.StatusInProgress:
+			if e.EstimatedTime == "" {
+				t.Errorf("in_progress %s estimated_time is empty", e.SubmissionID)
+			}
+			if e.EstimatedTime != wantETA[e.SubmissionID] {
+				t.Errorf("in_progress %s estimated_time = %q, want %q",
+					e.SubmissionID, e.EstimatedTime, wantETA[e.SubmissionID])
+			}
+		default:
+			if e.EstimatedTime != "" {
+				t.Errorf("terminal %s (%s) estimated_time = %q, want empty",
+					e.SubmissionID, e.Status, e.EstimatedTime)
+			}
+		}
+		if rawETA != e.EstimatedTime {
+			t.Errorf("entries[%d] (%s) raw estimated_time = %v, decoded = %q",
+				i, e.SubmissionID, rawETA, e.EstimatedTime)
+		}
+	}
+	for _, id := range []string{submitted.SubmissionID, "sub_eta_done", solving.ID} {
+		if _, ok := seen[id]; !ok {
+			t.Errorf("entry %s missing from the listing: %v", id, seen)
+		}
+	}
+	if seen[solving.ID] != ingest.StatusInProgress {
+		t.Errorf("%s status = %q, want in_progress", solving.ID, seen[solving.ID])
+	}
+
+	// Paging: the list position stays the page position, offset included.
+	offRR := do(t, s, "GET", "/api/v1/queue?limit=2&offset=1", nil)
+	if offRR.Code != http.StatusOK {
+		t.Fatalf("paged status = %d, want 200", offRR.Code)
+	}
+	var offResp queueListResponse
+	if err := json.Unmarshal(offRR.Body.Bytes(), &offResp); err != nil {
+		t.Fatalf("decode paged list: %v", err)
+	}
+	if len(offResp.Entries) != 2 {
+		t.Fatalf("paged entries = %d, want 2", len(offResp.Entries))
+	}
+	for i, e := range offResp.Entries {
+		if e.Position != 1+i+1 {
+			t.Errorf("paged entries[%d] (%s) position = %d, want %d",
+				i, e.SubmissionID, e.Position, 1+i+1)
+		}
+	}
+}
+
 // --- Taxonomy + Stats ----------------------------------------------------
 
 func TestTaxonomy_Empty(t *testing.T) {
