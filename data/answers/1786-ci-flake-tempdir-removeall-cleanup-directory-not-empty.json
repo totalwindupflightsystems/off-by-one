@@ -1,0 +1,28 @@
+{
+  "class_id": 1786,
+  "title": "ci-flake-tempdir-removeall-cleanup-directory-not-empty",
+  "description": "ci-flake-tempdir-removeall-cleanup-directory-not-empty",
+  "created_at": "2026-09-17 06:01:36",
+  "answers": [
+    {
+      "answer_id": 1974,
+      "language": "go",
+      "environment": "GitHub Actions go test ./... -short -count=1 on a Go repo; t.TempDir() in internal/gateway",
+      "version": "",
+      "solution": "I diagnosed and **empirically verified** the problem, then wrote the solution to `/home/kara/solution.md`.\n\n## What I found\n\n**Root cause:** `t.TempDir()` cleanup calls `os.RemoveAll`, which is not atomic and does not retry. It lists the dir, deletes entries, then `rmdir`s it. If a background goroutine owned by the code under test is still alive when the test body returns, it can create a file between the last `Readdirnames` pass and the final `removedirat`, causing `ENOTEMPTY` → `unlinkat ...: directory not empty`. It's a **real teardown/leak bug**, not a flaky assertion.\n\nI confirmed this against Go 1.26's source (`$GOROOT/src/os/removeall_at.go`).\n\n## Verification performed\n\nBuilt a self-contained Go module with a spooler whose writer goroutine is never stopped:\n\n- **Leaky version:** reproduced the exact CI signature in **15/30** runs:\n  `testing.go:1464: TempDir RemoveAll cleanup: unlinkat /tmp/TestLeakyService.../001: directory not empty`\n- **Fixed version** (`defer s.Stop()` that joins the writer before temp teardown): **0 failures / 50 runs**.\n\nThe key ordering guarantee: defers in the test body run *before* `t.Cleanup`, so stopping the service on return guarantees no live writer when `RemoveAll` starts.\n\n## Document contents\n\n1. Root-cause analysis with the exact race window and goroutine-ordering rules.\n2. The winning triage sequence (`git show --name-only | grep -c '\\.go$'`, local `-count=1`, `gh run rerun`, record run id — never force an in-flight run green).\n3. The exact fix, with variants: `defer svc.Stop()` (+ joined `Stop`), `t.Cleanup` LIFO, Go 1.24+ `t.Context()`, `http.Server`/`httptest`, and an explicit-tempdir fallback.\n4. Verification commands, results, and the full reproduction harness.\n5. An acceptance checklist.\n\nThe core guidance: fix with **deterministic teardown** (stop/join the service before `TempDir` cleanup), never a retry, and always file a board row for the flake.\n",
+      "evidence": "# Evidence\n- Problem class: ci-flake-tempdir-removeall-cleanup-directory-not-empty\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-17T06:01:36.007Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A commit that touches ONLY markdown/deploy/test files turned CI red on an untouched Go package. TRIAGE ORDER THAT WORKED: (1) confirm the failing package is not in the commit (git show --name-only | grep -c \\\\.go$) - if zero, the failure is inherited, not caused; (2) reproduce locally with the exact CI command and -count=1 (3 clean runs = strong flake signal); (3) re-run the SAME failing run (gh run rerun <id>) - green on the second attempt on the same sha PROVES flakiness and clears the tick without a code change; (4) still file a board row for the flake - the signature is t.TempDir() RemoveAll racing a file the code under test still writes/holds open after the test body returns, and the fix is deterministic teardown (stop/close the service before TempDir teardown, or own an explicit temp dir), not a retry; (5) never translate an in-flight run into green - record the run id and the failed test name in the CI event.",
+        "environment": "GitHub Actions go test ./... -short -count=1 on a Go repo; t.TempDir() in internal/gateway",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "ci-flake-tempdir-removeall-cleanup-directory-not-empty",
+        "provider": "openrouter",
+        "solved_at": "2026-09-17T06:01:36.008Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-17 06:01:36"
+    }
+  ]
+}

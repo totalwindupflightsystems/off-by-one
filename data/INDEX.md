@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1687 problem classes · 1772 verified answers** · exported 2026-09-17 04:00 UTC
+**1704 problem classes · 1790 verified answers** · exported 2026-09-17 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -32,6 +32,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
 | 749 | docs-claims-vs-implementation-drift | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
+| 945 | board-jsonl-duplicate-id-remediation | 2 | go, python |
 | 971 | js-e2e-browser-verification | 2 | go |
 | 1464 | gitreins-judge-tier2-evaluator-time-cap-incomplete | 2 | go |
 | 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 2 | python, shell |
@@ -869,7 +870,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 942 | docs-config-readme-struct-drift | 1 | go |
 | 943 | go-docs-yaml-validation | 1 | go |
 | 944 | go-postgres-migration-ambiguous-column | 1 | go |
-| 945 | board-jsonl-duplicate-id-remediation | 1 | go |
 | 946 | go-goconst-test-literal-regression | 1 | go |
 | 947 | go-cli-data-dir-threading | 1 | go |
 | 948 | sh-flock-fd-inheritance-hang | 1 | shell |
@@ -1693,3 +1693,20 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1776 | python-json-bridge-required-key-validation | 1 | python |
 | 1777 | share-token-terminal-state-hidden-by-resolver | 1 | go |
 | 1778 | disposition-register-stale-after-exec-close | 1 | go |
+| 1779 | go-lsm-leveled-compaction-tombstone-shadow-recovery | 1 | go |
+| 1780 | python-ctr-drbg-sp800-90a-reseed-prediction-resistance | 1 | python |
+| 1781 | js-treeshap-exact-interventional-path-dependent | 1 | js |
+| 1782 | gitreins-rust-static-analysis-cppcheck-timeout | 1 | rust |
+| 1783 | vitest-monorepo-root-config-missing | 1 | typescript |
+| 1784 | jsonl-board-pending-duplicate-id-reconciliation | 1 | python |
+| 1785 | gitreins-tier2-criterion-requires-automated-test-evidence | 1 | go |
+| 1786 | ci-flake-tempdir-removeall-cleanup-directory-not-empty | 1 | go |
+| 1787 | eduos-disposition-register-preexisting-sibling-row-staleness-compound | 1 | go |
+| 1788 | cli-broken-pipe-sigpipe-panic | 1 | rust |
+| 1789 | pnpm-double-dash-forwarded-to-script | 1 | shell |
+| 1790 | go-test-tempdir-teardown-races-service-background-persist | 1 | go |
+| 1791 | eduos-demo-db-submissions-schema-probe-timestamps | 1 | go |
+| 1792 | go-jsonl-optional-file-parse-error-swallowed | 1 | go |
+| 1793 | eduos-gitleaks-false-positive-ignore-fingerprint-duality | 1 | go |
+| 1794 | go-filepath-join-grep-false-negative | 1 | go |
+| 1795 | docs-truth-pass-leaves-second-half-of-compound-false-claim | 1 | markdown |

@@ -1,0 +1,28 @@
+{
+  "class_id": 1779,
+  "title": "go-lsm-leveled-compaction-tombstone-shadow-recovery",
+  "description": "go-lsm-leveled-compaction-tombstone-shadow-recovery",
+  "created_at": "2026-09-17 04:08:11",
+  "answers": [
+    {
+      "answer_id": 1967,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "Done. I built a complete, verified reference solution at `/home/kara/lsm-recovery-solution/`, with the written deliverable at `/home/kara/lsm-recovery-solution/SOLUTION.md`.\n\n## What was wrong (root causes)\n\nA crash-safe LSM recovery has six independent failure modes, each of which alone breaks correctness:\n\n1. **Torn records partially decoded** — WAL/MANIFEST records lack length+CRC framing, and recovery doesn't truncate to the last good offset. A half-written MANIFEST edit references a table that was never renamed → permanently wedged `Open`.\n2. **Wrong durability ordering** — if compaction doesn't write-outputs → publish-edit → delete-inputs in that order, a crash leaves orphans that resurrect deleted data.\n3. **Per-level lookups** — a tombstone in L1 must win over a live value physically still in L2; reads must select the newest version `≤ readSeq` across *all* levels + memtable.\n4. **Eager tombstone drops** — compaction that collapses to \"newest version only\" erases the value a snapshot predates. The retention rule needs a snapshot floor.\n5. **Checksum failure is fatal** — a bad SSTable takes down replay instead of being quarantined.\n6. **Non-deterministic recovery** — fresh file numbers / repeated WAL application make two replays diverge.\n\n## The fix (highlights)\n\n- **Framed records**: `[len][crc32c][payload]`; `readFramed` returns a sentinel torn error, recovery stops and `os.Truncate`s to the last intact edit.\n- **Recovery order**: recover MANIFEST → verify/quarantine tables → replay WAL prefix → flush recovered memtable via one idempotent edit → GC orphans (`.tmp`, unreferenced `.sst`, stale WALs).\n- **Snapshot floor retention**: drop a version only when the shadowing version is `≤ floor`; drop a tombstone only when it's alone, bottommost, and `≤ floor`.\n- **Quarantine**: move bad table to `quarantine/` and append a delete edit; replay continues.\n- Bonus bug I caught in review: delete/quarantine edits omitted the snapshot field and would silently reset the floor — fixed with an explicit `HasOldestSnap` flag (regression test included).\n\n## Verification\n\nClean under `go vet` and `go test -race`:\n\n```\n--- PASS: TestTombstoneShadowsLowerLevel\n--- PASS: TestRetentionCollapsesOnlyBelowFloor\n--- PASS: TestTombstoneDroppedOnlyAtBottom\n--- PASS: TestManifestTornTailTruncated\n--- PASS: TestCorruptTableQuarantined\n--- PASS: TestWALTornTailTruncated\n--- PASS: TestByteIdenticalRecovery\n--- PASS: TestQuarantineEditDoesNotResetSnapshot\n--- PASS: TestSIGKILLMidCompaction/{start,output,manifest}\n--- PASS: TestSIGKILLDuringWALReplay\nok  lsmrecovery\n```\n\nThe harness (`harness_test.go` + `cmd/lsmctl`) builds the exact state — `a=\"v1\"` in L2, tombstone `a@2` in L1, snapshot floor 1 — then `SIGKILL`s the process at three durable compaction boundaries and asserts `Get(a,0)=absent`, `Get(a,1)=\"v1\"`, `Get(b,0)=\"vb\"`, tombstone retention under a further `L1→L2` compaction, and identical SHA-256 digests over all durable bytes across two independent replays.\n\n`SOLUTION.md` contains the full root-cause analysis, fix, verification section, and all source files appended for a directly usable copy.\n",
+      "evidence": "# Evidence\n- Problem class: go-lsm-leveled-compaction-tombstone-shadow-recovery\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-17T04:08:11.974Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement the crash-recovery half of an LSM storage engine: WAL replay must rebuild a leveled tree in which a tombstone in L1 shadows a live key still present in L2, and a MANIFEST whose final record is torn must be truncated to the last intact version rather than partially applied. Reads at an older sequence number must keep seeing the pre-tombstone value, so compaction may not drop a tombstone whose oldest live snapshot predates it, and an SSTable whose checksum fails must be quarantined without wedging the replay. Deliver a harness that SIGKILLs the process mid-compaction and asserts per-key sequence visibility plus byte-identical recovery across two replay runs.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-lsm-leveled-compaction-tombstone-shadow-recovery",
+        "provider": "openrouter",
+        "solved_at": "2026-09-17T04:08:11.974Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-09-17 04:08:11"
+    }
+  ]
+}
