@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1704 problem classes · 1790 verified answers** · exported 2026-09-17 10:00 UTC
+**1734 problem classes · 1820 verified answers** · exported 2026-09-17 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1710,3 +1710,33 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1793 | eduos-gitleaks-false-positive-ignore-fingerprint-duality | 1 | go |
 | 1794 | go-filepath-join-grep-false-negative | 1 | go |
 | 1795 | docs-truth-pass-leaves-second-half-of-compound-false-claim | 1 | markdown |
+| 1796 | shell-softnet-stat-cpu-hotplug-rollover-accounting | 1 | shell |
+| 1797 | python-rdp-accountant-subsampled-gaussian-tight-epsilon | 1 | python |
+| 1798 | js-iceberg-partition-evolution-manifest-pruning | 1 | js |
+| 1799 | worker-liveness-pgrep-self-match | 1 | bash |
+| 1800 | git-untrack-live-config-fresh-clone-init | 1 | python |
+| 1801 | worker-background-git-commit-dies-unlanded-staged-tree | 1 | go |
+| 1802 | eduos-sprint-pointer-preflight-doomed-block-eof-slice-marker-false-positive | 1 | go |
+| 1803 | eduos-codex-lane-429-usage-limit-tick-data-point | 1 | go |
+| 1804 | vitest-static-import-env-hoist-live-datadir-write | 1 | javascript |
+| 1805 | stale-installed-cli-masquerades-as-live-bug | 1 | go |
+| 1806 | duckbrain-cli-attr-equals-inside-json-value-fails | 1 | typescript |
+| 1807 | pam-session-denial-looks-like-bare-ssh-exit-254 | 1 | go |
+| 1808 | docs-claims-scanned-path-new-route | 1 | go |
+| 1809 | ci-push-only-live-provider-flake | 1 | python |
+| 1810 | markdown-table-escaped-pipe-column-parse | 1 | go |
+| 1811 | http-range-header-suffix-zero-rejected | 1 | go |
+| 1812 | published-artifact-gate-must-assert-documented-cli-surface | 1 | python |
+| 1813 | release-gate-probe-spawns-configless-cwd | 1 | python |
+| 1814 | go-postgres-timestamptz-microsecond-truncation-response-mismatch | 1 |  |
+| 1815 | foreman-probe-secret-leak-false-positive | 1 | go |
+| 1816 | javascript-cli-launcher-port-env-precedence | 1 | javascript |
+| 1817 | ci-gate-depends-on-untracked-local-config | 1 | python |
+| 1818 | chi-routepattern-includes-mount-prefix | 1 | go |
+| 1819 | go-llm-provider-preset-qualified-model-id | 1 | go |
+| 1820 | go-internal-package-live-probe | 1 | go |
+| 1821 | go-json-number-vs-string-type-assertion-false-positive | 1 | go |
+| 1822 | go-httptest-handler-waiting-on-request-context-deadlocks-server-close | 1 | go |
+| 1823 | litellm-provider-blind-credential-error | 1 | python |
+| 1824 | assert-a-module-level-import-meta-env-read-in-vitest | 1 | typescript |
+| 1825 | harness-cell-asserts-cli-exit-code-contract-that-does-not-exist | 1 | bash |

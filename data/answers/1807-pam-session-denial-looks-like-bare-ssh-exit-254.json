@@ -1,0 +1,28 @@
+{
+  "class_id": 1807,
+  "title": "pam-session-denial-looks-like-bare-ssh-exit-254",
+  "description": "pam-session-denial-looks-like-bare-ssh-exit-254",
+  "created_at": "2026-09-17 11:05:36",
+  "answers": [
+    {
+      "answer_id": 1996,
+      "language": "go",
+      "environment": "Linux/Ubuntu 24.04, OpenSSH sshd + PAM (pam_succeed_if / pam_exec / pam_namespace), systemd-managed daemon spawning per-agent users",
+      "version": "",
+      "solution": "Diagnosis complete and fix verified. Solution written to **`/workspace/SOLUTION.md`**.\n\n## Summary\n\n**Title:** PAM session denial presents as a bare SSH exit 254\n\n**Root cause:** The GAP-075 boundary in `/etc/pam.d/sshd` runs\n`session [success=ignore default=die] pam_exec.so quiet /usr/lib/bunker/pam-bunker-guard verify bunker-agents`.\nWhen the agent user is **not a member of `bunker-agents`** (e.g. the running daemon predates the spawn-side grant), the helper exits non-zero → `pam_exec` maps it to `PAM_SYSTEM_ERR` → `default=die` denies the session. sshd logs the only useful message to the **server journal**; the client sees `exit 254`, banner-only stdout, empty stderr — and nothing classified it.\n\n**Discriminator (one command):**\n```sh\nsudo -u <failing-user> /usr/lib/bunker/pam-bunker-guard verify bunker-agents; echo rc=$?\ngetent group bunker-agents   # compare a working vs failing user\n```\nDifference is group membership, not service health/key/reachability.\n\n**Fix (commit `94f9df4`):**\n- New pure `internal/server/exec_session.go`: `classifyExecSessionDenial(exitCode, stderrBytes, stdoutBytes)` fires **only** on `254 + 0 stderr + non-empty stdout`, returning a one-line diagnostic naming the group check and `getent group bunker-agents` / `host-provision --status`.\n- `internal/server/service.go`: `ExecAgent` now counts streamed stdout/stderr bytes and, after `wg.Wait()`/GAP-067 marker and **before** the exit-code frame, streams the diagnostic as one stderr frame + a warn log with `agent_id`. Exit code and frame ordering unchanged.\n\n**Verification (run in this environment):**\n```\ngo build ./...                                   # BUILD_OK\ngo test ./internal/server/                       # ok ... 1.472s\ngo test ./internal/server/ -run 'ExecSession' -v # all 10 table cases + shape test PASS\n```\nReference live check (from the context): removing the agent from the isolation group → `rc=254`, banner-only stdout, diagnostic on stderr; happy path `rc=0` unchanged.\n\nThe document also includes the full code, a pre-fix apply path (`git checkout 94f9df4 -- ...`), the fail-closed warning (never hand-delete only the PAM drop-in), and the readiness-probe hardening follow-up.\n",
+      "evidence": "# Evidence\n- Problem class: pam-session-denial-looks-like-bare-ssh-exit-254\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-17T11:05:36.103Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SIGNATURE: a privileged/session-managed SSH target (e.g. a per-agent Linux user whose session is gated by a PAM block) can be DENIED at session open while the transport itself is healthy. The client sees: exit status 254, the login banner as the ONLY stdout, and NOTHING on stderr. Server-side journal (not the client!) shows 'pam_unix(sshd:session): session opened for user <u>' followed by 'error: PAM: pam_open_session(): System error'. Typical cause: a PAM rule that runs an external checker for your user class, e.g. `session [success=ignore default=die] pam_exec.so quiet /usr/lib/<product>/pam-<x>-guard verify <group>` - the helper exits non-zero when the user is not in <group>, PAM maps non-zero to PAM_SYSTEM_ERR, and `default=die` denies the session. DISCRIMINATOR (one command): run the helper by hand with the target user, and compare `getent group <group>` for a WORKING user vs a FAILING one - the difference is group membership, not service health, key material or reachability. DANGER: never hand-delete just the PAM drop-in - the remaining pam_exec precondition then fails closed and locks out EVERY user of that class. FIX DIRECTION for the product: make the denial SELF-EXPLAINING at the point of failure (detect exit 254 + zero stderr + banner-only stdout and emit a diagnostic naming the group check) and never report the resource 'ready' before an SSH probe proves a session can actually be opened.",
+        "environment": "Linux/Ubuntu 24.04, OpenSSH sshd + PAM (pam_succeed_if / pam_exec / pam_namespace), systemd-managed daemon spawning per-agent users",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "pam-session-denial-looks-like-bare-ssh-exit-254",
+        "provider": "openrouter",
+        "solved_at": "2026-09-17T11:05:36.103Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-17 11:05:36"
+    }
+  ]
+}

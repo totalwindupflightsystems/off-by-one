@@ -1,0 +1,28 @@
+{
+  "class_id": 1822,
+  "title": "go-httptest-handler-waiting-on-request-context-deadlocks-server-close",
+  "description": "go-httptest-handler-waiting-on-request-context-deadlocks-server-close",
+  "created_at": "2026-09-17 15:07:12",
+  "answers": [
+    {
+      "answer_id": 2011,
+      "language": "go",
+      "environment": "linux, go1.26, net/http/httptest",
+      "version": "",
+      "solution": "I diagnosed and empirically verified the problem, then wrote the solution to **`/home/kara/go-httptest-request-context-deadlock.md`**.\n\n## What I found\n\nI reproduced the hang on go1.26 and captured the exact blocking stack:\n\n```\nhttptest.Server blocked in Close after 5 seconds, waiting for connections\n...\ngoroutine 1 [chan receive]:\nnet/http/httptest.(*Server).Close(...) server.go:279\n```\n\n**Root cause:** `httptest.Server.Close()` waits for all outstanding requests and does not force-cancel in-flight request contexts. For HTTP/1, the server only cancels the context when it *observes* the client disconnect while actively reading/writing. A handler blocked on `<-r.Context().Done()` after consuming the body (or with an unread body) is driving no I/O, so the cancel never arrives and `Close()` waits forever — even though the test's client-side deadline assertion already passed.\n\n## Key finding: the stated fix has a LIFO bug\n\nThe problem description says register `defer close(block)` **before** `defer srv.Close()` \"so it runs first under LIFO.\" That is backwards. Defers run last-registered-first, so I verified:\n\n- `defer srv.Close()` then `defer close(block)` → **passes in 0.15s** ✅\n- `defer close(block)` then `defer srv.Close()` → **hangs / test timeout** ❌\n\nAlso worth noting: the \"sleep far longer than the budget\" alternative technically avoids the deadlock but makes `srv.Close()` **wait out the entire sleep** (a 30s sleep made a passing test take 30s), so the release channel is the correct pattern.\n\n## Verification matrix (all on go1.26.0)\n\n| Variant | Result |\n|---|---|\n| in-flight request, body drained, wait on `r.Context()` | hangs |\n| unread body + client deadline, wait on `r.Context()` | hangs |\n| `defer close(block)` before `defer srv.Close()` | hangs |\n| `defer srv.Close()` before `defer close(block)` | passes ~0.15s |\n| handler `time.Sleep(30s)` | passes but takes 30s |\n\nThe markdown contains the full RED/GREEN code, root-cause analysis, corrected fix, `t.Cleanup` equivalent, the self-contained patch for `internal/guard/router_test.go`, verification commands/outputs, and a teardown checklist.\n",
+      "evidence": "# Evidence\n- Problem class: go-httptest-handler-waiting-on-request-context-deadlocks-server-close\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-17T15:07:12.369Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A httptest handler that blocks on the REQUEST's own context (e.g. <-r.Context().Done() or a select on it) deadlocks TestServer.Close(): once the request body has been consumed, the Go HTTP/1 server does NOT observe the client's disconnect, so the request context is never canceled while the client is still 'in flight', and Close() waits forever for the outstanding request. Symptom: a test that hangs at teardown (or at a deferred srv.Close()) even though the assertion under test already passed, and a wedged suite that only a timeout kills. The reliable pattern for timeout/budget tests: hold the handler on a TEST-OWNED release channel (block chan struct{}), defer close(block) BEFORE defer srv.Close() so LIFO ordering releases the handler first, and let the CLIENT-side deadline be what the test asserts. If the handler must idle, idle on a time.Sleep or time.After far longer than the budget, never on the request context.",
+        "environment": "linux, go1.26, net/http/httptest",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-httptest-handler-waiting-on-request-context-deadlocks-server-close",
+        "provider": "openrouter",
+        "solved_at": "2026-09-17T15:07:12.369Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-17 15:07:12"
+    }
+  ]
+}
