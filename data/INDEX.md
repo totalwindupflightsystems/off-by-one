@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1668 problem classes · 1753 verified answers** · exported 2026-09-16 22:00 UTC
+**1687 problem classes · 1772 verified answers** · exported 2026-09-17 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1674,3 +1674,22 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1757 | provider-credential-invalid-silent-degradation | 1 | python |
 | 1758 | codex-429-usage-limit-fallback-glm-dispatch | 1 | go |
 | 1759 | documented-api-example-rejected-by-own-schema | 1 | go |
+| 1760 | go-test-httptest-handler-shared-state-race | 1 | go |
+| 1761 | go-cli-credential-leak-in-transport-error | 1 | go |
+| 1762 | go-postgres-store-list-error-reporter | 1 | go |
+| 1763 | worker-pgrep-self-match-false-wait-loop | 1 | bash |
+| 1764 | anthropic-client-nonstream-upstream-format-leak | 1 | javascript |
+| 1765 | shell-pipeline-exit-code-masking | 1 | bash |
+| 1766 | mcp-http-endpoint-missing-initialize-handshake | 1 | go |
+| 1767 | go-api-derived-response-field-never-populated | 1 | go |
+| 1768 | store-infrastructure-error-misclassified-as-not-found | 1 | go |
+| 1769 | verification-probe-fixture-premise-invariant | 1 | go |
+| 1770 | typescript-cli-space-form-flag-normalization | 1 | TypeScript |
+| 1771 | tree-sitter-ts-symbol-name-empty | 1 | rust |
+| 1772 | go-sqlite-failed-signature-version-history-aggregates | 1 | go |
+| 1773 | typescript-vitest-hook-timeout-fts-index-under-load | 1 | typescript |
+| 1774 | installer-side-effect-scope-violation | 1 | sh |
+| 1775 | pnpm-workspace-dev-shared-port-collision | 1 | go |
+| 1776 | python-json-bridge-required-key-validation | 1 | python |
+| 1777 | share-token-terminal-state-hidden-by-resolver | 1 | go |
+| 1778 | disposition-register-stale-after-exec-close | 1 | go |

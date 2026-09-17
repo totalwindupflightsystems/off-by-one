@@ -1,0 +1,28 @@
+{
+  "class_id": 1760,
+  "title": "go-test-httptest-handler-shared-state-race",
+  "description": "go-test-httptest-handler-shared-state-race",
+  "created_at": "2026-09-16 23:21:46",
+  "answers": [
+    {
+      "answer_id": 1948,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I cloned `crier-dev/crier`, reproduced the race on the parent commit, and verified the real fix from commit `316d322`. Solution written to `/home/kara/kanbanhttp-race-fix.md`.\n\n# Fix: Data race in `TestHTTPKanbanWriter_ThroughWorker` (DF-CRIER-188)\n\n**Repo:** `crier-dev/crier` · **File:** `internal/guard/kanbanhttp_test.go` · **Fix commit:** `316d322`\n\n## Root cause\n\nThe `httptest` handler wrote the request body into a test-scoped slice while the test goroutine polled it with a sleep loop:\n\n```go\nvar gotBody []byte\nsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n    gotBody, _ = io.ReadAll(r.Body)   // write: server goroutine\n    w.WriteHeader(http.StatusOK)\n}))\n...\nfor time.Now().Before(deadline) {\n    if len(gotBody) > 0 { break }     // read: test goroutine\n    time.Sleep(10 * time.Millisecond)\n}\n```\n\n`httptest` serves each request on its own goroutine, so both goroutines touch the `gotBody` slice header with no synchronization. `time.Sleep` is not a happens-before edge, so `-race` flags a `DATA RACE`. The polling loop also fails confusingly on timeout (nil body → unmarshal error).\n\n## The fix\n\nHand the body off over a buffered channel (cap 1, non-blocking `select/default`) and wait for it with a bounded `select` vs `time.After`. Never call `t.Fatal` from the handler; deliver `nil` on read error instead.\n\n```go\nbodyCh := make(chan []byte, 1)\nsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {\n    b, err := io.ReadAll(r.Body)\n    if err != nil {\n        b = nil // no t.Fatal off the test goroutine\n    }\n    select {\n    case bodyCh <- b:\n    default:\n    }\n    w.WriteHeader(http.StatusOK)\n}))\ndefer srv.Close()\n...\nvar gotBody []byte\nselect {\ncase gotBody = <-bodyCh:\ncase <-time.After(3 * time.Second):\n    t.Fatal(\"worker did not POST a card within 3s\")\n}\n```\n\n## Verification\n\n| Revision | Command | Result |\n|---|---|---|\n| `48839eb` (parent) | `go test -race -count=20 ./internal/guard/ -run TestHTTPKanbanWriter_ThroughWorker` | `WARNING: DATA RACE` / `FAIL` |\n| `316d322` (fix) | same single test | `ok ... 1.077s` |\n| `316d322` (fix) | `go test -race -count=1 ./internal/guard/` | `ok ... 15.557s` |\n\nBoth the single test under `-count=20` and the whole package under `-race` are green after the fix. The channel send/receive establishes the happens-before edge, the bounded select fails with a clear message, and `select/default` keeps the handler from ever blocking the server.\n\nThe full corrected test function and a copy-paste reproduction script are in the markdown file.\n",
+      "evidence": "# Evidence\n- Problem class: go-test-httptest-handler-shared-state-race\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-16T23:21:46.806Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Go race detector flags a data race between an httptest handler goroutine and the test goroutine when the handler writes a shared []byte the test later polls with a sleep loop. Sleeping is not synchronization. Root cause: unsynchronized shared buffer across goroutines. Fix: transfer the body over a buffered channel (cap 1, select/default send) and have the test wait with a bounded select vs time.After, failing with a clear message when no body arrives; never t.Fatal from the handler goroutine. Verified: go test -race -count=20 on the single test and -race package runs green at crier commit 316d322.",
+        "environment": "",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-test-httptest-handler-shared-state-race",
+        "provider": "openrouter",
+        "solved_at": "2026-09-16T23:21:46.807Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-16 23:21:46"
+    }
+  ]
+}
