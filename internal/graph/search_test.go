@@ -399,3 +399,46 @@ func TestSearch_DeduplicatesClassMatchesAndAnswerMatches(t *testing.T) {
 		t.Errorf("SearchCount = %d, want 1 (must agree with hit count)", total)
 	}
 }
+
+// TestSearch_StatusExcludesFailedSignature guards OB-GAP-064 on the FTS
+// search path: a hit for a class whose only status-verified answer carries
+// a failed signature must not report status 'verified' — it derives
+// 'failed' like the list view does.
+func TestSearch_StatusExcludesFailedSignature(t *testing.T) {
+	s := newSharedTestStore(t)
+	ctx := context.Background()
+
+	// Term unique to the answer body so the class-level FTS branch cannot
+	// supply the hit: the derived status comes from the answer aggregate.
+	cid, err := s.CreateProblemClass(ctx, "search-failed-signature-probe", "search probe class")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	aid := seedAnswerWithStatus(t, s, ctx, cid, 0, "zorbulate the deploy", `{"result":"failed"}`, AnswerVerified)
+	if aid == 0 {
+		t.Fatal("seed returned id 0")
+	}
+
+	hits, err := s.Search(ctx, "zorbulate", "", "", "", 20, 0)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	var hit *SearchHit
+	for i := range hits {
+		if hits[i].ClassID == cid {
+			hit = &hits[i]
+		}
+	}
+	if hit == nil {
+		t.Fatalf("Search returned %d hits, none for class %d (no hit to inspect)", len(hits), cid)
+	}
+	if hit.Status == "verified" {
+		t.Errorf("Search hit status = %q, want not verified — the row's signature says result='failed'", hit.Status)
+	}
+	if hit.Status == "ci_passed" {
+		t.Errorf("Search hit status = %q, want not ci_passed", hit.Status)
+	}
+	if hit.Status != "failed" {
+		t.Errorf("Search hit status = %q, want %q (failed-signature row derives failed)", hit.Status, "failed")
+	}
+}

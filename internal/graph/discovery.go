@@ -77,10 +77,11 @@ func (s *Store) Discovery(ctx context.Context, title, env, lang, version string,
 // beats one matching only env+lang, which beats one matching only env.
 // Within each specificity tier, the most recent verified answer wins.
 //
-// The signature backstop mirrors Store.Stats (store.go:491): status is
+// The signature backstop mirrors Store.Stats (store.go): status is
 // the primary signal, but an older binary could still have written a
 // verified-status row whose signature says result='failed'. Such a row
-// is not an answer and must not be served (OB-GAP-057).
+// is not an answer and must not be served (OB-GAP-057). The predicate
+// text itself lives once, as signatureNotFailedSQL (signature.go).
 func (s *Store) bestAnswer(ctx context.Context, classID int64, env, lang, version string) (*AnswerNode, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT id, class_id, parent_id, env, lang, version, solution, evidence, signatures, status, created_at
@@ -90,7 +91,7 @@ func (s *Store) bestAnswer(ctx context.Context, classID int64, env, lang, versio
 		  AND (lang = ? OR ? = '')
 		  AND (version = ? OR ? = '')
 		  AND status IN ('verified', 'ci_passed')
-		  AND COALESCE(json_extract(signatures, '$.result'), '') != 'failed'
+		  AND `+signatureNotFailedSQL+`
 		ORDER BY
 		  (CASE WHEN env = ? THEN 3 ELSE 0 END) +
 		  (CASE WHEN lang = ? THEN 2 ELSE 0 END) +
@@ -148,6 +149,15 @@ func (s *Store) versionHistory(ctx context.Context, startID int64) ([]AnswerNode
 		a, err := s.GetAnswerNode(ctx, id)
 		if err != nil {
 			return nil, fmt.Errorf("versionHistory fetch %d: %w", id, err)
+		}
+		// Omit failed-signature ancestors (OB-GAP-064): a row whose
+		// status says verified but whose signature says
+		// result='failed' is not a version of the answer. Continue
+		// the walk rather than break — the chain was already
+		// collected, so a good ancestor deeper in the chain (the
+		// parent of the skipped row) is still returned.
+		if signatureFailed(a.Signatures) {
+			continue
 		}
 		out = append(out, *a)
 	}

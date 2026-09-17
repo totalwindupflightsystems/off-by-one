@@ -60,6 +60,11 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 	// answer_count, and the derived best status (ci_passed > verified >
 	// pending > failed, coalescing to 'pending'). That keeps the API
 	// search path from doing N+1 lookups per hit (OB-GAP-050).
+	//
+	// The derived status carries the same failed-signature backstop as the
+	// list view (OB-GAP-064): a status-verified row whose signatures JSON
+	// says result='failed' never satisfies the ci_passed or verified
+	// branch, so the hit derives 'failed' instead of 'verified'.
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT hits.id, hits.title, hits.snip, hits.rank, hits.answer_id,
 		       pc.description, pc.created_at,
@@ -104,8 +109,8 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 			SELECT class_id,
 			       COUNT(*) AS cnt,
 			       CASE
-			           WHEN MAX(CASE WHEN status = 'ci_passed' THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
-			           WHEN MAX(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) = 1 THEN 'verified'
+			           WHEN MAX(CASE WHEN status = 'ci_passed' AND `+signatureNotFailedSQL+` THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
+			           WHEN MAX(CASE WHEN status = 'verified' AND `+signatureNotFailedSQL+` THEN 1 ELSE 0 END) = 1 THEN 'verified'
 			           WHEN MAX(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) = 1 THEN 'pending'
 			           ELSE 'failed'
 			       END AS best_status

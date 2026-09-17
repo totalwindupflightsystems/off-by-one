@@ -488,7 +488,7 @@ func (s *Store) Stats(ctx context.Context) (*Stats, error) {
 		SELECT
 			(SELECT COUNT(*) FROM problem_classes),
 			(SELECT COUNT(*) FROM answer_nodes),
-			(SELECT COUNT(*) FROM answer_nodes WHERE status IN ('verified', 'ci_passed') AND COALESCE(json_extract(signatures, '$.result'), '') != 'failed')
+			(SELECT COUNT(*) FROM answer_nodes WHERE status IN ('verified', 'ci_passed') AND `+signatureNotFailedSQL+`)
 	`)
 	if err := row.Scan(&st.TotalProblems, &st.TotalAnswers, &st.VerifiedAnswers); err != nil {
 		return nil, fmt.Errorf("stats: %w", err)
@@ -521,13 +521,19 @@ func (s *Store) AnswerCount(ctx context.Context, classID int64) (int, error) {
 // failed, coalescing to 'pending' when the class has no answers. The
 // detail endpoint (/api/v1/problems/{class}) uses it so its status
 // matches the list view (OB-GAP-024).
+//
+// The ci_passed/verified branches apply signatureNotFailedSQL
+// (OB-GAP-064), so a status-verified row whose signature says
+// result='failed' derives 'failed' here exactly as it does in the list
+// view — without it the detail endpoint would report 'verified' for a
+// class the list reports as 'failed'.
 func (s *Store) GetProblemClassStatus(ctx context.Context, classID int64) (string, error) {
 	var status string
 	row := s.db.QueryRowContext(ctx, `
 		SELECT COALESCE(
 			(SELECT CASE
-			        WHEN MAX(CASE WHEN status = 'ci_passed' THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
-			        WHEN MAX(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) = 1 THEN 'verified'
+			        WHEN MAX(CASE WHEN status = 'ci_passed' AND `+signatureNotFailedSQL+` THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
+			        WHEN MAX(CASE WHEN status = 'verified' AND `+signatureNotFailedSQL+` THEN 1 ELSE 0 END) = 1 THEN 'verified'
 			        WHEN MAX(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) = 1 THEN 'pending'
 			        ELSE 'failed'
 			    END
@@ -567,6 +573,12 @@ func (s *Store) ListProblemClassesWithCounts(ctx context.Context, limit, offset 
 // the caller) keeps LIMIT/OFFSET pagination correct. status may be one of
 // ci_passed, verified, pending, failed, or the UI alias "solved" (matches
 // verified OR ci_passed). Empty = no filter.
+//
+// best_status applies the signatureNotFailedSQL backstop to the ci_passed
+// and verified branches (OB-GAP-064): a row whose status says verified but
+// whose signatures JSON says result='failed' can never make a class look
+// solved. answer_count still counts every row for the class — that is
+// deliberate (see the commit for OB-GAP-064).
 func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status string, limit, offset int) ([]ProblemClassWithCounts, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
@@ -583,8 +595,8 @@ func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status
 			SELECT class_id,
 			       COUNT(*) AS cnt,
 			       CASE
-			           WHEN MAX(CASE WHEN status = 'ci_passed' THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
-			           WHEN MAX(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) = 1 THEN 'verified'
+			           WHEN MAX(CASE WHEN status = 'ci_passed' AND `+signatureNotFailedSQL+` THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
+			           WHEN MAX(CASE WHEN status = 'verified' AND `+signatureNotFailedSQL+` THEN 1 ELSE 0 END) = 1 THEN 'verified'
 			           WHEN MAX(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) = 1 THEN 'pending'
 			           ELSE 'failed'
 			       END AS best_status
@@ -618,6 +630,10 @@ func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status
 // filtered by derived best answer status (same semantics as
 // ListProblemClassesWithCountsFiltered). Used for accurate pagination
 // totals on /api/v1/problems.
+//
+// Like the list view it applies the signatureNotFailedSQL backstop to the
+// ci_passed and verified branches (OB-GAP-064), so ?status=solved cannot
+// count a class whose only verified row has a failed signature.
 func (s *Store) CountProblemClasses(ctx context.Context, status string) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `
@@ -626,8 +642,8 @@ func (s *Store) CountProblemClasses(ctx context.Context, status string) (int, er
 		LEFT JOIN (
 			SELECT class_id,
 			       CASE
-			           WHEN MAX(CASE WHEN status = 'ci_passed' THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
-			           WHEN MAX(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) = 1 THEN 'verified'
+			           WHEN MAX(CASE WHEN status = 'ci_passed' AND `+signatureNotFailedSQL+` THEN 1 ELSE 0 END) = 1 THEN 'ci_passed'
+			           WHEN MAX(CASE WHEN status = 'verified' AND `+signatureNotFailedSQL+` THEN 1 ELSE 0 END) = 1 THEN 'verified'
 			           WHEN MAX(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) = 1 THEN 'pending'
 			           ELSE 'failed'
 			       END AS best_status

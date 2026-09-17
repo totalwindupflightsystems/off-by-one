@@ -481,3 +481,241 @@ func TestStore_Discovery_ExcludesFailedSignature(t *testing.T) {
 		t.Errorf("Discovery served a failed-signature answer: %+v", res.Exact)
 	}
 }
+
+// --- OB-GAP-064: failed-signature answers in version history + status ---
+
+// seedAnswerWithStatus inserts an answer with the given signature blob and
+// forces its status column. It is the fixture for the status/signature
+// divergence OB-GAP-064 targets: status says verified/ci_passed while the
+// signature JSON says result='failed'.
+func seedAnswerWithStatus(t *testing.T, s *Store, ctx context.Context, classID, parentID int64, solution, signatures, status string) int64 {
+	t.Helper()
+	id, err := s.CreateAnswerNode(ctx, classID, parentID, "docker", "go", "1.0", solution, "evidence", signatures)
+	if err != nil {
+		t.Fatalf("CreateAnswerNode(%q): %v", solution, err)
+	}
+	if err := s.UpdateAnswerStatus(ctx, id, status); err != nil {
+		t.Fatalf("UpdateAnswerStatus(%d, %q): %v", id, status, err)
+	}
+	return id
+}
+
+// TestStore_Discovery_VersionHistory_ExcludesFailedSignature guards
+// OB-GAP-064 at the Discovery surface: a row in the MIDDLE of a parent_id
+// chain whose status says verified but whose signature says
+// result='failed' is not a version of the answer and must be omitted from
+// DiscoveryResult.Versions — while the good ancestors on BOTH sides are
+// still returned, i.e. the walk continues past the skipped row instead of
+// stopping at it.
+func TestStore_Discovery_VersionHistory_ExcludesFailedSignature(t *testing.T) {
+	s := newSharedTestStore(t)
+	ctx := context.Background()
+
+	cid, err := s.CreateProblemClass(ctx, "chain-failed-middle", "three-link chain with a failed middle")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	r1 := seedAnswerWithStatus(t, s, ctx, cid, 0, "oldest good root", `{"result":"ok"}`, AnswerVerified)
+	r2 := seedAnswerWithStatus(t, s, ctx, cid, r1, "failed middle link", `{"result":"failed"}`, AnswerVerified)
+	r3 := seedAnswerWithStatus(t, s, ctx, cid, r2, "newest good tip", `{"result":"ok"}`, AnswerVerified)
+
+	res, err := s.Discovery(ctx, "chain-failed-middle", "", "", "", false)
+	if err != nil {
+		t.Fatalf("Discovery: %v", err)
+	}
+	if res.Exact == nil || res.Exact.ID != r3 {
+		t.Fatalf("Exact = %+v, want the newest good answer id %d", res.Exact, r3)
+	}
+
+	solutions := make([]string, 0, len(res.Versions))
+	for _, v := range res.Versions {
+		solutions = append(solutions, v.Solution)
+	}
+	for _, v := range res.Versions {
+		if v.ID == r2 || v.Solution == "failed middle link" {
+			t.Errorf("Versions contains failed-signature row: %v (id %d, want it omitted)", solutions, v.ID)
+		}
+	}
+	if len(res.Versions) != 2 {
+		t.Fatalf("Versions = %v (%d rows), want 2 (failed-signature r2 excluded, surviving count down by exactly one)", solutions, len(res.Versions))
+	}
+	// The ancestor BEHIND the failed row must still be present: the skip
+	// continues the walk, it does not truncate it.
+	if res.Versions[0].ID != r1 {
+		t.Errorf("Versions[0] id = %d, want %d (good ancestor behind the failed row)", res.Versions[0].ID, r1)
+	}
+	// Ordering contract unchanged: oldest → newest.
+	if res.Versions[0].Solution != "oldest good root" || res.Versions[len(res.Versions)-1].Solution != "newest good tip" {
+		t.Errorf("Versions order = %v, want oldest → newest with the failed link removed", solutions)
+	}
+}
+
+// listStatusesByTitle runs the filtered list query and returns derived
+// statuses keyed by class title.
+func listStatusesByTitle(t *testing.T, s *Store, ctx context.Context, status string) map[string]string {
+	t.Helper()
+	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, status, 100, 0)
+	if err != nil {
+		t.Fatalf("ListProblemClassesWithCountsFiltered(%q): %v", status, err)
+	}
+	out := make(map[string]string, len(rows))
+	for _, r := range rows {
+		out[r.Title] = r.Status
+	}
+	return out
+}
+
+// TestStore_ListProblemClassesWithCounts_ExcludesFailedSignatureStatus
+// guards OB-GAP-064 at the list surface: a class whose only status-verified
+// answer carries a failed signature must derive 'failed' — never
+// 'verified' — so ?status=solved stops listing a failed solve as solved. A
+// companion class with a genuine verified answer still derives 'verified'
+// (guard against over-blocking), and the ci_passed branch is held to the
+// same rule.
+func TestStore_ListProblemClassesWithCounts_ExcludesFailedSignatureStatus(t *testing.T) {
+	s := newSharedTestStore(t)
+	ctx := context.Background()
+
+	failedVerified, err := s.CreateProblemClass(ctx, "status-failed-signature", "verified row with a failed signature")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	seedAnswerWithStatus(t, s, ctx, failedVerified, 0, "gave up", `{"result":"failed"}`, AnswerVerified)
+
+	failedCIPassed, err := s.CreateProblemClass(ctx, "status-failed-signature-ci", "ci_passed row with a failed signature")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	seedAnswerWithStatus(t, s, ctx, failedCIPassed, 0, "gave up under CI", `{"result":"failed"}`, AnswerCIPassed)
+
+	genuine, err := s.CreateProblemClass(ctx, "status-genuine-verified", "genuine verified row")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	seedAnswerWithStatus(t, s, ctx, genuine, 0, "real fix", `{"result":"passed"}`, AnswerVerified)
+
+	all := listStatusesByTitle(t, s, ctx, "")
+	if got := all["status-failed-signature"]; got != "failed" {
+		t.Errorf("status = %q, want %q for a class whose only verified row has a failed signature", got, "failed")
+	}
+	if got := all["status-failed-signature-ci"]; got != "failed" {
+		t.Errorf("status = %q, want %q for a class whose only ci_passed row has a failed signature", got, "failed")
+	}
+	if got := all["status-genuine-verified"]; got != "verified" {
+		t.Errorf("companion status = %q, want %q (a genuine verified row must still derive verified)", got, "verified")
+	}
+
+	solved := listStatusesByTitle(t, s, ctx, "solved")
+	if st, ok := solved["status-failed-signature"]; ok {
+		t.Errorf("?status=solved lists status-failed-signature with status %q, want it excluded", st)
+	}
+	if st, ok := solved["status-failed-signature-ci"]; ok {
+		t.Errorf("?status=solved lists status-failed-signature-ci with status %q, want it excluded", st)
+	}
+	if got := solved["status-genuine-verified"]; got != "verified" {
+		t.Errorf("?status=solved companion = %q, want verified", got)
+	}
+
+	// answer_count intentionally still counts every row (out of scope for
+	// OB-GAP-064): only the DERIVED status changes.
+	for _, r := range mustList(t, s, ctx) {
+		if r.Title == "status-failed-signature" && r.AnswerCount != 1 {
+			t.Errorf("answer_count = %d, want 1 (counts every row by design)", r.AnswerCount)
+		}
+	}
+}
+
+func mustList(t *testing.T, s *Store, ctx context.Context) []ProblemClassWithCounts {
+	t.Helper()
+	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", 100, 0)
+	if err != nil {
+		t.Fatalf("ListProblemClassesWithCountsFiltered: %v", err)
+	}
+	return rows
+}
+
+// TestStore_CountProblemClasses_ExcludesFailedSignatureStatus guards
+// OB-GAP-064 at the pagination-total surface: ?status=solved must not count
+// a class whose only verified row has a failed signature, the class must
+// count as 'failed' instead, and the unfiltered total is unchanged.
+func TestStore_CountProblemClasses_ExcludesFailedSignatureStatus(t *testing.T) {
+	s := newSharedTestStore(t)
+	ctx := context.Background()
+
+	failedVerified, err := s.CreateProblemClass(ctx, "count-failed-signature", "verified row with a failed signature")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	seedAnswerWithStatus(t, s, ctx, failedVerified, 0, "gave up", `{"result":"failed"}`, AnswerVerified)
+
+	genuine, err := s.CreateProblemClass(ctx, "count-genuine-verified", "genuine verified row")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	seedAnswerWithStatus(t, s, ctx, genuine, 0, "real fix", `{"result":"passed"}`, AnswerVerified)
+
+	for _, tc := range []struct {
+		status string
+		want   int
+		why    string
+	}{
+		{"solved", 1, "only the genuine verified class is solved"},
+		{"verified", 1, "the failed-signature row must not satisfy the verified branch"},
+		{"ci_passed", 0, "no class has a legitimate ci_passed answer"},
+		{"failed", 1, "the failed-signature class derives failed instead"},
+		{"pending", 0, "neither class is pending"},
+		{"", 2, "the unfiltered total is unchanged"},
+	} {
+		got, err := s.CountProblemClasses(ctx, tc.status)
+		if err != nil {
+			t.Fatalf("CountProblemClasses(%q): %v", tc.status, err)
+		}
+		if got != tc.want {
+			t.Errorf("CountProblemClasses(%q) = %d, want %d (%s)", tc.status, got, tc.want, tc.why)
+		}
+	}
+}
+
+// TestStore_GetProblemClassStatus_ExcludesFailedSignature pins the detail
+// endpoint's derivation to the same rule as the list view (OB-GAP-024
+// parity). GetProblemClassStatus is a fourth best_status CASE site that
+// the OB-GAP-064 brief did not enumerate; left unfixed it would report
+// 'verified' for a class the list view reports as 'failed'. A genuine
+// verified row still derives verified.
+func TestStore_GetProblemClassStatus_ExcludesFailedSignature(t *testing.T) {
+	s := newSharedTestStore(t)
+	ctx := context.Background()
+
+	failedVerified, err := s.CreateProblemClass(ctx, "detail-failed-signature", "verified row with a failed signature")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	seedAnswerWithStatus(t, s, ctx, failedVerified, 0, "gave up", `{"result":"failed"}`, AnswerVerified)
+
+	genuine, err := s.CreateProblemClass(ctx, "detail-genuine-verified", "genuine verified row")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	seedAnswerWithStatus(t, s, ctx, genuine, 0, "real fix", `{"result":"passed"}`, AnswerVerified)
+
+	for _, tc := range []struct {
+		class string
+		want  string
+	}{
+		{"detail-failed-signature", "failed"},
+		{"detail-genuine-verified", "verified"},
+	} {
+		got, err := s.GetProblemClassStatus(ctx, mustGetClassID(t, s, ctx, tc.class))
+		if err != nil {
+			t.Fatalf("GetProblemClassStatus(%q): %v", tc.class, err)
+		}
+		if got != tc.want {
+			t.Errorf("GetProblemClassStatus(%q) = %q, want %q", tc.class, got, tc.want)
+		}
+		// The detail status must equal what the list view derives for the
+		// same class (OB-GAP-024 parity).
+		if listed := listStatusesByTitle(t, s, ctx, "")[tc.class]; listed != got {
+			t.Errorf("detail status %q != list status %q for %q (OB-GAP-024 parity)", got, listed, tc.class)
+		}
+	}
+}
