@@ -398,10 +398,27 @@ func (s *Store) CreateEdge(ctx context.Context, sourceID, targetID int64, relati
 	default:
 		return 0, fmt.Errorf("invalid relationship %q", relationship)
 	}
+	return insertEdge(ctx, s.db, sourceID, targetID, relationship, weight)
+}
+
+// edgeExecer is the statement executor an edge INSERT runs on: the pooled
+// *sql.DB for a standalone CreateEdge, or the *sql.Tx of a batched linking
+// pass (writeSimilarEdges in linker.go). Both satisfy it, so the single
+// INSERT below is shared by the two write paths and the column set, the
+// weight normalisation and the duplicate mapping cannot drift apart.
+type edgeExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}
+
+// insertEdge writes one problem_edges row on the given executor, normalising
+// a non-positive weight to 1.0 and mapping a unique-constraint violation onto
+// ErrDuplicate. Callers that write in bulk (the linker's batch) treat
+// ErrDuplicate as "already linked" and skip the row.
+func insertEdge(ctx context.Context, ex edgeExecer, sourceID, targetID int64, relationship string, weight float64) (int64, error) {
 	if weight <= 0 {
 		weight = 1.0
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := ex.ExecContext(ctx,
 		`INSERT INTO problem_edges (source_id, target_id, relationship, weight) VALUES (?, ?, ?, ?)`,
 		sourceID, targetID, relationship, weight)
 	if err != nil {
