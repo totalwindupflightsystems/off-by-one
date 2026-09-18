@@ -1,0 +1,572 @@
+commit a867f66ecbea3926a2580e1da1c07ea0bfcd9a72
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Fri Sep 18 03:27:13 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Fri Sep 18 03:27:13 2026 -0500
+
+    fix(api): parse quoted mapping keys and flow sequences in the OpenAPI YAML subset
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ pkg/api/yaml.go      | 292 ++++++++++++++++++++++++++++++++++++++++++++++++---
+ pkg/api/yaml_test.go | 205 ++++++++++++++++++++++++++++++++++++
+ 2 files changed, 484 insertions(+), 13 deletions(-)
+
+diff --git a/pkg/api/yaml.go b/pkg/api/yaml.go
+index 96f71c6..07f1db1 100644
+--- a/pkg/api/yaml.go
++++ b/pkg/api/yaml.go
+@@ -40,7 +40,10 @@ func jsonUnmarshal(data []byte, target any) error {
+ // Supported syntax:
+ //   - block-style mappings (key: value, with indented continuations)
+ //   - block-style sequences (lines beginning with `- `)
++//   - flow-style sequences and mappings ([a, b], {a: b}, and nested forms
++//     thereof) on a single line
+ //   - quoted strings ('single' and "double")
++//   - quoted mapping keys ('200': and "200": are unquoted on parse)
+ //   - bare strings (anything that doesn't look like another scalar)
+ //   - integers and floats
+ //   - booleans (true/false/yes/no)
+@@ -49,10 +52,12 @@ func jsonUnmarshal(data []byte, target any) error {
+ //
+ // Unsupported (will fail loudly — that's fine, our spec uses none of these):
+ //   - YAML anchors and aliases (*foo, &bar)
+-//   - flow-style mappings/sequences ({a: b}, [1, 2])
++//   - multi-line flow collections (a flow collection must open and close on
++//     one line; an unclosed [ or { is kept as a plain string)
+ //   - multi-document streams (--- ... ---)
+ //   - merge keys (<<)
+ //   - tags (!foo)
++//   - block-scalar chomping/indentation indicators (|-, >+, |2)
+ //
+ // If a future spec needs any of these, swap in sigs.k8s.io/yaml.
+ func decodeYAMLInto(data []byte, target any) error {
+@@ -219,21 +224,17 @@ func parseYAMLMapping(lines []yamlLine, idx *int, baseIndent int) (*yamlNode, er
+ 		line := lines[*idx]
+ 		// Consume this line.
+ 		(*idx)++
+-		text := strings.TrimLeft(line.text, " \t")
+-		// Find the key/value separator. Keys are unquoted, then ': ' or
+-		// end-of-line. Quoted keys aren't supported in our subset.
+-		colon := -1
+-		for i, r := range text {
+-			if r == ':' && (i+1 == len(text) || text[i+1] == ' ' || text[i+1] == '\t') {
+-				colon = i
+-				break
+-			}
+-		}
++		text := strings.TrimLeft(line.text, " 	")
++		// Find the key/value separator: an unquoted ':' followed by
++		// whitespace or end-of-line. The scan tracks quote state so a
++		// colon INSIDE a quoted key is never chosen as the separator.
++		colon := findMappingSeparator(text)
+ 		if colon < 0 {
+ 			return nil, fmt.Errorf("line %d: expected ':' in mapping entry: %q", line.lineNo, text)
+ 		}
+-		key := text[:colon]
+-		key = strings.TrimSpace(key)
++		// Keys may be bare or quoted; quoted keys are unquoted here so the
++		// emitted JSON carries `200`, not `'200'`.
++		key := unquoteYAMLKey(strings.TrimSpace(text[:colon]))
+ 		if key == "" {
+ 			return nil, fmt.Errorf("line %d: empty key in mapping", line.lineNo)
+ 		}
+@@ -457,6 +458,12 @@ func parseYAMLScalar(text string, lineNo int) *yamlNode {
+ 			return &yamlNode{kind: ykScalar, value: text[1 : len(text)-1], line: lineNo}
+ 		}
+ 	}
++	// Flow-style collections: a balanced "[a, b]" decodes to a sequence and a
++	// balanced "{a: b}" to a mapping. This runs before the number/bare-string
++	// fallbacks so a flow sequence is never emitted as a single string.
++	if flow, ok := parseYAMLFlow(text, lineNo); ok {
++		return flow
++	}
+ 	// Numbers.
+ 	if i, err := strconv.ParseInt(text, 10, 64); err == nil {
+ 		return &yamlNode{kind: ykScalar, value: i, line: lineNo}
+@@ -468,6 +475,265 @@ func parseYAMLScalar(text string, lineNo int) *yamlNode {
+ 	return &yamlNode{kind: ykScalar, value: text, line: lineNo}
+ }
+ 
++// findMappingSeparator returns the byte index of the ':' that separates a
++// block-mapping key from its value, or -1 when the line has no separator. A
++// separator is an UNQUOTED ':' followed by whitespace or end-of-line. Quote
++// state is tracked (with backslash escapes honoured inside double quotes, as
++// unescapeDoubleQuoted does) so a colon inside a quoted key is never chosen.
++func findMappingSeparator(s string) int {
++	inSingle, inDouble, escaped := false, false, false
++	for i := 0; i < len(s); i++ {
++		c := s[i]
++		switch {
++		case escaped:
++			escaped = false
++		case inDouble && c == '\\':
++			escaped = true
++		case c == '\'' && !inDouble:
++			inSingle = !inSingle
++		case c == '"' && !inSingle:
++			inDouble = !inDouble
++		case c == ':' && !inSingle && !inDouble:
++			if i+1 == len(s) || s[i+1] == ' ' || s[i+1] == '\t' {
++				return i
++			}
++		}
++	}
++	return -1
++}
++
++// unquoteYAMLKey strips one matching pair of surrounding quotes from a
++// mapping key and resolves the in-quote escape, matching YAML's rules for
++// scalar keys: double quotes via unescapeDoubleQuoted, and single quotes
++// where a doubled single quote stands for one literal apostrophe. Unquoted
++// keys are returned unchanged, as are strings that only look quoted on one
++// side ("'200" keeps its quote).
++func unquoteYAMLKey(key string) string {
++	if len(key) >= 2 {
++		if key[0] == '"' && key[len(key)-1] == '"' {
++			return unescapeDoubleQuoted(key[1 : len(key)-1])
++		}
++		if key[0] == '\'' && key[len(key)-1] == '\'' {
++			return strings.ReplaceAll(key[1:len(key)-1], "''", "'")
++		}
++	}
++	return key
++}
++
++// parseYAMLFlow decodes a single-line flow-style collection ("[a, b]" or
++// "{k: v}", including nested forms) into a ykSequence/ykMapping node. It
++// reports ok=false when text is not a balanced collection of that kind — an
++// unclosed "[a, b" or a trailing "]" is left to the callers' scalar fallback,
++// so malformed values degrade to a plain string instead of failing the parse.
++func parseYAMLFlow(text string, lineNo int) (*yamlNode, bool) {
++	if len(text) < 2 {
++		return nil, false
++	}
++	var closer byte
++	switch text[0] {
++	case '[':
++		closer = ']'
++	case '{':
++		closer = '}'
++	default:
++		return nil, false
++	}
++	inner, ok := flowInterior(text, closer)
++	if !ok {
++		return nil, false
++	}
++	parts := splitFlowTopLevel(inner)
++	if text[0] == '[' {
++		node := &yamlNode{kind: ykSequence, line: lineNo}
++		for _, part := range parts {
++			part = strings.TrimSpace(part)
++			if part == "" {
++				continue
++			}
++			node.items = append(node.items, parseYAMLScalar(part, lineNo))
++		}
++		return node, true
++	}
++	node := &yamlNode{kind: ykMapping, values: map[string]*yamlNode{}, line: lineNo}
++	for _, part := range parts {
++		part = strings.TrimSpace(part)
++		if part == "" {
++			continue
++		}
++		colon := findFlowColon(part)
++		var key string
++		if colon < 0 {
++			// A bare entry in a flow mapping is YAML shorthand for a null
++			// value: "{a, b}" is {a: null, b: null}.
++			key = unquoteYAMLKey(part)
++			node.keys = append(node.keys, key)
++			node.values[key] = &yamlNode{kind: ykNull, line: lineNo}
++			continue
++		}
++		key = unquoteYAMLKey(strings.TrimSpace(part[:colon]))
++		value := strings.TrimSpace(part[colon+1:])
++		node.keys = append(node.keys, key)
++		node.values[key] = parseYAMLScalar(value, lineNo)
++	}
++	return node, true
++}
++
++// flowInterior returns the text between the opening bracket at s[0] and its
++// matching closer, and reports whether s is exactly one balanced collection.
++// The bracket kinds must nest properly ("[a}" is rejected) and nothing but
++// the closer may follow the matching one, so "[a] b" is not a flow sequence.
++func flowInterior(s string, closer byte) (string, bool) {
++	stack := []byte{closer}
++	inSingle, inDouble, escaped := false, false, false
++	for i := 1; i < len(s); i++ {
++		c := s[i]
++		switch {
++		case escaped:
++			escaped = false
++			continue
++		case inDouble:
++			if c == '\\' {
++				escaped = true
++			} else if c == '"' {
++				inDouble = false
++			}
++			continue
++		case inSingle:
++			if c == '\'' {
++				if i+1 < len(s) && s[i+1] == '\'' {
++					// '' is an escaped quote, not the end of the string.
++					i++
++					continue
++				}
++				inSingle = false
++			}
++			continue
++		}
++		switch c {
++		case '\'':
++			inSingle = true
++		case '"':
++			inDouble = true
++		case '[':
++			stack = append(stack, ']')
++		case '{':
++			stack = append(stack, '}')
++		case ']', '}':
++			if c != stack[len(stack)-1] {
++				return "", false
++			}
++			stack = stack[:len(stack)-1]
++			if len(stack) == 0 {
++				if i != len(s)-1 {
++					return "", false
++				}
++				return s[1:i], true
++			}
++		}
++	}
++	return "", false
++}
++
++// splitFlowTopLevel splits a flow-collection interior on commas that sit at
++// nesting depth zero and outside quotes, so ["a, b", c] yields two elements
++// and [[a], [b]] yields two nested collections.
++func splitFlowTopLevel(s string) []string {
++	var parts []string
++	depth, start := 0, 0
++	inSingle, inDouble, escaped := false, false, false
++	for i := 0; i < len(s); i++ {
++		c := s[i]
++		switch {
++		case escaped:
++			escaped = false
++			continue
++		case inDouble:
++			if c == '\\' {
++				escaped = true
++			} else if c == '"' {
++				inDouble = false
++			}
++			continue
++		case inSingle:
++			if c == '\'' {
++				if i+1 < len(s) && s[i+1] == '\'' {
++					i++
++					continue
++				}
++				inSingle = false
++			}
++			continue
++		}
++		switch c {
++		case '\'':
++			inSingle = true
++		case '"':
++			inDouble = true
++		case '[', '{':
++			depth++
++		case ']', '}':
++			if depth > 0 {
++				depth--
++			}
++		case ',':
++			if depth == 0 {
++				parts = append(parts, s[start:i])
++				start = i + 1
++			}
++		}
++	}
++	return append(parts, s[start:])
++}
++
++// findFlowColon returns the byte index of the first top-level unquoted ':' in
++// a flow-mapping entry, or -1. Unlike block mappings, a flow entry needs no
++// trailing space after the colon ("{a:1}" and "{\"a\":1}" are both accepted).
++func findFlowColon(s string) int {
++	depth := 0
++	inSingle, inDouble, escaped := false, false, false
++	for i := 0; i < len(s); i++ {
++		c := s[i]
++		switch {
++		case escaped:
++			escaped = false
++			continue
++		case inDouble:
++			if c == '\\' {
++				escaped = true
++			} else if c == '"' {
++				inDouble = false
++			}
++			continue
++		case inSingle:
++			if c == '\'' {
++				if i+1 < len(s) && s[i+1] == '\'' {
++					i++
++					continue
++				}
++				inSingle = false
++			}
++			continue
++		}
++		switch c {
++		case '\'':
++			inSingle = true
++		case '"':
++			inDouble = true
++		case '[', '{':
++			depth++
++		case ']', '}':
++			if depth > 0 {
++				depth--
++			}
++		case ':':
++			if depth == 0 {
++				return i
++			}
++		}
++	}
++	return -1
++}
++
+ func stripInlineComment(s string) string {
+ 	inSingle, inDouble := false, false
+ 	for i, r := range s {
+diff --git a/pkg/api/yaml_test.go b/pkg/api/yaml_test.go
+index cdc9f95..fe28b4d 100644
+--- a/pkg/api/yaml_test.go
++++ b/pkg/api/yaml_test.go
+@@ -2,6 +2,10 @@ package api
+ 
+ import (
+ 	"encoding/json"
++	"fmt"
++	"reflect"
++	"regexp"
++	"sort"
+ 	"strings"
+ 	"testing"
+ )
+@@ -285,3 +289,204 @@ func TestJSONBytes_RoundTrip(t *testing.T) {
+ 		t.Fatalf("re-unmarshal failed: %v\nfirst 200 bytes: %s", err, first[:min(200, len(first))])
+ 	}
+ }
++
++// TestYAMLParsing_QuotedKeysAndFlowSequences pins the parser itself (not just
++// the shipped spec): a quoted mapping key must arrive WITHOUT its quotes and a
++// flow collection must arrive as a JSON array/mapping, never as one string.
++func TestYAMLParsing_QuotedKeysAndFlowSequences(t *testing.T) {
++	yaml := `
++paths:
++  /health:
++    get:
++      responses:
++        '200':
++          description: ok
++        "404":
++          description: missing
++        default:
++          description: fallback
++components:
++  schemas:
++    QueueEntry:
++      type: object
++      properties:
++        status:
++          type: string
++          enum: [pending, in_progress, complete, failed]
++      required: [status]
++      tags: [queue]
++edges:
++  nested: [[a], [b]]
++  quoted: ["a, b", c]
++  empty: []
++  unclosed: [a, b
++  flowmap: {a: b, '200': ok}
++  flowmap_empty: {}
++  'a: b': colon-inside-quoted-key
++  'it''s': literal-apostrophe-key
++`
++	var doc map[string]any
++	if err := decodeYAMLInto([]byte(yaml), &doc); err != nil {
++		t.Fatalf("decode: %v", err)
++	}
++
++	// (1) Quoted keys: '200' and "404" must land as 200 and 404.
++	paths := mustMap(t, doc, "paths")
++	responses := mustMap(t, mustMap(t, mustMap(t, paths, "/health"), "get"), "responses")
++	for _, want := range []string{"200", "404", "default"} {
++		if _, ok := responses[want]; !ok {
++			t.Errorf("responses missing key %q; got keys %v", want, sortedKeys(responses))
++		}
++	}
++	for _, bad := range []string{"'200'", `"404"`} {
++		if _, ok := responses[bad]; ok {
++			t.Errorf("responses kept a quoted key %q (values: %v)", bad, responses[bad])
++		}
++	}
++
++	// (2) Flow sequences become arrays.
++	entry := mustMap(t, mustMap(t, mustMap(t, doc, "components"), "schemas"), "QueueEntry")
++	props := mustMap(t, entry, "properties")
++	statusProp := mustMap(t, props, "status")
++	gotEnum := statusProp["enum"]
++	wantEnum := []any{"pending", "in_progress", "complete", "failed"}
++	if !reflect.DeepEqual(gotEnum, wantEnum) {
++		t.Errorf("enum = %#v (%T), want %#v", gotEnum, gotEnum, wantEnum)
++	}
++	if !reflect.DeepEqual(entry["required"], []any{"status"}) {
++		t.Errorf("required = %#v, want [status]", entry["required"])
++	}
++	if !reflect.DeepEqual(entry["tags"], []any{"queue"}) {
++		t.Errorf("tags = %#v, want [queue]", entry["tags"])
++	}
++
++	// (3) Nested, quoted-comma, empty and malformed flow collections.
++	edges := mustMap(t, doc, "edges")
++	if !reflect.DeepEqual(edges["nested"], []any{[]any{"a"}, []any{"b"}}) {
++		t.Errorf("nested = %#v, want [[a] [b]] as arrays", edges["nested"])
++	}
++	if !reflect.DeepEqual(edges["quoted"], []any{"a, b", "c"}) {
++		t.Errorf("quoted = %#v, want [\"a, b\" c]", edges["quoted"])
++	}
++	empty, ok := edges["empty"].([]any)
++	if !ok || len(empty) != 0 {
++		t.Errorf("empty = %#v (%T), want an empty array", edges["empty"], edges["empty"])
++	}
++	if got, want := edges["unclosed"], "[a, b"; got != want {
++		t.Errorf("unclosed = %#v, want the plain string %q (never a panic or error)", got, want)
++	}
++	if !reflect.DeepEqual(edges["flowmap"], map[string]any{"a": "b", "200": "ok"}) {
++		t.Errorf("flowmap = %#v, want a mapping with an unquoted 200 key", edges["flowmap"])
++	}
++	flowEmpty, ok := edges["flowmap_empty"].(map[string]any)
++	if !ok || len(flowEmpty) != 0 {
++		t.Errorf("flowmap_empty = %#v (%T), want an empty mapping", edges["flowmap_empty"], edges["flowmap_empty"])
++	}
++	if got, want := edges["a: b"], "colon-inside-quoted-key"; got != want {
++		t.Errorf("key 'a: b' = %#v, want %q (a colon inside a quoted key is not the separator)", got, want)
++	}
++	if got, want := edges["it's"], "literal-apostrophe-key"; got != want {
++		t.Errorf("key with doubled apostrophe = %#v, want %q", got, want)
++	}
++}
++
++// TestOpenAPISpec_ResponsesKeysAndEnumsAreMachineReadable walks the WHOLE
++// served document so no response key or enum anywhere can regress to the
++// quoted-string / stringified-array forms.
++func TestOpenAPISpec_ResponsesKeysAndEnumsAreMachineReadable(t *testing.T) {
++	raw, err := JSONBytes()
++	if err != nil {
++		t.Fatalf("JSONBytes: %v", err)
++	}
++	var doc map[string]any
++	if err := json.Unmarshal(raw, &doc); err != nil {
++		t.Fatalf("json.Unmarshal: %v", err)
++	}
++
++	responseKeyRE := regexp.MustCompile(`^(default|[1-5][0-9]{2})$`)
++	var responseKeys []string
++	var enums []any
++	var walk func(v any, at string)
++	walk = func(v any, at string) {
++		switch node := v.(type) {
++		case map[string]any:
++			if responses, ok := node["responses"].(map[string]any); ok {
++				for k := range responses {
++					responseKeys = append(responseKeys, k)
++				}
++			}
++			if e, ok := node["enum"]; ok {
++				enums = append(enums, e)
++			}
++			for k, child := range node {
++				walk(child, at+"/"+k)
++			}
++		case []any:
++			for i, child := range node {
++				walk(child, fmt.Sprintf("%s/%d", at, i))
++			}
++		}
++	}
++	walk(doc, "")
++
++	// Non-vacuity guard: the served document really does carry these
++	// constructs, so an empty walk cannot pass as green.
++	if len(responseKeys) < 21 {
++		t.Fatalf("walked only %d response keys, want at least 21", len(responseKeys))
++	}
++	for _, k := range responseKeys {
++		if !responseKeyRE.MatchString(k) {
++			t.Errorf("response key %q is not machine-readable (want 'default' or a 3-digit code, no quotes)", k)
++		}
++	}
++	// Five enum flow sequences reach the served document. openapi.yaml also
++	// carries `enum: [...]` lines inside sequence-item inline mappings
++	// (parameter schemas) whose continuation keys this parser drops — those
++	// never reach the document and are tracked as a separate defect.
++	if len(enums) < 5 {
++		t.Fatalf("walked only %d enum values, want at least 5", len(enums))
++	}
++	for i, e := range enums {
++		arr, ok := e.([]any)
++		if !ok {
++			t.Errorf("enum #%d is %T (%v), want a JSON array", i, e, e)
++			continue
++		}
++		if len(arr) == 0 {
++			t.Errorf("enum #%d is an empty array", i)
++		}
++	}
++
++	// The acceptance case, spelled out: /health's responses and
++	// QueueEntry.status.enum.
++	health := mustMap(t, mustMap(t, mustMap(t, mustMap(t, doc, "paths"), "/health"), "get"), "responses")
++	if keys := sortedKeys(health); !reflect.DeepEqual(keys, []string{"200"}) {
++		t.Errorf("/health responses keys = %v, want [200]", keys)
++	}
++	status := mustMap(t, mustMap(t, mustMap(t, mustMap(t, mustMap(t, doc, "components"), "schemas"), "QueueEntry"), "properties"), "status")
++	got := status["enum"]
++	want := []any{"pending", "in_progress", "complete", "failed"}
++	if !reflect.DeepEqual(got, want) {
++		t.Errorf("QueueEntry.status.enum = %#v (%T), want %#v", got, got, want)
++	}
++}
++
++// mustMap returns doc[key] as a mapping, failing the test when it is missing
++// or of another type.
++func mustMap(t *testing.T, doc map[string]any, key string) map[string]any {
++	t.Helper()
++	child, ok := doc[key].(map[string]any)
++	if !ok {
++		t.Fatalf("key %q = %#v (%T), want a mapping", key, doc[key], doc[key])
++	}
++	return child
++}
++
++func sortedKeys(m map[string]any) []string {
++	out := make([]string, 0, len(m))
++	for k := range m {
++		out = append(out, k)
++	}
++	sort.Strings(out)
++	return out
++}
