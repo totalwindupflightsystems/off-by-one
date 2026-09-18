@@ -62,7 +62,7 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
 
 `status` is one of `queued`, `deduplicated`, or `rejected`.
 
-**Status codes:** `200` (queued/duplicate), `400` (invalid submission), `409` (duplicate — same tuple already queued or answered), `500` (internal error).
+**Status codes:** `200` (queued/duplicate), `400` (invalid submission), `409` (duplicate — same tuple already queued or answered), `500` (internal error), `503` (`solver_unavailable` — no solver wired up; see below).
 
 **Duplicate (`409`) response.** A submission is deduplicated on `(problem_class, environment, language, version)`. When that tuple is already queued/in progress or already has a verified answer, no second job is created: the response carries `"status": "deduplicated"` and the **existing** `submission_id` (the same id the original submit returned) with its queue `position`:
 
@@ -84,6 +84,17 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
   "message": "ingest: invalid cadence (accepted: pre-phase, end-of-day, post-debug): got \"weekly\""
 }
 ```
+
+**Solver unavailable (`503`).** When the server has no working solver — `bwrap` + `pi-agent` not configured, the same condition `GET /api/v1/stats` reports as `solver_available: false` — the handler rejects the submission up front, **before the queue is touched**: no `submission_id` is issued, no queue entry is created, and there is nothing to poll on `GET /api/v1/queue`.
+
+```json
+{
+  "error": "solver_unavailable",
+  "message": "solver is not available (bwrap + pi-agent not configured); submissions cannot be queued — use POST /api/v1/problems/discover to look up existing answers"
+}
+```
+
+The check runs first, ahead of body parsing, so this response is returned for both JSON and `multipart/form-data` submissions regardless of body validity. Clients should fall back to `POST /api/v1/problems/discover` to read pre-verified answers from a catalog-only deployment. The condition clears when the server is restarted with `bwrap` and `pi-agent` available.
 
 **Example**
 

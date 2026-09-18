@@ -104,7 +104,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
 }
 ```
 
-Possible statuses: `queued`, `deduplicated`, `rejected`. A 400 response means the submission was invalid (missing `problem_class`, unknown `cadence`, etc.). A 409 response means the same `(class, environment, language, version)` tuple is already pending or already has a verified answer — see [Deduplication](#deduplication-and-queue-behavior).
+Possible statuses: `queued`, `deduplicated`, `rejected`. A 400 response means the submission was invalid (missing `problem_class`, unknown `cadence`, etc.). A 409 response means the same `(class, environment, language, version)` tuple is already pending or already has a verified answer — see [Deduplication](#deduplication-and-queue-behavior). A 503 response means the deployment has no working solver (`solver_available: false` in `GET /api/v1/stats`): the submission is rejected up front with the error code `solver_unavailable` and no queue entry is created — see [Queue ordering](#queue-ordering).
 
 ---
 
@@ -312,7 +312,9 @@ When a duplicate is detected, the API returns HTTP `409 Conflict` with a body li
 
 Pending entries are ordered by priority descending, then `created_at` ascending. The highest-priority pending entry is dequeued during idle cycles, moved to `in_progress`, sandboxed, solved by Pi Agent, and either marked `complete` (with an answer node) or `failed`.
 
-If `solver_available` is false in `/api/v1/stats`, the cron loop is not running and submissions will stay in the queue until the server is restarted with a working solver.
+If `solver_available` is false in `/api/v1/stats`, no solver is wired up (`bwrap` + `pi-agent` missing) and the cron loop is not running. In that state `POST /api/v1/problems/submit` does **not** queue anything: the handler rejects the request up front with HTTP `503` and error code `solver_unavailable`, so no submission id is issued and no queue entry is created — `GET /api/v1/queue` will not show it, and there is nothing to poll. Clients should treat `solver_available: false` as "submit is closed" and fall back to `POST /api/v1/problems/discover` for pre-verified answers.
+
+For operators: the fix is configuration, not a client retry — install `bwrap`, make `pi-agent` reachable, and restart the server; submissions are accepted again as soon as a solver is wired up at startup. Pre-verified answers stay discoverable throughout, so a catalog-only deployment is fully usable for reads.
 
 ---
 
