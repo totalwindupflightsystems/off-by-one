@@ -60,35 +60,34 @@ func main() {
 	// pattern.
 	_ = godotenv.Load()
 
-	// `off-by-one seed` — one-shot corpus loader subcommand. Dispatched
-	// before the server flag set is parsed because it owns its own flags
-	// (issue #1: fresh installs need an import path from the bundled
-	// flat corpus before discovery can return anything).
-	if len(os.Args) > 1 && os.Args[1] == "seed" {
-		runSeed(os.Args[2:])
+	// Custom usage: the default flag-package output prints only the server
+	// flags, hiding the `seed` subcommand (OB-GAP-053).
+	flag.Usage = printUsage
+
+	// Declare the server flag set BEFORE dispatch. Registering is a pure
+	// declaration — nothing is parsed here — and seedDispatch reads the live
+	// declarations to learn each flag's arity (which flags consume a value),
+	// so the dispatch probe can never drift from the real set as flags are
+	// added.
+	cfg := registerServerFlags(flag.CommandLine)
+
+	// `off-by-one seed` — one-shot corpus loader subcommand. Dispatched before
+	// the server flag set is parsed because it owns its own flags (issue #1:
+	// fresh installs need an import path from the bundled flat corpus before
+	// discovery can return anything). seedDispatch also recognises the
+	// subcommand when server-compatible flags precede it
+	// (`off-by-one --db PATH seed`, OB-GAP-071) — the stdlib flag package stops
+	// at the first non-flag argument, so a leading-position argv[1] test left
+	// that invocation to the server path, which bound the port and served an
+	// empty catalog instead of seeding.
+	if seedArgs, ok := seedDispatch(os.Args[1:], flag.CommandLine); ok {
+		runSeed(seedArgs)
 		return
 	}
 
-	// Custom usage: the default flag-package output prints only the server
-	// flags, hiding the `seed` subcommand dispatched above (OB-GAP-053).
-	flag.Usage = printUsage
-
-	port := flag.Int("port", envInt("OFF_BY_ONE_PORT", 8766), "HTTP listen port")
-	host := flag.String("host", envString("OFF_BY_ONE_HOST", ""), "HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy)")
-	dbPath := flag.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path")
-	bwrapPath := flag.String("bwrap", envString("OFF_BY_ONE_BWRAP", "/usr/bin/bwrap"), "Path to bwrap binary")
-	piAgentPath := flag.String("pi-agent", envString("OFF_BY_ONE_PI_AGENT", "pi-agent"), "Path to pi-agent binary")
-	cronInterval := flag.Duration("cron-interval", envDuration("OFF_BY_ONE_CRON_INTERVAL", 5*time.Minute), "Cron loop wake interval")
-	loadThreshold := flag.Float64("load-threshold", envFloat("OFF_BY_ONE_LOAD_THRESHOLD", 1.0), "Max loadavg(1) for idle detection (negative = always idle)")
-	solveTimeout := flag.Duration("solve-timeout", envDuration("OFF_BY_ONE_SOLVE_TIMEOUT", solver.DefaultSolveTimeout), "Per-solve timeout cap")
-	skipSandbox := flag.Bool("skip-sandbox", envBool("OFF_BY_ONE_SKIP_SANDBOX", false), "Skip bwrap sandbox (for dev/testing)")
-	readOnly := flag.Bool("readonly", envBool("OFF_BY_ONE_READONLY", false), "Public catalog mode: block all mutating endpoints and the AI chat")
-	exportDir := flag.String("export-dir", envString("OFF_BY_ONE_EXPORT_DIR", ""), "Working directory for git export clones (empty = export disabled)")
-	importDir := flag.String("import-dir", envString("OFF_BY_ONE_IMPORT_DIR", ""), "Working directory for git import clones (empty = import disabled)")
-	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
 
-	if *showVersion {
+	if *cfg.showVersion {
 		fmt.Printf("off-by-one %s\n", version)
 		return
 	}
@@ -102,7 +101,7 @@ func main() {
 	}
 
 	// --- 1. Graph store (SQLite) --------------------------------------
-	store, err := graph.Open(*dbPath)
+	store, err := graph.Open(*cfg.dbPath)
 	if err != nil {
 		log.Fatalf("open graph store: %v", err)
 	}
@@ -111,7 +110,7 @@ func main() {
 			log.Printf("close graph store: %v", cerr)
 		}
 	}()
-	log.Printf("graph store opened: %s", *dbPath)
+	log.Printf("graph store opened: %s", *cfg.dbPath)
 
 	// --- 2. Ingest queue (shares the graph DB) ------------------------
 	queue, err := ingest.Open(store)
@@ -126,12 +125,12 @@ func main() {
 	// loop is not started — the API still works for submit/discover.
 	var solverExec *solver.Executor
 	var sandboxExec *sandbox.Executor
-	if !*skipSandbox {
-		if _, serr := os.Stat(*bwrapPath); serr != nil {
-			log.Printf("warning: bwrap not found at %s — solver disabled (use --skip-sandbox to suppress this)", *bwrapPath)
+	if !*cfg.skipSandbox {
+		if _, serr := os.Stat(*cfg.bwrapPath); serr != nil {
+			log.Printf("warning: bwrap not found at %s — solver disabled (use --skip-sandbox to suppress this)", *cfg.bwrapPath)
 		} else {
 			sandboxExec = &sandbox.Executor{
-				BwrapPath:          *bwrapPath,
+				BwrapPath:          *cfg.bwrapPath,
 				WorkDir:            os.TempDir(),
 				Timeout:            sandboxTimeout(),
 				ExtraReadOnlyPaths: extraReadOnlyPaths(),
@@ -147,9 +146,9 @@ func main() {
 					log.Printf("DEEPSEEK_API_KEY empty — using OPENROUTER_API_KEY for solves")
 				}
 			}
-			cfg := solverConfigFor(os.Getenv, *piAgentPath, apiKey, *solveTimeout)
-			solverExec = solver.NewExecutor(cfg, runner, store)
-			log.Printf("solver ready: pi-agent=%s bwrap=%s model=%s", *piAgentPath, *bwrapPath, cfg.Model)
+			solverCfg := solverConfigFor(os.Getenv, *cfg.piAgentPath, apiKey, *cfg.solveTimeout)
+			solverExec = solver.NewExecutor(solverCfg, runner, store)
+			log.Printf("solver ready: pi-agent=%s bwrap=%s model=%s", *cfg.piAgentPath, *cfg.bwrapPath, solverCfg.Model)
 		}
 	} else {
 		log.Printf("sandbox skipped (--skip-sandbox)")
@@ -165,13 +164,13 @@ func main() {
 	if solverExec != nil {
 		cronCtx, cronCancel = context.WithCancel(context.Background())
 		loop = cron.NewLoop(cron.Config{
-			Interval:      *cronInterval,
-			LoadThreshold: *loadThreshold,
+			Interval:      *cfg.cronInterval,
+			LoadThreshold: *cfg.loadThreshold,
 			Solver:        solverExec,
 			Queue:         queue,
 		})
 		go func() {
-			log.Printf("cron loop started: interval=%s loadThreshold=%.1f", *cronInterval, *loadThreshold)
+			log.Printf("cron loop started: interval=%s loadThreshold=%.1f", *cfg.cronInterval, *cfg.loadThreshold)
 			if rerr := loop.Run(cronCtx); rerr != nil && !errors.Is(rerr, context.Canceled) {
 				log.Printf("cron loop exited with error: %v", rerr)
 			}
@@ -184,9 +183,9 @@ func main() {
 	// --- 5. API server -------------------------------------------------
 	specBytes := openapiBytes
 	apiServer := apihttp.New(store, queue, specBytes)
-	apiServer.ExportLocalDir = *exportDir
-	apiServer.ImportLocalDir = *importDir
-	apiServer.ReadOnly = *readOnly
+	apiServer.ExportLocalDir = *cfg.exportDir
+	apiServer.ImportLocalDir = *cfg.importDir
+	apiServer.ReadOnly = *cfg.readOnly
 	apiServer.SolverAvailable = solverExec != nil
 	apiHandler := apiServer.Handler()
 
@@ -211,7 +210,7 @@ func main() {
 			apiHandler.ServeHTTP(w, r)
 			return
 		case r.URL.Path == "/ws/chat":
-			if *readOnly {
+			if *cfg.readOnly {
 				http.Error(w, "AI agent disabled in read-only catalog mode", http.StatusForbidden)
 				return
 			}
@@ -226,13 +225,13 @@ func main() {
 	})
 
 	srv := &http.Server{
-		Addr:              fmt.Sprintf("%s:%d", *host, *port),
+		Addr:              fmt.Sprintf("%s:%d", *cfg.host, *cfg.port),
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
-	log.Printf("off-by-one %s listening on :%d (db=%s)", version, *port, *dbPath)
-	log.Printf("OpenAPI spec at http://localhost:%d/openapi.json (sha256=%s)", *port, api.SHA256()[:12])
+	log.Printf("off-by-one %s listening on :%d (db=%s)", version, *cfg.port, *cfg.dbPath)
+	log.Printf("OpenAPI spec at http://localhost:%d/openapi.json (sha256=%s)", *cfg.port, api.SHA256()[:12])
 
 	// --- 8. Graceful shutdown -----------------------------------------
 	// SIGINT/SIGTERM → stop cron loop → close DB → shutdown HTTP server.
@@ -275,6 +274,49 @@ func main() {
 	// the deferred store.Close() fires.
 	wg.Wait()
 	log.Printf("off-by-one shutdown complete")
+}
+
+// --- server flag set ----------------------------------------------------
+
+// serverConfig holds the value handles of the server flag set. main()
+// registers the whole set on flag.CommandLine; the seed dispatch probe (and
+// its tests) read the same declarations, so the two can never disagree about
+// which flags consume a value.
+type serverConfig struct {
+	port          *int
+	host          *string
+	dbPath        *string
+	bwrapPath     *string
+	piAgentPath   *string
+	cronInterval  *time.Duration
+	loadThreshold *float64
+	solveTimeout  *time.Duration
+	skipSandbox   *bool
+	readOnly      *bool
+	exportDir     *string
+	importDir     *string
+	showVersion   *bool
+}
+
+// registerServerFlags declares the full server flag set on fs and returns its
+// value handles. Declaring is side-effect free (no parsing, no output), so
+// main() can do it before seedDispatch needs the live arity table.
+func registerServerFlags(fs *flag.FlagSet) *serverConfig {
+	return &serverConfig{
+		port:          fs.Int("port", envInt("OFF_BY_ONE_PORT", 8766), "HTTP listen port"),
+		host:          fs.String("host", envString("OFF_BY_ONE_HOST", ""), "HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy)"),
+		dbPath:        fs.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path"),
+		bwrapPath:     fs.String("bwrap", envString("OFF_BY_ONE_BWRAP", "/usr/bin/bwrap"), "Path to bwrap binary"),
+		piAgentPath:   fs.String("pi-agent", envString("OFF_BY_ONE_PI_AGENT", "pi-agent"), "Path to pi-agent binary"),
+		cronInterval:  fs.Duration("cron-interval", envDuration("OFF_BY_ONE_CRON_INTERVAL", 5*time.Minute), "Cron loop wake interval"),
+		loadThreshold: fs.Float64("load-threshold", envFloat("OFF_BY_ONE_LOAD_THRESHOLD", 1.0), "Max loadavg(1) for idle detection (negative = always idle)"),
+		solveTimeout:  fs.Duration("solve-timeout", envDuration("OFF_BY_ONE_SOLVE_TIMEOUT", solver.DefaultSolveTimeout), "Per-solve timeout cap"),
+		skipSandbox:   fs.Bool("skip-sandbox", envBool("OFF_BY_ONE_SKIP_SANDBOX", false), "Skip bwrap sandbox (for dev/testing)"),
+		readOnly:      fs.Bool("readonly", envBool("OFF_BY_ONE_READONLY", false), "Public catalog mode: block all mutating endpoints and the AI chat"),
+		exportDir:     fs.String("export-dir", envString("OFF_BY_ONE_EXPORT_DIR", ""), "Working directory for git export clones (empty = export disabled)"),
+		importDir:     fs.String("import-dir", envString("OFF_BY_ONE_IMPORT_DIR", ""), "Working directory for git import clones (empty = import disabled)"),
+		showVersion:   fs.Bool("version", false, "Print version and exit"),
+	}
 }
 
 // printUsage writes the full usage text to flag.CommandLine.Output():
