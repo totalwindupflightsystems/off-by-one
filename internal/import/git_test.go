@@ -792,3 +792,78 @@ func TestImport_ExistingCloneMatchingRepo_Proceeds(t *testing.T) {
 		t.Errorf("Added = %d, want 1", res.Added)
 	}
 }
+
+// TestImportLinksSimilarEdges proves the import path is a real edge producer
+// (OB-GAP-067): importing an answer for a class whose title overlaps an
+// existing class writes `similar` edges in both directions, reports the
+// count, and a re-import of identical content writes nothing.
+//
+// No git is involved — this drives importAnswer directly, which is the only
+// place the import flow writes an answer (and therefore the only place it can
+// link one).
+func TestImportLinksSimilarEdges(t *testing.T) {
+	ctx := context.Background()
+	store := makeStore(t)
+
+	// Class already in the graph, with a title that shares three lexemes
+	// (python, idle, audit) with the answer about to be imported.
+	if _, _, err := store.UpsertProblemClass(ctx, "python-sdk-idle-audit", ""); err != nil {
+		t.Fatalf("UpsertProblemClass: %v", err)
+	}
+	engine := NewEngine(Config{}, store)
+
+	parsed := ParsedAnswer{
+		ClassTitle: "python-audit-idle-maintenance",
+		Env:        "py3.11",
+		Version:    "3.11",
+		Lang:       "python",
+		Status:     graph.AnswerVerified,
+		Solution:   "# Solution\nKeep the audit cadence.",
+		Evidence:   "fixture run",
+		Signatures: `{"result":"passed"}`,
+	}
+
+	detail, edges, err := engine.importAnswer(ctx, parsed)
+	if err != nil {
+		t.Fatalf("importAnswer: %v", err)
+	}
+	if detail.Action != ActionAdded {
+		t.Fatalf("action = %q, want %q", detail.Action, ActionAdded)
+	}
+	if edges != 2 {
+		t.Errorf("edges created = %d, want 2 (one per direction)", edges)
+	}
+
+	class, err := store.GetProblemClassByTitle(ctx, parsed.ClassTitle)
+	if err != nil {
+		t.Fatalf("GetProblemClassByTitle: %v", err)
+	}
+	got, err := store.ListEdgesFrom(ctx, class.ID)
+	if err != nil {
+		t.Fatalf("ListEdgesFrom: %v", err)
+	}
+	if len(got) == 0 {
+		t.Fatal("imported class has no edges — /problems/<class>/related would answer []")
+	}
+	for _, e := range got {
+		if e.Relationship != graph.EdgeSimilar {
+			t.Errorf("relationship = %q, want %q", e.Relationship, graph.EdgeSimilar)
+		}
+		if !(e.Weight > 0 && e.Weight <= 1) {
+			t.Errorf("weight = %v, want 0 < w <= 1", e.Weight)
+		}
+	}
+
+	// Idempotent re-import: identical content is skipped and — because a
+	// skipped answer changes no relationship — reports zero new edges.
+	detail, edges, err = engine.importAnswer(ctx, parsed)
+	if err != nil {
+		t.Fatalf("second importAnswer: %v", err)
+	}
+	if detail.Action != ActionSkipped {
+		t.Errorf("action = %q, want %q", detail.Action, ActionSkipped)
+	}
+	if edges != 0 {
+		t.Errorf("edges created on re-import = %d, want 0", edges)
+	}
+}

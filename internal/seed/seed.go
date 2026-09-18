@@ -51,7 +51,20 @@ type Stats struct {
 	ClassesExisting int
 	AnswersCreated  int
 	AnswersSkipped  int
+	// EdgesCreated counts the `similar` graph edges the linker wrote after
+	// the corpus files were loaded. Zero on a re-run — edges are keyed by
+	// (source, target, relationship), so an existing edge is never rewritten.
+	EdgesCreated int
 }
+
+// Linker defaults used by the corpus seed. Two shared title lexemes is the
+// weakest overlap that still means something (one shared token is usually a
+// generic word such as "python" or "drift"), and five neighbours keeps a
+// class from being linked to the whole corpus through one broad term.
+const (
+	linkMinShared    = 2
+	linkMaxNeighbors = 5
+)
 
 // Seed loads every *.json corpus file under <dir>/answers/ into the
 // store. dir is the data directory (default ./data); the corpus itself
@@ -62,6 +75,12 @@ type Stats struct {
 // status comes from its own corpus verdict (see corpusAnswerStatus) — a
 // signature marked failed is imported as failed, everything else keeps
 // the export's verified status.
+//
+// Once the files are loaded the classes are linked into the lateral
+// `similar` graph (graph.LinkAllSimilar) — the corpus carries no error
+// signatures, so title lexemes are the only relationship signal available,
+// and without this step /problems/<class>/related answers [] on a
+// perfectly seeded database.
 func Seed(ctx context.Context, store *graph.Store, dir string) (*Stats, error) {
 	answersDir := filepath.Join(dir, "answers")
 	entries, err := os.ReadDir(answersDir)
@@ -77,6 +96,16 @@ func Seed(ctx context.Context, store *graph.Store, dir string) (*Stats, error) {
 			return nil, fmt.Errorf("%s: %w", ent.Name(), err)
 		}
 	}
+
+	// Link the classes into the lateral graph once every file is loaded.
+	// Linking happens after the loop (not per file) so a class can pair with
+	// classes from files that sort later, and so the corpus is only scanned
+	// once. Idempotent like the rest of the loader: a re-run creates 0 edges.
+	edges, err := store.LinkAllSimilar(ctx, linkMinShared, linkMaxNeighbors)
+	if err != nil {
+		return nil, fmt.Errorf("link similar classes: %w", err)
+	}
+	stats.EdgesCreated = edges
 	return stats, nil
 }
 

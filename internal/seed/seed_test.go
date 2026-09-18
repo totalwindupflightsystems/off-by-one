@@ -473,3 +473,113 @@ func TestCorpusAnswerStatus(t *testing.T) {
 		})
 	}
 }
+
+// relateCorpus is a two-class corpus whose titles share three lexemes
+// (python, idle, audit) — the smallest shape that links. The corpus carries
+// no error signatures, so title lexemes are the only relationship signal the
+// data has.
+func relateCorpus() map[string]string {
+	return map[string]string{
+		"0001-python-sdk-idle-audit.json": `{
+  "class_id": 1,
+  "title": "python-sdk-idle-audit",
+  "description": "audit the python SDK for idle waiting",
+  "created_at": "2026-07-24 22:52:43",
+  "answers": [
+    {
+      "answer_id": 11,
+      "language": "python",
+      "environment": "py3.11",
+      "version": "3.11",
+      "solution": "# Solution A\nTrace the idle wait.",
+      "evidence": "reproducer attached",
+      "signatures": {"model": "m1", "result": "passed", "tests": 5},
+      "status": "verified"
+    }
+  ]
+}`,
+		"0002-python-audit-idle-maintenance.json": `{
+  "class_id": 2,
+  "title": "python-audit-idle-maintenance",
+  "description": "maintenance pass over the python idle audit",
+  "created_at": "2026-07-24 22:52:44",
+  "answers": [
+    {
+      "answer_id": 21,
+      "language": "python",
+      "environment": "py3.11",
+      "version": "3.11",
+      "solution": "# Solution B\nKeep the audit cadence.",
+      "evidence": "fixture run",
+      "signatures": {"model": "m2", "result": "passed"},
+      "status": "verified"
+    }
+  ]
+}`,
+	}
+}
+
+// TestSeedCreatesRelatedEdges proves the seed path writes real graph edges
+// (OB-GAP-067). problem_edges was permanently empty because CreateEdge had
+// no production caller, so GET /api/v1/problems/<class>/related answered
+// {"related":[]} on a fully seeded database. The test asserts the row count,
+// the edges reachable from a seeded class (what the handler reads), and that
+// a re-run adds nothing.
+func TestSeedCreatesRelatedEdges(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	dir := writeCorpus(t, relateCorpus())
+
+	stats, err := Seed(ctx, store, dir)
+	if err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if stats.EdgesCreated <= 0 {
+		t.Fatalf("Seed stats EdgesCreated = %d, want > 0", stats.EdgesCreated)
+	}
+
+	var rows int
+	if err := store.DB().QueryRowContext(ctx, `SELECT count(*) FROM problem_edges`).Scan(&rows); err != nil {
+		t.Fatalf("count problem_edges: %v", err)
+	}
+	if rows <= 0 {
+		t.Fatalf("problem_edges rows = %d, want > 0", rows)
+	}
+
+	class, err := store.GetProblemClassByTitle(ctx, "python-sdk-idle-audit")
+	if err != nil {
+		t.Fatalf("GetProblemClassByTitle: %v", err)
+	}
+	edges, err := store.ListEdgesFrom(ctx, class.ID)
+	if err != nil {
+		t.Fatalf("ListEdgesFrom(%d): %v", class.ID, err)
+	}
+	if len(edges) == 0 {
+		t.Fatalf("ListEdgesFrom(%s) returned no edges — /related would answer []", class.Title)
+	}
+	for _, e := range edges {
+		if e.Relationship != graph.EdgeSimilar {
+			t.Errorf("relationship = %q, want %q", e.Relationship, graph.EdgeSimilar)
+		}
+		if !(e.Weight > 0 && e.Weight <= 1) {
+			t.Errorf("weight = %v, want 0 < w <= 1", e.Weight)
+		}
+	}
+
+	// Idempotency contract: a re-run imports only the delta, so it creates
+	// no new edges and leaves the table unchanged.
+	again, err := Seed(ctx, store, dir)
+	if err != nil {
+		t.Fatalf("second Seed: %v", err)
+	}
+	if again.EdgesCreated != 0 {
+		t.Errorf("second run EdgesCreated = %d, want 0", again.EdgesCreated)
+	}
+	var rowsAgain int
+	if err := store.DB().QueryRowContext(ctx, `SELECT count(*) FROM problem_edges`).Scan(&rowsAgain); err != nil {
+		t.Fatalf("count problem_edges after re-run: %v", err)
+	}
+	if rowsAgain != rows {
+		t.Errorf("problem_edges rows = %d after re-run, want %d", rowsAgain, rows)
+	}
+}

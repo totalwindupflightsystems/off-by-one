@@ -95,7 +95,21 @@ type ImportResult struct {
 	Conflicted int
 	ParseErr   int
 	Details    []ImportDetail
+	// EdgesCreated counts the `similar` graph edges written while linking
+	// the imported classes into the lateral graph. It is internal: the
+	// /api/v1/problems/import response shape is unchanged (the handler
+	// builds its own wire struct), so this is carried for tests and for
+	// callers of the engine package.
+	EdgesCreated int
 }
+
+// Linker defaults for an import: see internal/seed for the same pair. Two
+// shared title lexemes is the weakest meaningful overlap; five neighbours
+// keeps a broad token from linking a class into the whole catalog.
+const (
+	linkMinShared    = 2
+	linkMaxNeighbors = 5
+)
 
 // Engine performs import operations against a git repository. It reads
 // answers from a source repo and inserts/updates them in a *graph.Store.
@@ -168,7 +182,7 @@ func (e *Engine) Import(ctx context.Context) (*ImportResult, error) {
 	// Step 3 + 4: diff and insert.
 	res := &ImportResult{}
 	for _, ans := range answers {
-		detail, err := e.importAnswer(ctx, ans)
+		detail, edges, err := e.importAnswer(ctx, ans)
 		if err != nil {
 			detail = ImportDetail{
 				ClassTitle: ans.ClassTitle,
@@ -179,6 +193,7 @@ func (e *Engine) Import(ctx context.Context) (*ImportResult, error) {
 				Reason:     err.Error(),
 			}
 		}
+		res.EdgesCreated += edges
 		res.Details = append(res.Details, detail)
 		switch detail.Action {
 		case ActionAdded:
@@ -342,8 +357,10 @@ func (e *Engine) parseAnswerDir(dir, classTitle, env, version string) (ParsedAns
 }
 
 // importAnswer diffs a parsed answer against the local graph and inserts
-// or updates it. Returns the ImportDetail describing the action taken.
-func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDetail, error) {
+// or updates it. Returns the ImportDetail describing the action taken, plus
+// the number of `similar` edges created while linking the class into the
+// lateral graph (0 for a skipped answer).
+func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDetail, int, error) {
 	detail := ImportDetail{
 		ClassTitle: ans.ClassTitle,
 		Env:        ans.Env,
@@ -354,13 +371,13 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
 	// Upsert the problem class.
 	pc, _, err := e.store.UpsertProblemClass(ctx, ans.ClassTitle, "")
 	if err != nil {
-		return detail, fmt.Errorf("upsert problem class: %w", err)
+		return detail, 0, fmt.Errorf("upsert problem class: %w", err)
 	}
 
 	// Check for existing answer with same (class, env, lang, version).
 	existing, err := e.findAnswer(ctx, pc.ID, ans.Env, ans.Lang, ans.Version)
 	if err != nil {
-		return detail, fmt.Errorf("find existing answer: %w", err)
+		return detail, 0, fmt.Errorf("find existing answer: %w", err)
 	}
 
 	if existing == nil {
@@ -369,7 +386,7 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
 			ans.Env, ans.Lang, ans.Version,
 			ans.Solution, ans.Evidence, ans.Signatures)
 		if err != nil {
-			return detail, fmt.Errorf("create answer node: %w", err)
+			return detail, 0, fmt.Errorf("create answer node: %w", err)
 		}
 		// Set status if parsed and valid.
 		if ans.Status != "" {
@@ -377,18 +394,19 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
 		}
 		detail.Action = ActionAdded
 		detail.AnswerID = answerID
-		return detail, nil
+		return detail, e.linkSimilar(ctx, pc.ID), nil
 	}
 
 	// Existing answer found — compare content.
 	if existing.Solution == ans.Solution &&
 		existing.Evidence == ans.Evidence &&
 		existing.Signatures == ans.Signatures {
-		// Identical content — skip.
+		// Identical content — skip. A skipped answer changes nothing about
+		// the class, so there is no new relationship to record.
 		detail.Action = ActionSkipped
 		detail.AnswerID = existing.ID
 		detail.Reason = "identical content"
-		return detail, nil
+		return detail, 0, nil
 	}
 
 	// Content differs — update the existing answer.
@@ -396,7 +414,7 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
 		`UPDATE answer_nodes SET solution = ?, evidence = ?, signatures = ? WHERE id = ?`,
 		ans.Solution, ans.Evidence, ans.Signatures, existing.ID)
 	if err != nil {
-		return detail, fmt.Errorf("update answer node: %w", err)
+		return detail, 0, fmt.Errorf("update answer node: %w", err)
 	}
 	if ans.Status != "" {
 		_ = e.store.UpdateAnswerStatus(ctx, existing.ID, ans.Status)
@@ -404,7 +422,23 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
 	detail.Action = ActionUpdated
 	detail.AnswerID = existing.ID
 	detail.Reason = "content updated"
-	return detail, nil
+	return detail, e.linkSimilar(ctx, pc.ID), nil
+}
+
+// linkSimilar links a class that an import just added or updated into the
+// lateral `similar` graph and returns the number of edges created.
+//
+// The linker's error is deliberately swallowed: by the time we get here the
+// answer itself is already committed, and a linker failure must never turn
+// a successful import into a reported failure. Linking is best-effort and
+// self-repairing — the next import, or a seed run, re-runs the same
+// idempotent linker and fills in whatever is missing.
+func (e *Engine) linkSimilar(ctx context.Context, classID int64) int {
+	created, err := e.store.LinkSimilarClasses(ctx, classID, linkMinShared, linkMaxNeighbors)
+	if err != nil {
+		return 0
+	}
+	return created
 }
 
 // findAnswer looks for an existing answer matching (classID, env, lang, version).

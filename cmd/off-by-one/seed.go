@@ -169,8 +169,8 @@ func seedRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	log.Printf("seed complete: files=%d; classes=%d created / %d existing; answers=%d created / %d skipped (db=%s)",
+	log.Printf("seed complete: files=%d; classes=%d created / %d existing; answers=%d created / %d skipped; edges=%d created (db=%s)",
 		stats.FilesLoaded, stats.ClassesCreated, stats.ClassesExisting,
-		stats.AnswersCreated, stats.AnswersSkipped, *dbPath)
+		stats.AnswersCreated, stats.AnswersSkipped, stats.EdgesCreated, *dbPath)
 	return nil
 }

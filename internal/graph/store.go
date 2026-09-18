@@ -21,12 +21,18 @@ import (
 )
 
 // Edge types match the relationship column in problem_edges. They are the
-// canonical values Muster and the web UI surface.
+// canonical values Muster, the linker (linker.go), and the web UI surface.
 const (
 	EdgeSameRootCause = "same_root_cause"
 	EdgePrerequisite  = "prerequisite"
 	EdgeSupersededBy  = "superseded_by"
 	EdgeGeneralizes   = "generalizes"
+	// EdgeSimilar is the derived relationship the title-lexeme linker
+	// writes (internal/graph/linker.go) when two problem classes share
+	// title tokens but no confirmed root cause. It is also the value
+	// docs/integration.md and docs/api-reference.md have always
+	// documented for the related-problems response.
+	EdgeSimilar = "similar"
 )
 
 // Status values match the status column in answer_nodes.
@@ -388,7 +394,7 @@ func (s *Store) CreateEdge(ctx context.Context, sourceID, targetID int64, relati
 		return 0, errors.New("self-edges are not allowed")
 	}
 	switch relationship {
-	case EdgeSameRootCause, EdgePrerequisite, EdgeSupersededBy, EdgeGeneralizes:
+	case EdgeSameRootCause, EdgePrerequisite, EdgeSupersededBy, EdgeGeneralizes, EdgeSimilar:
 	default:
 		return 0, fmt.Errorf("invalid relationship %q", relationship)
 	}
