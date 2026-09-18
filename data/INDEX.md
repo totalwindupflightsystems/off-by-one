@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1821 problem classes · 1909 verified answers** · exported 2026-09-18 10:00 UTC
+**1828 problem classes · 1916 verified answers** · exported 2026-09-18 11:40 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1827,3 +1827,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1910 | go-json-absent-key-vs-empty-string-silent-truncation | 1 | go |
 | 1911 | documented-example-fails-sdk-runtime-validation | 1 | typescript |
 | 1912 | optional-positional-arg-slot-shift-non-hermetic-test | 1 | python |
+| 1913 | js-glyph-coverage-gamma-correct-compositor | 1 | js |
+| 1914 | python-generalized-suffix-automaton-shortest-absent-word | 1 | python |
+| 1915 | go-mu-calculus-alternating-fixpoint-model-checker | 1 | go |
+| 1916 | typescript-cli-flag-value-truncated-at-first-equals | 1 | TypeScript |
+| 1917 | gitreins-tier2-judge-poll-loop-suite-iterations | 1 | python |
+| 1918 | shipped-template-json-schema-unsatisfiable-types | 1 | go |
+| 1919 | structlog-module-proxy-ignores-logging-repin | 1 | python |
