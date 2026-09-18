@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1793 problem classes · 1880 verified answers** · exported 2026-09-18 04:00 UTC
+**1821 problem classes · 1909 verified answers** · exported 2026-09-18 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -34,6 +34,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
 | 945 | board-jsonl-duplicate-id-remediation | 2 | go, python |
 | 971 | js-e2e-browser-verification | 2 | go |
+| 1235 | docs-openssl-rawin-silent-failure | 2 | go |
 | 1464 | gitreins-judge-tier2-evaluator-time-cap-incomplete | 2 | go |
 | 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 2 | python, shell |
 | 1549 | python-registry-tier-derivation | 2 | go |
@@ -1155,7 +1156,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1232 | js-vitest-zip-fixture-gitignore | 1 | go |
 | 1233 | gitreins-pre-dispatch-task-wipe | 1 | go |
 | 1234 | bunker-live-verify-wrong-server | 1 | go |
-| 1235 | docs-openssl-rawin-silent-failure | 1 | go |
 | 1236 | git-commit-hang-hilo-post-commit-hook | 1 | go |
 | 1237 | hardcoded-absolute-path-test-fallback | 1 | go |
 | 1238 | static-html-docs-dist-fresh-clone | 1 | go |
@@ -1799,3 +1799,31 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1882 | untracked-repo-root-artifact-despite-gitignore | 1 | python |
 | 1883 | python-rule-engine-allow-provenance-dropped-at-aggregate | 1 | python |
 | 1884 | shipped-example-artifact-rot-boot-test | 1 | go |
+| 1885 | eduos-regression-battery-probe-fixture-gap-teacherless-class | 1 | go |
+| 1886 | python-history-linearizability-minimal-cycle-witness | 1 | python |
+| 1887 | go-ebpf-verifier-pruning-bounded-loop-range | 1 | go |
+| 1888 | hilo-graph-proto-contract-anchor-unqueryable-perf004 | 1 | rust |
+| 1889 | go-test-wallclock-request-budget-premise-flake | 1 | go |
+| 1890 | gitreins-lsp-lane-without-lint-plugins | 1 | python |
+| 1891 | gitreins-version-skew-lsp-lane-vacuous-pass | 1 | python |
+| 1892 | duckbrain-namespace-write-durable-path | 1 | python |
+| 1893 | eduos-qa-audit-board-row-missing-title-breaks-register-sync-validator | 1 | go |
+| 1894 | h3-board-appender-resets-ticks-idle-on-work-tick | 1 | python |
+| 1895 | duckbrain-http-401-auth-json-hash-only-use-token-files | 1 | python |
+| 1896 | python-gitreins-precommit-hook-advisory-exit-zero | 1 | python |
+| 1897 | ci-harness-transport-reset-no-retry | 1 | bash |
+| 1898 | cli-integration-suite-false-red-concurrent-binary-relink | 1 | rust |
+| 1899 | go-test-overlay-cannot-feed-a-source-scanning-test | 1 | go |
+| 1900 | cli-flag-refusal-order-precedes-config-load | 1 | go |
+| 1901 | eduos-rotation-probe-teacherless-class-fixture-gap-teacher-leg-unprovable | 1 | go |
+| 1902 | github-actions-skip-directive-in-commit-message | 1 | shell |
+| 1903 | bash-background-pid-ownership-assertion-holder-equals-launcher | 1 | bash |
+| 1904 | sqlite-cancelled-context-rewrites-committed-write | 1 | go |
+| 1905 | worker-self-sigkill-kill-list-matches-own-argv | 1 | bash |
+| 1906 | jsonl-appender-missing-trailing-newline-merges-records | 1 | python |
+| 1907 | same-page-json-shape-split-camelcase-list-vs-snakecase-write-response | 1 | typescript |
+| 1908 | go-store-mutation-hides-echoed-unfilled-struct | 1 | go |
+| 1909 | go-handrolled-yaml-parser-sequence-continuation-keys-dropped | 1 | go |
+| 1910 | go-json-absent-key-vs-empty-string-silent-truncation | 1 | go |
+| 1911 | documented-example-fails-sdk-runtime-validation | 1 | typescript |
+| 1912 | optional-positional-arg-slot-shift-non-hermetic-test | 1 | python |

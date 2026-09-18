@@ -1,0 +1,28 @@
+{
+  "class_id": 1904,
+  "title": "sqlite-cancelled-context-rewrites-committed-write",
+  "description": "sqlite-cancelled-context-rewrites-committed-write",
+  "created_at": "2026-09-18 08:17:50",
+  "answers": [
+    {
+      "answer_id": 2095,
+      "language": "go",
+      "environment": "go 1.26 + modernc.org/sqlite v1.58.0 (pure-Go driver), any code that writes through database/sql under a caller context that can be cancelled mid-statement",
+      "version": "hermes-dagger 1d13d45",
+      "solution": "Done. Solution written to `/home/kara/sqlite-cancelled-context-write.md` and verified against Go 1.26.0 + `modernc.org/sqlite v1.58.0`.\n\n## What the diagnosis found\n\n**Root cause is confirmed in the driver source, not inferred:**\n\n- `modernc.org/sqlite@v1.58.0/stmt.go` installs `interruptOnDone` and a deferred check that does `r, err = nil, ctx.Err()` whenever `done != 0` (`stmt.go:109-113` for `exec`, `stmt.go:299-305` for `query`).\n- `interruptOnDone` (`sqlite.go:77-116`) sets `done=1` from a goroutine when the context fires. If that lands after `sqlite3_step` already committed, the committed write is reported as `context canceled`.\n\n**The engine anti-pattern then makes it fatal:** the claim write runs under the caller context, while terminal cleanup is deferred inside the inner `run()` that the error path never calls. The row stays `running`, so retries get `already running`.\n\n## The fix\n\nOn **any** claim/ownership write error, reconcile before returning: re-read status under `context.WithoutCancel(ctx)` + timeout, and conditionally terminate **only if still owned by this attempt's token**. Move the normal cleanup defer into the function that acquired the claim.\n\n## Verification actually run\n\n- `TestCommittedWriteReportedAsError` — deterministic reproduction: a multi-statement `ExecContext` commits statement 1, gets interrupted during a slow recursive CTE, returns `context canceled`, and the row is still present.\n- `TestReconcileRepairsCommittedClaim` — fault injector performs the real `UPDATE`, returns `context.Canceled`; after the fix the row is `failed`, not `running`.\n- `TestFalsificationControl` — with the single reconcile call disabled, the same injection leaves `status='running'` (proves test sensitivity).\n- `TestReconcileDoesNotClobberOtherOwner` — proves the owner guard prevents stomping a newer claim.\n- `go test -race -count=1 ./...` passes.\n\nThe markdown includes the full `store.go`, `engine.go`, and all tests so it is self-contained.\n",
+      "evidence": "# Evidence\n- Problem class: sqlite-cancelled-context-rewrites-committed-write\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-18T08:17:50.137Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A write can COMMIT and still be reported as an error. modernc.org/sqlite installs interruptOnDone for statements/transactions and its deferred check rewrites the result to ctx.Err() once the interrupt fired: the statement completed, but the caller sees 'context canceled'. Observed on a real engine: Execute() claims a run slot by writing the row as 'running' under the CALLER's context (the one that dies on a client disconnect / node deadline / drain); the row landed as 'running' while Execute returned 'save run: context canceled', so the terminal-status cleanup — which was deferred INSIDE the inner run() function and therefore never executed on that path — never repaired it. Result: the slot stayed busy forever and every later retry of the same run was refused with 'run <id> is already running' although nothing was executing. Reproduction signature: 2 failures in 121 -race repetitions under load, 0 in 52 off-peak; both read '<write> FAILED err=context canceled' followed by a retry that sees status='running', with NO cleanup line at all. Fix shape: on ANY write error in an ownership/claim path, reconcile under a FRESH bounded context (re-read + conditional terminate) before returning the error; never rely on a defer that lives inside a function the error path never reaches. Falsification control: removing the single reconcile call makes a deterministic fault-injection test fail ('status stays running after a write that reported failure').",
+        "environment": "go 1.26 + modernc.org/sqlite v1.58.0 (pure-Go driver), any code that writes through database/sql under a caller context that can be cancelled mid-statement",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "sqlite-cancelled-context-rewrites-committed-write",
+        "provider": "openrouter",
+        "solved_at": "2026-09-18T08:17:50.137Z",
+        "version": "hermes-dagger 1d13d45"
+      },
+      "status": "verified",
+      "created_at": "2026-09-18 08:17:50"
+    }
+  ]
+}

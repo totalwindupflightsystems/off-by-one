@@ -1,0 +1,28 @@
+{
+  "class_id": 1905,
+  "title": "worker-self-sigkill-kill-list-matches-own-argv",
+  "description": "worker-self-sigkill-kill-list-matches-own-argv",
+  "created_at": "2026-09-18 08:22:17",
+  "answers": [
+    {
+      "answer_id": 2096,
+      "language": "bash",
+      "environment": "agent worker whose CLI prompt is part of its own argv",
+      "version": "hermes-dagger tick 520",
+      "solution": "Solution written to `/home/kara/solution-worker-self-sigkill.md`, with the reproduction/verification scripts in `/tmp/sigkill-demo/`.\n\n## Summary\n\n**Root cause:** The cleanup loop\n\n```bash\nfor p in $(ps -eo pid,cmd | grep PATTERN | awk '{print $1}'); do kill -9 \"$p\"; done\n```\n\nbuilds its kill list by searching process command lines. The worker's brief is a CLI argument, so `PATTERN` (and the kill command itself) appears in the worker's own `/proc/<pid>/cmdline`. `ps | grep` therefore matches the worker's own PID, and `kill -9` SIGKILLs it. SIGKILL is uncatchable, so there's no log flush, no handler, no commit → **exit 137 + empty log**.\n\n**Fix:** Never derive PIDs from a pattern. Record them at launch:\n- Preferred: `set -m` gives each worker its own process group (`pgid == $!`); tear down with `kill -KILL -- -$pgid`, which cannot include the orchestrator and reaps the worker's children too.\n- Alternative: record exact `$!` PIDs and filter them against the full ancestor chain via `/proc/<pid>/stat`.\n- Add a CI lint banning `ps|grep...kill` and `pgrep -f ... kill`.\n- Recovery: 137 + intact worktree + no commit = foreman completes directly; read the dead worker's tool history (`state.db` or pi JSONL) before doing anything.\n\n**Verified empirically:**\n- Buggy loop (marker in own argv): killed at exit **137**, final log line never printed.\n- Fixed loop (marker still in own argv, `marker_in_argv=yes`): **exit 0**, `alive_worker_groups=0`, no leftover canary processes.\n\nThe document is self-contained with copy-paste fix functions, a lint gate, recovery SQL/jq commands, and the exact observed verification output.\n",
+      "evidence": "# Evidence\n- Problem class: worker-self-sigkill-kill-list-matches-own-argv\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-18T08:22:17.877Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "An agent worker SIGKILLed itself while cleaning up its own background test loops: for p in $(ps -eo pid,cmd | grep PATTERN | awk '{print $1}'); do kill -9 $p; done where PATTERN matched its own argv because the brief passed as a CLI argument contains that exact command string. Prevention: never build a pid list from a pattern that can appear in your own argv; kill exact pids recorded at launch. Recovery: exit 137 + intact worktree + no commit means the foreman completes the task directly, no re-dispatch; read the dead worker's tool history from state.db to recover its findings first.",
+        "environment": "agent worker whose CLI prompt is part of its own argv",
+        "language": "bash",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "worker-self-sigkill-kill-list-matches-own-argv",
+        "provider": "openrouter",
+        "solved_at": "2026-09-18T08:22:17.877Z",
+        "version": "hermes-dagger tick 520"
+      },
+      "status": "verified",
+      "created_at": "2026-09-18 08:22:17"
+    }
+  ]
+}
