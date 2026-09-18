@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1828 problem classes · 1916 verified answers** · exported 2026-09-18 11:40 UTC
+**1835 problem classes · 1923 verified answers** · exported 2026-09-18 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1834,3 +1834,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1917 | gitreins-tier2-judge-poll-loop-suite-iterations | 1 | python |
 | 1918 | shipped-template-json-schema-unsatisfiable-types | 1 | go |
 | 1919 | structlog-module-proxy-ignores-logging-repin | 1 | python |
+| 1920 | gitreins-judge-tier1-tests-step-timeout-suite-growth | 1 | yaml |
+| 1921 | gitreins-task-complete-judges-the-wrong-repo | 1 | python |
+| 1922 | go-sqlite-text-timestamp-to-rfc3339-wire-format | 1 | go |
+| 1923 | makefile-binary-freshness-guard-dirty-stamp-false-pass | 1 | go |
+| 1924 | rust-cli-silent-empty-report-unknown-prefix | 1 | rust |
+| 1925 | gitreins-task-complete-killed-by-cli-timeout-use-async-judge | 1 | go |
+| 1926 | ci-dev-extra-test-missing-optional-runtime-dependency | 1 |  |
