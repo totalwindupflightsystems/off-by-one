@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1765 problem classes · 1851 verified answers** · exported 2026-09-17 22:00 UTC
+**1793 problem classes · 1880 verified answers** · exported 2026-09-18 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -38,6 +38,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 2 | python, shell |
 | 1549 | python-registry-tier-derivation | 2 | go |
 | 1648 | deepseek-v4-flash-alias-still-serves | 2 | shell |
+| 1691 | go-cli-release-published-binary-drift | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -1605,7 +1606,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1688 | telegram-forum-dead-thread-id-masked-by-no-thread-retry | 1 | go |
 | 1689 | typescript-http-pagination-offset-as-post-fetch-slice-empty-page | 1 | typescript |
 | 1690 | qa-board-row-stale-premise-live-recheck | 1 | go |
-| 1691 | go-cli-release-published-binary-drift | 1 | go |
 | 1692 | pip-install-editable-dev-extra-pep735-not-installed | 1 | python |
 | 1693 | dagger-tool-mediator-secret-echo-invalid-http-header | 1 | go+typescript |
 | 1694 | sqlite-secret-scrub-ft5-shadow-tables-keep-token-in-bytes | 1 | python3-sqlite3 |
@@ -1771,3 +1771,31 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1854 | bash-gate-selftest-asserts-repo-state-nonhermetic | 1 | bash |
 | 1855 | gitignore-bare-pattern-shadows-source-directory | 1 | git |
 | 1856 | fail-loud-framing-silently-skips-blank-lines | 1 | go |
+| 1857 | edmonds-blossom-maximum-matching | 1 | python |
+| 1858 | tar-extract-symlink-hardlink-escape-guard | 1 | go |
+| 1859 | polygon-boolean-clipper-degeneracy | 1 | javascript |
+| 1860 | go-unit-test-hermetic-ambient-provider-lane | 1 | go |
+| 1861 | gateway-model-list-envelope-mismatch | 1 | go |
+| 1862 | python-cli-relative-child-path-vs-spawn-cwd | 1 | python |
+| 1863 | eduos-gitreins-criteria-closed-row-close-before-judge | 1 | go |
+| 1864 | go-fsync-durability-created-directory-seam-probe | 1 | go |
+| 1865 | go-subprocess-cancel-blocked-by-pipe-holding-descendant | 1 | go |
+| 1866 | bunker-cli-error-actionability-and-fail-fast-validation | 1 | go |
+| 1867 | local-cli-proxy-as-openai-provider | 1 | python |
+| 1868 | mediator-authored-tool-output-looks-like-host-truth | 1 | go+typescript |
+| 1869 | gemma4-fused-audio-thinking-budget-empty-transcription | 1 | go |
+| 1870 | go-struct-digest-must-exclude-volatile-and-self | 1 | go |
+| 1871 | llm-json-schema-array-from-delimited-string | 1 | python |
+| 1872 | health-probe-max-tokens-1-false-token-limit-warning | 1 | python |
+| 1873 | git-tracked-generated-cache-half-tracked | 1 | go |
+| 1874 | go-modernc-sqlite-readonly-dsn-sidecars | 1 | go |
+| 1875 | json-list-envelope-named-key-precedence | 1 | go |
+| 1876 | bash-test-gate-false-error-from-test-stdout | 1 | bash |
+| 1877 | systemd-runtime-dir-ownership-race-converge | 1 | go |
+| 1878 | gitreins-judge-criterion-asserts-foreman-owned-state | 1 | rust |
+| 1879 | bash-cmd-substitution-fallback-appends-multiline-value | 1 | bash |
+| 1880 | gateway-drain-503-tick-failure | 1 | go |
+| 1881 | gitreins-tier1-degraded-pass-empty-index-overall-fail | 1 | python |
+| 1882 | untracked-repo-root-artifact-despite-gitignore | 1 | python |
+| 1883 | python-rule-engine-allow-provenance-dropped-at-aggregate | 1 | python |
+| 1884 | shipped-example-artifact-rot-boot-test | 1 | go |

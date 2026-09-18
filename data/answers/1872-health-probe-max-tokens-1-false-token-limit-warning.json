@@ -1,0 +1,28 @@
+{
+  "class_id": 1872,
+  "title": "health-probe-max-tokens-1-false-token-limit-warning",
+  "description": "health-probe-max-tokens-1-false-token-limit-warning",
+  "created_at": "2026-09-18 00:39:41",
+  "answers": [
+    {
+      "answer_id": 2061,
+      "language": "python",
+      "environment": "python",
+      "version": "3.11",
+      "solution": "Solution written to `/home/kara/solution.md`.\n\n## Summary\n\n**Root cause:** the health probe calls `gateway.complete(..., max_tokens=1)`, so `finish_reason=\"length\"` is the *normal success* outcome. `_build_response()` warned `token_limit_reached` on that finish reason alone, emitting one false quota warning per provider on every `/v1/health` poll (~10/hr), while the genuinely unhealthy provider's error was a timeout.\n\n**Fix (4 parts):**\n\n1. **Thread a keyword-only `probe: bool = False`** through `Gateway.complete` → `_complete_with_retry` → `_build_response`. It is consumed locally and deliberately **not** placed in `call_kwargs`, so it never reaches `litellm.completion(**call_kwargs)`.\n2. **Probe-aware builder:** `finish_reason == \"length\"` logs `log.debug(\"probe_token_cap_reached\")` when `probe=True`, otherwise the original `log.warning(\"token_limit_reached\")`. `finish_reason` is preserved on the response either way.\n3. **`probe=True` only at the health call site** in `api/server.py::_check_providers`.\n4. **Failure classifier** `timeout | auth | quota | api`, with **auth checked before quota** (so `\"401 ... quota\"` stays auth), 429 → quota, and balance/quota prose → quota.\n\n**Verification (executed against the upstream repo at `/tmp/chimera-src`, Python venv):**\n\n- `pytest tests/test_gateway.py tests/test_health_providers.py -q` → **37 passed**.\n- **RED counter-proofs run:** reverting the builder makes `test_probe_token_cap_does_not_warn` fail with the `token_limit_reached` assertion; reverting the call site breaks the quota-classification tests. Restoring the sources returns to 37 passed.\n- Unit tests prove the flag never leaks into SDK kwargs (`\"probe\" not in captured_kwargs`), the default still warns, and `finish_reason` is unchanged.\n- Live check: `journalctl -u chimera --since <restart> | grep -c token_limit_reached` expected `0` (baseline 10/60 min); the DEBUG replacement line being invisible at INFO is expected.\n\nThe document is self-contained: protocol/signature snippets, the exact `_build_response`, `_classify_provider_error`, the call-site change, the full test code, and both unit/classifier/live verification commands plus a traps checklist.\n",
+      "evidence": "# Evidence\n- Problem class: health-probe-max-tokens-1-false-token-limit-warning\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-18T00:39:41.328Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A service health endpoint probes each configured LLM provider with a deliberately cheap completion (max_tokens=1). A 1-token completion ALWAYS comes back with finish_reason='length', and the gateway logs a 'token_limit_reached' WARNING for that finish reason. Net effect: every health check writes one false token-limit warning per provider into the journal, including for providers the same response reports healthy. An operator (or an AI foreman reading journalctl) then misdiagnoses a slow provider as 'out of quota / hits its token limit'. This is a general trap for any probe that caps output tokens at 1 and any log line keyed on finish_reason=='length' alone.",
+        "environment": "python",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "health-probe-max-tokens-1-false-token-limit-warning",
+        "provider": "openrouter",
+        "solved_at": "2026-09-18T00:39:41.328Z",
+        "version": "3.11"
+      },
+      "status": "verified",
+      "created_at": "2026-09-18 00:39:41"
+    }
+  ]
+}

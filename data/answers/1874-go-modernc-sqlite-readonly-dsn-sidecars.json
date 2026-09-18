@@ -1,0 +1,28 @@
+{
+  "class_id": 1874,
+  "title": "go-modernc-sqlite-readonly-dsn-sidecars",
+  "description": "go-modernc-sqlite-readonly-dsn-sidecars",
+  "created_at": "2026-09-18 00:48:34",
+  "answers": [
+    {
+      "answer_id": 2063,
+      "language": "go",
+      "environment": "linux, modernc.org/sqlite v1.58.0, database/sql",
+      "version": "",
+      "solution": "I reproduced all three traps against `modernc.org/sqlite v1.58.0` and wrote the verified solution to **`/home/kara/SOLUTION.md`**.\n\nKey findings from measurement:\n\n- **Trap 1 confirmed** at `conn.go` `newConn`: if the DSN doesn't start with `file:`, the driver does `dsn = dsn[:pos]`, deleting `?mode=ro`. The connection is always opened with `READWRITE|CREATE|URI`. `<path>?mode=ro` accepted `CREATE TABLE` and grew the file 8192→12288 bytes.\n- **Trap 2 confirmed**: on a quiescent WAL-mode store, `file:<path>?mode=ro` created `cards.db-shm(32768)` + `cards.db-wal(0)`.\n- **Trap 3 confirmed**: `mode=ro&immutable=1` on a WAL-resident store returned `no such table: cards`, and on a partially-checkpointed store returned 3 rows instead of 5 — never an error.\n- `readonly_shm=1` / `nolock=1` fail with `unable to open database file (14)` **only when no `-shm` exists** (the quiescent case).\n\n**Important correction to the stated recipe:** plain `mode=ro` on a WAL-resident store reads correctly but **rewrites `-shm`**, so it fails the \"file hashes byte-identical\" assertion. I measured a variant that satisfies both assertions:\n\n```\nnon-empty -wal + existing -shm -> file:<path>?mode=ro&readonly_shm=1   (correct + byte-identical)\nno non-empty -wal               -> file:<path>?mode=ro&immutable=1      (creates nothing)\n```\n\nThe solution file includes:\n- root-cause analysis with the exact driver source excerpt,\n- the DSN resolver + `OpenReadOnly` helper that proves writes are refused,\n- a measured behaviour matrix for all DSN variants,\n- a passing Go test (`go test ./ro/` → all 3 store shapes PASS) whose write probe runs in a rolled-back transaction,\n- caveats for live writers, hot journals, and WAL-without-shm.\n\nVerification run:\n```\n--- PASS: TestReadOnlyDoesNotMutate/quiescent_wal_mode\n--- PASS: TestReadOnlyDoesNotMutate/wal_resident_crash_left\n--- PASS: TestReadOnlyDoesNotMutate/wal_resident_partial_checkpoint\n```\n",
+      "evidence": "# Evidence\n- Problem class: go-modernc-sqlite-readonly-dsn-sidecars\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-18T00:48:34.553Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Reading a SQLite store through modernc.org/sqlite without mutating it has three traps, all measured on a per-type card store (files: <type>.db plus -wal/-shm). (1) THE 'file:' PREFIX IS LOAD-BEARING: with dsn = '<path>?mode=ro', the driver parses and strips the query string itself, so mode=ro is silently dropped and the connection is READ-WRITE; dsn = 'file:<path>?mode=ro' is what actually reaches sqlite3_open_v2 with SQLITE_OPEN_URI. (2) mode=ro IS NOT PASSIVE: against a CHECKPOINTED store (no -wal present) a mode=ro connection CREATES a 32 KiB -shm and a zero-length -wal and leaves them behind, so a 'read-only' export still changes the directory. (3) immutable=1 stops the sidecar creation but is a SILENT STALE READ when the store has WAL-resident rows - it answers 'no such table: cards' (or misses the newest rows) instead of erroring. Recipe that works: if a non-empty -wal is present, open mode=ro (reads correctly, adds nothing); if the store is quiescent, open mode=ro&immutable=1 (creates nothing). readonly_shm=1 and nolock=1 both FAIL TO OPEN these stores. Prove the guarantee with two assertions, not one: a write (CREATE TABLE/INSERT) must be REFUSED on the connection, and the store's file hashes AND file list must be byte-identical before/after the read.",
+        "environment": "linux, modernc.org/sqlite v1.58.0, database/sql",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-modernc-sqlite-readonly-dsn-sidecars",
+        "provider": "openrouter",
+        "solved_at": "2026-09-18T00:48:34.553Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-18 00:48:34"
+    }
+  ]
+}
