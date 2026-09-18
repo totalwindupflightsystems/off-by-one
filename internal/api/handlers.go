@@ -133,8 +133,13 @@ type queueEntryWire struct {
 	Stage         string `json:"stage"`
 	Position      int    `json:"position"`
 	EstimatedTime string `json:"estimated_time"`
-	StartedAt     string `json:"started_at,omitempty"`
-	CompletedAt   string `json:"completed_at,omitempty"`
+	// StartedAt/CompletedAt are RFC 3339 timestamps, or "" while the
+	// entry has not been claimed / has not finished. They deliberately
+	// carry no omitempty: the documented pending-entry example shows
+	// both keys present and empty (OB-GAP-068), and a missing key is
+	// indistinguishable from a server that forgot to emit it.
+	StartedAt   string `json:"started_at"`
+	CompletedAt string `json:"completed_at"`
 	// FailureReason is why the solve failed. omitempty keeps it absent
 	// for every non-failed entry, so a submitter polling the queue can
 	// tell "still queued" from "failed, here's why" (DF-OFF-BY-ONE-4).
@@ -734,9 +739,12 @@ func answerToWire(a *graph.AnswerNode, problemClass string) *answerWire {
 }
 
 // entryToWire converts a queue.Entry into the API's JSON shape.
-// StartedAt/CompletedAt are sql.NullString in the store; we extract
-// the inner string when valid. FailureReason is empty unless the entry
-// failed, and its omitempty tag keeps the key out of the response
+//
+// StartedAt/CompletedAt are sql.NullString in the store: a NULL column
+// (nothing claimed the entry yet / it has not finished) maps to "", and
+// a set column is converted from the store's SQLite TEXT layout to
+// RFC 3339 by formatStoreTimestamp. FailureReason is empty unless the
+// entry failed, and its omitempty tag keeps the key out of the response
 // entirely for pending/complete entries.
 func entryToWire(e *ingest.Entry) queueEntryWire {
 	w := queueEntryWire{
@@ -747,10 +755,10 @@ func entryToWire(e *ingest.Entry) queueEntryWire {
 		FailureReason: e.FailureReason,
 	}
 	if e.StartedAt.Valid {
-		w.StartedAt = e.StartedAt.String
+		w.StartedAt = formatStoreTimestamp(e.StartedAt.String)
 	}
 	if e.CompletedAt.Valid {
-		w.CompletedAt = e.CompletedAt.String
+		w.CompletedAt = formatStoreTimestamp(e.CompletedAt.String)
 	}
 	return w
 }
@@ -1000,6 +1008,42 @@ func formatTimeRFC3339(t time.Time) string {
 		return ""
 	}
 	return t.UTC().Format(time.RFC3339)
+}
+
+// storeTimestampLayout is the layout SQLite's CURRENT_TIMESTAMP (and
+// datetime('now')) produces — UTC, space separator, no offset. The queue
+// store keeps started_at/completed_at as TEXT in exactly this layout, so
+// a value read straight out of the column is not RFC 3339.
+const storeTimestampLayout = "2006-01-02 15:04:05"
+
+// formatStoreTimestamp converts a timestamp read from a SQLite TEXT
+// column into an RFC 3339 string for the wire (OB-GAP-068).
+//
+// Every timestamp the API documents is RFC 3339 (docs/api-reference.md),
+// but the queue store holds started_at/completed_at in
+// storeTimestampLayout, so copying the column into the response verbatim
+// hands clients a string that time.Parse(time.RFC3339, ...) and
+// new Date(...) both reject.
+//
+//   - "" stays "" — a pending entry has no timing yet, which is the
+//     documented shape ("started_at": "").
+//   - an already-RFC3339 value is returned unchanged, so the helper is
+//     idempotent and safe to apply to a value that was converted
+//     upstream.
+//   - any layout we do not recognise is returned as-is rather than
+//     guessed at: an unknown value a client can still read is strictly
+//     better than dropping it or inventing a time.
+func formatStoreTimestamp(s string) string {
+	if s == "" {
+		return ""
+	}
+	if _, err := time.Parse(time.RFC3339, s); err == nil {
+		return s
+	}
+	if t, err := time.Parse(storeTimestampLayout, s); err == nil {
+		return t.UTC().Format(time.RFC3339)
+	}
+	return s
 }
 
 // defaultPerJobEstimate is the per-job cost used when the lab has no

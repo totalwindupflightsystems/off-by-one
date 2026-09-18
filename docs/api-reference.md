@@ -374,6 +374,10 @@ List all queued submissions. Optionally filter by `status`.
 
 `status` is one of `pending`, `in_progress`, `complete`, `failed`. `stage` may be `queued`, `sandbox_prepare`, `sandbox_solve`, `done`, or `failed`.
 
+**`started_at` and `completed_at` semantics**
+
+Both are RFC 3339 UTC timestamps (e.g. `2026-08-15T02:13:43Z`) and both keys are **always present**. `started_at` is set when the entry is dequeued and `completed_at` when the solve finishes or fails; a `pending` entry has not been claimed yet, so it returns `""` for both — the shape the example above shows.
+
 **`position` and `estimated_time` semantics**
 
 | Field | `GET /api/v1/queue` (list) | `GET /api/v1/queue/{submission_id}` |
@@ -405,7 +409,7 @@ Get the status of a single submission.
 
 **Response `200 OK`**
 
-Same `QueueEntry` shape as the list endpoint, and the same `position` / `estimated_time` semantics documented there — `position` is the entry's 1-based place in the pending queue (`0` when the entry is not waiting) and `estimated_time` is empty once the entry is `complete` or `failed`.
+Same `QueueEntry` shape as the list endpoint, and the same `position` / `estimated_time` semantics documented there — `position` is the entry's 1-based place in the pending queue (`0` when the entry is not waiting) and `estimated_time` is empty once the entry is `complete` or `failed` — plus the same `started_at` / `completed_at` rule: RFC 3339, and `""` while the entry is `pending`.
 
 **Status codes:** `200`, `404` (submission not found), `500`.
 

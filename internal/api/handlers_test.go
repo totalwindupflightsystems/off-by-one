@@ -1017,6 +1017,172 @@ func TestGetQueueStatus(t *testing.T) {
 	}
 }
 
+// queueEntryObject decodes a queue response body — either the list shape
+// ({"entries":[...],"total":n}) or the single-entry shape — and returns
+// the raw JSON object for the first entry. Tests assert on this rather
+// than on the typed struct so a tag typo or a dropped key cannot hide
+// behind the decoder.
+func queueEntryObject(t *testing.T, label, body string) map[string]any {
+	t.Helper()
+	var raw map[string]any
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		t.Fatalf("%s: decode body: %v (body = %s)", label, err, body)
+	}
+	entries, listed := raw["entries"]
+	if !listed {
+		return raw
+	}
+	list, ok := entries.([]any)
+	if !ok || len(list) == 0 {
+		t.Fatalf("%s: list body carries no entries: %s", label, body)
+	}
+	obj, ok := list[0].(map[string]any)
+	if !ok {
+		t.Fatalf("%s: first entry is not a JSON object: %s", label, body)
+	}
+	return obj
+}
+
+// TestFormatStoreTimestamp pins the store→wire timestamp conversion: the
+// queue columns hold SQLite TEXT ("2006-01-02 15:04:05", UTC, no offset)
+// while every documented API timestamp is RFC 3339 (OB-GAP-068). Empty
+// stays empty, an already-RFC3339 value passes through, and an
+// unrecognised value is returned unchanged rather than dropped.
+func TestFormatStoreTimestamp(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"empty stays empty", "", ""},
+		{"sqlite layout becomes RFC3339", "2026-08-15 02:13:43", "2026-08-15T02:13:43Z"},
+		{"sqlite layout at midnight", "2026-01-02 00:00:00", "2026-01-02T00:00:00Z"},
+		{"already RFC3339 passes through", "2026-09-04T15:35:26Z", "2026-09-04T15:35:26Z"},
+		{"RFC3339 with offset passes through", "2026-09-04T15:35:26-05:00", "2026-09-04T15:35:26-05:00"},
+		{"RFC3339Nano passes through", "2026-09-04T15:35:26.123456789Z", "2026-09-04T15:35:26.123456789Z"},
+		{"date-only layout is returned unchanged", "2026-08-15", "2026-08-15"},
+		{"free text is returned unchanged", "not-a-timestamp", "not-a-timestamp"},
+	}
+	for _, tc := range cases {
+		if got := formatStoreTimestamp(tc.in); got != tc.want {
+			t.Errorf("%s: formatStoreTimestamp(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
+	}
+
+	// Idempotent: re-running the helper on its own output is a no-op, so
+	// it stays safe if a caller converts an already-converted value.
+	converted := formatStoreTimestamp("2026-08-15 02:13:43")
+	if got := formatStoreTimestamp(converted); got != converted {
+		t.Errorf("formatStoreTimestamp is not idempotent: %q -> %q", converted, got)
+	}
+}
+
+// TestQueueTimestamps_RFC3339 is the OB-GAP-068 regression test: the
+// queue endpoints must return started_at/completed_at as RFC 3339, never
+// the raw SQLite TEXT the columns hold, and a pending entry must carry
+// both keys as "" exactly as docs/api-reference.md documents.
+//
+// The fixture inserts the raw store layout directly, the way
+// seedObservedSolveTime and the store's own CURRENT_TIMESTAMP writes do.
+// Both endpoints go through entryToWire, so both are exercised. Every
+// assertion reads the RAW response body — a tag typo or a missing key
+// must not be able to pass behind the decoder.
+func TestQueueTimestamps_RFC3339(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	const completeID = "sub_ts_complete"
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status, stage, started_at, completed_at)
+		VALUES (?, 'cls-ts', 'complete', 'done',
+			'2026-08-15 02:13:43', '2026-08-15 02:14:16')`, completeID); err != nil {
+		t.Fatalf("insert completed entry: %v", err)
+	}
+	const pendingID = "sub_ts_pending"
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status, stage) VALUES (?, 'cls-ts', 'pending', 'queued')`,
+		pendingID); err != nil {
+		t.Fatalf("insert pending entry: %v", err)
+	}
+
+	// A completed entry: both keys present, RFC 3339, both parseable.
+	for _, tc := range []struct{ name, path string }{
+		{"list", "/api/v1/queue?status=complete&limit=1"},
+		{"detail", "/api/v1/queue/" + completeID},
+	} {
+		rr := do(t, s, "GET", tc.path, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, body = %s", tc.name, rr.Code, rr.Body.String())
+		}
+		body := rr.Body.String()
+		// The exact wire form, asserted on the raw bytes.
+		for _, want := range []string{
+			`"started_at":"2026-08-15T02:13:43Z"`,
+			`"completed_at":"2026-08-15T02:14:16Z"`,
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: raw body missing %s: %s", tc.name, want, body)
+			}
+		}
+		obj := queueEntryObject(t, tc.name, body)
+		if obj["submission_id"] != completeID {
+			t.Errorf("%s: submission_id = %v, want %q", tc.name, obj["submission_id"], completeID)
+		}
+		for _, field := range []string{"started_at", "completed_at"} {
+			got, present := obj[field]
+			if !present {
+				t.Errorf("%s: %q missing from the response", tc.name, field)
+				continue
+			}
+			str, ok := got.(string)
+			if !ok {
+				t.Errorf("%s: %q = %v (%T), want a JSON string", tc.name, field, got, got)
+				continue
+			}
+			if str == "" {
+				t.Errorf("%s: %q is empty for a completed entry", tc.name, field)
+			}
+			if _, err := time.Parse(time.RFC3339, str); err != nil {
+				t.Errorf("%s: %q = %q does not parse as RFC3339: %v", tc.name, field, str, err)
+			}
+			if strings.Contains(str, " ") {
+				t.Errorf("%s: %q = %q still carries the raw store layout (space separator)", tc.name, field, str)
+			}
+		}
+	}
+
+	// A pending entry has no timing yet: both keys present and empty,
+	// matching the documented pending-entry example.
+	for _, tc := range []struct{ name, path string }{
+		{"pending detail", "/api/v1/queue/" + pendingID},
+		{"pending list", "/api/v1/queue?status=pending&limit=1"},
+	} {
+		rr := do(t, s, "GET", tc.path, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, body = %s", tc.name, rr.Code, rr.Body.String())
+		}
+		body := rr.Body.String()
+		for _, want := range []string{`"started_at":""`, `"completed_at":""`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: raw body missing %s (omitempty defeats the documented empty-string shape): %s",
+					tc.name, want, body)
+			}
+		}
+		obj := queueEntryObject(t, tc.name, body)
+		if obj["submission_id"] != pendingID {
+			t.Errorf("%s: submission_id = %v, want %q", tc.name, obj["submission_id"], pendingID)
+		}
+		for _, field := range []string{"started_at", "completed_at"} {
+			got, present := obj[field]
+			if !present {
+				t.Errorf("%s: %q missing from a pending entry, want \"\"", tc.name, field)
+				continue
+			}
+			if got != "" {
+				t.Errorf("%s: %q = %v, want \"\"", tc.name, field, got)
+			}
+		}
+	}
+}
+
 // TestGetQueueStatus_FailureReason guards DF-OFF-BY-ONE-4 at the API
 // layer: a failed solve must tell the submitter WHY over
 // GET /api/v1/queue/{submission_id}, not just status='failed'. Pending

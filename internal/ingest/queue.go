@@ -104,8 +104,11 @@ type Entry struct {
 	// CreatedAt/StartedAt/CompletedAt are stored as strings because
 	// modernc.org/sqlite returns TEXT timestamps as strings — scanning
 	// directly into time.Time fails with "unsupported Scan, storing
-	// driver.Value type string into type *time.Time". Callers that
-	// need a real time.Time should call parseSQLiteTimestamp.
+	// driver.Value type string into type *time.Time". Callers that need
+	// a real time.Time must parse these SQLite-layout strings
+	// themselves ("2006-01-02 15:04:05", UTC); the API layer converts
+	// them to RFC 3339 for the wire via formatStoreTimestamp
+	// (internal/api, OB-GAP-068).
 	// CreatedAt is a non-nullable string; StartedAt/CompletedAt are
 	// nullable strings because modernc.org/sqlite returns TEXT NULLs as
 	// nil (not empty string) and string columns cannot scan nil. Use
