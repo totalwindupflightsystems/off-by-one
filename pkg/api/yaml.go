@@ -40,7 +40,10 @@ func jsonUnmarshal(data []byte, target any) error {
 // Supported syntax:
 //   - block-style mappings (key: value, with indented continuations)
 //   - block-style sequences (lines beginning with `- `)
+//   - flow-style sequences and mappings ([a, b], {a: b}, and nested forms
+//     thereof) on a single line
 //   - quoted strings ('single' and "double")
+//   - quoted mapping keys ('200': and "200": are unquoted on parse)
 //   - bare strings (anything that doesn't look like another scalar)
 //   - integers and floats
 //   - booleans (true/false/yes/no)
@@ -49,10 +52,12 @@ func jsonUnmarshal(data []byte, target any) error {
 //
 // Unsupported (will fail loudly — that's fine, our spec uses none of these):
 //   - YAML anchors and aliases (*foo, &bar)
-//   - flow-style mappings/sequences ({a: b}, [1, 2])
+//   - multi-line flow collections (a flow collection must open and close on
+//     one line; an unclosed [ or { is kept as a plain string)
 //   - multi-document streams (--- ... ---)
 //   - merge keys (<<)
 //   - tags (!foo)
+//   - block-scalar chomping/indentation indicators (|-, >+, |2)
 //
 // If a future spec needs any of these, swap in sigs.k8s.io/yaml.
 func decodeYAMLInto(data []byte, target any) error {
@@ -219,21 +224,17 @@ func parseYAMLMapping(lines []yamlLine, idx *int, baseIndent int) (*yamlNode, er
 		line := lines[*idx]
 		// Consume this line.
 		(*idx)++
-		text := strings.TrimLeft(line.text, " \t")
-		// Find the key/value separator. Keys are unquoted, then ': ' or
-		// end-of-line. Quoted keys aren't supported in our subset.
-		colon := -1
-		for i, r := range text {
-			if r == ':' && (i+1 == len(text) || text[i+1] == ' ' || text[i+1] == '\t') {
-				colon = i
-				break
-			}
-		}
+		text := strings.TrimLeft(line.text, " 	")
+		// Find the key/value separator: an unquoted ':' followed by
+		// whitespace or end-of-line. The scan tracks quote state so a
+		// colon INSIDE a quoted key is never chosen as the separator.
+		colon := findMappingSeparator(text)
 		if colon < 0 {
 			return nil, fmt.Errorf("line %d: expected ':' in mapping entry: %q", line.lineNo, text)
 		}
-		key := text[:colon]
-		key = strings.TrimSpace(key)
+		// Keys may be bare or quoted; quoted keys are unquoted here so the
+		// emitted JSON carries `200`, not `'200'`.
+		key := unquoteYAMLKey(strings.TrimSpace(text[:colon]))
 		if key == "" {
 			return nil, fmt.Errorf("line %d: empty key in mapping", line.lineNo)
 		}
@@ -457,6 +458,12 @@ func parseYAMLScalar(text string, lineNo int) *yamlNode {
 			return &yamlNode{kind: ykScalar, value: text[1 : len(text)-1], line: lineNo}
 		}
 	}
+	// Flow-style collections: a balanced "[a, b]" decodes to a sequence and a
+	// balanced "{a: b}" to a mapping. This runs before the number/bare-string
+	// fallbacks so a flow sequence is never emitted as a single string.
+	if flow, ok := parseYAMLFlow(text, lineNo); ok {
+		return flow
+	}
 	// Numbers.
 	if i, err := strconv.ParseInt(text, 10, 64); err == nil {
 		return &yamlNode{kind: ykScalar, value: i, line: lineNo}
@@ -466,6 +473,265 @@ func parseYAMLScalar(text string, lineNo int) *yamlNode {
 	}
 	// Bare string.
 	return &yamlNode{kind: ykScalar, value: text, line: lineNo}
+}
+
+// findMappingSeparator returns the byte index of the ':' that separates a
+// block-mapping key from its value, or -1 when the line has no separator. A
+// separator is an UNQUOTED ':' followed by whitespace or end-of-line. Quote
+// state is tracked (with backslash escapes honoured inside double quotes, as
+// unescapeDoubleQuoted does) so a colon inside a quoted key is never chosen.
+func findMappingSeparator(s string) int {
+	inSingle, inDouble, escaped := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case escaped:
+			escaped = false
+		case inDouble && c == '\\':
+			escaped = true
+		case c == '\'' && !inDouble:
+			inSingle = !inSingle
+		case c == '"' && !inSingle:
+			inDouble = !inDouble
+		case c == ':' && !inSingle && !inDouble:
+			if i+1 == len(s) || s[i+1] == ' ' || s[i+1] == '\t' {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// unquoteYAMLKey strips one matching pair of surrounding quotes from a
+// mapping key and resolves the in-quote escape, matching YAML's rules for
+// scalar keys: double quotes via unescapeDoubleQuoted, and single quotes
+// where a doubled single quote stands for one literal apostrophe. Unquoted
+// keys are returned unchanged, as are strings that only look quoted on one
+// side ("'200" keeps its quote).
+func unquoteYAMLKey(key string) string {
+	if len(key) >= 2 {
+		if key[0] == '"' && key[len(key)-1] == '"' {
+			return unescapeDoubleQuoted(key[1 : len(key)-1])
+		}
+		if key[0] == '\'' && key[len(key)-1] == '\'' {
+			return strings.ReplaceAll(key[1:len(key)-1], "''", "'")
+		}
+	}
+	return key
+}
+
+// parseYAMLFlow decodes a single-line flow-style collection ("[a, b]" or
+// "{k: v}", including nested forms) into a ykSequence/ykMapping node. It
+// reports ok=false when text is not a balanced collection of that kind — an
+// unclosed "[a, b" or a trailing "]" is left to the callers' scalar fallback,
+// so malformed values degrade to a plain string instead of failing the parse.
+func parseYAMLFlow(text string, lineNo int) (*yamlNode, bool) {
+	if len(text) < 2 {
+		return nil, false
+	}
+	var closer byte
+	switch text[0] {
+	case '[':
+		closer = ']'
+	case '{':
+		closer = '}'
+	default:
+		return nil, false
+	}
+	inner, ok := flowInterior(text, closer)
+	if !ok {
+		return nil, false
+	}
+	parts := splitFlowTopLevel(inner)
+	if text[0] == '[' {
+		node := &yamlNode{kind: ykSequence, line: lineNo}
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			node.items = append(node.items, parseYAMLScalar(part, lineNo))
+		}
+		return node, true
+	}
+	node := &yamlNode{kind: ykMapping, values: map[string]*yamlNode{}, line: lineNo}
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		colon := findFlowColon(part)
+		var key string
+		if colon < 0 {
+			// A bare entry in a flow mapping is YAML shorthand for a null
+			// value: "{a, b}" is {a: null, b: null}.
+			key = unquoteYAMLKey(part)
+			node.keys = append(node.keys, key)
+			node.values[key] = &yamlNode{kind: ykNull, line: lineNo}
+			continue
+		}
+		key = unquoteYAMLKey(strings.TrimSpace(part[:colon]))
+		value := strings.TrimSpace(part[colon+1:])
+		node.keys = append(node.keys, key)
+		node.values[key] = parseYAMLScalar(value, lineNo)
+	}
+	return node, true
+}
+
+// flowInterior returns the text between the opening bracket at s[0] and its
+// matching closer, and reports whether s is exactly one balanced collection.
+// The bracket kinds must nest properly ("[a}" is rejected) and nothing but
+// the closer may follow the matching one, so "[a] b" is not a flow sequence.
+func flowInterior(s string, closer byte) (string, bool) {
+	stack := []byte{closer}
+	inSingle, inDouble, escaped := false, false, false
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case escaped:
+			escaped = false
+			continue
+		case inDouble:
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inDouble = false
+			}
+			continue
+		case inSingle:
+			if c == '\'' {
+				if i+1 < len(s) && s[i+1] == '\'' {
+					// '' is an escaped quote, not the end of the string.
+					i++
+					continue
+				}
+				inSingle = false
+			}
+			continue
+		}
+		switch c {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '[':
+			stack = append(stack, ']')
+		case '{':
+			stack = append(stack, '}')
+		case ']', '}':
+			if c != stack[len(stack)-1] {
+				return "", false
+			}
+			stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				if i != len(s)-1 {
+					return "", false
+				}
+				return s[1:i], true
+			}
+		}
+	}
+	return "", false
+}
+
+// splitFlowTopLevel splits a flow-collection interior on commas that sit at
+// nesting depth zero and outside quotes, so ["a, b", c] yields two elements
+// and [[a], [b]] yields two nested collections.
+func splitFlowTopLevel(s string) []string {
+	var parts []string
+	depth, start := 0, 0
+	inSingle, inDouble, escaped := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case escaped:
+			escaped = false
+			continue
+		case inDouble:
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inDouble = false
+			}
+			continue
+		case inSingle:
+			if c == '\'' {
+				if i+1 < len(s) && s[i+1] == '\'' {
+					i++
+					continue
+				}
+				inSingle = false
+			}
+			continue
+		}
+		switch c {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '[', '{':
+			depth++
+		case ']', '}':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				parts = append(parts, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, s[start:])
+}
+
+// findFlowColon returns the byte index of the first top-level unquoted ':' in
+// a flow-mapping entry, or -1. Unlike block mappings, a flow entry needs no
+// trailing space after the colon ("{a:1}" and "{\"a\":1}" are both accepted).
+func findFlowColon(s string) int {
+	depth := 0
+	inSingle, inDouble, escaped := false, false, false
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case escaped:
+			escaped = false
+			continue
+		case inDouble:
+			if c == '\\' {
+				escaped = true
+			} else if c == '"' {
+				inDouble = false
+			}
+			continue
+		case inSingle:
+			if c == '\'' {
+				if i+1 < len(s) && s[i+1] == '\'' {
+					i++
+					continue
+				}
+				inSingle = false
+			}
+			continue
+		}
+		switch c {
+		case '\'':
+			inSingle = true
+		case '"':
+			inDouble = true
+		case '[', '{':
+			depth++
+		case ']', '}':
+			if depth > 0 {
+				depth--
+			}
+		case ':':
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func stripInlineComment(s string) string {
