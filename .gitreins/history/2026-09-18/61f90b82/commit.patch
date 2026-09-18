@@ -1,0 +1,1029 @@
+commit 1398b1fc3ad9c5cdb1921951a9ea4f007e6019aa
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Fri Sep 18 04:03:13 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Fri Sep 18 04:03:13 2026 -0500
+
+    fix(graph): wire a real similar-class edge producer (OB-GAP-067)
+    
+    problem_edges was permanently empty: Store.CreateEdge had no production
+    caller, so GET /api/v1/problems/<class>/related answered {"related":[]} and
+    POST .../discover returned an empty related list on a fully seeded database,
+    while README, docs/integration.md, docs/api-reference.md and the OpenAPI spec
+    all documented traversal as working.
+    
+    - graph: accept the documented `similar` relationship (EdgeSimilar) in the
+      CreateEdge switch. docs/integration.md and docs/api-reference.md have always
+      shown that value; only the store rejected it.
+    - graph/linker.go (new): deterministic, provenance-honest title-lexeme linker.
+      TitleTokens lowercases, splits on non-alphanumeric runs, drops tokens
+      shorter than 3 chars and the six-word stopword set, and dedupes.
+      LinkSimilarClasses(classID, minShared, maxNeighbors) loads the class, scores
+      every other class by |A n B| / min(|A|,|B|) clamped to (0,1], keeps the top
+      maxNeighbors by weight (tiebreak: shared desc, then title asc) and writes
+      `similar` edges BOTH ways, ignoring ErrDuplicate so it is idempotent.
+      LinkAllSimilar runs it across every class.
+      Why titles: the corpus carries no error signature (answers[].signatures is
+      solve metadata: {model,result,tests,problem_class}), so the class title slug
+      is the only relationship signal the data actually has. Why both directions:
+      every traversal read here (ListEdgesFrom, relatedClasses, Discovery, the
+      /related handler) is single-directional, so a one-sided write would make
+      /problems/A/related list B while /problems/B/related stayed empty. Why
+      `similar`: shared words are evidence of family resemblance, not proof of a
+      shared root cause.
+    - seed: link the whole corpus after the file loop (LinkAllSimilar(ctx, 2, 5));
+      Stats gains EdgesCreated, 0 on a re-run.
+    - import: importAnswer links the class it just added or updated, best-effort —
+      a linker failure can never turn an already-committed import into a reported
+      failure. ImportResult gains EdgesCreated (internal; the /import wire shape
+      is built by the handler and is unchanged).
+    
+    Live evidence on a scratch DB (the live DB and service were never touched):
+      off-by-one seed -dir .../data -db /tmp/oby382/scratch.db
+        -> files=1793; classes=1793 created / 0 existing; answers=1880 created;
+           edges=7004 created
+      second run -> edges=0 created, problem_edges stays 7004 (idempotent)
+      GET http://127.0.0.1:8771/api/v1/problems/python-sdk-idle-audit/related
+        -> non-empty related[] with problem_class/relationship/weight:
+           h3-sdk-python-idle-audit-tick 1, idle-audit-python-sdk 1,
+           python-idle-audit 1, go-idle-audit 1,
+           python-sdk-duckdb-board-audit 0.75, h3-sdk-idle-audit-tick 0.75
+      (so-nil-pointer-deref has no token-mates in this corpus, so a class that
+       does was used for the probe.)
+    
+    Tests: graph.TestLinkSimilarClassesCreatesEdges / RespectsMinShared /
+    RejectsZeroID / TestTitleTokens, seed.TestSeedCreatesRelatedEdges,
+    import.TestImportLinksSimilarEdges. RED-proved by reverting each producer in
+    turn: removing the CreateEdge case fails with
+    `create similar edge 1->2: invalid relationship "similar"`; removing the seed
+    call fails with `Seed stats EdgesCreated = 0, want > 0`; removing the link call
+    on the added path fails with `edges created = 0, want 2`.
+    
+    Gates: gofmt -l cmd internal pkg sql (empty); go build ./... ok; go vet ./... ok;
+    go test ./... -short -count=1 -p 1 -> 13 ok packages, 0 FAIL.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ cmd/off-by-one/seed.go        |   4 +-
+ internal/graph/linker.go      | 280 ++++++++++++++++++++++++++++++++++++++++++
+ internal/graph/linker_test.go | 217 ++++++++++++++++++++++++++++++++
+ internal/graph/store.go       |  10 +-
+ internal/import/git.go        |  56 +++++++--
+ internal/import/git_test.go   |  75 +++++++++++
+ internal/seed/seed.go         |  29 +++++
+ internal/seed/seed_test.go    | 110 +++++++++++++++++
+ 8 files changed, 766 insertions(+), 15 deletions(-)
+
+diff --git a/cmd/off-by-one/seed.go b/cmd/off-by-one/seed.go
+index 0c2cda7..d116247 100644
+--- a/cmd/off-by-one/seed.go
++++ b/cmd/off-by-one/seed.go
+@@ -169,8 +169,8 @@ func seedRun(args []string) error {
+ 	if err != nil {
+ 		return err
+ 	}
+-	log.Printf("seed complete: files=%d; classes=%d created / %d existing; answers=%d created / %d skipped (db=%s)",
++	log.Printf("seed complete: files=%d; classes=%d created / %d existing; answers=%d created / %d skipped; edges=%d created (db=%s)",
+ 		stats.FilesLoaded, stats.ClassesCreated, stats.ClassesExisting,
+-		stats.AnswersCreated, stats.AnswersSkipped, *dbPath)
++		stats.AnswersCreated, stats.AnswersSkipped, stats.EdgesCreated, *dbPath)
+ 	return nil
+ }
+diff --git a/internal/graph/linker.go b/internal/graph/linker.go
+new file mode 100644
+index 0000000..84c4583
+--- /dev/null
++++ b/internal/graph/linker.go
+@@ -0,0 +1,280 @@
++package graph
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"sort"
++	"strings"
++	"unicode"
++)
++
++// This file is the production producer of problem_edges. Before it existed
++// Store.CreateEdge had no caller outside tests, so every
++// /api/v1/problems/<class>/related request answered `{"related":[]}` and
++// POST /api/v1/problems/discover returned an empty related list, regardless
++// of how much corpus the database held (OB-GAP-067).
++//
++// Why title lexemes: the flat corpus (data/answers/*.json) carries
++// {class_id, title, description, created_at, answers[]}, and answers[].signatures
++// is SOLVE metadata ({model, result, tests, problem_class}) — it is not an
++// error signature and it is per-answer, not per-class. The only relationship
++// signal the data actually carries is the class title slug, whose tokens are
++// chosen by whoever named the problem ("python-sdk-idle-audit",
++// "python-audit-idle-maintenance"). Token overlap is therefore the honest,
++// deterministic, explainable link we can compute — and it is deliberately
++// presented as `similar`, not as `same_root_cause`: shared words are
++// evidence of family resemblance, not proof of a shared cause.
++
++// minTitleTokenLen is the shortest token TitleTokens keeps. One- and
++// two-character fragments ("go", "so", "js", "ds", "py") are language or
++// topic prefixes that appear in hundreds of titles, so they carry no family
++// signal; keeping them would link almost every class to almost every other.
++const minTitleTokenLen = 3
++
++// titleStopwords is the complete set of tokens TitleTokens drops on top of
++// the length rule. It stays deliberately tiny — generic English glue plus
++// two words that describe the deliverable of a task rather than its family
++// ("fix", "bug"). Words that look generic but DO carry the family signal
++// ("error", "nil", "idle", "audit", "drift", "stale", "flaky") are not
++// stopwords: dropping them would erase exactly the relationships this
++// linker exists to record.
++var titleStopwords = map[string]bool{
++	"the":  true,
++	"and":  true,
++	"for":  true,
++	"with": true,
++	"fix":  true,
++	"bug":  true,
++}
++
++// TitleTokens splits a problem-class title into the significant lexemes used
++// for similarity linking. Titles are slugs, so the input is lowercased,
++// split on every non-alphanumeric run, and filtered down to tokens of at
++// least minTitleTokenLen characters that are not titleStopwords. Duplicates
++// are dropped while preserving first-seen order, so the same title always
++// produces the same slice.
++func TitleTokens(title string) []string {
++	out := make([]string, 0, 4)
++	seen := make(map[string]bool, 4)
++	for _, tok := range strings.FieldsFunc(strings.ToLower(title), func(r rune) bool {
++		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
++	}) {
++		if len(tok) < minTitleTokenLen || titleStopwords[tok] || seen[tok] {
++			continue
++		}
++		seen[tok] = true
++		out = append(out, tok)
++	}
++	return out
++}
++
++// tokenSet is the set form of TitleTokens output — used for the overlap
++// computation, where position is irrelevant and repeats must not count.
++func tokenSet(tokens []string) map[string]bool {
++	set := make(map[string]bool, len(tokens))
++	for _, t := range tokens {
++		set[t] = true
++	}
++	return set
++}
++
++// similarCandidate is one class paired with the similarity the linker
++// computed against the class being linked.
++type similarCandidate struct {
++	id     int64
++	title  string
++	shared int
++	weight float64
++}
++
++// LinkSimilarClasses links classID to up to maxNeighbors other problem
++// classes whose titles share at least minShared lexemes, writing a
++// `similar` edge in BOTH directions for each neighbour. It returns the
++// number of edges created — 0 on a re-run, because every edge the previous
++// run wrote collides with the unique (source, target, relationship) index
++// and is skipped. A class with no qualifying neighbour returns 0 and no
++// error: that is an ordinary outcome, not a failure.
++//
++// Weight is overlap over the smaller of the two token sets —
++// |A∩B| / min(|A|,|B|), always in (0,1]: two titles whose significant
++// tokens are the same score 1.0, while one shared word between two long
++// titles scores low and sorts last.
++//
++// Both directions are written because every traversal read in the codebase
++// is single-directional (ListEdgesFrom, relatedClasses, Discovery, and the
++// /related handler), so a one-sided write would make `similar` mean
++// "A points at B" — /problems/A/related would list B while
++// /problems/B/related stayed empty, which is not what a similarity
++// relationship claims.
++func (s *Store) LinkSimilarClasses(ctx context.Context, classID int64, minShared, maxNeighbors int) (int, error) {
++	if classID == 0 {
++		return 0, errors.New("graph: class id must be non-zero")
++	}
++	if minShared < 1 {
++		minShared = 1
++	}
++	if maxNeighbors < 1 {
++		maxNeighbors = 1
++	}
++
++	src, err := s.GetProblemClass(ctx, classID)
++	if err != nil {
++		return 0, err
++	}
++	srcTokens := tokenSet(TitleTokens(src.Title))
++	if len(srcTokens) == 0 {
++		// Nothing to match on (e.g. a title made entirely of stopwords or
++		// two-letter prefixes). No candidates can qualify.
++		return 0, nil
++	}
++
++	candidates, err := s.similarCandidates(ctx, classID, srcTokens, minShared)
++	if err != nil {
++		return 0, err
++	}
++
++	// Deterministic ranking: strongest overlap first, then more shared
++	// tokens, then title ascending — so the neighbours chosen for a class
++	// are identical on every run, and a maxNeighbors cut-off always drops
++	// the same candidates.
++	sort.Slice(candidates, func(i, j int) bool {
++		a, b := candidates[i], candidates[j]
++		if a.weight != b.weight {
++			return a.weight > b.weight
++		}
++		if a.shared != b.shared {
++			return a.shared > b.shared
++		}
++		return a.title < b.title
++	})
++	if len(candidates) > maxNeighbors {
++		candidates = candidates[:maxNeighbors]
++	}
++
++	created := 0
++	for _, c := range candidates {
++		for _, dir := range [][2]int64{{classID, c.id}, {c.id, classID}} {
++			if _, err := s.CreateEdge(ctx, dir[0], dir[1], EdgeSimilar, c.weight); err != nil {
++				if errors.Is(err, ErrDuplicate) {
++					continue // already linked by an earlier run — idempotent
++				}
++				return created, fmt.Errorf("create similar edge %d->%d: %w", dir[0], dir[1], err)
++			}
++			created++
++		}
++	}
++	return created, nil
++}
++
++// similarCandidates returns every class other than classID whose title
++// shares at least minShared lexemes with srcTokens, with its overlap weight.
++// Candidates that do not qualify are dropped here (not later) so the
++// maxNeighbors cut-off can never be consumed by a non-matching class.
++func (s *Store) similarCandidates(ctx context.Context, classID int64, srcTokens map[string]bool, minShared int) ([]similarCandidate, error) {
++	rows, err := s.db.QueryContext(ctx,
++		`SELECT id, title FROM problem_classes WHERE id != ?`, classID)
++	if err != nil {
++		return nil, fmt.Errorf("list candidate classes: %w", err)
++	}
++	defer rows.Close()
++
++	var out []similarCandidate
++	for rows.Next() {
++		var id int64
++		var title string
++		if err := rows.Scan(&id, &title); err != nil {
++			return nil, err
++		}
++		candTokens := tokenSet(TitleTokens(title))
++		shared := overlapCount(srcTokens, candTokens)
++		if shared < minShared {
++			continue
++		}
++		smaller := len(srcTokens)
++		if len(candTokens) < smaller {
++			smaller = len(candTokens)
++		}
++		if smaller == 0 {
++			continue
++		}
++		out = append(out, similarCandidate{
++			id:     id,
++			title:  title,
++			shared: shared,
++			weight: clampWeight(float64(shared) / float64(smaller)),
++		})
++	}
++	return out, rows.Err()
++}
++
++// LinkAllSimilar runs LinkSimilarClasses for every problem class and returns
++// the total number of edges created. Re-running is safe: every edge written
++// by the first run already exists, so the second run returns 0 and the
++// problem_edges table is unchanged.
++func (s *Store) LinkAllSimilar(ctx context.Context, minShared, maxNeighbors int) (int, error) {
++	ids, err := s.allProblemClassIDs(ctx)
++	if err != nil {
++		return 0, err
++	}
++	total := 0
++	for _, id := range ids {
++		n, err := s.LinkSimilarClasses(ctx, id, minShared, maxNeighbors)
++		if err != nil {
++			return total, fmt.Errorf("link class %d: %w", id, err)
++		}
++		total += n
++	}
++	return total, nil
++}
++
++// allProblemClassIDs returns every class ID in ascending order. The IDs are
++// collected and the cursor closed before any linking happens: the linking
++// loop INSERTs into problem_edges, and holding an open read cursor over
++// problem_classes across those writes would interleave a reader with writers
++// on the same pooled SQLite connections for the whole run.
++func (s *Store) allProblemClassIDs(ctx context.Context) ([]int64, error) {
++	rows, err := s.db.QueryContext(ctx, `SELECT id FROM problem_classes ORDER BY id`)
++	if err != nil {
++		return nil, fmt.Errorf("list problem class ids: %w", err)
++	}
++	defer rows.Close()
++
++	ids := make([]int64, 0, 256)
++	for rows.Next() {
++		var id int64
++		if err := rows.Scan(&id); err != nil {
++			return nil, err
++		}
++		ids = append(ids, id)
++	}
++	return ids, rows.Err()
++}
++
++// overlapCount counts the tokens present in both sets.
++func overlapCount(a, b map[string]bool) int {
++	// Iterate the smaller side so a long title paired with a short one
++	// costs the short one's size.
++	if len(b) < len(a) {
++		a, b = b, a
++	}
++	n := 0
++	for tok := range a {
++		if b[tok] {
++			n++
++		}
++	}
++	return n
++}
++
++// clampWeight keeps a similarity weight inside (0,1]. Overlap over the
++// smaller token set cannot exceed 1 while tokens are deduped, but the guard
++// keeps a future scoring change from writing a weight the API/UI contract
++// (0 < weight <= 1) would reject. A non-positive score is normalised to 1.0,
++// matching CreateEdge's own treatment of a non-positive weight.
++func clampWeight(w float64) float64 {
++	if w <= 0 || w > 1 {
++		return 1
++	}
++	return w
++}
+diff --git a/internal/graph/linker_test.go b/internal/graph/linker_test.go
+new file mode 100644
+index 0000000..677d310
+--- /dev/null
++++ b/internal/graph/linker_test.go
+@@ -0,0 +1,217 @@
++package graph
++
++import (
++	"context"
++	"math"
++	"path/filepath"
++	"testing"
++)
++
++// newLinkerTestStore returns a Store backed by its own temp-file database.
++// The package's shared in-memory helper is deliberately avoided here: the
++// linker scans EVERY problem class, so a database shared with other tests in
++// the package would make the ranked candidate list depend on test order.
++func newLinkerTestStore(t *testing.T) *Store {
++	t.Helper()
++	s, err := Open(filepath.Join(t.TempDir(), "linker-test.db"))
++	if err != nil {
++		t.Fatalf("Open: %v", err)
++	}
++	t.Cleanup(func() { _ = s.Close() })
++	return s
++}
++
++func mustCreateClass(t *testing.T, s *Store, ctx context.Context, title, description string) int64 {
++	t.Helper()
++	id, err := s.CreateProblemClass(ctx, title, description)
++	if err != nil {
++		t.Fatalf("CreateProblemClass(%q): %v", title, err)
++	}
++	if id == 0 {
++		t.Fatalf("CreateProblemClass(%q) returned id 0", title)
++	}
++	return id
++}
++
++func countEdges(t *testing.T, s *Store, ctx context.Context) int {
++	t.Helper()
++	var n int
++	if err := s.DB().QueryRowContext(ctx, `SELECT count(*) FROM problem_edges`).Scan(&n); err != nil {
++		t.Fatalf("count problem_edges: %v", err)
++	}
++	return n
++}
++
++// TestLinkSimilarClassesCreatesEdges proves the linker is a real edge
++// producer (OB-GAP-067): the `similar` relationship is accepted by
++// CreateEdge, edges are written in BOTH directions with a weight inside the
++// documented (0,1] range, an unrelated class is left alone, and a second run
++// creates zero new rows.
++func TestLinkSimilarClassesCreatesEdges(t *testing.T) {
++	ctx := context.Background()
++	s := newLinkerTestStore(t)
++
++	// python-sdk-idle-audit      → {python, sdk, idle, audit}
++	// python-audit-idle-maintenance → {python, audit, idle, maintenance}
++	//   → 3 shared lexemes out of the smaller set's 4 → weight 0.75
++	aID := mustCreateClass(t, s, ctx, "python-sdk-idle-audit", "audit a python SDK for idle waiting")
++	bID := mustCreateClass(t, s, ctx, "python-audit-idle-maintenance", "maintenance pass for the python idle audit")
++	// Shares no lexeme with either of the above.
++	cID := mustCreateClass(t, s, ctx, "rust-ownership-lifetimes", "borrow checker lifetimes")
++
++	created, err := s.LinkSimilarClasses(ctx, aID, 2, 5)
++	if err != nil {
++		t.Fatalf("LinkSimilarClasses: %v", err)
++	}
++	if created != 2 {
++		t.Errorf("created = %d, want 2 (one edge in each direction between the pair)", created)
++	}
++
++	edges, err := s.ListEdgesFrom(ctx, aID)
++	if err != nil {
++		t.Fatalf("ListEdgesFrom(%d): %v", aID, err)
++	}
++	if len(edges) != 1 {
++		t.Fatalf("ListEdgesFrom(a) returned %d edges, want 1", len(edges))
++	}
++	e := edges[0]
++	if e.Relationship != EdgeSimilar {
++		t.Errorf("relationship = %q, want %q", e.Relationship, EdgeSimilar)
++	}
++	if e.SourceID != aID || e.TargetID != bID {
++		t.Errorf("edge = %d->%d, want %d->%d", e.SourceID, e.TargetID, aID, bID)
++	}
++	if !(e.Weight > 0 && e.Weight <= 1) {
++		t.Errorf("weight = %v, want 0 < w <= 1", e.Weight)
++	}
++	if want := 0.75; math.Abs(e.Weight-want) > 1e-9 {
++		t.Errorf("weight = %v, want %v (3 of the smaller title's 4 lexemes)", e.Weight, want)
++	}
++
++	// The reverse direction must exist too — every traversal read in the
++	// codebase (ListEdgesFrom, relatedClasses, the /related handler) walks
++	// one direction only, so a one-sided write would leave
++	// /problems/python-audit-idle-maintenance/related empty.
++	rev, err := s.ListEdgesFrom(ctx, bID)
++	if err != nil {
++		t.Fatalf("ListEdgesFrom(%d): %v", bID, err)
++	}
++	if len(rev) != 1 {
++		t.Fatalf("ListEdgesFrom(b) returned %d edges, want 1 (bidirectional link)", len(rev))
++	}
++	if rev[0].TargetID != aID || rev[0].Relationship != EdgeSimilar {
++		t.Errorf("reverse edge = %d (%s), want ->%d (%s)", rev[0].TargetID, rev[0].Relationship, aID, EdgeSimilar)
++	}
++
++	// The unrelated class must not have been linked.
++	if unrelated, err := s.ListEdgesFrom(ctx, cID); err != nil {
++		t.Fatalf("ListEdgesFrom(%d): %v", cID, err)
++	} else if len(unrelated) != 0 {
++		t.Errorf("unrelated class has %d edges, want 0", len(unrelated))
++	}
++
++	// Idempotency: re-running creates nothing and does not error.
++	again, err := s.LinkSimilarClasses(ctx, aID, 2, 5)
++	if err != nil {
++		t.Fatalf("second LinkSimilarClasses: %v", err)
++	}
++	if again != 0 {
++		t.Errorf("second run created = %d, want 0", again)
++	}
++	if n := countEdges(t, s, ctx); n != 2 {
++		t.Errorf("problem_edges rows = %d, want 2 after the idempotent re-run", n)
++	}
++
++	// LinkAllSimilar must be re-runnable across the whole catalog without
++	// error and without adding rows.
++	total, err := s.LinkAllSimilar(ctx, 2, 5)
++	if err != nil {
++		t.Fatalf("LinkAllSimilar: %v", err)
++	}
++	if total != 0 {
++		t.Errorf("LinkAllSimilar on an already-linked DB created = %d, want 0", total)
++	}
++	if n := countEdges(t, s, ctx); n != 2 {
++		t.Errorf("problem_edges rows = %d after LinkAllSimilar, want 2", n)
++	}
++}
++
++// TestLinkSimilarClassesRespectsMinShared proves minShared is the gate and
++// not an accident: the same pair that links at minShared=1 is NOT linked at
++// minShared=2, and the class is left with zero edges.
++func TestLinkSimilarClassesRespectsMinShared(t *testing.T) {
++	ctx := context.Background()
++	s := newLinkerTestStore(t)
++
++	// Tokens (tokens shorter than 3 chars are dropped, so "go" is gone):
++	//   go-nil-pointer-deref   → {nil, pointer, deref}
++	//   go-nil-interface-grace → {nil, interface, grace}
++	// Shared lexemes: {nil} = 1, below the default minShared of 2.
++	aID := mustCreateClass(t, s, ctx, "go-nil-pointer-deref", "nil pointer dereference")
++	mustCreateClass(t, s, ctx, "go-nil-interface-grace", "nil interface handling")
++
++	created, err := s.LinkSimilarClasses(ctx, aID, 2, 5)
++	if err != nil {
++		t.Fatalf("LinkSimilarClasses(minShared=2): %v", err)
++	}
++	if created != 0 {
++		t.Errorf("created = %d at minShared=2, want 0 (only 1 shared lexeme)", created)
++	}
++	if edges, err := s.ListEdgesFrom(ctx, aID); err != nil {
++		t.Fatalf("ListEdgesFrom: %v", err)
++	} else if len(edges) != 0 {
++		t.Errorf("edges = %d at minShared=2, want 0", len(edges))
++	}
++
++	// Same data, weaker gate: now the pair must link — proving the earlier
++	// zero was the minShared threshold and not an empty candidate scan.
++	created, err = s.LinkSimilarClasses(ctx, aID, 1, 5)
++	if err != nil {
++		t.Fatalf("LinkSimilarClasses(minShared=1): %v", err)
++	}
++	if created != 2 {
++		t.Errorf("created = %d at minShared=1, want 2", created)
++	}
++	if n := countEdges(t, s, ctx); n != 2 {
++		t.Errorf("problem_edges rows = %d, want 2", n)
++	}
++}
++
++// TestLinkSimilarClassesRejectsZeroID pins the documented input contract.
++func TestLinkSimilarClassesRejectsZeroID(t *testing.T) {
++	s := newLinkerTestStore(t)
++	if _, err := s.LinkSimilarClasses(context.Background(), 0, 2, 5); err == nil {
++		t.Fatal("LinkSimilarClasses(0) returned nil error, want an error")
++	}
++}
++
++// TestTitleTokens covers the lexeme rules the linker depends on: lowercase,
++// split on any non-alphanumeric run, drop tokens shorter than three
++// characters and the documented stopwords, and dedupe.
++func TestTitleTokens(t *testing.T) {
++	tests := []struct {
++		title string
++		want  []string
++	}{
++		{"python-sdk-idle-audit", []string{"python", "sdk", "idle", "audit"}},
++		{"Go-Nil_Pointer.Deref", []string{"nil", "pointer", "deref"}},
++		{"  so-nil--pointer  ", []string{"nil", "pointer"}},
++		{"audit audit idle", []string{"audit", "idle"}},
++		{"fix-the-bug", []string{}},
++		{"error-nil-idle-audit", []string{"error", "nil", "idle", "audit"}},
++		{"", []string{}},
++	}
++	for _, tc := range tests {
++		got := TitleTokens(tc.title)
++		if len(got) != len(tc.want) {
++			t.Errorf("TitleTokens(%q) = %v, want %v", tc.title, got, tc.want)
++			continue
++		}
++		for i := range got {
++			if got[i] != tc.want[i] {
++				t.Errorf("TitleTokens(%q) = %v, want %v", tc.title, got, tc.want)
++				break
++			}
++		}
++	}
++}
+diff --git a/internal/graph/store.go b/internal/graph/store.go
+index a225456..9ec2a0e 100644
+--- a/internal/graph/store.go
++++ b/internal/graph/store.go
+@@ -21,12 +21,18 @@ import (
+ )
+ 
+ // Edge types match the relationship column in problem_edges. They are the
+-// canonical values Muster and the web UI surface.
++// canonical values Muster, the linker (linker.go), and the web UI surface.
+ const (
+ 	EdgeSameRootCause = "same_root_cause"
+ 	EdgePrerequisite  = "prerequisite"
+ 	EdgeSupersededBy  = "superseded_by"
+ 	EdgeGeneralizes   = "generalizes"
++	// EdgeSimilar is the derived relationship the title-lexeme linker
++	// writes (internal/graph/linker.go) when two problem classes share
++	// title tokens but no confirmed root cause. It is also the value
++	// docs/integration.md and docs/api-reference.md have always
++	// documented for the related-problems response.
++	EdgeSimilar = "similar"
+ )
+ 
+ // Status values match the status column in answer_nodes.
+@@ -388,7 +394,7 @@ func (s *Store) CreateEdge(ctx context.Context, sourceID, targetID int64, relati
+ 		return 0, errors.New("self-edges are not allowed")
+ 	}
+ 	switch relationship {
+-	case EdgeSameRootCause, EdgePrerequisite, EdgeSupersededBy, EdgeGeneralizes:
++	case EdgeSameRootCause, EdgePrerequisite, EdgeSupersededBy, EdgeGeneralizes, EdgeSimilar:
+ 	default:
+ 		return 0, fmt.Errorf("invalid relationship %q", relationship)
+ 	}
+diff --git a/internal/import/git.go b/internal/import/git.go
+index 78a3ae3..c9fe057 100644
+--- a/internal/import/git.go
++++ b/internal/import/git.go
+@@ -95,8 +95,22 @@ type ImportResult struct {
+ 	Conflicted int
+ 	ParseErr   int
+ 	Details    []ImportDetail
++	// EdgesCreated counts the `similar` graph edges written while linking
++	// the imported classes into the lateral graph. It is internal: the
++	// /api/v1/problems/import response shape is unchanged (the handler
++	// builds its own wire struct), so this is carried for tests and for
++	// callers of the engine package.
++	EdgesCreated int
+ }
+ 
++// Linker defaults for an import: see internal/seed for the same pair. Two
++// shared title lexemes is the weakest meaningful overlap; five neighbours
++// keeps a broad token from linking a class into the whole catalog.
++const (
++	linkMinShared    = 2
++	linkMaxNeighbors = 5
++)
++
+ // Engine performs import operations against a git repository. It reads
+ // answers from a source repo and inserts/updates them in a *graph.Store.
+ type Engine struct {
+@@ -168,7 +182,7 @@ func (e *Engine) Import(ctx context.Context) (*ImportResult, error) {
+ 	// Step 3 + 4: diff and insert.
+ 	res := &ImportResult{}
+ 	for _, ans := range answers {
+-		detail, err := e.importAnswer(ctx, ans)
++		detail, edges, err := e.importAnswer(ctx, ans)
+ 		if err != nil {
+ 			detail = ImportDetail{
+ 				ClassTitle: ans.ClassTitle,
+@@ -179,6 +193,7 @@ func (e *Engine) Import(ctx context.Context) (*ImportResult, error) {
+ 				Reason:     err.Error(),
+ 			}
+ 		}
++		res.EdgesCreated += edges
+ 		res.Details = append(res.Details, detail)
+ 		switch detail.Action {
+ 		case ActionAdded:
+@@ -342,8 +357,10 @@ func (e *Engine) parseAnswerDir(dir, classTitle, env, version string) (ParsedAns
+ }
+ 
+ // importAnswer diffs a parsed answer against the local graph and inserts
+-// or updates it. Returns the ImportDetail describing the action taken.
+-func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDetail, error) {
++// or updates it. Returns the ImportDetail describing the action taken, plus
++// the number of `similar` edges created while linking the class into the
++// lateral graph (0 for a skipped answer).
++func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDetail, int, error) {
+ 	detail := ImportDetail{
+ 		ClassTitle: ans.ClassTitle,
+ 		Env:        ans.Env,
+@@ -354,13 +371,13 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
+ 	// Upsert the problem class.
+ 	pc, _, err := e.store.UpsertProblemClass(ctx, ans.ClassTitle, "")
+ 	if err != nil {
+-		return detail, fmt.Errorf("upsert problem class: %w", err)
++		return detail, 0, fmt.Errorf("upsert problem class: %w", err)
+ 	}
+ 
+ 	// Check for existing answer with same (class, env, lang, version).
+ 	existing, err := e.findAnswer(ctx, pc.ID, ans.Env, ans.Lang, ans.Version)
+ 	if err != nil {
+-		return detail, fmt.Errorf("find existing answer: %w", err)
++		return detail, 0, fmt.Errorf("find existing answer: %w", err)
+ 	}
+ 
+ 	if existing == nil {
+@@ -369,7 +386,7 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
+ 			ans.Env, ans.Lang, ans.Version,
+ 			ans.Solution, ans.Evidence, ans.Signatures)
+ 		if err != nil {
+-			return detail, fmt.Errorf("create answer node: %w", err)
++			return detail, 0, fmt.Errorf("create answer node: %w", err)
+ 		}
+ 		// Set status if parsed and valid.
+ 		if ans.Status != "" {
+@@ -377,18 +394,19 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
+ 		}
+ 		detail.Action = ActionAdded
+ 		detail.AnswerID = answerID
+-		return detail, nil
++		return detail, e.linkSimilar(ctx, pc.ID), nil
+ 	}
+ 
+ 	// Existing answer found — compare content.
+ 	if existing.Solution == ans.Solution &&
+ 		existing.Evidence == ans.Evidence &&
+ 		existing.Signatures == ans.Signatures {
+-		// Identical content — skip.
++		// Identical content — skip. A skipped answer changes nothing about
++		// the class, so there is no new relationship to record.
+ 		detail.Action = ActionSkipped
+ 		detail.AnswerID = existing.ID
+ 		detail.Reason = "identical content"
+-		return detail, nil
++		return detail, 0, nil
+ 	}
+ 
+ 	// Content differs — update the existing answer.
+@@ -396,7 +414,7 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
+ 		`UPDATE answer_nodes SET solution = ?, evidence = ?, signatures = ? WHERE id = ?`,
+ 		ans.Solution, ans.Evidence, ans.Signatures, existing.ID)
+ 	if err != nil {
+-		return detail, fmt.Errorf("update answer node: %w", err)
++		return detail, 0, fmt.Errorf("update answer node: %w", err)
+ 	}
+ 	if ans.Status != "" {
+ 		_ = e.store.UpdateAnswerStatus(ctx, existing.ID, ans.Status)
+@@ -404,7 +422,23 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
+ 	detail.Action = ActionUpdated
+ 	detail.AnswerID = existing.ID
+ 	detail.Reason = "content updated"
+-	return detail, nil
++	return detail, e.linkSimilar(ctx, pc.ID), nil
++}
++
++// linkSimilar links a class that an import just added or updated into the
++// lateral `similar` graph and returns the number of edges created.
++//
++// The linker's error is deliberately swallowed: by the time we get here the
++// answer itself is already committed, and a linker failure must never turn
++// a successful import into a reported failure. Linking is best-effort and
++// self-repairing — the next import, or a seed run, re-runs the same
++// idempotent linker and fills in whatever is missing.
++func (e *Engine) linkSimilar(ctx context.Context, classID int64) int {
++	created, err := e.store.LinkSimilarClasses(ctx, classID, linkMinShared, linkMaxNeighbors)
++	if err != nil {
++		return 0
++	}
++	return created
+ }
+ 
+ // findAnswer looks for an existing answer matching (classID, env, lang, version).
+diff --git a/internal/import/git_test.go b/internal/import/git_test.go
+index cc5077f..7b2573a 100644
+--- a/internal/import/git_test.go
++++ b/internal/import/git_test.go
+@@ -792,3 +792,78 @@ func TestImport_ExistingCloneMatchingRepo_Proceeds(t *testing.T) {
+ 		t.Errorf("Added = %d, want 1", res.Added)
+ 	}
+ }
++
++// TestImportLinksSimilarEdges proves the import path is a real edge producer
++// (OB-GAP-067): importing an answer for a class whose title overlaps an
++// existing class writes `similar` edges in both directions, reports the
++// count, and a re-import of identical content writes nothing.
++//
++// No git is involved — this drives importAnswer directly, which is the only
++// place the import flow writes an answer (and therefore the only place it can
++// link one).
++func TestImportLinksSimilarEdges(t *testing.T) {
++	ctx := context.Background()
++	store := makeStore(t)
++
++	// Class already in the graph, with a title that shares three lexemes
++	// (python, idle, audit) with the answer about to be imported.
++	if _, _, err := store.UpsertProblemClass(ctx, "python-sdk-idle-audit", ""); err != nil {
++		t.Fatalf("UpsertProblemClass: %v", err)
++	}
++	engine := NewEngine(Config{}, store)
++
++	parsed := ParsedAnswer{
++		ClassTitle: "python-audit-idle-maintenance",
++		Env:        "py3.11",
++		Version:    "3.11",
++		Lang:       "python",
++		Status:     graph.AnswerVerified,
++		Solution:   "# Solution\nKeep the audit cadence.",
++		Evidence:   "fixture run",
++		Signatures: `{"result":"passed"}`,
++	}
++
++	detail, edges, err := engine.importAnswer(ctx, parsed)
++	if err != nil {
++		t.Fatalf("importAnswer: %v", err)
++	}
++	if detail.Action != ActionAdded {
++		t.Fatalf("action = %q, want %q", detail.Action, ActionAdded)
++	}
++	if edges != 2 {
++		t.Errorf("edges created = %d, want 2 (one per direction)", edges)
++	}
++
++	class, err := store.GetProblemClassByTitle(ctx, parsed.ClassTitle)
++	if err != nil {
++		t.Fatalf("GetProblemClassByTitle: %v", err)
++	}
++	got, err := store.ListEdgesFrom(ctx, class.ID)
++	if err != nil {
++		t.Fatalf("ListEdgesFrom: %v", err)
++	}
++	if len(got) == 0 {
++		t.Fatal("imported class has no edges — /problems/<class>/related would answer []")
++	}
++	for _, e := range got {
++		if e.Relationship != graph.EdgeSimilar {
++			t.Errorf("relationship = %q, want %q", e.Relationship, graph.EdgeSimilar)
++		}
++		if !(e.Weight > 0 && e.Weight <= 1) {
++			t.Errorf("weight = %v, want 0 < w <= 1", e.Weight)
++		}
++	}
++
++	// Idempotent re-import: identical content is skipped and — because a
++	// skipped answer changes no relationship — reports zero new edges.
++	detail, edges, err = engine.importAnswer(ctx, parsed)
++	if err != nil {
++		t.Fatalf("second importAnswer: %v", err)
++	}
++	if detail.Action != ActionSkipped {
++		t.Errorf("action = %q, want %q", detail.Action, ActionSkipped)
++	}
++	if edges != 0 {
++		t.Errorf("edges created on re-import = %d, want 0", edges)
++	}
++}
+diff --git a/internal/seed/seed.go b/internal/seed/seed.go
+index 240bee7..2ace707 100644
+--- a/internal/seed/seed.go
++++ b/internal/seed/seed.go
+@@ -51,8 +51,21 @@ type Stats struct {
+ 	ClassesExisting int
+ 	AnswersCreated  int
+ 	AnswersSkipped  int
++	// EdgesCreated counts the `similar` graph edges the linker wrote after
++	// the corpus files were loaded. Zero on a re-run — edges are keyed by
++	// (source, target, relationship), so an existing edge is never rewritten.
++	EdgesCreated int
+ }
+ 
++// Linker defaults used by the corpus seed. Two shared title lexemes is the
++// weakest overlap that still means something (one shared token is usually a
++// generic word such as "python" or "drift"), and five neighbours keeps a
++// class from being linked to the whole corpus through one broad term.
++const (
++	linkMinShared    = 2
++	linkMaxNeighbors = 5
++)
++
+ // Seed loads every *.json corpus file under <dir>/answers/ into the
+ // store. dir is the data directory (default ./data); the corpus itself
+ // lives in its answers/ subdirectory.
+@@ -62,6 +75,12 @@ type Stats struct {
+ // status comes from its own corpus verdict (see corpusAnswerStatus) — a
+ // signature marked failed is imported as failed, everything else keeps
+ // the export's verified status.
++//
++// Once the files are loaded the classes are linked into the lateral
++// `similar` graph (graph.LinkAllSimilar) — the corpus carries no error
++// signatures, so title lexemes are the only relationship signal available,
++// and without this step /problems/<class>/related answers [] on a
++// perfectly seeded database.
+ func Seed(ctx context.Context, store *graph.Store, dir string) (*Stats, error) {
+ 	answersDir := filepath.Join(dir, "answers")
+ 	entries, err := os.ReadDir(answersDir)
+@@ -77,6 +96,16 @@ func Seed(ctx context.Context, store *graph.Store, dir string) (*Stats, error) {
+ 			return nil, fmt.Errorf("%s: %w", ent.Name(), err)
+ 		}
+ 	}
++
++	// Link the classes into the lateral graph once every file is loaded.
++	// Linking happens after the loop (not per file) so a class can pair with
++	// classes from files that sort later, and so the corpus is only scanned
++	// once. Idempotent like the rest of the loader: a re-run creates 0 edges.
++	edges, err := store.LinkAllSimilar(ctx, linkMinShared, linkMaxNeighbors)
++	if err != nil {
++		return nil, fmt.Errorf("link similar classes: %w", err)
++	}
++	stats.EdgesCreated = edges
+ 	return stats, nil
+ }
+ 
+diff --git a/internal/seed/seed_test.go b/internal/seed/seed_test.go
+index 64f8cc9..1d9c745 100644
+--- a/internal/seed/seed_test.go
++++ b/internal/seed/seed_test.go
+@@ -473,3 +473,113 @@ func TestCorpusAnswerStatus(t *testing.T) {
+ 		})
+ 	}
+ }
++
++// relateCorpus is a two-class corpus whose titles share three lexemes
++// (python, idle, audit) — the smallest shape that links. The corpus carries
++// no error signatures, so title lexemes are the only relationship signal the
++// data has.
++func relateCorpus() map[string]string {
++	return map[string]string{
++		"0001-python-sdk-idle-audit.json": `{
++  "class_id": 1,
++  "title": "python-sdk-idle-audit",
++  "description": "audit the python SDK for idle waiting",
++  "created_at": "2026-07-24 22:52:43",
++  "answers": [
++    {
++      "answer_id": 11,
++      "language": "python",
++      "environment": "py3.11",
++      "version": "3.11",
++      "solution": "# Solution A\nTrace the idle wait.",
++      "evidence": "reproducer attached",
++      "signatures": {"model": "m1", "result": "passed", "tests": 5},
++      "status": "verified"
++    }
++  ]
++}`,
++		"0002-python-audit-idle-maintenance.json": `{
++  "class_id": 2,
++  "title": "python-audit-idle-maintenance",
++  "description": "maintenance pass over the python idle audit",
++  "created_at": "2026-07-24 22:52:44",
++  "answers": [
++    {
++      "answer_id": 21,
++      "language": "python",
++      "environment": "py3.11",
++      "version": "3.11",
++      "solution": "# Solution B\nKeep the audit cadence.",
++      "evidence": "fixture run",
++      "signatures": {"model": "m2", "result": "passed"},
++      "status": "verified"
++    }
++  ]
++}`,
++	}
++}
++
++// TestSeedCreatesRelatedEdges proves the seed path writes real graph edges
++// (OB-GAP-067). problem_edges was permanently empty because CreateEdge had
++// no production caller, so GET /api/v1/problems/<class>/related answered
++// {"related":[]} on a fully seeded database. The test asserts the row count,
++// the edges reachable from a seeded class (what the handler reads), and that
++// a re-run adds nothing.
++func TestSeedCreatesRelatedEdges(t *testing.T) {
++	ctx := context.Background()
++	store := newTestStore(t)
++	dir := writeCorpus(t, relateCorpus())
++
++	stats, err := Seed(ctx, store, dir)
++	if err != nil {
++		t.Fatalf("Seed: %v", err)
++	}
++	if stats.EdgesCreated <= 0 {
++		t.Fatalf("Seed stats EdgesCreated = %d, want > 0", stats.EdgesCreated)
++	}
++
++	var rows int
++	if err := store.DB().QueryRowContext(ctx, `SELECT count(*) FROM problem_edges`).Scan(&rows); err != nil {
++		t.Fatalf("count problem_edges: %v", err)
++	}
++	if rows <= 0 {
++		t.Fatalf("problem_edges rows = %d, want > 0", rows)
++	}
++
++	class, err := store.GetProblemClassByTitle(ctx, "python-sdk-idle-audit")
++	if err != nil {
++		t.Fatalf("GetProblemClassByTitle: %v", err)
++	}
++	edges, err := store.ListEdgesFrom(ctx, class.ID)
++	if err != nil {
++		t.Fatalf("ListEdgesFrom(%d): %v", class.ID, err)
++	}
++	if len(edges) == 0 {
++		t.Fatalf("ListEdgesFrom(%s) returned no edges — /related would answer []", class.Title)
++	}
++	for _, e := range edges {
++		if e.Relationship != graph.EdgeSimilar {
++			t.Errorf("relationship = %q, want %q", e.Relationship, graph.EdgeSimilar)
++		}
++		if !(e.Weight > 0 && e.Weight <= 1) {
++			t.Errorf("weight = %v, want 0 < w <= 1", e.Weight)
++		}
++	}
++
++	// Idempotency contract: a re-run imports only the delta, so it creates
++	// no new edges and leaves the table unchanged.
++	again, err := Seed(ctx, store, dir)
++	if err != nil {
++		t.Fatalf("second Seed: %v", err)
++	}
++	if again.EdgesCreated != 0 {
++		t.Errorf("second run EdgesCreated = %d, want 0", again.EdgesCreated)
++	}
++	var rowsAgain int
++	if err := store.DB().QueryRowContext(ctx, `SELECT count(*) FROM problem_edges`).Scan(&rowsAgain); err != nil {
++		t.Fatalf("count problem_edges after re-run: %v", err)
++	}
++	if rowsAgain != rows {
++		t.Errorf("problem_edges rows = %d after re-run, want %d", rowsAgain, rows)
++	}
++}
