@@ -1,0 +1,841 @@
+commit 0ff9d4ce4ad8795e5f35d21e32983a37dfb3b6c6
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Fri Sep 18 07:13:42 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Fri Sep 18 07:13:42 2026 -0500
+
+    fix(cli): honor seed subcommand after server flags
+    
+    Addresses OB-GAP-071.
+    
+    `./off-by-one --db PATH seed` booted the HTTP server instead of seeding: the
+    dispatch test was `os.Args[1] == "seed"`, and the stdlib flag package stops
+    parsing at the first non-flag argument, so the server path consumed the argv,
+    bound the port and served an empty catalog. The pre-fix HEAD binary serves
+    GET /health -> 200 on that exact argv.
+    
+    Dispatch now finds the subcommand wherever the first positional argument sits:
+    
+    * cmd/off-by-one/dispatch.go (new) — seedDispatch(argv, server) walks argv with
+      a probe FlagSet built from the LIVE server declarations (same names, same
+      arity via the flag package's own IsBoolFlag test, values discarded), so
+      `--db seed` still means "the database file named seed" and `--port 9000 seed`
+      finds the subcommand. An explicit pre-seed -db is forwarded in its seed
+      spelling (a -db after the subcommand still wins, since the seed FlagSet
+      applies occurrences in order); any other pre-seed server flag is named on
+      stderr as ignored rather than silently reinterpreted. --help/-h, unknown or
+      malformed flags and an explicit --version stay on the server path, which
+      prints the same usage/version output as before.
+    * cmd/off-by-one/main.go — registerServerFlags() declares the server flag set;
+      main() registers it before dispatch (declaring is side-effect free, no
+      parsing or output), so the probe cannot drift from the real arity table as
+      flags are added. The server path is otherwise untouched: .env loading,
+      flag.Parse, help, version and every flag value behave exactly as before.
+    * cmd/off-by-one/dispatch_test.go (new) — table tests for every recognised form
+      (including the `--db seed` ambiguity and boolean flags), an arity invariant
+      driven by the live server flag set, a seedRun round trip proving a forwarded
+      -db lands the corpus in that database, and three real-binary subprocess
+      tests: the acceptance argv (`--db PATH --port N seed`) must seed PATH from
+      the cwd corpus, exit on its own and never bind the port; the historical
+      `seed -db PATH` form; and server startup still parsing --port/--db, logging
+      them and binding.
+    
+    Evidence: gofmt -l clean; `go build ./...`, `go vet ./...`,
+    `go test ./... -short -p 1 -count=1` all pass. RED proof — reverting only the
+    main.go wiring (helper files kept, package still compiles) fails
+    TestSeedAfterLeadingServerFlagsSeedsAndNeverServes with "the invocation bound
+    127.0.0.1:<port> — the HTTP server started instead of seeding (OB-GAP-071)" in
+    0.79s; restoring the wiring turns it green. All tests use temp databases and a
+    temp corpus; no live database, port or corpus file is touched.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ cmd/off-by-one/dispatch.go      | 137 +++++++++++++
+ cmd/off-by-one/dispatch_test.go | 418 ++++++++++++++++++++++++++++++++++++++++
+ cmd/off-by-one/main.go          | 128 +++++++-----
+ 3 files changed, 640 insertions(+), 43 deletions(-)
+
+diff --git a/cmd/off-by-one/dispatch.go b/cmd/off-by-one/dispatch.go
+new file mode 100644
+index 0000000..4fce6f4
+--- /dev/null
++++ b/cmd/off-by-one/dispatch.go
+@@ -0,0 +1,137 @@
++// Package main — CLI subcommand dispatch.
++//
++// The stdlib flag package stops parsing at the first non-flag argument, so
++// `off-by-one --db PATH seed` leaves `seed` in flag.Args() and boots the HTTP
++// server instead of seeding (OB-GAP-071). seedDispatch walks argv with a probe
++// flag set built from the live server declarations — same names, same arity,
++// values discarded — to find the first positional argument without guessing
++// which flags take values.
++package main
++
++import (
++	"flag"
++	"io"
++	"log"
++	"strings"
++)
++
++// seedSubcommand is the one subcommand recognised before flag.Parse: it owns
++// its own flags and must never reach the server startup path.
++const seedSubcommand = "seed"
++
++// dispatchValue is a throwaway flag.Value: the probe set registers one per
++// server flag so the probe consumes exactly the arguments the real set would.
++// The value is recorded (the seed subcommand shares -db with the server) and
++// otherwise ignored.
++type dispatchValue struct {
++	text   string
++	set    bool
++	isBool bool
++}
++
++func (v *dispatchValue) String() string { return v.text }
++
++func (v *dispatchValue) Set(s string) error {
++	v.text, v.set = s, true
++	return nil
++}
++
++// IsBoolFlag mirrors the flag package's own arity test (an interface check on
++// the Value, not on the flag's default): a boolean flag may be given without a
++// value, so `-readonly seed` must not swallow the subcommand.
++func (v *dispatchValue) IsBoolFlag() bool { return v.isBool }
++
++// newDispatchProbe returns a flag set mirroring server's flag names and arity.
++// Output is discarded and parsing never exits — the probe is a recogniser, and
++// every real diagnostic stays with flag.Parse on the server path.
++func newDispatchProbe(server *flag.FlagSet) *flag.FlagSet {
++	probe := flag.NewFlagSet("off-by-one", flag.ContinueOnError)
++	probe.SetOutput(io.Discard)
++	probe.Usage = func() {}
++	if server == nil {
++		return probe
++	}
++	server.VisitAll(func(f *flag.Flag) {
++		v := &dispatchValue{}
++		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok {
++			v.isBool = bf.IsBoolFlag()
++		}
++		probe.Var(v, f.Name, "")
++	})
++	return probe
++}
++
++// explicitValue returns the value recorded for name and whether the flag was
++// actually given (Visit only reports explicit flags, but the probe value also
++// carries the raw text).
++func explicitValue(probe *flag.FlagSet, name string) (string, bool) {
++	f := probe.Lookup(name)
++	if f == nil {
++		return "", false
++	}
++	v, ok := f.Value.(*dispatchValue)
++	if !ok || !v.set {
++		return "", false
++	}
++	return v.text, true
++}
++
++// seedDispatch reports whether argv (os.Args[1:]) selects the `seed`
++// subcommand and returns the argument list to hand to seedRun.
++//
++// All of these select it:
++//
++//	off-by-one seed
++//	off-by-one seed -dir DIR -db DB          (historical form, unchanged)
++//	off-by-one --db DB seed
++//	off-by-one --db=DB --port 9000 seed
++//	off-by-one --readonly seed               (boolean flags do not eat "seed")
++//
++// Flags given before `seed` are not silently reinterpreted: `-db` is forwarded
++// in its seed spelling, and any other explicit server flag is named on stderr
++// as ignored, so `off-by-one --port 9000 seed` cannot look like it seeded into
++// :9000. A `-db` after the subcommand still wins, because the seed FlagSet
++// applies occurrences in order.
++//
++// The server path is preserved for everything else. A probe parse error
++// (--help/-h, an unknown flag, a missing flag value) and an explicit --version
++// are NOT seed: argv falls through to flag.Parse, which prints the normal
++// usage/version output and exits exactly as before.
++func seedDispatch(argv []string, server *flag.FlagSet) ([]string, bool) {
++	probe := newDispatchProbe(server)
++	if err := probe.Parse(argv); err != nil {
++		// ErrHelp, "flag provided but not defined", "flag needs an argument":
++		// the server path owns these diagnostics.
++		return nil, false
++	}
++
++	rest := probe.Args()
++	if len(rest) == 0 || rest[0] != seedSubcommand {
++		// No positional argument, or a different one: `--db seed` names a
++		// database file, `--port 9000` is an ordinary server start.
++		return nil, false
++	}
++
++	// `off-by-one --version seed`: the server flag set owns --version and
++	// printing it keeps the pre-subcommand-aware precedence.
++	if _, ok := explicitValue(probe, "version"); ok {
++		return nil, false
++	}
++
++	seedArgs := make([]string, 0, len(rest)+2)
++	var ignored []string
++	probe.Visit(func(f *flag.Flag) {
++		if f.Name == "db" {
++			if val, ok := explicitValue(probe, "db"); ok {
++				seedArgs = append(seedArgs, "-db", val)
++			}
++			return
++		}
++		ignored = append(ignored, "-"+f.Name)
++	})
++	if len(ignored) > 0 {
++		log.Printf("seed: ignoring server flag(s) given before the subcommand: %s", strings.Join(ignored, ", "))
++	}
++
++	return append(seedArgs, rest[1:]...), true
++}
+diff --git a/cmd/off-by-one/dispatch_test.go b/cmd/off-by-one/dispatch_test.go
+new file mode 100644
+index 0000000..ae74005
+--- /dev/null
++++ b/cmd/off-by-one/dispatch_test.go
+@@ -0,0 +1,418 @@
++package main
++
++import (
++	"flag"
++	"fmt"
++	"net"
++	"os"
++	"os/exec"
++	"path/filepath"
++	"slices"
++	"strconv"
++	"strings"
++	"sync"
++	"testing"
++	"time"
++)
++
++// serverFlagSet returns a fresh flag set carrying the REAL server flag
++// declarations, so the dispatch tests exercise the same names and arity
++// main() registers on flag.CommandLine.
++func serverFlagSet(t *testing.T) *flag.FlagSet {
++	t.Helper()
++	fs := flag.NewFlagSet("off-by-one", flag.ContinueOnError)
++	registerServerFlags(fs)
++	return fs
++}
++
++// TestSeedDispatchRecognisesSubcommandForms covers the invocations that must
++// reach the seed subcommand, including the OB-GAP-071 case where
++// server-compatible flags precede `seed`. Any other pre-seed server flag is
++// dropped (and named on stderr) rather than handed to the seed FlagSet, which
++// would abort on an unknown flag.
++func TestSeedDispatchRecognisesSubcommandForms(t *testing.T) {
++	fs := serverFlagSet(t)
++	cases := []struct {
++		name string
++		argv []string
++		want []string
++	}{
++		{"subcommand only", []string{"seed"}, []string{}},
++		{"historical form", []string{"seed", "-dir", "/corpus", "-db", "/db.sqlite"}, []string{"-dir", "/corpus", "-db", "/db.sqlite"}},
++		{"seed then positional", []string{"seed", "extra"}, []string{"extra"}},
++		{"db before subcommand", []string{"--db", "/db.sqlite", "seed"}, []string{"-db", "/db.sqlite"}},
++		{"single-dash db", []string{"-db", "/db.sqlite", "seed"}, []string{"-db", "/db.sqlite"}},
++		{"equals form", []string{"--db=/db.sqlite", "seed"}, []string{"-db", "/db.sqlite"}},
++		{"server flags before subcommand", []string{"--port", "9000", "--db", "/db.sqlite", "seed"}, []string{"-db", "/db.sqlite"}},
++		{"bool flag before subcommand", []string{"--readonly", "seed"}, []string{}},
++		{"bool flag with value", []string{"--skip-sandbox=false", "seed"}, []string{}},
++		{"flag terminator", []string{"--", "seed"}, []string{}},
++		{
++			"pre-seed db plus subcommand flags",
++			[]string{"--db", "/db.sqlite", "seed", "-dir", "/corpus"},
++			[]string{"-db", "/db.sqlite", "-dir", "/corpus"},
++		},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			got, ok := seedDispatch(tc.argv, fs)
++			if !ok {
++				t.Fatalf("seedDispatch(%v) = not-seed, want seed args %v", tc.argv, tc.want)
++			}
++			if !slices.Equal(got, tc.want) {
++				t.Errorf("seedDispatch(%v) args = %v, want %v", tc.argv, got, tc.want)
++			}
++		})
++	}
++}
++
++// TestSeedDispatchLeavesServerStartupAlone covers the invocations that must
++// keep booting the server: no subcommand, and the argv-vs-arity ambiguities
++// where "seed" is a flag VALUE, not a subcommand. Help/version also stay with
++// the server path so their output is unchanged.
++func TestSeedDispatchLeavesServerStartupAlone(t *testing.T) {
++	fs := serverFlagSet(t)
++	cases := []struct {
++		name string
++		argv []string
++	}{
++		{"no args", nil},
++		{"server flags only", []string{"--port", "9000", "--db", "/db.sqlite"}},
++		{"port flag only", []string{"--port", "9000"}},
++		{"value flag eats seed", []string{"--db", "seed"}},
++		{"host flag eats seed", []string{"--host", "seed"}},
++		{"prefix of subcommand", []string{"seedling"}},
++		{"unknown positional", []string{"some-file.json"}},
++		{"help before subcommand", []string{"--help", "seed"}},
++		{"short help before subcommand", []string{"-h", "seed"}},
++		{"unknown flag before subcommand", []string{"--nope", "seed"}},
++		{"missing flag value", []string{"--db"}},
++		{"version before subcommand", []string{"--version", "seed"}},
++		{"version=false before subcommand", []string{"--version=false", "seed"}},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			got, ok := seedDispatch(tc.argv, fs)
++			if ok {
++				t.Errorf("seedDispatch(%v) = seed %v, want server startup", tc.argv, got)
++			}
++		})
++	}
++}
++
++// TestSeedDispatchMirrorsServerFlagArity walks the live server flag set: every
++// value-taking flag must consume the following argument (so `--port seed`
++// cannot be mistaken for a subcommand) while boolean flags must not, and the
++// subcommand must still be found once the flag's value is present. This is the
++// invariant that keeps the probe honest as server flags are added.
++func TestSeedDispatchMirrorsServerFlagArity(t *testing.T) {
++	fs := serverFlagSet(t)
++	checked := 0
++	fs.VisitAll(func(f *flag.Flag) {
++		if f.Name == "version" {
++			return // --version keeps server precedence (covered above)
++		}
++		isBool := false
++		if bf, ok := f.Value.(interface{ IsBoolFlag() bool }); ok {
++			isBool = bf.IsBoolFlag()
++		}
++		checked++
++
++		if isBool {
++			if _, ok := seedDispatch([]string{"--" + f.Name, "seed"}, fs); !ok {
++				t.Errorf("bool flag --%s: `--%s seed` must dispatch to seed", f.Name, f.Name)
++			}
++			return
++		}
++
++		if got, ok := seedDispatch([]string{"--" + f.Name, "seed"}, fs); ok {
++			t.Errorf("value flag --%s: `--%s seed` must treat seed as the flag value, got seed args %v", f.Name, f.Name, got)
++		}
++		if _, ok := seedDispatch([]string{"--" + f.Name, "VALUE", "seed"}, fs); !ok {
++			t.Errorf("value flag --%s: `--%s VALUE seed` must dispatch to seed", f.Name, f.Name)
++		}
++	})
++	if checked == 0 {
++		t.Fatal("no server flags registered — probe arity was not exercised")
++	}
++}
++
++// TestSeedDispatchForwardsDBIntoSeedRun proves the forwarded -db is honoured
++// end to end: the dispatched argument list is fed to seedRun and the database
++// lands at the pre-subcommand --db path. It also pins the precedence rule — a
++// -db after the subcommand is applied later by the seed FlagSet and therefore
++// wins — and proves the corpus really was loaded into that database.
++func TestSeedDispatchForwardsDBIntoSeedRun(t *testing.T) {
++	corpus := writeCorpusRootNamed(t, filepath.Join(t.TempDir(), "data"), "forwarded db class")
++	dbBefore := filepath.Join(t.TempDir(), "before.db")
++	dbAfter := filepath.Join(t.TempDir(), "after.db")
++
++	args, ok := seedDispatch([]string{"--db", dbBefore, "seed", "-dir", corpus, "-db", dbAfter}, serverFlagSet(t))
++	if !ok {
++		t.Fatalf("seedDispatch did not select seed for --db ... seed")
++	}
++	if err := seedRun(args); err != nil {
++		t.Fatalf("seedRun(%v): %v", args, err)
++	}
++
++	if _, err := os.Stat(dbBefore); err == nil {
++		t.Errorf("database %s was created — the forwarded -db should lose to the subcommand's own -db", dbBefore)
++	}
++	if !classExists(t, dbAfter, "forwarded db class") {
++		t.Errorf("seeded db %s does not hold the fixture corpus", dbAfter)
++	}
++}
++
++// --- real-binary acceptance ------------------------------------------------
++
++var (
++	ob1BuildOnce sync.Once
++	ob1BuildPath string
++	ob1BuildErr  error
++	ob1BuildDir  string
++)
++
++// TestMain removes the directory holding the CLI built for the subprocess
++// tests below.
++func TestMain(m *testing.M) {
++	code := m.Run()
++	if ob1BuildDir != "" {
++		_ = os.RemoveAll(ob1BuildDir)
++	}
++	os.Exit(code)
++}
++
++// offByOneBinary builds the real CLI once for this test binary and returns its
++// path. The acceptance criterion is about the real argv, so these tests exec
++// the built command rather than calling a helper.
++func offByOneBinary(t *testing.T) string {
++	t.Helper()
++	ob1BuildOnce.Do(func() {
++		dir, err := os.MkdirTemp("", "ob1-cli-")
++		if err != nil {
++			ob1BuildErr = fmt.Errorf("mkdtemp: %w", err)
++			return
++		}
++		ob1BuildDir = dir
++		bin := filepath.Join(dir, "off-by-one")
++		if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
++			ob1BuildErr = fmt.Errorf("go build: %v\n%s", err, out)
++			return
++		}
++		ob1BuildPath = bin
++	})
++	if ob1BuildErr != nil {
++		t.Fatalf("%v", ob1BuildErr)
++	}
++	return ob1BuildPath
++}
++
++// startCLI starts the built binary in dir with its combined output streamed to
++// a log file. A FILE (not a bytes.Buffer) keeps the concurrently reading test
++// goroutine from racing with os/exec's writer.
++func startCLI(t *testing.T, bin, dir string, args ...string) (*exec.Cmd, string) {
++	t.Helper()
++	logPath := filepath.Join(t.TempDir(), "cli.log")
++	f, err := os.Create(logPath)
++	if err != nil {
++		t.Fatalf("create log file: %v", err)
++	}
++	cmd := exec.Command(bin, args...)
++	cmd.Dir = dir
++	cmd.Stdout, cmd.Stderr = f, f
++	if err := cmd.Start(); err != nil {
++		_ = f.Close()
++		t.Fatalf("start %s %v: %v", bin, args, err)
++	}
++	// The child holds its own descriptor; dropping the parent's prevents a
++	// leaked handle per test.
++	_ = f.Close()
++	return cmd, logPath
++}
++
++// awaitSeedExit waits for a started invocation to exit, failing fast when it
++// binds port — proof the HTTP server started — or when it outlives timeout.
++// The pre-fix `off-by-one --db PATH seed` argv serves forever in
++// ListenAndServe, so "exits on its own" is the acceptance signal.
++func awaitSeedExit(t *testing.T, cmd *exec.Cmd, port int, logPath string, timeout time.Duration) {
++	t.Helper()
++	done := make(chan error, 1)
++	go func() { done <- cmd.Wait() }()
++
++	deadline := time.Now().Add(timeout)
++	for {
++		select {
++		case err := <-done:
++			if err != nil {
++				t.Fatalf("invocation exited with error: %v\noutput:\n%s", err, readFileString(logPath))
++			}
++			return
++		default:
++		}
++		if portListening(port) {
++			_ = cmd.Process.Kill()
++			<-done
++			t.Fatalf("the invocation bound 127.0.0.1:%d — the HTTP server started instead of seeding (OB-GAP-071)\noutput:\n%s",
++				port, readFileString(logPath))
++		}
++		if time.Now().After(deadline) {
++			_ = cmd.Process.Kill()
++			<-done
++			t.Fatalf("the invocation did not exit within %s — it is serving instead of seeding\noutput:\n%s",
++				timeout, readFileString(logPath))
++		}
++		time.Sleep(20 * time.Millisecond)
++	}
++}
++
++// assertSeeded proves the invocation seeded dbPath from the cwd corpus, never
++// started the server, and ignored the OFF_BY_ONE_DB fallback.
++func assertSeeded(t *testing.T, logPath, dbPath, envDB, title string, port int) {
++	t.Helper()
++	output := readFileString(logPath)
++	if !strings.Contains(output, "seed complete:") {
++		t.Errorf("seed did not run — output:\n%s", output)
++	}
++	if strings.Contains(output, "listening on") {
++		t.Errorf("server startup log line found — the seed invocation served HTTP:\n%s", output)
++	}
++	if portListening(port) {
++		t.Errorf("something is still listening on 127.0.0.1:%d after the invocation exited", port)
++	}
++	st, err := os.Stat(dbPath)
++	if err != nil {
++		t.Fatalf("--db path %s was not created: %v\noutput:\n%s", dbPath, err, output)
++	}
++	if st.Size() == 0 {
++		t.Fatalf("--db path %s was created but is empty", dbPath)
++	}
++	if _, err := os.Stat(envDB); err == nil {
++		t.Errorf("OFF_BY_ONE_DB path %s was created — the --db flag was ignored", envDB)
++	}
++	if !classExists(t, dbPath, title) {
++		t.Errorf("seeded db %s does not hold the cwd corpus %q\noutput:\n%s", dbPath, title, output)
++	}
++}
++
++// TestSeedAfterLeadingServerFlagsSeedsAndNeverServes is the OB-GAP-071
++// acceptance test: `off-by-one --db PATH --port N seed` must honour PATH,
++// finish seeding, and never bind the port. Against the pre-fix source the
++// binary boots the server here and this test fails.
++func TestSeedAfterLeadingServerFlagsSeedsAndNeverServes(t *testing.T) {
++	bin := offByOneBinary(t)
++
++	work := t.TempDir()
++	const title = "leading-flag corpus class"
++	writeCorpusRootNamed(t, filepath.Join(work, "data"), title)
++
++	dbPath := filepath.Join(t.TempDir(), "leading.db")
++	envDB := filepath.Join(t.TempDir(), "env.db")
++	t.Setenv("OFF_BY_ONE_DB", envDB) // must lose to the --db flag
++	port := freePort(t)
++
++	cmd, logPath := startCLI(t, bin, work, "--db", dbPath, "--port", strconv.Itoa(port), "seed")
++	awaitSeedExit(t, cmd, port, logPath, 60*time.Second)
++
++	assertSeeded(t, logPath, dbPath, envDB, title, port)
++}
++
++// TestSeedSubcommandFirstStillSeeds proves the historical invocation still
++// works as a real process: `off-by-one seed -db PATH` seeds and exits.
++func TestSeedSubcommandFirstStillSeeds(t *testing.T) {
++	bin := offByOneBinary(t)
++
++	work := t.TempDir()
++	const title = "leading-subcommand corpus class"
++	writeCorpusRootNamed(t, filepath.Join(work, "data"), title)
++
++	dbPath := filepath.Join(t.TempDir(), "first.db")
++	envDB := filepath.Join(t.TempDir(), "env.db")
++	t.Setenv("OFF_BY_ONE_DB", envDB)
++	port := freePort(t)
++
++	cmd, logPath := startCLI(t, bin, work, "seed", "-db", dbPath)
++	awaitSeedExit(t, cmd, port, logPath, 60*time.Second)
++
++	assertSeeded(t, logPath, dbPath, envDB, title, port)
++}
++
++// TestServerStartupStillParsesFlags guards the reordered registration: with no
++// subcommand the binary must still parse server flags, log the requested port
++// and database, and bind that port.
++func TestServerStartupStillParsesFlags(t *testing.T) {
++	bin := offByOneBinary(t)
++
++	work := t.TempDir()
++	dbPath := filepath.Join(work, "server.db")
++	port := freePort(t)
++
++	cmd, logPath := startCLI(t, bin, work, "--port", strconv.Itoa(port), "--db", dbPath, "--skip-sandbox")
++	t.Cleanup(func() {
++		_ = cmd.Process.Kill()
++		_ = cmd.Wait()
++	})
++
++	output := waitForFileLine(t, logPath, fmt.Sprintf("listening on :%d", port), 60*time.Second)
++	if !strings.Contains(output, "db="+dbPath) {
++		t.Errorf("server ignored --db: want db=%s\noutput:\n%s", dbPath, output)
++	}
++	deadline := time.Now().Add(10 * time.Second)
++	for !portListening(port) && time.Now().Before(deadline) {
++		time.Sleep(50 * time.Millisecond)
++	}
++	if !portListening(port) {
++		t.Errorf("server did not bind 127.0.0.1:%d\noutput:\n%s", port, readFileString(logPath))
++	}
++}
++
++// --- helpers ---------------------------------------------------------------
++
++// freePort returns a port the OS just handed out and released, so the tests
++// know exactly which port must stay unbound.
++func freePort(t *testing.T) int {
++	t.Helper()
++	l, err := net.Listen("tcp", "127.0.0.1:0")
++	if err != nil {
++		t.Fatalf("reserve port: %v", err)
++	}
++	port := l.Addr().(*net.TCPAddr).Port
++	if err := l.Close(); err != nil {
++		t.Fatalf("release port: %v", err)
++	}
++	return port
++}
++
++// portListening reports whether anything accepts TCP connections on port.
++func portListening(port int) bool {
++	c, err := net.DialTimeout("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)), 200*time.Millisecond)
++	if err != nil {
++		return false
++	}
++	_ = c.Close()
++	return true
++}
++
++func readFileString(path string) string {
++	b, err := os.ReadFile(path)
++	if err != nil {
++		return fmt.Sprintf("<no output: %v>", err)
++	}
++	return string(b)
++}
++
++// waitForFileLine polls the child's log file until it contains want.
++func waitForFileLine(t *testing.T, path, want string, timeout time.Duration) string {
++	t.Helper()
++	deadline := time.Now().Add(timeout)
++	last := ""
++	for {
++		last = readFileString(path)
++		if strings.Contains(last, want) {
++			return last
++		}
++		if time.Now().After(deadline) {
++			t.Fatalf("timed out waiting for %q in %s; output:\n%s", want, path, last)
++		}
++		time.Sleep(50 * time.Millisecond)
++	}
++}
+diff --git a/cmd/off-by-one/main.go b/cmd/off-by-one/main.go
+index 29c88eb..cbb22b2 100644
+--- a/cmd/off-by-one/main.go
++++ b/cmd/off-by-one/main.go
+@@ -60,35 +60,34 @@ func main() {
+ 	// pattern.
+ 	_ = godotenv.Load()
+ 
+-	// `off-by-one seed` — one-shot corpus loader subcommand. Dispatched
+-	// before the server flag set is parsed because it owns its own flags
+-	// (issue #1: fresh installs need an import path from the bundled
+-	// flat corpus before discovery can return anything).
+-	if len(os.Args) > 1 && os.Args[1] == "seed" {
+-		runSeed(os.Args[2:])
+-		return
+-	}
+-
+ 	// Custom usage: the default flag-package output prints only the server
+-	// flags, hiding the `seed` subcommand dispatched above (OB-GAP-053).
++	// flags, hiding the `seed` subcommand (OB-GAP-053).
+ 	flag.Usage = printUsage
+ 
+-	port := flag.Int("port", envInt("OFF_BY_ONE_PORT", 8766), "HTTP listen port")
+-	host := flag.String("host", envString("OFF_BY_ONE_HOST", ""), "HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy)")
+-	dbPath := flag.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path")
+-	bwrapPath := flag.String("bwrap", envString("OFF_BY_ONE_BWRAP", "/usr/bin/bwrap"), "Path to bwrap binary")
+-	piAgentPath := flag.String("pi-agent", envString("OFF_BY_ONE_PI_AGENT", "pi-agent"), "Path to pi-agent binary")
+-	cronInterval := flag.Duration("cron-interval", envDuration("OFF_BY_ONE_CRON_INTERVAL", 5*time.Minute), "Cron loop wake interval")
+-	loadThreshold := flag.Float64("load-threshold", envFloat("OFF_BY_ONE_LOAD_THRESHOLD", 1.0), "Max loadavg(1) for idle detection (negative = always idle)")
+-	solveTimeout := flag.Duration("solve-timeout", envDuration("OFF_BY_ONE_SOLVE_TIMEOUT", solver.DefaultSolveTimeout), "Per-solve timeout cap")
+-	skipSandbox := flag.Bool("skip-sandbox", envBool("OFF_BY_ONE_SKIP_SANDBOX", false), "Skip bwrap sandbox (for dev/testing)")
+-	readOnly := flag.Bool("readonly", envBool("OFF_BY_ONE_READONLY", false), "Public catalog mode: block all mutating endpoints and the AI chat")
+-	exportDir := flag.String("export-dir", envString("OFF_BY_ONE_EXPORT_DIR", ""), "Working directory for git export clones (empty = export disabled)")
+-	importDir := flag.String("import-dir", envString("OFF_BY_ONE_IMPORT_DIR", ""), "Working directory for git import clones (empty = import disabled)")
+-	showVersion := flag.Bool("version", false, "Print version and exit")
++	// Declare the server flag set BEFORE dispatch. Registering is a pure
++	// declaration — nothing is parsed here — and seedDispatch reads the live
++	// declarations to learn each flag's arity (which flags consume a value),
++	// so the dispatch probe can never drift from the real set as flags are
++	// added.
++	cfg := registerServerFlags(flag.CommandLine)
++
++	// `off-by-one seed` — one-shot corpus loader subcommand. Dispatched before
++	// the server flag set is parsed because it owns its own flags (issue #1:
++	// fresh installs need an import path from the bundled flat corpus before
++	// discovery can return anything). seedDispatch also recognises the
++	// subcommand when server-compatible flags precede it
++	// (`off-by-one --db PATH seed`, OB-GAP-071) — the stdlib flag package stops
++	// at the first non-flag argument, so a leading-position argv[1] test left
++	// that invocation to the server path, which bound the port and served an
++	// empty catalog instead of seeding.
++	if seedArgs, ok := seedDispatch(os.Args[1:], flag.CommandLine); ok {
++		runSeed(seedArgs)
++		return
++	}
++
+ 	flag.Parse()
+ 
+-	if *showVersion {
++	if *cfg.showVersion {
+ 		fmt.Printf("off-by-one %s\n", version)
+ 		return
+ 	}
+@@ -102,7 +101,7 @@ func main() {
+ 	}
+ 
+ 	// --- 1. Graph store (SQLite) --------------------------------------
+-	store, err := graph.Open(*dbPath)
++	store, err := graph.Open(*cfg.dbPath)
+ 	if err != nil {
+ 		log.Fatalf("open graph store: %v", err)
+ 	}
+@@ -111,7 +110,7 @@ func main() {
+ 			log.Printf("close graph store: %v", cerr)
+ 		}
+ 	}()
+-	log.Printf("graph store opened: %s", *dbPath)
++	log.Printf("graph store opened: %s", *cfg.dbPath)
+ 
+ 	// --- 2. Ingest queue (shares the graph DB) ------------------------
+ 	queue, err := ingest.Open(store)
+@@ -126,12 +125,12 @@ func main() {
+ 	// loop is not started — the API still works for submit/discover.
+ 	var solverExec *solver.Executor
+ 	var sandboxExec *sandbox.Executor
+-	if !*skipSandbox {
+-		if _, serr := os.Stat(*bwrapPath); serr != nil {
+-			log.Printf("warning: bwrap not found at %s — solver disabled (use --skip-sandbox to suppress this)", *bwrapPath)
++	if !*cfg.skipSandbox {
++		if _, serr := os.Stat(*cfg.bwrapPath); serr != nil {
++			log.Printf("warning: bwrap not found at %s — solver disabled (use --skip-sandbox to suppress this)", *cfg.bwrapPath)
+ 		} else {
+ 			sandboxExec = &sandbox.Executor{
+-				BwrapPath:          *bwrapPath,
++				BwrapPath:          *cfg.bwrapPath,
+ 				WorkDir:            os.TempDir(),
+ 				Timeout:            sandboxTimeout(),
+ 				ExtraReadOnlyPaths: extraReadOnlyPaths(),
+@@ -147,9 +146,9 @@ func main() {
+ 					log.Printf("DEEPSEEK_API_KEY empty — using OPENROUTER_API_KEY for solves")
+ 				}
+ 			}
+-			cfg := solverConfigFor(os.Getenv, *piAgentPath, apiKey, *solveTimeout)
+-			solverExec = solver.NewExecutor(cfg, runner, store)
+-			log.Printf("solver ready: pi-agent=%s bwrap=%s model=%s", *piAgentPath, *bwrapPath, cfg.Model)
++			solverCfg := solverConfigFor(os.Getenv, *cfg.piAgentPath, apiKey, *cfg.solveTimeout)
++			solverExec = solver.NewExecutor(solverCfg, runner, store)
++			log.Printf("solver ready: pi-agent=%s bwrap=%s model=%s", *cfg.piAgentPath, *cfg.bwrapPath, solverCfg.Model)
+ 		}
+ 	} else {
+ 		log.Printf("sandbox skipped (--skip-sandbox)")
+@@ -165,13 +164,13 @@ func main() {
+ 	if solverExec != nil {
+ 		cronCtx, cronCancel = context.WithCancel(context.Background())
+ 		loop = cron.NewLoop(cron.Config{
+-			Interval:      *cronInterval,
+-			LoadThreshold: *loadThreshold,
++			Interval:      *cfg.cronInterval,
++			LoadThreshold: *cfg.loadThreshold,
+ 			Solver:        solverExec,
+ 			Queue:         queue,
+ 		})
+ 		go func() {
+-			log.Printf("cron loop started: interval=%s loadThreshold=%.1f", *cronInterval, *loadThreshold)
++			log.Printf("cron loop started: interval=%s loadThreshold=%.1f", *cfg.cronInterval, *cfg.loadThreshold)
+ 			if rerr := loop.Run(cronCtx); rerr != nil && !errors.Is(rerr, context.Canceled) {
+ 				log.Printf("cron loop exited with error: %v", rerr)
+ 			}
+@@ -184,9 +183,9 @@ func main() {
+ 	// --- 5. API server -------------------------------------------------
+ 	specBytes := openapiBytes
+ 	apiServer := apihttp.New(store, queue, specBytes)
+-	apiServer.ExportLocalDir = *exportDir
+-	apiServer.ImportLocalDir = *importDir
+-	apiServer.ReadOnly = *readOnly
++	apiServer.ExportLocalDir = *cfg.exportDir
++	apiServer.ImportLocalDir = *cfg.importDir
++	apiServer.ReadOnly = *cfg.readOnly
+ 	apiServer.SolverAvailable = solverExec != nil
+ 	apiHandler := apiServer.Handler()
+ 
+@@ -211,7 +210,7 @@ func main() {
+ 			apiHandler.ServeHTTP(w, r)
+ 			return
+ 		case r.URL.Path == "/ws/chat":
+-			if *readOnly {
++			if *cfg.readOnly {
+ 				http.Error(w, "AI agent disabled in read-only catalog mode", http.StatusForbidden)
+ 				return
+ 			}
+@@ -226,13 +225,13 @@ func main() {
+ 	})
+ 
+ 	srv := &http.Server{
+-		Addr:              fmt.Sprintf("%s:%d", *host, *port),
++		Addr:              fmt.Sprintf("%s:%d", *cfg.host, *cfg.port),
+ 		Handler:           handler,
+ 		ReadHeaderTimeout: 5 * time.Second,
+ 	}
+ 
+-	log.Printf("off-by-one %s listening on :%d (db=%s)", version, *port, *dbPath)
+-	log.Printf("OpenAPI spec at http://localhost:%d/openapi.json (sha256=%s)", *port, api.SHA256()[:12])
++	log.Printf("off-by-one %s listening on :%d (db=%s)", version, *cfg.port, *cfg.dbPath)
++	log.Printf("OpenAPI spec at http://localhost:%d/openapi.json (sha256=%s)", *cfg.port, api.SHA256()[:12])
+ 
+ 	// --- 8. Graceful shutdown -----------------------------------------
+ 	// SIGINT/SIGTERM → stop cron loop → close DB → shutdown HTTP server.
+@@ -277,6 +276,49 @@ func main() {
+ 	log.Printf("off-by-one shutdown complete")
+ }
+ 
++// --- server flag set ----------------------------------------------------
++
++// serverConfig holds the value handles of the server flag set. main()
++// registers the whole set on flag.CommandLine; the seed dispatch probe (and
++// its tests) read the same declarations, so the two can never disagree about
++// which flags consume a value.
++type serverConfig struct {
++	port          *int
++	host          *string
++	dbPath        *string
++	bwrapPath     *string
++	piAgentPath   *string
++	cronInterval  *time.Duration
++	loadThreshold *float64
++	solveTimeout  *time.Duration
++	skipSandbox   *bool
++	readOnly      *bool
++	exportDir     *string
++	importDir     *string
++	showVersion   *bool
++}
++
++// registerServerFlags declares the full server flag set on fs and returns its
++// value handles. Declaring is side-effect free (no parsing, no output), so
++// main() can do it before seedDispatch needs the live arity table.
++func registerServerFlags(fs *flag.FlagSet) *serverConfig {
++	return &serverConfig{
++		port:          fs.Int("port", envInt("OFF_BY_ONE_PORT", 8766), "HTTP listen port"),
++		host:          fs.String("host", envString("OFF_BY_ONE_HOST", ""), "HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy)"),
++		dbPath:        fs.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path"),
++		bwrapPath:     fs.String("bwrap", envString("OFF_BY_ONE_BWRAP", "/usr/bin/bwrap"), "Path to bwrap binary"),
++		piAgentPath:   fs.String("pi-agent", envString("OFF_BY_ONE_PI_AGENT", "pi-agent"), "Path to pi-agent binary"),
++		cronInterval:  fs.Duration("cron-interval", envDuration("OFF_BY_ONE_CRON_INTERVAL", 5*time.Minute), "Cron loop wake interval"),
++		loadThreshold: fs.Float64("load-threshold", envFloat("OFF_BY_ONE_LOAD_THRESHOLD", 1.0), "Max loadavg(1) for idle detection (negative = always idle)"),
++		solveTimeout:  fs.Duration("solve-timeout", envDuration("OFF_BY_ONE_SOLVE_TIMEOUT", solver.DefaultSolveTimeout), "Per-solve timeout cap"),
++		skipSandbox:   fs.Bool("skip-sandbox", envBool("OFF_BY_ONE_SKIP_SANDBOX", false), "Skip bwrap sandbox (for dev/testing)"),
++		readOnly:      fs.Bool("readonly", envBool("OFF_BY_ONE_READONLY", false), "Public catalog mode: block all mutating endpoints and the AI chat"),
++		exportDir:     fs.String("export-dir", envString("OFF_BY_ONE_EXPORT_DIR", ""), "Working directory for git export clones (empty = export disabled)"),
++		importDir:     fs.String("import-dir", envString("OFF_BY_ONE_IMPORT_DIR", ""), "Working directory for git import clones (empty = import disabled)"),
++		showVersion:   fs.Bool("version", false, "Print version and exit"),
++	}
++}
++
+ // printUsage writes the full usage text to flag.CommandLine.Output():
+ // the subcommand list first (the default flag-package usage prints only
+ // the server flags, so --help never mentioned `seed` — OB-GAP-053),
