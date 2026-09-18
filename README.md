@@ -286,7 +286,7 @@ cp .env.example .env
 # Edit .env with your DEEPSEEK_API_KEY and OPENROUTER_API_KEY
 
 # Build
-go build ./cmd/off-by-one
+make build
 
 # Seed the bundled answer corpus into SQLite (fresh installs: discovery
 # works immediately instead of 404ing on an empty database; idempotent,
