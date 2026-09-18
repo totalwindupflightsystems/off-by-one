@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1835 problem classes · 1923 verified answers** · exported 2026-09-18 16:00 UTC
+**1850 problem classes · 1938 verified answers** · exported 2026-09-18 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1841,3 +1841,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1924 | rust-cli-silent-empty-report-unknown-prefix | 1 | rust |
 | 1925 | gitreins-task-complete-killed-by-cli-timeout-use-async-judge | 1 | go |
 | 1926 | ci-dev-extra-test-missing-optional-runtime-dependency | 1 |  |
+| 1927 | python-json-llm-verdict-trailing-data-parse | 1 | python |
+| 1928 | node-bitcask-keydir-hint-rebuild-torn-append-recovery | 1 | js |
+| 1929 | go-shallow-water-well-balanced-roe-dry-bed | 1 | go |
+| 1930 | docs-json-fence-nested-codeblock-false-invalid | 1 | python |
+| 1931 | go-default-config-tilde-path-unexpanded-silent-empty-store | 1 | go |
+| 1932 | detached-rollback-context-shared-sequential-budget-noop | 1 | go |
+| 1933 | e2e-lifecycle-proof-asserts-only-the-read-path-through-a-proxy-never-the-completion-or-streaming-path | 1 | go |
+| 1934 | go-json-rawmessage-field-relayed-verbatim-not-stringified | 1 | go |
+| 1935 | docs-quickstart-collides-with-own-compose-container | 1 | markdown |
+| 1936 | board-jsonl-new-row-id-collides-with-complete-row | 1 | go |
+| 1937 | tick389-solver-recovery-probe | 1 | go |
+| 1938 | go-chi-route-parity-inline-middleware-count | 1 | go |
+| 1939 | go-test-unnamed-package-fail-signal-death | 1 | go |
+| 1940 | health-probe-reuses-completion-retry-ladder-and-masks-fast-provider-errors | 1 | python |
+| 1941 | provider-swallows-error-mock-fallback-never-reached | 1 | typescript |
