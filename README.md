@@ -385,7 +385,8 @@ off-by-one/
 ├── scripts/publish-catalog.sh # Host publish leg: staged binary+DB pair, single activation, retried transport
 ├── scripts/lib/transport-retry.sh # ssh/scp failure classifier + bounded retry (transport class only)
 ├── scripts/tests/transport-retry-selftest.sh # Regression self-test for the publish transport (make transport-retry-selftest)
-├── scripts/pi-agent-watchdog.sh # pi-agent health probe — checks WRAPPER RESOLUTION, not mere presence (packages/coding-agent/dist/cli.js, package.json, non-empty node_modules/.bin, executable wrapper); silent when healthy, prints one ALERT per incident (stamp-deduped) with the rebuild recipe when the binary is missing or hollowed — schedule it (cron, ~15 min)
+├── scripts/pi-agent-watchdog.sh # pi-agent health probe — checks WRAPPER RESOLUTION, not mere presence (packages/coding-agent/dist/cli.js, package.json, non-empty node_modules/.bin, executable wrapper, plus node resolving every solve-path @earendil-works/* workspace package from $PI_DIR); silent when healthy, prints one ALERT per incident (stamp-deduped) naming the unresolved package(s) / carrying the rebuild recipe when the binary is missing, hollowed, or a workspace dep no longer resolves — schedule it (cron, ~15 min)
+├── scripts/tests/pi-agent-watchdog-selftest.sh # Regression self-test for the pi-agent watchdog (make pi-agent-watchdog-selftest)
 ├── Makefile                 # Build targets
 ├── AGENTS.md                # Agent development guide
 ├── CONTRIBUTING.md          # Contribution guide

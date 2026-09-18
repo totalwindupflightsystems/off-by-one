@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh connect-muster transport-retry-selftest clean
+.PHONY: build test test-short check-binary-fresh connect-muster transport-retry-selftest pi-agent-watchdog-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -95,6 +95,13 @@ test-short:
 # PATH shims + temp dirs, no network, no credentials, no real host.
 transport-retry-selftest:
 	bash scripts/tests/transport-retry-selftest.sh
+
+# Regression self-test for the pi-agent health watchdog
+# (scripts/pi-agent-watchdog.sh, OB-GAP-078). Deterministic: temp fixture
+# workspaces + PI_DIR/stamp/wrapper env overrides, no network, no credentials,
+# no contact with the real /tmp/pi install.
+pi-agent-watchdog-selftest:
+	bash scripts/tests/pi-agent-watchdog-selftest.sh
 
 lint:
 	go vet ./...

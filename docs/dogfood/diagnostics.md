@@ -26,6 +26,16 @@ that answers "does it work and why" without re-running the world.
   `DEEPSEEK_API_KEY` from env. `OFF_BY_ONE_SOLVE_TIMEOUT` default 30m (wired in
   OB-GAP-008). If bwrap/pi-agent are missing → **WARN at startup +
   `solver_available:false` in stats** (OB-GAP-005) and the cron loop does not run.
+  **Presence is NOT solve health (OB-GAP-078):** `/tmp/pi/.git`, `package.json`,
+  a non-empty `node_modules/.bin` and an executable wrapper can all be green
+  while the solve path is dead — on 2026-09-18 four
+  `node_modules/@earendil-works` workspace symlinks had vanished and every solve
+  failed in <=1s with `ERR_MODULE_NOT_FOUND: Cannot find package
+  '@earendil-works/pi-tui' imported from
+  /tmp/pi/packages/coding-agent/dist/main.js`. `scripts/pi-agent-watchdog.sh`
+  resolves every solve-path workspace package from `$PI_DIR` with node and NAMES
+  the missing one(s) (`make pi-agent-watchdog-selftest`); a vanished link is
+  invisible to the directory listing the old probe walked.
 - **Cron loop** (`internal/cron`): wakes every `OFF_BY_ONE_CRON_INTERVAL` (5m),
   only dequeues when loadavg(1) < threshold (idle detection) and a solver exists.
 - **Graph** (`internal/graph`): problem-class tree + FTS5 search + BFS related
