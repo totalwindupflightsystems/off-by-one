@@ -310,23 +310,43 @@ func parseYAMLSequence(lines []yamlLine, idx *int, baseIndent int) (*yamlNode, e
 		// sequence item (a line at baseIndent that begins with "- ") or
 		// a line at indent <= baseIndent (a sibling in the parent block).
 		if isInlineMappingStart(rest) {
+			// The synthetic block must be parsed at the inline mapping's
+			// OWN indentation — the column where its first key starts, just
+			// past the "- " marker — not at the sequence's baseIndent.
+			// parseYAMLMapping only consumes lines at its baseIndent, so
+			// parsing at baseIndent (the old behaviour) dropped every
+			// continuation key: `- name: q` followed by `in: query` /
+			// `required: true` / `schema:` yielded {name: q} and silently
+			// discarded the rest, because the collection loop below had
+			// already advanced past those lines.
+			//
+			// mappingIndent starts at the first key's column and is lowered
+			// to the shallowest collected line: a continuation key at the
+			// mapping's column is then parsed by the same mapping (the
+			// normal case), while a DEEPER line that is not a key — e.g.
+			// block-scalar content under `description: |` — cannot drag the
+			// mapping's base indent down with it and lose its own content.
+			mappingIndent := line.indent + (len(text) - len(rest))
 			synthetic := make([]yamlLine, 0, 4)
-			synthetic = append(synthetic, yamlLine{indent: baseIndent, text: strings.Repeat(" ", baseIndent) + rest, lineNo: line.lineNo})
 			for *idx < len(lines) {
 				next := lines[*idx]
 				if next.indent <= baseIndent {
 					break
 				}
-				trimmed := strings.TrimLeft(next.text, " 	")
-				// A new sequence item at baseIndent starts with "- ".
-				if next.indent == baseIndent && (strings.HasPrefix(trimmed, "- ") || trimmed == "-") {
-					break
+				if next.indent < mappingIndent {
+					mappingIndent = next.indent
 				}
 				synthetic = append(synthetic, next)
 				(*idx)++
 			}
+			// Re-add the first line at the resolved indent, first in order.
+			synthetic = append([]yamlLine{{
+				indent: mappingIndent,
+				text:   strings.Repeat(" ", mappingIndent) + rest,
+				lineNo: line.lineNo,
+			}}, synthetic...)
 			subIdx := 0
-			child, err := parseYAMLBlock(synthetic, &subIdx, baseIndent)
+			child, err := parseYAMLBlock(synthetic, &subIdx, mappingIndent)
 			if err != nil {
 				return nil, err
 			}

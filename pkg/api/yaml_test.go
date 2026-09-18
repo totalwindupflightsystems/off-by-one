@@ -439,12 +439,13 @@ func TestOpenAPISpec_ResponsesKeysAndEnumsAreMachineReadable(t *testing.T) {
 			t.Errorf("response key %q is not machine-readable (want 'default' or a 3-digit code, no quotes)", k)
 		}
 	}
-	// Five enum flow sequences reach the served document. openapi.yaml also
-	// carries `enum: [...]` lines inside sequence-item inline mappings
-	// (parameter schemas) whose continuation keys this parser drops — those
-	// never reach the document and are tracked as a separate defect.
-	if len(enums) < 5 {
-		t.Fatalf("walked only %d enum values, want at least 5", len(enums))
+	// Seven enum flow sequences reach the served document. openapi.yaml also
+	// carried `enum: [...]` lines inside sequence-item inline mappings
+	// (parameter schemas) that this parser used to drop — see
+	// TestOpenAPISpec_EverySourceEnumReachesJSON, which requires the served
+	// count to match the source exactly.
+	if len(enums) < 7 {
+		t.Fatalf("walked only %d enum values, want at least 7", len(enums))
 	}
 	for i, e := range enums {
 		arr, ok := e.([]any)
@@ -468,6 +469,369 @@ func TestOpenAPISpec_ResponsesKeysAndEnumsAreMachineReadable(t *testing.T) {
 	want := []any{"pending", "in_progress", "complete", "failed"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("QueueEntry.status.enum = %#v (%T), want %#v", got, got, want)
+	}
+}
+
+// TestYAMLParsing_SequenceItemInlineMappingContinuations pins the parser-level
+// defect: an inline mapping item inside a block sequence (`- name: q`) followed
+// by DEEPER continuation lines (`in: query`, `required: true`, `schema:` with
+// its own `enum:` flow array) must keep every continuation key. The bug was
+// that the synthetic mapping built for the inline item used the SEQUENCE's
+// base indent, so parseYAMLMapping consumed only the first key and the
+// continuation lines — already advanced past by the collection loop — were
+// silently dropped.
+func TestYAMLParsing_SequenceItemInlineMappingContinuations(t *testing.T) {
+	yaml := `
+paths:
+  /api/v1/problems:
+    get:
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Full-text search query
+          schema:
+            type: string
+            enum: [pending, verified, failed, ci_passed]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: ok
+servers:
+  - url: http://localhost:8766
+    description: Local dev server
+items:
+  - first
+  - second
+`
+	var doc map[string]any
+	if err := decodeYAMLInto([]byte(yaml), &doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	paramsAny := mustMap(t, mustMap(t, mustMap(t, doc, "paths"), "/api/v1/problems"), "get")["parameters"]
+	params, ok := paramsAny.([]any)
+	if !ok {
+		t.Fatalf("parameters = %#v (%T), want a sequence of mappings", paramsAny, paramsAny)
+	}
+	if len(params) != 2 {
+		t.Fatalf("parameters length = %d, want 2", len(params))
+	}
+
+	// (1) Every continuation key of the first parameter survives, and no
+	// extra key appears: the key SET is asserted, not just non-emptiness.
+	first, ok := params[0].(map[string]any)
+	if !ok {
+		t.Fatalf("parameters[0] = %#v (%T), want a mapping", params[0], params[0])
+	}
+	if keys := sortedKeys(first); !reflect.DeepEqual(keys, []string{"description", "in", "name", "required", "schema"}) {
+		t.Errorf("parameters[0] keys = %v, want [description in name required schema]", keys)
+	}
+	for key, want := range map[string]any{
+		"name":        "q",
+		"in":          "query",
+		"required":    true,
+		"description": "Full-text search query",
+	} {
+		if got := first[key]; got != want {
+			t.Errorf("parameters[0].%s = %#v, want %#v", key, got, want)
+		}
+	}
+
+	// (2) The nested schema keeps its own continuation keys, including the
+	// flow-sequence enum as a real array.
+	schema := mustMap(t, first, "schema")
+	if keys := sortedKeys(schema); !reflect.DeepEqual(keys, []string{"enum", "type"}) {
+		t.Errorf("parameters[0].schema keys = %v, want [enum type]", keys)
+	}
+	if schema["type"] != "string" {
+		t.Errorf("parameters[0].schema.type = %#v, want %q", schema["type"], "string")
+	}
+	if got, want := schema["enum"], []any{"pending", "verified", "failed", "ci_passed"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("parameters[0].schema.enum = %#v (%T), want %#v", got, got, want)
+	}
+
+	// (3) The second item's continuations survive independently: its schema
+	// has no enum and carries the integer default.
+	if keys := sortedKeys(params[1].(map[string]any)); !reflect.DeepEqual(keys, []string{"in", "name", "schema"}) {
+		t.Errorf("parameters[1] keys = %v, want [in name schema]", keys)
+	}
+	second := mustMap(t, params[1].(map[string]any), "schema")
+	if keys := sortedKeys(second); !reflect.DeepEqual(keys, []string{"default", "type"}) {
+		t.Errorf("parameters[1].schema keys = %v, want [default type]", keys)
+	}
+	if got := second["type"]; got != "integer" {
+		t.Errorf("parameters[1].schema.type = %#v, want %q", got, "integer")
+	}
+	if got := second["default"]; got != float64(20) {
+		t.Errorf("parameters[1].schema.default = %#v, want 20", got)
+	}
+	if _, ok := params[1].(map[string]any)["required"]; ok {
+		t.Errorf("parameters[1] unexpectedly carries a required key")
+	}
+
+	// (4) Non-parameter sequence items keep their continuations too.
+	servers, ok := doc["servers"].([]any)
+	if !ok || len(servers) != 1 {
+		t.Fatalf("servers = %#v (%T), want one item", doc["servers"], doc["servers"])
+	}
+	serverMap, ok := servers[0].(map[string]any)
+	if !ok {
+		t.Fatalf("servers[0] = %#v (%T), want a mapping", servers[0], servers[0])
+	}
+	if keys := sortedKeys(serverMap); !reflect.DeepEqual(keys, []string{"description", "url"}) {
+		t.Errorf("servers[0] keys = %v, want [description url]", keys)
+	}
+	if serverMap["description"] != "Local dev server" {
+		t.Errorf("servers[0].description = %#v, want %q", serverMap["description"], "Local dev server")
+	}
+
+	// (5) The collection loop still advanced past the whole continuation
+	// block: sibling blocks after it are intact and plain scalar items did
+	// not get swallowed by the deeper mapping.
+	responses := mustMap(t, mustMap(t, mustMap(t, mustMap(t, doc, "paths"), "/api/v1/problems"), "get"), "responses")
+	if keys := sortedKeys(responses); !reflect.DeepEqual(keys, []string{"200"}) {
+		t.Errorf("responses keys = %v, want [200]", keys)
+	}
+	if got := mustMap(t, responses, "200")["description"]; got != "ok" {
+		t.Errorf("responses.200.description = %#v, want %q", got, "ok")
+	}
+	items, ok := doc["items"].([]any)
+	if !ok || !reflect.DeepEqual(items, []any{"first", "second"}) {
+		t.Errorf("items = %#v (%T), want [first second]", doc["items"], doc["items"])
+	}
+}
+
+// TestYAMLParsing_SequenceItemBlockScalarContinuation pins the second half of
+// the indent rule: the synthetic mapping's base indent must stay at the inline
+// mapping's own column, so a DEEPER non-key line — block-scalar content under
+// `description: |` — is still read as content of that key. Resolving the base
+// indent to the shallowest CONTINUATION line instead of the mapping column
+// would move the mapping past its own block scalar and lose the text (and the
+// following keys with it, since the content line has no ':').
+func TestYAMLParsing_SequenceItemBlockScalarContinuation(t *testing.T) {
+	yaml := `
+docs:
+  - summary: inline
+    description: |
+      line one
+      line two
+    note: keep
+  - summary: second
+    description: plain text
+`
+	var doc map[string]any
+	if err := decodeYAMLInto([]byte(yaml), &doc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	items, ok := doc["docs"].([]any)
+	if !ok || len(items) != 2 {
+		t.Fatalf("docs = %#v (%T), want two items", doc["docs"], doc["docs"])
+	}
+	first, ok := items[0].(map[string]any)
+	if !ok {
+		t.Fatalf("docs[0] = %#v (%T), want a mapping", items[0], items[0])
+	}
+	if keys := sortedKeys(first); !reflect.DeepEqual(keys, []string{"description", "note", "summary"}) {
+		t.Errorf("docs[0] keys = %v, want [description note summary]", keys)
+	}
+	if got, want := first["description"], "line one\nline two"; got != want {
+		t.Errorf("docs[0].description = %#v, want %q", got, want)
+	}
+	if first["note"] != "keep" {
+		t.Errorf("docs[0].note = %#v, want %q", first["note"], "keep")
+	}
+	second, ok := items[1].(map[string]any)
+	if !ok {
+		t.Fatalf("docs[1] = %#v (%T), want a mapping", items[1], items[1])
+	}
+	if second["description"] != "plain text" {
+		t.Errorf("docs[1].description = %#v, want %q", second["description"], "plain text")
+	}
+}
+
+// TestOpenAPISpec_ParametersCarryContinuationKeys walks the served document and
+// asserts that OpenAPI parameter metadata — the reason this defect mattered —
+// reaches JSON, not just that some parameters parse.
+func TestOpenAPISpec_ParametersCarryContinuationKeys(t *testing.T) {
+	raw, err := JSONBytes()
+	if err != nil {
+		t.Fatalf("JSONBytes: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	var params []map[string]any
+	var walk func(v any)
+	walk = func(v any) {
+		switch node := v.(type) {
+		case map[string]any:
+			if list, ok := node["parameters"].([]any); ok {
+				for _, item := range list {
+					if m, ok := item.(map[string]any); ok {
+						params = append(params, m)
+					}
+				}
+			}
+			for _, child := range node {
+				walk(child)
+			}
+		case []any:
+			for _, child := range node {
+				walk(child)
+			}
+		}
+	}
+	walk(doc)
+
+	// Non-vacuity guard: the spec declares 15 parameters across its paths.
+	if len(params) != 15 {
+		t.Fatalf("walked %d parameters, want 15", len(params))
+	}
+	for i, p := range params {
+		name, _ := p["name"].(string)
+		loc, _ := p["in"].(string)
+		if name == "" {
+			t.Errorf("parameter #%d has no name: %#v", i, p)
+		}
+		if loc != "query" && loc != "path" && loc != "header" && loc != "cookie" {
+			t.Errorf("parameter %q has in=%#v, want a valid location (continuation key dropped?)", name, p["in"])
+		}
+		if _, ok := p["schema"].(map[string]any); !ok {
+			t.Errorf("parameter %q has no schema mapping: %#v", name, p["schema"])
+		}
+	}
+
+	find := func(path, method, name string) map[string]any {
+		t.Helper()
+		op := mustMap(t, mustMap(t, mustMap(t, doc, "paths"), path), method)
+		list, ok := op["parameters"].([]any)
+		if !ok {
+			t.Fatalf("%s %s has no parameters", method, path)
+		}
+		for _, item := range list {
+			m := item.(map[string]any)
+			if m["name"] == name {
+				return m
+			}
+		}
+		t.Fatalf("parameter %q not found on %s %s", name, method, path)
+		return nil
+	}
+
+	q := find("/api/v1/problems", "get", "q")
+	if q["in"] != "query" {
+		t.Errorf("q.in = %#v, want query", q["in"])
+	}
+	if q["description"] != "Full-text search query" {
+		t.Errorf("q.description = %#v, want %q", q["description"], "Full-text search query")
+	}
+	if got := mustMap(t, q, "schema")["type"]; got != "string" {
+		t.Errorf("q.schema.type = %#v, want string", got)
+	}
+
+	status := find("/api/v1/problems", "get", "status")
+	statusEnum := mustMap(t, status, "schema")["enum"]
+	if got, want := statusEnum, []any{"pending", "verified", "failed", "ci_passed"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("status.schema.enum = %#v (%T), want %#v", got, got, want)
+	}
+
+	limit := find("/api/v1/problems", "get", "limit")
+	limitSchema := mustMap(t, limit, "schema")
+	if got := limitSchema["default"]; got != float64(20) {
+		t.Errorf("limit.schema.default = %#v, want 20", got)
+	}
+	if got := limitSchema["maximum"]; got != float64(100) {
+		t.Errorf("limit.schema.maximum = %#v, want 100", got)
+	}
+
+	id := find("/api/v1/problems/{class}/answers/{id}", "get", "id")
+	if id["in"] != "path" || id["required"] != true {
+		t.Errorf("id param = %#v, want in=path required=true", id)
+	}
+}
+
+// TestOpenAPISpec_EverySourceEnumReachesJSON derives the expected enum arrays
+// from the embedded source YAML (independent of the parser under test) and
+// requires every one of them to appear as a non-empty JSON array in the served
+// document. Two of the seven source `enum:` lines used to be dropped because
+// they live inside a sequence-item inline mapping (a parameter's `schema:`).
+func TestOpenAPISpec_EverySourceEnumReachesJSON(t *testing.T) {
+	source := string(YAMLBytes())
+	lines := regexp.MustCompile(`(?m)^[ \t]*enum:[ \t]*\[([^\]]*)\][ \t]*$`).FindAllStringSubmatch(source, -1)
+	var want [][]any
+	for _, m := range lines {
+		var arr []any
+		for _, part := range strings.Split(m[1], ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			arr = append(arr, strings.Trim(part, `"'`))
+		}
+		want = append(want, arr)
+	}
+	if len(want) != 7 {
+		t.Fatalf("source openapi.yaml declares %d single-line enum arrays, want 7 (update this test with the spec)", len(want))
+	}
+
+	raw, err := JSONBytes()
+	if err != nil {
+		t.Fatalf("JSONBytes: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	var got [][]any
+	var walk func(v any)
+	walk = func(v any) {
+		switch node := v.(type) {
+		case map[string]any:
+			if e, ok := node["enum"]; ok {
+				arr, ok := e.([]any)
+				if !ok {
+					t.Errorf("enum %#v is %T, want a JSON array", e, e)
+				} else {
+					got = append(got, arr)
+				}
+			}
+			for _, child := range node {
+				walk(child)
+			}
+		case []any:
+			for _, child := range node {
+				walk(child)
+			}
+		}
+	}
+	walk(doc)
+
+	if len(got) != len(want) {
+		t.Errorf("served document carries %d enum arrays, source declares %d — continuation keys were dropped", len(got), len(want))
+	}
+	for i, arr := range got {
+		if len(arr) == 0 {
+			t.Errorf("served enum array #%d is empty", i)
+		}
+	}
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if reflect.DeepEqual(g, w) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("source enum %v never reached the served JSON (got %v)", w, got)
+		}
 	}
 }
 
