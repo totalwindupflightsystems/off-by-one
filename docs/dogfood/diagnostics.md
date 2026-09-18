@@ -89,7 +89,7 @@ that answers "does it work and why" without re-running the world.
    if the tuple is already solved — then just discover.
 3. **Operate:** check the startup WARN + `solver_available`; keep `/tmp/pi` intact
    (rebuild recipe above); restarts are safe (SQLite WAL, data persists).
-4. **Test locally:** `go build ./cmd/off-by-one && ./off-by-one --skip-sandbox
+4. **Test locally:** `make build && ./off-by-one --skip-sandbox
    --db /tmp/x.db --port 8877` — full API without bwrap/keys.
 5. **Read-only catalog deployments:** fine for humans browsing; agent discovery
    works since OB-GAP-020 (discover is 200 in readonly mode).

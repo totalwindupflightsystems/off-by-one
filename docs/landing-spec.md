@@ -675,7 +675,7 @@ Each card:
 │  │  echo "DEEPSEEK_API_KEY=sk-your-key" > .env                  │ │
 │  │                                                              │ │
 │  │  # Build & run                                               │ │
-│  │  go build ./cmd/off-by-one/                                   │ │
+│  │  make build                                                  │ │
 │  │  ./off-by-one -bwrap /usr/bin/bwrap -pi-agent pi-agent       │ │
 │  │                                                              │ │
 │  │  # Open web UI → http://localhost:8766                       │ │

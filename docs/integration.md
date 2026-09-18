@@ -23,7 +23,7 @@ Base URL: `http://localhost:8766` (or wherever the binary is listening).
 
 ```bash
 # Build
-go build ./cmd/off-by-one
+make build
 
 # Run with defaults (port 8766, ./off-by-one.db, solver requires bwrap + pi-agent)
 ./off-by-one

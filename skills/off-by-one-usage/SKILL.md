@@ -32,7 +32,7 @@ state; if a pitfall mentions a fixed OB-GAP id, it is stale — check the board.
 | Web UI | `GET /` (embedded SPA — Home/Search/Submit/Explore/Chat) |
 | Flat corpus | `data/answers/*.json` (per class), `data/answers.jsonl`, `data/INDEX.md` |
 | Public catalog | ob1.it.com (read-only mirror, synced ~6h) |
-| Binary | `go build ./cmd/off-by-one` → `./off-by-one` (needs `DEEPSEEK_API_KEY` for the solver; `--skip-sandbox` for dev) |
+| Binary | `make build` → `./off-by-one` (needs `DEEPSEEK_API_KEY` for the solver; `--skip-sandbox` for dev) |
 
 ## The workflows that work (verified live)
 
@@ -149,7 +149,7 @@ time, the fix is not serving — file a board task, don't assume.
 ## Running a scratch instance (safe testing)
 
 ```bash
-go build ./cmd/off-by-one
+make build
 env -u DEEPSEEK_API_KEY OFF_BY_ONE_PORT=8877 OFF_BY_ONE_DB=/tmp/x.db \
   ./off-by-one --skip-sandbox --load-threshold -1
 ```
