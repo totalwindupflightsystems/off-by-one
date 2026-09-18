@@ -91,6 +91,16 @@ that answers "does it work and why" without re-running the world.
    (rebuild recipe above); restarts are safe (SQLite WAL, data persists).
 4. **Test locally:** `make build && ./off-by-one --skip-sandbox
    --db /tmp/x.db --port 8877` — full API without bwrap/keys.
+   Before you trust that binary, run `make check-binary-fresh`: `make build`
+   stamps `./off-by-one` from `git describe`, and the check refuses an artifact
+   the running server would serve with pre-fix behavior. The three failures it
+   prints, verbatim:
+
+   - `ERROR: ./off-by-one was built from a dirty tree (stamp: <stamp>) — the working tree had uncommitted changes when it was compiled; commit or stash them, then run 'make build'`
+   - `ERROR: ./off-by-one carries no version stamp (<stamp>) — it was not built by 'make build'; run 'make build'`
+   - `ERROR: ./off-by-one is stale — source changed since it was built; run 'make build'`
+
+   Remedy for all three: commit or stash the working tree, then `make build`.
 5. **Read-only catalog deployments:** fine for humans browsing; agent discovery
    works since OB-GAP-020 (discover is 200 in readonly mode).
 6. **Commit hygiene:** GitReins guard blocks on secrets/build/tests; docs-only

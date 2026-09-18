@@ -146,6 +146,16 @@ is rebuilt AND the server restarted. `verified_answers == total_answers` in
 stats is the pre-fix signature of OB-GAP-060. If binary mtime < HEAD commit
 time, the fix is not serving — file a board task, don't assume.
 
+**Binary-freshness guard:** `make build` stamps `./off-by-one` from
+`git describe`; `make check-binary-fresh` refuses an artifact the server would
+serve with pre-fix behavior. Its three failures, verbatim:
+
+- `ERROR: ./off-by-one was built from a dirty tree (stamp: <stamp>) — the working tree had uncommitted changes when it was compiled; commit or stash them, then run 'make build'`
+- `ERROR: ./off-by-one carries no version stamp (<stamp>) — it was not built by 'make build'; run 'make build'`
+- `ERROR: ./off-by-one is stale — source changed since it was built; run 'make build'`
+
+Remedy for all three: commit or stash the working tree, then `make build`.
+
 ## Running a scratch instance (safe testing)
 
 ```bash
