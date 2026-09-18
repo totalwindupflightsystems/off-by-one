@@ -1,0 +1,84 @@
+commit 986f7f70a64cd4a04844a142c85a7fc9c207ba96
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Fri Sep 18 09:10:39 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Fri Sep 18 09:10:39 2026 -0500
+
+    docs: document submit 503 solver_unavailable; drop stale queue-until-restart claim. Addresses OB-GAP-069
+    
+    docs/api-reference.md: add `503` (`solver_unavailable`) to the POST /api/v1/problems/submit
+    status set and document the response body plus the no-queue-entry behavior. The handler
+    rejects before any queue write (internal/api/handlers.go:206-210) and the check runs ahead of
+    body parsing, so the status applies to JSON and multipart submissions alike.
+    
+    docs/integration.md: replace the false "submissions will stay in the queue until the server is
+    restarted" guidance (the handler never queues while solver_available is false) with the real
+    behavior — HTTP 503, error code solver_unavailable, no submission id, nothing in
+    GET /api/v1/queue — and keep the operator restart guidance. Adds the 503 case to the submit
+    status summary.
+    
+    Documented submit status set now 200 / 400 / 409 / 500 / 503, matching the writeError statuses
+    in handleSubmitProblem (400 invalid_request, 500 internal_error, 503 solver_unavailable) plus
+    the 409 duplicate path (ingest.StatusForHTTP). Docs-only change; no Go code touched.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ docs/api-reference.md | 13 ++++++++++++-
+ docs/integration.md   |  6 ++++--
+ 2 files changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index b784309..12a5499 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -62,7 +62,7 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
+ 
+ `status` is one of `queued`, `deduplicated`, or `rejected`.
+ 
+-**Status codes:** `200` (queued/duplicate), `400` (invalid submission), `409` (duplicate — same tuple already queued or answered), `500` (internal error).
++**Status codes:** `200` (queued/duplicate), `400` (invalid submission), `409` (duplicate — same tuple already queued or answered), `500` (internal error), `503` (`solver_unavailable` — no solver wired up; see below).
+ 
+ **Duplicate (`409`) response.** A submission is deduplicated on `(problem_class, environment, language, version)`. When that tuple is already queued/in progress or already has a verified answer, no second job is created: the response carries `"status": "deduplicated"` and the **existing** `submission_id` (the same id the original submit returned) with its queue `position`:
+ 
+@@ -85,6 +85,17 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
+ }
+ ```
+ 
++**Solver unavailable (`503`).** When the server has no working solver — `bwrap` + `pi-agent` not configured, the same condition `GET /api/v1/stats` reports as `solver_available: false` — the handler rejects the submission up front, **before the queue is touched**: no `submission_id` is issued, no queue entry is created, and there is nothing to poll on `GET /api/v1/queue`.
++
++```json
++{
++  "error": "solver_unavailable",
++  "message": "solver is not available (bwrap + pi-agent not configured); submissions cannot be queued — use POST /api/v1/problems/discover to look up existing answers"
++}
++```
++
++The check runs first, ahead of body parsing, so this response is returned for both JSON and `multipart/form-data` submissions regardless of body validity. Clients should fall back to `POST /api/v1/problems/discover` to read pre-verified answers from a catalog-only deployment. The condition clears when the server is restarted with `bwrap` and `pi-agent` available.
++
+ **Example**
+ 
+ ```bash
+diff --git a/docs/integration.md b/docs/integration.md
+index fbabf68..65bb4f3 100644
+--- a/docs/integration.md
++++ b/docs/integration.md
+@@ -104,7 +104,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
+ }
+ ```
+ 
+-Possible statuses: `queued`, `deduplicated`, `rejected`. A 400 response means the submission was invalid (missing `problem_class`, unknown `cadence`, etc.). A 409 response means the same `(class, environment, language, version)` tuple is already pending or already has a verified answer — see [Deduplication](#deduplication-and-queue-behavior).
++Possible statuses: `queued`, `deduplicated`, `rejected`. A 400 response means the submission was invalid (missing `problem_class`, unknown `cadence`, etc.). A 409 response means the same `(class, environment, language, version)` tuple is already pending or already has a verified answer — see [Deduplication](#deduplication-and-queue-behavior). A 503 response means the deployment has no working solver (`solver_available: false` in `GET /api/v1/stats`): the submission is rejected up front with the error code `solver_unavailable` and no queue entry is created — see [Queue ordering](#queue-ordering).
+ 
+ ---
+ 
+@@ -312,7 +312,9 @@ When a duplicate is detected, the API returns HTTP `409 Conflict` with a body li
+ 
+ Pending entries are ordered by priority descending, then `created_at` ascending. The highest-priority pending entry is dequeued during idle cycles, moved to `in_progress`, sandboxed, solved by Pi Agent, and either marked `complete` (with an answer node) or `failed`.
+ 
+-If `solver_available` is false in `/api/v1/stats`, the cron loop is not running and submissions will stay in the queue until the server is restarted with a working solver.
++If `solver_available` is false in `/api/v1/stats`, no solver is wired up (`bwrap` + `pi-agent` missing) and the cron loop is not running. In that state `POST /api/v1/problems/submit` does **not** queue anything: the handler rejects the request up front with HTTP `503` and error code `solver_unavailable`, so no submission id is issued and no queue entry is created — `GET /api/v1/queue` will not show it, and there is nothing to poll. Clients should treat `solver_available: false` as "submit is closed" and fall back to `POST /api/v1/problems/discover` for pre-verified answers.
++
++For operators: the fix is configuration, not a client retry — install `bwrap`, make `pi-agent` reachable, and restart the server; submissions are accepted again as soon as a solver is wired up at startup. Pre-verified answers stay discoverable throughout, so a catalog-only deployment is fully usable for reads.
+ 
+ ---
+ 
