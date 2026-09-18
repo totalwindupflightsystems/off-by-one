@@ -381,6 +381,10 @@ off-by-one/
 ├── muster-config.yaml       # Muster connection config
 ├── scripts/connect-muster.sh # Muster connection script
 ├── scripts/sync-answers.sh  # Answer corpus sync script
+├── scripts/ob1-distribute.sh # Cron entrypoint: corpus -> GitHub + host publish (deployed copy lives at ~/.hermes/scripts/)
+├── scripts/publish-catalog.sh # Host publish leg: staged binary+DB pair, single activation, retried transport
+├── scripts/lib/transport-retry.sh # ssh/scp failure classifier + bounded retry (transport class only)
+├── scripts/tests/transport-retry-selftest.sh # Regression self-test for the publish transport (make transport-retry-selftest)
 ├── scripts/pi-agent-watchdog.sh # pi-agent health probe — checks WRAPPER RESOLUTION, not mere presence (packages/coding-agent/dist/cli.js, package.json, non-empty node_modules/.bin, executable wrapper); silent when healthy, prints one ALERT per incident (stamp-deduped) with the rebuild recipe when the binary is missing or hollowed — schedule it (cron, ~15 min)
 ├── Makefile                 # Build targets
 ├── AGENTS.md                # Agent development guide
@@ -415,6 +419,33 @@ grep -l '"title": ".*raft.*"' data/answers/*.json
 ```
 
 The exported corpus is the set of verified answers. `GET /api/v1/stats` applies one further exclusion on top of that set: an answer whose signatures JSON records a failed solve (`result: "failed"`) is not counted in `verified_answers`, so `hit_rate` (= verified_answers/total_answers) is computed from the live database and is not a fixed constant. Observed on the running lab while this section was written — the values move as the corpus grows, so query your own instance with `curl -s http://localhost:8766/api/v1/stats` instead of trusting them: `total_problems` 1847, `total_answers` 2036, `verified_answers` 2008, `hit_rate` 0.9862475442043221, `coverage` 1.0871683811586357. Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more. To contribute, open a PR adding/updating a file under `data/answers/`. Regenerate the export anytime with `python3 scripts/export-answers.py`.
+
+## Publishing the public catalog
+
+`scripts/ob1-distribute.sh` (cron, 4×/day) has two independent halves:
+
+1. **Answer corpus → GitHub** — regenerate `data/`, commit, push. Unchanged, and
+   keeps working even when the host publish fails.
+2. **Host publish → catalog box** — `scripts/publish-catalog.sh` ships the
+   binary and an answer-DB snapshot as a **staged pair** (`*.new`), and activates
+   them only after both transfers succeeded. Transient ssh/scp resets
+   (`Connection reset by peer`, `scp: Connection closed`, rc 255) retry the whole
+   idempotent pair within a bounded budget; ordinary remote command failures
+   (rc 1, "no space left", a failed restart) are attempted exactly once and are
+   never retried; a rejected key/host-key failure is reported as an
+   operator-action class instead of being retried blindly; activation is
+   attempted once and never promotes an incomplete pair.
+
+```bash
+make transport-retry-selftest                          # 108 checks, PATH shims, no network
+OB1_PUBLISH_DRY_RUN=1 bash scripts/publish-catalog.sh  # resolved plan, no ssh
+bash scripts/ob1-distribute.sh                         # full cron entrypoint (corpus + publish)
+```
+
+Operator knobs (`OB1_PUBLISH_BOX`, `OB1_PUBLISH_MODE`, `TRANSPORT_RETRIES`,
+and the distinct exit codes 1–6), the retry classification table and the current
+state of the legacy deploy host are documented in
+[docs/publish-transport.md](docs/publish-transport.md).
 
 ## Related Projects
 

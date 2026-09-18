@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh connect-muster clean
+.PHONY: build test test-short check-binary-fresh connect-muster transport-retry-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -55,6 +55,12 @@ test:
 
 test-short:
 	go test -short -count=1 ./...
+
+# Regression self-test for the public-catalog publish transport
+# (scripts/lib/transport-retry.sh + scripts/publish-catalog.sh). Deterministic:
+# PATH shims + temp dirs, no network, no credentials, no real host.
+transport-retry-selftest:
+	bash scripts/tests/transport-retry-selftest.sh
 
 lint:
 	go vet ./...
