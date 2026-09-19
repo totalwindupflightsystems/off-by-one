@@ -427,7 +427,9 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 // are exact-match filters honored by BOTH branches (OB-GAP-080).
 func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	limit := parseIntDefault(q.Get("limit"), 20, 1, 100)
+	// Over-max limit clamps to the documented max of 100 (OB-GAP-081);
+	// omitted, non-numeric, and non-positive values use the default.
+	limit := clampIntDefault(q.Get("limit"), 20, 1, 100)
 	offset := parseIntDefault(q.Get("offset"), 0, 0, 1<<20)
 	status := q.Get("status")
 	env := q.Get("env")
@@ -998,6 +1000,27 @@ func parseIntDefault(s string, def, min, max int) int {
 	}
 	if n > max {
 		return def
+	}
+	return n
+}
+
+// clampIntDefault returns the parsed int clamped into [min, max], or def
+// when the value is absent, non-numeric, or below min (OB-GAP-081).
+// Unlike parseIntDefault, values above max are clamped to max rather
+// than silently falling back to the default.
+func clampIntDefault(s string, def, min, max int) int {
+	if s == "" {
+		return def
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return def
+	}
+	if n < min {
+		return def
+	}
+	if n > max {
+		return max
 	}
 	return n
 }

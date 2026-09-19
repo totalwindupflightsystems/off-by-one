@@ -126,7 +126,7 @@ List or search problem classes. Supports full-text search via `q` and filtering 
 | `env` | string | Filter by environment — matched **exactly** against the `env` stored on the class's answer rows |
 | `lang` | string | Filter by language — matched **exactly** against the `lang` stored on the class's answer rows |
 | `status` | string | Filter by status (`pending`, `verified`, `failed`, `ci_passed`) |
-| `limit` | integer | Page size (default 20, max 100) |
+| `limit` | integer | Page size (default 20, max 100). Values above 100 are clamped to 100; omitted, non-numeric, and values below 1 fall back to the default |
 | `offset` | integer | Pagination offset (default 0) |
 
 `env` and `lang` are exact matches (`a.env = ?`, `a.lang = ?`) against the value stored on the class's answer rows — not substring, case-insensitive, or alias matches — and a class is filtered out unless one of its answers carries that exact value. A filter copied from the [README submit example](../README.md#example-submit-a-problem) (`environment: "linux"`, `language: "go"`) can therefore legitimately return 0 rows: the stored values are whatever the corpus recorded, and they are not normalized (observed live: `GET /api/v1/problems?q=raft&env=linux` → `{"problems":[],"total":0}`, while `q=raft` alone returns the matching classes, whose answers carry `env` values such as `go1.26`). Check the stored values first — `GET /api/v1/problems/{class}/answers` returns `env` and `lang` for every answer. The same exact-match rule governs `POST /api/v1/problems/discover`'s `environment` / `language` filters — see [Discover Cached Solutions](integration.md#discover-cached-solutions).

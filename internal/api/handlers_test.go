@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -805,6 +806,62 @@ func TestListProblems_EnvLangFiltersWithoutQuery(t *testing.T) {
 	// Empty env/lang keeps the unfiltered total.
 	if resp := get("/api/v1/problems"); resp.Total != 2 {
 		t.Errorf("no filters: total = %d, want 2 (unfiltered catalog unchanged)", resp.Total)
+	}
+}
+
+// The list endpoint's limit parameter clamps over-max values to the
+// documented max of 100 instead of silently falling back to the default
+// 20 (OB-GAP-081): a client asking for a large page would otherwise get
+// a short page with no error. 0 / negative and non-numeric values keep
+// the documented default of 20, and the response shape is unchanged.
+func TestListProblems_LimitBoundaries(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	const total = 101
+	for i := 0; i < total; i++ {
+		seedClass(t, store, fmt.Sprintf("limit-class-%03d", i), "desc", "docker", "go", "1.0", "sol", graph.AnswerVerified)
+	}
+
+	get := func(path string) listProblemsResponse {
+		t.Helper()
+		rr := do(t, s, "GET", path, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, want 200", path, rr.Code)
+		}
+		var resp listProblemsResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("GET %s: decode: %v", path, err)
+		}
+		return resp
+	}
+
+	cases := []struct {
+		name  string
+		path  string
+		wantN int
+	}{
+		{"max accepted", "/api/v1/problems?limit=100", 100},
+		{"over max clamps", "/api/v1/problems?limit=101", 100},
+		{"far over max clamps", "/api/v1/problems?limit=200", 100},
+		{"zero uses default", "/api/v1/problems?limit=0", 20},
+		{"negative uses default", "/api/v1/problems?limit=-3", 20},
+		{"non-numeric uses default", "/api/v1/problems?limit=abc", 20},
+		{"omitted uses default", "/api/v1/problems", 20},
+	}
+	for _, tc := range cases {
+		resp := get(tc.path)
+		if len(resp.Problems) != tc.wantN {
+			t.Errorf("%s (%s): got %d problems, want %d", tc.name, tc.path, len(resp.Problems), tc.wantN)
+		}
+		if resp.Total != total {
+			t.Errorf("%s (%s): total = %d, want %d (limit must not affect total)", tc.name, tc.path, resp.Total, total)
+		}
+	}
+
+	// offset still paginates past the clamp boundary.
+	first := get("/api/v1/problems?limit=100&offset=0")
+	rest := get("/api/v1/problems?limit=200&offset=100")
+	if len(first.Problems) != 100 || len(rest.Problems) != 1 {
+		t.Errorf("offset pagination: first page = %d items, second = %d, want 100 + 1", len(first.Problems), len(rest.Problems))
 	}
 }
 
