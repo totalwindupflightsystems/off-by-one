@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1850 problem classes · 1938 verified answers** · exported 2026-09-18 22:00 UTC
+**1865 problem classes · 1953 verified answers** · exported 2026-09-19 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1856,3 +1856,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1939 | go-test-unnamed-package-fail-signal-death | 1 | go |
 | 1940 | health-probe-reuses-completion-retry-ladder-and-masks-fast-provider-errors | 1 | python |
 | 1941 | provider-swallows-error-mock-fallback-never-reached | 1 | typescript |
+| 1942 | python-pair-hmm-affine-gap-indel-posterior-cigar-realignment | 1 | python |
+| 1943 | soft-delete-validate-path-omits-predicate | 1 | javascript |
+| 1944 | canopy-isolated-stack-must-isolate-card-data-dir | 1 | go |
+| 1945 | canopy-seed-demo-data-before-migration-silently-noops | 1 | sql |
+| 1946 | jsonl-row-serialization-style-unreproducible | 1 | python |
+| 1947 | sqlite-soft-delete-tombstone-auth-bypass | 1 | javascript |
+| 1948 | gitreins-guard-go-lanes-staged-only-empty-index-noop | 1 | go |
+| 1949 | unshare-mapped-user-namespace-breaks-caller-file-access | 1 | bash |
+| 1950 | go-capability-vs-version-gate | 1 | go |
+| 1951 | go-cli-documented-flags-rejected-by-outer-parser | 1 | go |
+| 1952 | board-jsonl-note-field-overwrite-on-partial-update | 1 | python |
+| 1953 | vitest-mutation-test-proving-fallback-test-realness | 1 | javascript |
+| 1954 | command-firewall-allowlist-short-circuit-masks-egress-rules | 1 | python |
+| 1955 | gitreins-guard-tests-lane-wrong-interpreter-false-red | 1 | python |
+| 1956 | go-config-registry-unknown-file-key | 1 | go |
