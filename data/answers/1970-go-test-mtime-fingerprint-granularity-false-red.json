@@ -1,0 +1,28 @@
+{
+  "class_id": 1970,
+  "title": "go-test-mtime-fingerprint-granularity-false-red",
+  "description": "go-test-mtime-fingerprint-granularity-false-red",
+  "created_at": "2026-09-19 08:26:43",
+  "answers": [
+    {
+      "answer_id": 2161,
+      "language": "go",
+      "environment": "linux/amd64, go1.26.5, trouble repo internal/sensors; reproduced by pinning mtime with os.Chtimes before/after a same-size content rewrite",
+      "version": "",
+      "solution": "I diagnosed and verified the fix. Note: the original trouble repo was not present in the sandbox, so I reconstructed the `internal/sensors` package from the problem statement, reproduced the exact red, applied the fix, and falsified it.\n\n## Root cause\n\n`RuleDirFingerprint` hashed only `path + size + mtime`:\n\n```go\nfmt.Fprintf(h, \"%s\\x00%d\\x00%d\\n\", name, info.Size(), info.ModTime().UnixNano())\n```\n\nA same-size content rewrite with a pinned/unchanged mtime (coarse fs granularity, `tar -x`, `rsync -t`, `os.Chtimes`) leaves *every* stat field identical → fingerprint unchanged → the 60s sweep misses the real change and never reloads. The test asserted \"the mtime moved\", i.e. it asserted a property of the **filesystem**, not the code.\n\n## Fix\n\nFold a streamed SHA-256 content digest into the fingerprint alongside metadata, using `io.Copy(h, f)` so bytes are never buffered:\n\n```go\nfmt.Fprintf(h, \"%s\\x00%d\\x00%d\\x00\", name, info.Size(), info.ModTime().UnixNano())\nf, err := os.Open(path)\nif err != nil { return \"\", err }\n_, copyErr := io.Copy(h, f)\ncloseErr := f.Close()\n// ... surface both errors\nh.Write([]byte(\"\\n\"))\n```\n\nMetadata stays in the digest (path binding); nothing-changed stays stable so the sweep doesn't reload every tick.\n\n## Test\n\n`TestRuleDirMTimesDetectsChange` now asserts the hostile condition directly — same-length rewrite + `os.Chtimes` pins mtime equal — plus a natural polled edit/removal half with a 3s deadline (> 1s granularity) and a stability check.\n\n## Verification results\n\n| Step | Result |\n|---|---|\n| Pre-fix `go test` | **FAIL** — `pinned-mtime content change did not trigger reload` / `the mtime fingerprint did not change after an edit` |\n| Post-fix `go test -run TestRuleDirMTimesDetectsChange -v` | PASS |\n| `go test ./internal/sensors/ -count=10` | ok |\n| `go test -race ./internal/sensors/ -count=3` | ok |\n| `go vet` / `gofmt -l` | clean |\n| Falsification: buggy `rules.go` restored in `/tmp/falsify` | **FAIL** again |\n\nThe full self-contained write-up (root cause, complete `rules.go`, complete `reload_test.go`, exact commands, expected-outcome table) is at:\n\n- **`/home/kara/SOLUTION.md`**\n- Reproduction module: `/home/kara/trouble` (`internal/sensors/rules.go`, `internal/sensors/reload_test.go`)\n- Falsified copy: `/tmp/falsify`\n",
+      "evidence": "# Evidence\n- Problem class: go-test-mtime-fingerprint-granularity-false-red\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-19T08:26:43.688Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Go test asserts a file-mtime-derived fingerprint changes after a same-size rewrite, but the fingerprint hashed path+size+mtime only, so on a coarse-granularity filesystem (or a tar-synced/restored tree) the mtime does not move inside the test window and the assertion is a deterministic false red on clean machines while green on the ns-granularity dev box. Product-side the same blindness makes a 60s mtime-sweep backstop MISS a real content change.",
+        "environment": "linux/amd64, go1.26.5, trouble repo internal/sensors; reproduced by pinning mtime with os.Chtimes before/after a same-size content rewrite",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-test-mtime-fingerprint-granularity-false-red",
+        "provider": "openrouter",
+        "solved_at": "2026-09-19T08:26:43.688Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-19 08:26:43"
+    }
+  ]
+}

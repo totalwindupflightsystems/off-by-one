@@ -1,0 +1,28 @@
+{
+  "class_id": 1957,
+  "title": "redis-consumer-group-cold-restart-never-recreated",
+  "description": "redis-consumer-group-cold-restart-never-recreated",
+  "created_at": "2026-09-19 04:09:42",
+  "answers": [
+    {
+      "answer_id": 2148,
+      "language": "go",
+      "environment": "docker (redis:7.4-alpine, appendonly yes, maxmemory-policy noeviction)",
+      "version": "",
+      "solution": "Solution written to **`/home/kara/redis-consumer-group-cold-restart-fix.md`** and verified.\n\n## Summary\n\n**Root cause:** The consumer collapses all Redis errors into one \"unavailable → back off and retry\" path. But `NOGROUP` is a *reply from a healthy server*, not an availability failure. Because `XGROUP CREATE ... MKSTREAM` only runs once at boot, the reconnect path never re-creates the group, so `XAUTOCLAIM`/`XPENDING` answer `NOGROUP` forever, health stays `redis_unavailable`, and ingest keeps returning `429`.\n\n**The classification rule (the core fix):**\n- **No reply** (dial/EOF/timeout/reset, i.e. transport error) → `Unavailable` → bounded backoff, keep degraded, **never touch topology**.\n- **Got a RESP error reply** → server is up. `NOGROUP` → `GroupGone` → **re-bootstrap** (`XGROUP CREATE ... MKSTREAM`, re-warm dedup from durable store, resume claiming) and clear degraded. Other codes → `Transient` (`LOADING`/`READONLY`) or `Fatal` (`WRONGTYPE`/`NOPERM`) → back off or alert; **never rebuild topology**.\n\n**Two non-obvious points the verification surfaced:**\n1. If the stream exists but the group doesn't, re-create at `0` (replay) rather than `$` so retained entries aren't skipped — safe only because processing is idempotent.\n2. **Dedup must be keyed on a business key, not the Redis entry ID.** A wiped stream restarts auto-IDs at `0`, so an ID-keyed cache can silently suppress brand-new work (this was caught by a flaky test and fixed).\n\n**Verification (executed):** `TestClassify`, `TestColdRestartHeals` (flush → healthy/empty server → one pass self-heals, group re-created, new work flows), and `TestUnreachableStaysDegraded` (kill server → stays `Unavailable`/degraded with zero topology rebuilds, clears when it returns). `go test` passes, ran 10× for determinism, and the appendix code was extracted from the markdown and independently compiled/passed. Docker commands for an end-to-end `redis:7.4-alpine` reproduction are included (not run here — no Docker daemon in this sandbox).\n",
+      "evidence": "# Evidence\n- Problem class: redis-consumer-group-cold-restart-never-recreated\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-19T04:09:42.157Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A Redis-backed ingest queue creates its stream+consumer group once at boot (XGROUP CREATE ... MKSTREAM) and consumes with XREADGROUP/XACK-after-fsync. The Redis client reconnects on its own, but the reconnect path never re-runs XGROUP CREATE. When the Redis instance is replaced by a healthy but EMPTY server on the same address (flush, cold failover, container recreation) the consumer's XAUTOCLAIM/XPENDING loop answers NOGROUP forever, the daemon stays wedged in a degraded state that refuses new work, and no self-heal happens until a process restart. Question: what is the correct reconnect policy for stream consumers so a cold/empty Redis is re-initialised (re-create group with MKSTREAM, re-warm any key-based dedup cache from the durable store, resume claiming) instead of being treated as still-unavailable, without masking a genuinely unreachable server? Include the classification rule for 'connection lost during an operation' vs 'the server answered and the key is gone', and how to test both.",
+        "environment": "docker (redis:7.4-alpine, appendonly yes, maxmemory-policy noeviction)",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "redis-consumer-group-cold-restart-never-recreated",
+        "provider": "openrouter",
+        "solved_at": "2026-09-19T04:09:42.157Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-19 04:09:42"
+    }
+  ]
+}

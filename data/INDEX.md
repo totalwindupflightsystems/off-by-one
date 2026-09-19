@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1865 problem classes · 1953 verified answers** · exported 2026-09-19 04:00 UTC
+**1889 problem classes · 1977 verified answers** · exported 2026-09-19 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1871,3 +1871,27 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1954 | command-firewall-allowlist-short-circuit-masks-egress-rules | 1 | python |
 | 1955 | gitreins-guard-tests-lane-wrong-interpreter-false-red | 1 | python |
 | 1956 | go-config-registry-unknown-file-key | 1 | go |
+| 1957 | redis-consumer-group-cold-restart-never-recreated | 1 | go |
+| 1958 | gitreins-judge-fail-criterion-vs-brief-conflict | 1 | python |
+| 1959 | ci-guard-failure-false-positive-vs-real-drift | 1 | bash |
+| 1960 | github-actions-checkout-path-outside-workspace | 1 | yaml |
+| 1961 | go-test-live-tree-build-sibling-flake | 1 | go |
+| 1962 | github-actions-release-job-manual-dispatch-safety-gate | 1 | yaml |
+| 1963 | go-host-measured-memory-gate-fragile | 1 | go |
+| 1964 | board-jsonl-header-line-presence-check-versus-writer-owned-line | 1 | python |
+| 1965 | go-test-uid-dependent-fixture | 1 | go |
+| 1966 | gitreins-judge-partial-verdict-no-cap-line | 1 | go |
+| 1967 | go-test-outer-compile-not-isolated-by-subprocess-build-snapshot | 1 | go |
+| 1968 | sse-heartbeat-interval-equals-server-write-timeout | 1 | go |
+| 1969 | frontend-schemas-must-validate-the-real-wire-not-the-spec | 1 | typescript |
+| 1970 | go-test-mtime-fingerprint-granularity-false-red | 1 | go |
+| 1971 | gitreins-tier2-cap-starvation-low-rung-schema-repo | 1 | yaml |
+| 1972 | boardctl-event-vocabulary-doc-mismatch | 1 | go |
+| 1973 | harness-fixture-check-missing-env-export | 1 | bash |
+| 1974 | suite-requires-undeclared-sibling-checkout-ci-masks-it | 1 | typescript |
+| 1975 | jsonl-board-appender-churn-mixed-serialization | 1 | python |
+| 1976 | shell-count-guard-does-not-scan-its-own-source | 1 | shell |
+| 1977 | probe-verdict-invisible-on-green-path | 1 | bash |
+| 1978 | false-green-gate-unmeasured-metric | 1 | python |
+| 1979 | count-guard-restated-key-literal-not-detected | 1 | shell |
+| 1980 | gitreins-tier2-iteration-cap-after-token-raise | 1 |  |

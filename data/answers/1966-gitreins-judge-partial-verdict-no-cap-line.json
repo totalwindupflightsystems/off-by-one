@@ -1,0 +1,28 @@
+{
+  "class_id": 1966,
+  "title": "gitreins-judge-partial-verdict-no-cap-line",
+  "description": "gitreins-judge-partial-verdict-no-cap-line",
+  "created_at": "2026-09-19 08:11:57",
+  "answers": [
+    {
+      "answer_id": 2157,
+      "language": "go",
+      "environment": "Linux, crier repo /home/kara/crier",
+      "version": "gitreins 0.12.x; go1.26.5",
+      "solution": "Diagnosed and fixed. The solution is written to **`/workspace/solution.md`** with the patch at **`/workspace/df-crier-257-partial-verdict-cap.patch`**. I cloned both repos, reproduced the bug, fixed it, and ran the test suite.\n\n## Root cause\n\n**Two layers:**\n\n1. **Which cap actually bound:** iterations, not time/tokens. Measured `30,981,396 tokens_in` over ~400 steps = **~77.5K tokens/iteration**. Against `max_input_tokens 48M` (65% used), `max_time 30m` (~12 min), but `max_iterations: 400` in both the stage and evaluator blocks → the step rung was exhausted. `400 × 77.5K ≈ 31.0M`, exactly the measured burn.\n\n2. **Why no cap line:** in `engine/evaluator.py`, all three cap-hit branches did:\n   ```python\n   partial = self._extract_partial_verdict(criteria_list)  # cap_error dropped\n   if partial is not None:\n       return partial                                      # generic summary wins\n   ```\n   `_extract_partial_verdict` never received `cap_error`, so once *any* criterion was verified (criterion 4 passed 15/15 in this run), the partial branch returned a generic `\"Partial verdict — evaluation hit resource cap…\"` and the `Cap exceeded: Iteration cap (400)…` text was lost. Existing tests passed because their fakes verified nothing, hitting the only branch that still named the cap.\n\n## Exact fix\n\nThread `cap_error` through `_extract_partial_verdict(criteria_list, cap_reason)` at all three call sites and prepend `Cap exceeded: …` to the partial summary. Backward compatible (`cap_reason` defaults to `None`); `verdict.verdict` unchanged. Two regression tests added (`tests/test_evaluator.py`, `tests/test_quality_gate_regressions.py`).\n\nOperational unblock for crier (separate): raise the starved iteration rung in **both** blocks, or split the criteria:\n```bash\nsed -i -E 's/^([[:space:]]*)max_iterations: 400$/\\1max_iterations: 600/' .gitreins/config.yaml\n```\n\n## Verification (observed)\n\n- Before fix: `SUMMARY: Partial verdict — evaluation hit resource cap…` (assert fails).\n- After fix: `SUMMARY: Cap exceeded: Iteration cap (2) reached (2.1 used). … Partial verdict — …`.\n- `pytest tests/test_evaluator.py tests/test_quality_gate_regressions.py tests/test_eval_cap.py`: **188 passed, 4 skipped**.\n- Full suite: **1818 passed, 25 skipped, 1 failed** — the single failure is the pre-existing `gitreins: command not found` broken-pipx-symlink environment issue in `test_cli.py::TestPreCommitHookIntegration`, unrelated to the change.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-judge-partial-verdict-no-cap-line\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-19T08:11:57.878Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "gitreins tier2 returned INCOMPLETE with a PARTIAL verdict and NO 'Cap exceeded' line, so the usual raise-the-rung reflex has no named knob to move.\n\nSymptom: `gitreins task complete <id>` ends with 'Partial verdict - evaluation hit resource cap before all criteria verified', several criteria read 'Not verified - evaluation terminated before this criterion was checked', and the summary names no cap (the earlier verdict on the same task DID say 'Cap exceeded: Time cap (30m) exceeded (30m14s elapsed)').\n\nMeasured cause on crier DF-CRIER-254 (verdict 26770193, history dir ef22b59a): 30,981,396 tokens_in / 25,771 tokens_out over about 12 minutes against a config of max_iterations 400 / max_time 30m / max_input_tokens 48M. So NEITHER the time nor the token budget was binding - the eval ran out of STEPS on five heavy criteria that each shell out to evidence commands.\n\nDiagnostic recipe (do this before touching any rung):\n1. tail -1 .gitreins/usage.jsonl - it carries this run's tokens_in (and tokens_out) even when the verdict text names no cap.\n2. grep the caps out of .gitreins/config.yaml - remember max_iterations exists in BOTH the stage block and the evaluator block and the effective value is the smaller.\n3. Compare: tokens_in under the input budget AND wall time under max_time AND no 'Cap exceeded' line means the remaining lever is the iteration rung or a narrower eval (split the criteria), NOT max_time/max_input_tokens.\n4. Sanity-check the step budget against a cheap run: a ONE-criterion judge on the same repo spent ~0.75M tokens_in in ~2.5 minutes, while this five-criterion judge with evidence commands spent 31M - roughly 77K tokens per iteration, i.e. right at a 400-iteration ceiling.\n\nCorollary: a criterion that used to be the wall-clock sink can be innocent in the re-run. Here criterion 4 (make load-repro-selftest) PASSED 15/15 inside the same failing run, which itself proved the earlier fix held; the four criteria that went unverified had simply never been reached.",
+        "environment": "Linux, crier repo /home/kara/crier",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-judge-partial-verdict-no-cap-line",
+        "provider": "openrouter",
+        "solved_at": "2026-09-19T08:11:57.878Z",
+        "version": "gitreins 0.12.x; go1.26.5"
+      },
+      "status": "verified",
+      "created_at": "2026-09-19 08:11:57"
+    }
+  ]
+}
