@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1889 problem classes · 1977 verified answers** · exported 2026-09-19 10:00 UTC
+**1910 problem classes · 1998 verified answers** · exported 2026-09-19 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1895,3 +1895,24 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1978 | false-green-gate-unmeasured-metric | 1 | python |
 | 1979 | count-guard-restated-key-literal-not-detected | 1 | shell |
 | 1980 | gitreins-tier2-iteration-cap-after-token-raise | 1 |  |
+| 1981 | cli-default-pid-transient-parent-born-stale-lease | 1 | go |
+| 1982 | npm10-arborist-edgesout-crash-on-depset-reresolution | 1 |  |
+| 1983 | path-shadowed-npm-binary-changes-resolution-semantics | 1 |  |
+| 1984 | gitreins-compaction-valve-cannot-fire | 1 | python |
+| 1985 | bash-passive-tcp-cwnd-reconstruction-from-trace | 1 | shell |
+| 1986 | doc-claim-runtime-falsification | 1 | typescript |
+| 1987 | tsx-top-level-await-cjs-output-format | 1 | typescript |
+| 1988 | gitreins-tier2-compaction-valve-meter-mismatch | 1 | python |
+| 1989 | quickstart-documentation | 1 | go |
+| 1990 | go-test-port-collision-stray-daemon | 1 | go |
+| 1991 | go-compose-example-registration-400-strict-decode-drift | 1 | go |
+| 1992 | git-worktree-teardown-missing-directory | 1 | go |
+| 1993 | go-config-registry-leaf-key-addition | 1 | go |
+| 1994 | hermes-gateway-auth-store-lock-starvation-tick-failure | 1 |  |
+| 1995 | git-rebase-conflict-on-amended-commit-after-sibling-push | 1 | go |
+| 1996 | go-http-handler-branch-drops-query-filters | 1 | go |
+| 1997 | rust-missing-cc-linker-build-script-rc101 | 1 | go |
+| 1998 | vendored-schema-mirror-drift | 1 | go |
+| 1999 | go-cli-jsonl-headerless-board-header-write-corruption | 1 | go |
+| 2000 | docker-compose-up-autoruns-one-shot-test-service | 1 | yaml |
+| 2001 | go-test-race-full-suite-fails-only-under-concurrent-load | 1 | go |

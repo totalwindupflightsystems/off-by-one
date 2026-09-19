@@ -1,0 +1,28 @@
+{
+  "class_id": 1993,
+  "title": "go-config-registry-leaf-key-addition",
+  "description": "go-config-registry-leaf-key-addition",
+  "created_at": "2026-09-19 12:40:28",
+  "answers": [
+    {
+      "answer_id": 2184,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "No repository was present in the environment (only `/workspace/problem.json` describing the task), so I reconstructed a faithful, runnable model of the SPEC-12 registry + composition root, applied the fix, and verified it. The full write-up is at **`/home/kara/TRBL-039-solution.md`**; the verified reference implementation is at **`/home/kara/trbl-039/`**.\n\n## Root cause\n\nThe five flow durable-dispatch bounds (`max_entries=256`, `retention=72h`, `max_attempts=5`, `lease_timeout=5s`, `batch_size=100`) existed only as compiled constants. Four defects kept them untunable:\n\n1. **No `flow.*` rows** in the registry table, so a host `[flow]` table was never read.\n2. **Trusting `Duration.Std()`**, which returns `0` for both empty and garbage input — and a resolved `max_entries=0` is an **unbounded queue**.\n3. **Constants-only construction path**: the composition root handed literals to `store.New` / `flow.New`, discarding resolved values.\n4. **No behaviour test** overrode a key, so regressions were invisible.\n\n## Exact fix (`internal/lifecycle/config.go`)\n\nAdd one registry row per leaf, mirroring `hub.*` / `server.redis.*`, with positive-only validators:\n\n```go\npositiveInt = func(raw any) error {\n    s := strings.TrimSpace(fmt.Sprint(raw))\n    n, err := strconv.Atoi(s)\n    if err != nil { return fmt.Errorf(\"%s: unparsable integer %q: %w\", name, s, err) }\n    if n <= 0    { return fmt.Errorf(\"%s: must be > 0, got %d\", name, n) }\n    *dst = n; return nil\n}\n\npositiveDuration = func(raw any) error {           // NOT Duration.Std()\n    s := strings.TrimSpace(fmt.Sprint(raw))\n    d, err := time.ParseDuration(s)\n    if err != nil { return fmt.Errorf(\"%s: unparsable duration %q: %w\", name, s, err) }\n    if d <= 0    { return fmt.Errorf(\"%s: must be > 0, got %s\", name, d) }\n    *dst = d; return nil\n}\n```\n\nRows added for `flow.dispatch.{max_entries,retention,max_attempts,lease_timeout,batch_size}` with defaults `256 / 72h / 5 / 5s / 100`. `Load` installs all defaults, overlays only keys the host actually set, and errors on any failed validator — so an absent `[flow]` table runs the documented posture and a zero/garbage value is refused.\n\nComposition root projects once and shares the value:\n\n```go\nfunc Wire(cfg *lifecycle.Config) *App {\n    bounds := cfg.Dispatch          // projected ONCE\n    return &App{\n        Store: store.New(bounds),   // same value\n        Flow:  flow.New(bounds),    // same value\n    }\n}\n```\n\nBoth `store.New` and `flow.New` now take `lifecycle.DispatchBounds`; no literal defaults remain.\n\n## Verification (actually run)\n\n```console\n$ go vet ./... && go test ./... -v\n--- PASS: TestOverrideMaxEntriesEvictsAtThree   # override 3 => eviction at 3, not 256\n--- PASS: TestDefaultsAreSpecPosture             # 256/72h/5/5s/100\n--- PASS: TestZeroIsRefused                      # rejects 0, -4, garbage, \"\", -1s\n--- PASS: TestBothConstructorsShareOneValue\nok      example.com/trbl039/internal/store\n\n$ go run ./cmd/root\nmax_entries store=256 flow=256\n```\n\nSPEC-12 edits append clauses `SPEC-12a…e` under the letter-suffix rule, guarded by a selfcheck that diffs spec keys against `lifecycle.Keys()` and fails the build on drift.\n",
+      "evidence": "# Evidence\n- Problem class: go-config-registry-leaf-key-addition\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-19T12:40:28.573Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "trouble TRBL-039: adding five operator-tunable bounds for the flow durable dispatch queue as SPEC-12 config registry keys. Recipe that worked: mirror the existing hub.* / server.redis.* leaf-by-leaf entries in internal/lifecycle/config.go (the registry table of {dotted.key, toml section, toml key, current value, setter closure}); defaults must equal the constants the spec already pins (256/72h/5/5s/100) so a host with no [flow] table runs the documented posture; add POSITIVE-only validators (refuse 0/negative/unparsable duration at resolution, because a resolved zero is an unbounded queue) instead of trusting a Duration.Std() that answers 0 for both empty and garbage; then have the composition root project the resolved keys onto the subsystem bounds struct ONCE and hand the same value to both constructors (store + flow) so no constants-only path remains; prove behavior with a test that overrides max_entries to 3 and asserts eviction at 3, not at the compiled 256. Spec edits use the letter-suffix rule + selfcheck gate.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-config-registry-leaf-key-addition",
+        "provider": "openrouter",
+        "solved_at": "2026-09-19T12:40:28.573Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-19 12:40:28"
+    }
+  ]
+}
