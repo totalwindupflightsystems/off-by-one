@@ -1,0 +1,402 @@
+commit 4a3ff3933b4c9927be22e1b0058986417737de2a
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Sat Sep 19 09:17:14 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Sat Sep 19 09:17:14 2026 -0500
+
+    fix(api): honor env/lang filters on GET /api/v1/problems when q is empty (OB-GAP-080)
+    
+    The non-search branch of handleListProblems passed only status to
+    ListProblemClassesWithCountsFiltered/CountProblemClasses, silently
+    ignoring the documented env= and lang= exact-match filters. The q
+    branch (Search/SearchCount) already honored them, so ?env=<nonsense>
+    returned the full catalog without q but total=0 with q — and the SPA
+    hits exactly that shape when a filter chip is clicked with an empty
+    query box.
+    
+    Both store methods now take env, lang and apply the same EXISTS
+    exact-match semantics as Search (empty = no filter; a class matches
+    when one of its answer rows carries the value; filters intersect and
+    compose with status). All callers updated. RED-proven: reverting
+    store.go/handlers.go makes TestListProblems_EnvLangFiltersWithoutQuery
+    fail with total=2 for env=<nonsense> (the bug verbatim).
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ internal/api/handlers.go      |   7 ++-
+ internal/api/handlers_test.go |  51 ++++++++++++++++
+ internal/graph/search_test.go |   4 +-
+ internal/graph/store.go       |  40 +++++++++----
+ internal/graph/store_test.go  | 136 +++++++++++++++++++++++++++++++++++++++++-
+ 5 files changed, 219 insertions(+), 19 deletions(-)
+
+diff --git a/internal/api/handlers.go b/internal/api/handlers.go
+index 380039f..205e77c 100644
+--- a/internal/api/handlers.go
++++ b/internal/api/handlers.go
+@@ -423,7 +423,8 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
+ 
+ // handleListProblems supports ?q=, ?env=, ?lang=, ?status=, ?limit=,
+ // ?offset=. When q is set we use the FTS5 Search; otherwise the
+-// ListProblemClassesWithCounts with a status-derived filter.
++// ListProblemClassesWithCounts with a status-derived filter. env and lang
++// are exact-match filters honored by BOTH branches (OB-GAP-080).
+ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
+ 	q := r.URL.Query()
+ 	limit := parseIntDefault(q.Get("limit"), 20, 1, 100)
+@@ -459,12 +460,12 @@ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
+ 		return
+ 	}
+ 
+-	rows, err := s.Store.ListProblemClassesWithCountsFiltered(r.Context(), status, limit, offset)
++	rows, err := s.Store.ListProblemClassesWithCountsFiltered(r.Context(), status, env, lang, limit, offset)
+ 	if err != nil {
+ 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+ 		return
+ 	}
+-	total, err := s.Store.CountProblemClasses(r.Context(), status)
++	total, err := s.Store.CountProblemClasses(r.Context(), status, env, lang)
+ 	if err != nil {
+ 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+ 		return
+diff --git a/internal/api/handlers_test.go b/internal/api/handlers_test.go
+index c48115a..0a929c3 100644
+--- a/internal/api/handlers_test.go
++++ b/internal/api/handlers_test.go
+@@ -757,6 +757,57 @@ func TestListProblems_SearchNoMatch(t *testing.T) {
+ 	}
+ }
+ 
++// OB-GAP-080: env= and lang= must filter the NON-search branch of
++// handleListProblems exactly like the q branch — before the fix the non-q
++// branch ignored both params, so ?env=<nonsense> returned the whole
++// unfiltered catalog (the shipped SPA hits this shape when a filter chip
++// is clicked with an empty query box).
++func TestListProblems_EnvLangFiltersWithoutQuery(t *testing.T) {
++	s, store, _ := newTestServer(t)
++	seedClass(t, store, "docker-perms", "desc1", "docker", "go", "1.0", "sol1", graph.AnswerVerified)
++	seedClass(t, store, "kube-pods", "desc2", "kubernetes", "python", "1.0", "sol2", graph.AnswerPending)
++
++	get := func(path string) listProblemsResponse {
++		t.Helper()
++		rr := do(t, s, "GET", path, nil)
++		if rr.Code != http.StatusOK {
++			t.Fatalf("GET %s: status = %d, want 200", path, rr.Code)
++		}
++		var resp listProblemsResponse
++		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
++			t.Fatalf("GET %s: decode: %v", path, err)
++		}
++		return resp
++	}
++
++	// Nonsense env with no q → total 0 (the OB-GAP-080 live repro).
++	if resp := get("/api/v1/problems?env=zzz-no-such-env-xyz"); resp.Total != 0 {
++		t.Errorf("env=<nonsense> no q: total = %d, want 0 (env must filter the non-search branch)", resp.Total)
++	}
++	// Nonsense lang with no q → total 0.
++	if resp := get("/api/v1/problems?lang=zzz-no-such-lang-xyz"); resp.Total != 0 {
++		t.Errorf("lang=<nonsense> no q: total = %d, want 0 (lang must filter the non-search branch)", resp.Total)
++	}
++	// Real env → only matching classes.
++	resp := get("/api/v1/problems?env=docker")
++	if resp.Total != 1 || len(resp.Problems) != 1 || resp.Problems[0].Title != "docker-perms" {
++		t.Errorf("env=docker: total = %d problems = %+v, want exactly docker-perms", resp.Total, resp.Problems)
++	}
++	// Real lang → only matching classes.
++	resp = get("/api/v1/problems?lang=python")
++	if resp.Total != 1 || len(resp.Problems) != 1 || resp.Problems[0].Title != "kube-pods" {
++		t.Errorf("lang=python: total = %d problems = %+v, want exactly kube-pods", resp.Total, resp.Problems)
++	}
++	// Combined env+lang must intersect (no class has both docker+python).
++	if resp := get("/api/v1/problems?env=docker&lang=python"); resp.Total != 0 {
++		t.Errorf("env=docker&lang=python: total = %d, want 0 (filters intersect)", resp.Total)
++	}
++	// Empty env/lang keeps the unfiltered total.
++	if resp := get("/api/v1/problems"); resp.Total != 2 {
++		t.Errorf("no filters: total = %d, want 2 (unfiltered catalog unchanged)", resp.Total)
++	}
++}
++
+ func TestGetProblemClass(t *testing.T) {
+ 	s, store, _ := newTestServer(t)
+ 	seedClass(t, store, "docker-perms", "permissions", "docker", "go", "1.0", "use --user", graph.AnswerVerified)
+diff --git a/internal/graph/search_test.go b/internal/graph/search_test.go
+index e5a7fc9..08b88fd 100644
+--- a/internal/graph/search_test.go
++++ b/internal/graph/search_test.go
+@@ -350,14 +350,14 @@ func TestCountProblemClasses_MatchesListPagination(t *testing.T) {
+ 		}
+ 	}
+ 
+-	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", 2, 0)
++	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", "", "", 2, 0)
+ 	if err != nil {
+ 		t.Fatalf("ListProblemClassesWithCountsFiltered: %v", err)
+ 	}
+ 	if len(rows) != 2 {
+ 		t.Fatalf("page size: got %d, want 2", len(rows))
+ 	}
+-	n, err := s.CountProblemClasses(ctx, "")
++	n, err := s.CountProblemClasses(ctx, "", "", "")
+ 	if err != nil {
+ 		t.Fatalf("CountProblemClasses: %v", err)
+ 	}
+diff --git a/internal/graph/store.go b/internal/graph/store.go
+index 53cef39..9a307ef 100644
+--- a/internal/graph/store.go
++++ b/internal/graph/store.go
+@@ -588,7 +588,7 @@ type ProblemClassWithCounts struct {
+ // are placeholder zeros for now — the cron loop will populate them
+ // once the discovery endpoint begins logging hits.
+ func (s *Store) ListProblemClassesWithCounts(ctx context.Context, limit, offset int) ([]ProblemClassWithCounts, error) {
+-	return s.ListProblemClassesWithCountsFiltered(ctx, "", limit, offset)
++	return s.ListProblemClassesWithCountsFiltered(ctx, "", "", "", limit, offset)
+ }
+ 
+ // ListProblemClassesWithCountsFiltered is ListProblemClassesWithCounts with
+@@ -597,12 +597,18 @@ func (s *Store) ListProblemClassesWithCounts(ctx context.Context, limit, offset
+ // ci_passed, verified, pending, failed, or the UI alias "solved" (matches
+ // verified OR ci_passed). Empty = no filter.
+ //
++// env and lang are exact-match filters with the same semantics as Search
++// (empty = no filter): a class matches when it has at least one answer row
++// with that env / lang. They are applied in SQL too so pagination totals
++// stay correct (OB-GAP-080: the non-search branch of GET /api/v1/problems
++// must honor env=/lang= exactly like the q branch does).
++//
+ // best_status applies the signatureNotFailedSQL backstop to the ci_passed
+ // and verified branches (OB-GAP-064): a row whose status says verified but
+ // whose signatures JSON says result='failed' can never make a class look
+ // solved. answer_count still counts every row for the class — that is
+ // deliberate (see the commit for OB-GAP-064).
+-func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status string, limit, offset int) ([]ProblemClassWithCounts, error) {
++func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status, env, lang string, limit, offset int) ([]ProblemClassWithCounts, error) {
+ 	if limit <= 0 || limit > 1000 {
+ 		limit = 100
+ 	}
+@@ -626,12 +632,18 @@ func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status
+ 			FROM answer_nodes
+ 			GROUP BY class_id
+ 		) ac ON ac.class_id = pc.id
+-		WHERE ? = '' OR (CASE WHEN ? = 'solved'
++		WHERE (? = '' OR (CASE WHEN ? = 'solved'
+ 		                      THEN COALESCE(ac.best_status, 'pending') IN ('verified', 'ci_passed')
+-		                      ELSE COALESCE(ac.best_status, 'pending') = ? END)
++		                      ELSE COALESCE(ac.best_status, 'pending') = ? END))
++		  AND (? = '' OR EXISTS (
++		      SELECT 1 FROM answer_nodes a
++		      WHERE a.class_id = pc.id AND a.env = ?))
++		  AND (? = '' OR EXISTS (
++		      SELECT 1 FROM answer_nodes a
++		      WHERE a.class_id = pc.id AND a.lang = ?))
+ 		ORDER BY pc.id DESC
+ 		LIMIT ? OFFSET ?
+-	`, status, status, status, limit, offset)
++	`, status, status, status, env, env, lang, lang, limit, offset)
+ 	if err != nil {
+ 		return nil, fmt.Errorf("list problem_classes with counts: %w", err)
+ 	}
+@@ -650,14 +662,14 @@ func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status
+ }
+ 
+ // CountProblemClasses returns the number of problem classes, optionally
+-// filtered by derived best answer status (same semantics as
+-// ListProblemClassesWithCountsFiltered). Used for accurate pagination
++// filtered by derived best answer status and by env/lang (same semantics
++// as ListProblemClassesWithCountsFiltered). Used for accurate pagination
+ // totals on /api/v1/problems.
+ //
+ // Like the list view it applies the signatureNotFailedSQL backstop to the
+ // ci_passed and verified branches (OB-GAP-064), so ?status=solved cannot
+ // count a class whose only verified row has a failed signature.
+-func (s *Store) CountProblemClasses(ctx context.Context, status string) (int, error) {
++func (s *Store) CountProblemClasses(ctx context.Context, status, env, lang string) (int, error) {
+ 	var n int
+ 	err := s.db.QueryRowContext(ctx, `
+ 		SELECT COUNT(*)
+@@ -673,10 +685,16 @@ func (s *Store) CountProblemClasses(ctx context.Context, status string) (int, er
+ 			FROM answer_nodes
+ 			GROUP BY class_id
+ 		) ac ON ac.class_id = pc.id
+-		WHERE ? = '' OR (CASE WHEN ? = 'solved'
++		WHERE (? = '' OR (CASE WHEN ? = 'solved'
+ 		                      THEN COALESCE(ac.best_status, 'pending') IN ('verified', 'ci_passed')
+-		                      ELSE COALESCE(ac.best_status, 'pending') = ? END)
+-	`, status, status, status).Scan(&n)
++		                      ELSE COALESCE(ac.best_status, 'pending') = ? END))
++		  AND (? = '' OR EXISTS (
++		      SELECT 1 FROM answer_nodes a
++		      WHERE a.class_id = pc.id AND a.env = ?))
++		  AND (? = '' OR EXISTS (
++		      SELECT 1 FROM answer_nodes a
++		      WHERE a.class_id = pc.id AND a.lang = ?))
++	`, status, status, status, env, env, lang, lang).Scan(&n)
+ 	if err != nil {
+ 		return 0, fmt.Errorf("count problem_classes: %w", err)
+ 	}
+diff --git a/internal/graph/store_test.go b/internal/graph/store_test.go
+index 69d8f6d..dd37336 100644
+--- a/internal/graph/store_test.go
++++ b/internal/graph/store_test.go
+@@ -554,7 +554,7 @@ func TestStore_Discovery_VersionHistory_ExcludesFailedSignature(t *testing.T) {
+ // statuses keyed by class title.
+ func listStatusesByTitle(t *testing.T, s *Store, ctx context.Context, status string) map[string]string {
+ 	t.Helper()
+-	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, status, 100, 0)
++	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, status, "", "", 100, 0)
+ 	if err != nil {
+ 		t.Fatalf("ListProblemClassesWithCountsFiltered(%q): %v", status, err)
+ 	}
+@@ -627,7 +627,7 @@ func TestStore_ListProblemClassesWithCounts_ExcludesFailedSignatureStatus(t *tes
+ 
+ func mustList(t *testing.T, s *Store, ctx context.Context) []ProblemClassWithCounts {
+ 	t.Helper()
+-	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", 100, 0)
++	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", "", "", 100, 0)
+ 	if err != nil {
+ 		t.Fatalf("ListProblemClassesWithCountsFiltered: %v", err)
+ 	}
+@@ -666,7 +666,7 @@ func TestStore_CountProblemClasses_ExcludesFailedSignatureStatus(t *testing.T) {
+ 		{"pending", 0, "neither class is pending"},
+ 		{"", 2, "the unfiltered total is unchanged"},
+ 	} {
+-		got, err := s.CountProblemClasses(ctx, tc.status)
++		got, err := s.CountProblemClasses(ctx, tc.status, "", "")
+ 		if err != nil {
+ 			t.Fatalf("CountProblemClasses(%q): %v", tc.status, err)
+ 		}
+@@ -719,3 +719,133 @@ func TestStore_GetProblemClassStatus_ExcludesFailedSignature(t *testing.T) {
+ 		}
+ 	}
+ }
++
++// seedAnswerEnvLang inserts an answer with an explicit env/lang pair, the
++// fixture for the OB-GAP-080 exact-match env/lang list filters.
++func seedAnswerEnvLang(t *testing.T, s *Store, ctx context.Context, classID int64, env, lang, status string) int64 {
++	t.Helper()
++	id, err := s.CreateAnswerNode(ctx, classID, 0, env, lang, "1.0", "solution for "+env+"/"+lang, "evidence", `{"result":"passed"}`)
++	if err != nil {
++		t.Fatalf("CreateAnswerNode(env=%q, lang=%q): %v", env, lang, err)
++	}
++	if err := s.UpdateAnswerStatus(ctx, id, status); err != nil {
++		t.Fatalf("UpdateAnswerStatus(%d, %q): %v", id, status, err)
++	}
++	return id
++}
++
++// TestStore_ListProblemClassesWithCountsFiltered_EnvLang guards OB-GAP-080
++// at the store surface: ListProblemClassesWithCountsFiltered and
++// CountProblemClasses must apply env/lang as exact-match filters with the
++// same semantics as Search — empty string = no filter, a class matches a
++// value when at least one of its answer rows carries it, and both filters
++// intersect. A nonsense value must yield zero rows and a zero count while
++// env="" returns everything.
++func TestStore_ListProblemClassesWithCountsFiltered_EnvLang(t *testing.T) {
++	s := newSharedTestStore(t)
++	ctx := context.Background()
++
++	dockerGo, err := s.CreateProblemClass(ctx, "envlang-docker-go", "docker + go class")
++	if err != nil {
++		t.Fatalf("CreateProblemClass: %v", err)
++	}
++	seedAnswerEnvLang(t, s, ctx, dockerGo, "docker", "go", AnswerVerified)
++
++	kubePy, err := s.CreateProblemClass(ctx, "envlang-kube-python", "kubernetes + python class")
++	if err != nil {
++		t.Fatalf("CreateProblemClass: %v", err)
++	}
++	seedAnswerEnvLang(t, s, ctx, kubePy, "kubernetes", "python", AnswerPending)
++
++	// A class with NO answers: it is part of the unfiltered catalog but
++	// must not match any env/lang value (EXISTS finds no row).
++	if _, err := s.CreateProblemClass(ctx, "envlang-no-answers", "class without answers"); err != nil {
++		t.Fatalf("CreateProblemClass: %v", err)
++	}
++
++	titles := func(rows []ProblemClassWithCounts) []string {
++		out := make([]string, 0, len(rows))
++		for _, r := range rows {
++			out = append(out, r.Title)
++		}
++		return out
++	}
++	count := func(status, env, lang string) int {
++		t.Helper()
++		n, err := s.CountProblemClasses(ctx, status, env, lang)
++		if err != nil {
++			t.Fatalf("CountProblemClasses(%q, %q, %q): %v", status, env, lang, err)
++		}
++		return n
++	}
++	list := func(status, env, lang string) []ProblemClassWithCounts {
++		t.Helper()
++		rows, err := s.ListProblemClassesWithCountsFiltered(ctx, status, env, lang, 100, 0)
++		if err != nil {
++			t.Fatalf("ListProblemClassesWithCountsFiltered(%q, %q, %q): %v", status, env, lang, err)
++		}
++		return rows
++	}
++
++	// Empty filters return the whole catalog (3 classes).
++	if got := titles(list("", "", "")); len(got) != 3 {
++		t.Errorf("no filters: titles = %v, want all 3 classes", got)
++	}
++	if n := count("", "", ""); n != 3 {
++		t.Errorf("no filters: count = %d, want 3", n)
++	}
++
++	// Nonsense env returns zero rows and a zero total.
++	if got := titles(list("", "zzz-no-such-env-xyz", "")); len(got) != 0 {
++		t.Errorf("env=<nonsense>: titles = %v, want none", got)
++	}
++	if n := count("", "zzz-no-such-env-xyz", ""); n != 0 {
++		t.Errorf("env=<nonsense>: count = %d, want 0", n)
++	}
++
++	// Nonsense lang likewise.
++	if got := titles(list("", "", "zzz-no-such-lang-xyz")); len(got) != 0 {
++		t.Errorf("lang=<nonsense>: titles = %v, want none", got)
++	}
++	if n := count("", "", "zzz-no-such-lang-xyz"); n != 0 {
++		t.Errorf("lang=<nonsense>: count = %d, want 0", n)
++	}
++
++	// Real env returns exactly the matching class.
++	if got := titles(list("", "docker", "")); len(got) != 1 || got[0] != "envlang-docker-go" {
++		t.Errorf("env=docker: titles = %v, want [envlang-docker-go]", got)
++	}
++	if n := count("", "docker", ""); n != 1 {
++		t.Errorf("env=docker: count = %d, want 1", n)
++	}
++
++	// Real lang returns exactly the matching class.
++	if got := titles(list("", "", "python")); len(got) != 1 || got[0] != "envlang-kube-python" {
++		t.Errorf("lang=python: titles = %v, want [envlang-kube-python]", got)
++	}
++	if n := count("", "", "python"); n != 1 {
++		t.Errorf("lang=python: count = %d, want 1", n)
++	}
++
++	// env and lang intersect: no class has docker+python.
++	if got := titles(list("", "docker", "python")); len(got) != 0 {
++		t.Errorf("env=docker&lang=python: titles = %v, want none (filters intersect)", got)
++	}
++	if n := count("", "docker", "python"); n != 0 {
++		t.Errorf("env=docker&lang=python: count = %d, want 0", n)
++	}
++
++	// A matching pair (same class carries both) still matches.
++	if got := titles(list("", "kubernetes", "python")); len(got) != 1 || got[0] != "envlang-kube-python" {
++		t.Errorf("env=kubernetes&lang=python: titles = %v, want [envlang-kube-python]", got)
++	}
++
++	// env/lang compose with the status filter: env=docker&status=pending
++	// excludes the verified docker class.
++	if got := titles(list("pending", "docker", "")); len(got) != 0 {
++		t.Errorf("status=pending&env=docker: titles = %v, want none", got)
++	}
++	if got := titles(list("pending", "kubernetes", "")); len(got) != 1 || got[0] != "envlang-kube-python" {
++		t.Errorf("status=pending&env=kubernetes: titles = %v, want [envlang-kube-python]", got)
++	}
++}
