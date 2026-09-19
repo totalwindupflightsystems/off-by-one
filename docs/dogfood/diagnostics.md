@@ -111,6 +111,9 @@ that answers "does it work and why" without re-running the world.
    - `ERROR: ./off-by-one is stale — source changed since it was built; run 'make build'`
 
    Remedy for all three: commit or stash the working tree, then `make build`.
+   `check-binary-fresh` only validates the on-disk artifact — a fresh
+   `./off-by-one` does NOT prove the live process restarted. For the running
+   service, run `make check-deploy` (section 8).
 5. **Read-only catalog deployments:** fine for humans browsing; agent discovery
    works since OB-GAP-020 (discover is 200 in readonly mode).
 6. **Commit hygiene:** GitReins guard blocks on secrets/build/tests; docs-only
@@ -215,7 +218,9 @@ preflight test-write → scan → verify) and probed the lab's core loop live.
 ### The right way to answer "does off-by-one work?"
 
 1. `curl localhost:8766/api/v1/stats` — problems/answers/verified/queue.
-2. `stat -c %y off-by-one` vs `curl localhost:8766/health` uptime — deploy lag.
+2. `make check-deploy` — proves the RUNNING service serves HEAD's code
+   (section 8; OB-GAP-077). Replaces the old `stat -c %y off-by-one` vs
+   `/health` uptime heuristic, which was a lag proxy, not a proof.
 3. `git log origin/master..HEAD` — unpushed work.
 4. `gh run list -R totalwindupflightsystems/off-by-one` — CI.
 5. Discover a real class — the loop's end-to-end proof.
@@ -259,3 +264,70 @@ Hand-authored community answer repo in the documented flat-file format → `POST
 /api/v1/import` → `added:1` → `discover` → `found:true` with full solution/evidence/
 signatures in ~90s start-to-finish. Re-import dedups via content diff (`skipped:1`).
 The parse-upsert pipeline and the flat-file contract are solid and contributor-friendly.
+
+## 8. Deploy check after any code commit (OB-GAP-077)
+
+**The problem it closes:** on 2026-09-19 the live server (systemd unit
+`off-by-one.service`, MainPID 2774764) was running stamp `19a9a9c` while HEAD
+`85bbbe6` already contained code commit `4a3ff39`
+(internal/api/handlers.go — the OB-GAP-080 filter fix). The stale window
+spanned two board ticks: `make check-binary-fresh` alone cannot catch it,
+because it validates the on-disk `./off-by-one`, not the process that has been
+serving traffic since before the commit landed.
+
+**What `make check-deploy` proves** — one command, fail-fast, every failure
+exits non-zero and names the remedy:
+
+1. the on-disk artifact is fresh (chains `make check-binary-fresh`);
+2. the unit is running (`systemctl show off-by-one -p MainPID --value`, empty/0
+   = FAIL "unit off-by-one not running");
+3. `/proc/<MainPID>/exe` IS this repo's artifact (mismatch = FAIL naming both
+   paths);
+4. the RUNNING process's `--version` stamp resolves to a commit whose code
+   paths (`cmd/ internal/ web/ sql/ pkg/ go.mod go.sum Makefile`) match HEAD.
+   Data-only drift (corpus syncs) is tolerated — the same stamp-resolution
+   semantics as `check-binary-fresh`, mirrored in
+   `scripts/check-deploy --resolve-stamp <stamp>` (the unit-testable seam; it
+   touches neither systemctl nor /proc).
+
+**The one command, run after ANY code commit on master:**
+
+```
+cd ~/off-by-one && make check-deploy
+```
+
+**Failure modes and remedies**
+
+| Leg | Failure output | Remedy |
+|---|---|---|
+| 1 | `make check-binary-fresh rejected ./off-by-one` (stale / dirty-tree / no stamp) | commit or stash the tree, `make build`, relaunch the service, re-run |
+| 2 | `unit off-by-one not running (MainPID empty/0)` | start the service, re-run |
+| 3 | `running process (pid N) executes '<path>', not the repo artifact` | `make build` and relaunch so `/proc/<MainPID>/exe` points at the repo binary |
+| 4 | `running service (pid N, stamp S) does not serve HEAD's code` | `cd ~/off-by-one && make build && kill N` — systemd `Restart=always` relaunches the service; re-run `make check-deploy` |
+
+Self-test (fresh / divergence / garbage / live verdict-presence):
+`bash scripts/check-deploy-test.sh`.
+
+### Transcript #1 — stale live server, captured pre-deploy (2026-09-19)
+
+At capture time: HEAD `85bbbe6`, last code commit `4a3ff39`
+(internal/api/handlers.go), running server pid 2774764 with stamp `19a9a9c`.
+The check fails on leg 1 (`./off-by-one` predates the code commit) — exactly
+the divergence this task exists to catch. Host paths shortened to `~`.
+
+```
+$ make check-deploy
+./scripts/check-deploy
+make[1]: Entering directory '~/off-by-one'
+ERROR: ./off-by-one is stale — source changed since it was built; run 'make build'
+make[1]: *** [Makefile:43: check-binary-fresh] Error 1
+make[1]: Leaving directory '~/off-by-one'
+check-deploy: FAIL — leg 1: make check-binary-fresh rejected ./off-by-one (see ERROR above)
+remedy: commit or stash the working tree if needed, then run 'make build', relaunch the service, and re-run make check-deploy
+make: *** [Makefile:93: check-deploy] Error 1
+exit code: 2
+```
+
+### Transcript #2 — after deploy
+
+POST-DEPLOY TRANSCRIPT PENDING — foreman embeds after make build + relaunch.

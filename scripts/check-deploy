@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# check-deploy (OB-GAP-077) — one-command proof that the RUNNING
+# off-by-one.service serves the code at HEAD.
+#
+# Legs, fail-fast; every failure exits non-zero with a named remedy:
+#   1. make check-binary-fresh — the on-disk ./off-by-one artifact matches
+#      HEAD's code paths (or byte-compares clean against a fresh build).
+#   2. systemd unit off-by-one is running (MainPID non-empty, non-zero).
+#   3. /proc/<MainPID>/exe IS this repo's artifact.
+#   4. The RUNNING process's --version stamp resolves to a commit whose code
+#      paths (cmd/ internal/ web/ sql/ pkg/ go.mod go.sum Makefile) match HEAD.
+#      Data-only drift (corpus commits) is tolerated; code drift is not.
+#
+# Unit-testable seam (touches neither systemctl nor /proc):
+#   scripts/check-deploy --resolve-stamp <stamp>
+#     exit 0 — resolvable stamp whose code paths match HEAD
+#     exit 1 — divergence, dirty stamp, or unparseable stamp
+#
+# Docs: docs/dogfood/diagnostics.md → "Deploy check after any code commit".
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+UNIT="off-by-one"
+ARTIFACT="$REPO_ROOT/off-by-one"
+
+# Stamp-resolution semantics mirror Makefile's check-binary-fresh:
+#   *-dirty           → named failure (built from a dirty tree)
+#   ...-g<rev> forms  → candidate = text after the last "-g"
+#   <a>-<b>-<c> forms → candidate = last hyphen-separated field
+#   anything else     → candidate = the stamp itself
+# A resolvable candidate PASSES only when the code-path diff against HEAD is
+# empty (`git diff --name-only <rev> -- cmd/ internal/ web/ sql/ pkg/ go.mod
+# go.sum Makefile`). Unresolvable stamps fail here by name — this seam has no
+# byte-compare leg (default mode's leg 1 covers that for the on-disk artifact).
+resolve_stamp() {
+	local stamp="$1"
+	local candidate
+
+	case "$stamp" in
+	*-dirty)
+		echo "FAIL: stamp '$stamp' was built from a dirty tree — the working tree had uncommitted changes when it was compiled; commit or stash them, then run 'make build'"
+		return 1
+		;;
+	esac
+
+	case "$stamp" in
+	*-*-g?* | *-g?*) candidate="${stamp##*-g}" ;;
+	*-*-?*) candidate="${stamp##*-}" ;;
+	*) candidate="$stamp" ;;
+	esac
+
+	if git rev-parse --verify --quiet "${candidate}^{commit}" >/dev/null 2>&1; then
+		local rev
+		rev="$(git rev-parse --short "$candidate")"
+		local changed git_rc attempt
+		# Concurrent git processes on this repo (guards, board ticks) can make a
+		# single diff call fail transiently; retry once before failing the check.
+		changed=""
+		git_rc=1
+		for attempt in 1 2; do
+			if changed="$(git diff --name-only "$rev" -- cmd/ internal/ web/ sql/ pkg/ go.mod go.sum Makefile 2>/dev/null)"; then
+				git_rc=0
+				break
+			fi
+			sleep 1
+		done
+		if [ "$git_rc" -ne 0 ]; then
+			echo "FAIL: 'git diff --name-only $rev -- <code paths>' failed (rc=$git_rc) twice — a concurrent git process may hold the repo; retry check-deploy"
+			return 1
+		fi
+		if [ -z "$changed" ]; then
+			echo "PASS: stamp '$stamp' resolves to $rev — code paths match HEAD (data-only drift tolerated)"
+			return 0
+		fi
+		echo "FAIL: stamp '$stamp' resolves to $rev, but HEAD's code paths changed since it:"
+		echo "$changed"
+		echo "remedy: run 'make build' to rebuild the artifact, relaunch the service (systemd Restart=always re-executes it on kill), then re-run check-deploy"
+		return 1
+	fi
+
+	echo "FAIL: stamp '$stamp' does not name a resolvable commit (candidate '$candidate') — rebuild with 'make build' and relaunch the service, then re-run check-deploy"
+	return 1
+}
+
+main() {
+	cd "$REPO_ROOT"
+
+	# Leg 1: on-disk artifact freshness (chains make check-binary-fresh).
+	if ! make check-binary-fresh; then
+		echo "check-deploy: FAIL — leg 1: make check-binary-fresh rejected ./off-by-one (see ERROR above)"
+		echo "remedy: commit or stash the working tree if needed, then run 'make build', relaunch the service, and re-run make check-deploy"
+		exit 1
+	fi
+
+	# Leg 2: the service must be running.
+	pid="$(systemctl show "$UNIT" -p MainPID --value 2>/dev/null || true)"
+	if [ -z "$pid" ] || [ "$pid" = "0" ]; then
+		echo "check-deploy: FAIL — leg 2: unit $UNIT not running (MainPID empty/0)"
+		echo "remedy: start the service, then re-run make check-deploy"
+		exit 1
+	fi
+
+	# Leg 3: the running process must BE the repo artifact.
+	exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
+	if [ -z "$exe" ]; then
+		echo "check-deploy: FAIL — leg 3: cannot read /proc/$pid/exe (process exited between legs?)"
+		echo "remedy: re-run make check-deploy"
+		exit 1
+	fi
+	artifact_path="$(realpath "$ARTIFACT" 2>/dev/null || true)"
+	if [ -z "$artifact_path" ] || [ "$exe" != "$artifact_path" ]; then
+		echo "check-deploy: FAIL — leg 3: running process (pid $pid) executes '$exe', not the repo artifact '$ARTIFACT'"
+		echo "remedy: rebuild from this repo ('make build') and relaunch the service so /proc/<MainPID>/exe points at $ARTIFACT, then re-run make check-deploy"
+		exit 1
+	fi
+
+	# Leg 4: the RUNNING binary's stamp must serve HEAD's code paths.
+	raw_version="$("$exe" --version 2>/dev/null || true)"
+	stamp="$(printf '%s\n' "$raw_version" | awk '{print $NF}')"
+	if [ -z "$stamp" ]; then
+		echo "check-deploy: FAIL — leg 4: '$exe' produced no --version stamp"
+		echo "remedy: run 'make build' and relaunch the service, then re-run make check-deploy"
+		exit 1
+	fi
+	if resolve_stamp "$stamp"; then
+		echo "check-deploy: PASS — running service (pid $pid, stamp $stamp) serves HEAD's code"
+	else
+		echo "check-deploy: FAIL — leg 4: running service (pid $pid, stamp $stamp) does not serve HEAD's code"
+		echo "remedy: cd $REPO_ROOT && make build && kill $pid  # systemd Restart=always relaunches the service; re-run make check-deploy"
+		exit 1
+	fi
+}
+
+case "${1:-}" in
+--resolve-stamp)
+	[ "$#" -eq 2 ] || {
+		echo "usage: $0 --resolve-stamp <stamp>" >&2
+		exit 2
+	}
+	cd "$REPO_ROOT"
+	if resolve_stamp "$2"; then
+		exit 0
+	else
+		exit 1
+	fi
+	;;
+"")
+	main
+	;;
+*)
+	echo "usage: $0 [--resolve-stamp <stamp>]" >&2
+	exit 2
+	;;
+esac

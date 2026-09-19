@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh connect-muster transport-retry-selftest pi-agent-watchdog-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy connect-muster transport-retry-selftest pi-agent-watchdog-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -83,6 +83,14 @@ check-binary-fresh:
 		exit 1; \
 	fi; \
 	echo "./$(BINARY) is up to date with source"
+
+# One-command deploy check (OB-GAP-077): FAILS with a named remedy whenever the
+# RUNNING off-by-one.service does not serve the code at HEAD. Chains
+# check-binary-fresh, verifies /proc/<MainPID>/exe points at the repo artifact,
+# and resolves the running process's --version stamp against HEAD's code paths
+# (data-only drift tolerated). Run after any code commit on master.
+check-deploy:
+	./scripts/check-deploy
 
 test:
 	go test -count=1 ./...
