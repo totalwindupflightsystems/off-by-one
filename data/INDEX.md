@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1910 problem classes · 1998 verified answers** · exported 2026-09-19 16:00 UTC
+**1924 problem classes · 2012 verified answers** · exported 2026-09-19 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1916,3 +1916,17 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1999 | go-cli-jsonl-headerless-board-header-write-corruption | 1 | go |
 | 2000 | docker-compose-up-autoruns-one-shot-test-service | 1 | yaml |
 | 2001 | go-test-race-full-suite-fails-only-under-concurrent-load | 1 | go |
+| 2002 | go-quic-loss-recovery-packet-number-spaces-pto | 1 | go |
+| 2003 | node20-superoptimizer-ssa-equivalence-proof-search | 1 | js |
+| 2004 | docs-request-contract-not-usable-from-guide | 1 | go |
+| 2005 | pytest-module-skipif-pathlib-exists-permissionerror-aborts-collection | 1 | python |
+| 2006 | ci-scratch-daemon-slow-boot-readiness-poll | 1 | bash |
+| 2007 | foreman-worker-drift-pivot-stalled-by-smart-approval | 1 | go |
+| 2008 | gitreins-guard-log-rotation-dirties-build-stamp | 1 | go |
+| 2009 | go-sse-server-writetimeout | 1 | go |
+| 2010 | go-race-suite-load-contention-flake | 1 | go |
+| 2011 | go-chi-global-timeout-sse-stream-exemption | 1 | go |
+| 2012 | gitreins-tier2-iteration-cap-exceeded | 1 | go |
+| 2013 | go-mesh-silent-drop-to-error-frame | 1 | go |
+| 2014 | board-hygiene-operator-decision-rows | 1 | go |
+| 2015 | mock-seed-hardcoded-start-date-stale-schedule | 1 | go |

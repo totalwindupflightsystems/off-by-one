@@ -1,0 +1,28 @@
+{
+  "class_id": 2011,
+  "title": "go-chi-global-timeout-sse-stream-exemption",
+  "description": "go-chi-global-timeout-sse-stream-exemption",
+  "created_at": "2026-09-19 20:13:37",
+  "answers": [
+    {
+      "answer_id": 2202,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I diagnosed the issue, implemented the fix, and verified it with a real chi + `httptest` reproduction. The full write-up is in `/home/kara/solution.md`.\n\n## Summary\n\n**Root cause.** `chi`'s `middleware.Timeout` wraps *every* request context in `context.WithTimeout`. SSE handlers select on `r.Context().Done()` to detect client disconnects, so the global cap is indistinguishable from a disconnect: at 60s the handler returns cleanly, the stream EOFs, and clients treat it as a normal end (no retry). `middleware.Timeout` has no per-route escape hatch, so a conditional wrapper is required.\n\n**Fix** (verified as `/tmp/sserepro/sse.go`): a `TimeoutWithSSEExemption(d)` middleware that passes through only `GET` requests whose path ends in `/events` or `/feed`, and delegates everything else to the stock `middleware.Timeout`:\n\n```go\nif r.Method == http.MethodGet && isSSEPath(r.URL.Path) {\n    next.ServeHTTP(w, r)   // no deadline\n    return\n}\ncapped.ServeHTTP(w, r)     // ordinary requests keep the cap\n```\n\nTwo deliberate choices: **suffix matching** (not an explicit path allowlist, which is how the MLS events surface got missed) and a **method check** (so `POST .../events` writes stay capped).\n\n**Verification** (`/tmp/sserepro/sse_test.go`, all passing):\n\n| Test | Plain `middleware.Timeout` | With exemption |\n|---|---|---|\n| GET SSE stream (5 frames @100ms, 150ms cap) | `frames=1` (RED) | `frames=5` (GREEN) |\n| `POST /api/events` | — | 504 |\n| `GET /api/slow` | — | 504 |\n| `chi.Walk` parity | — | exempt set = `/api/events`, `/api/feed`, `/mls/events`, `/federation/feed` |\n\nThe parity test walks the real router with all conditional mounts enabled and pins the golden route set — it's what caught the missed 7th surface and the flag-gated federation routes. `chi.Walk` recurses into mounted sub-routers, so this works.\n",
+      "evidence": "# Evidence\n- Problem class: go-chi-global-timeout-sse-stream-exemption\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-19T20:13:37.211Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "chi middleware.Timeout(60s) applied globally kills every SSE stream cleanly at the cap (handlers return on ctx.Done; clients treat the clean close as non-error and never retry). Solution that landed (hermes-canopy DF-33, judge PASS 06b4aacc): wrap the timeout in a conditional middleware that skips the context wrap for GET requests whose path ends in /events or /feed — all SSE routes share those suffixes — while ordinary requests keep the cap. Method check is mandatory (POST .../events writes must stay capped). Regression test: mini chi router with a 150ms timeout, real httptest transport, stream 5 frames at 100ms intervals (RED with plain middleware.Timeout: frames=1), ordinary route still gets 504. Router-walk parity test (chi.Walk on the real router, DB-free seam) pins the exempt route set and caught a missed 7th SSE surface (MLS events) plus conditionally-mounted federation routes.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-chi-global-timeout-sse-stream-exemption",
+        "provider": "openrouter",
+        "solved_at": "2026-09-19T20:13:37.211Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-19 20:13:37"
+    }
+  ]
+}
