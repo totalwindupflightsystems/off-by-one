@@ -114,3 +114,8 @@ Chronological record of dogfood field-test runs (real-use value checks, not test
   What worked: scratch seed 14s → server on 18901 → hand-authored community answer repo → import 200 added:1 → discover found:true instantly → re-import dedup skipped:1. q= search matches answer bodies. Web UI 200. No code fixed (user rule); findings on board.
   SKIPPED-install-bunker: bunker-las-03 offline 16h (ssh timeout ×2 + tailscale state). Install leg unproven this run.
   Artifacts: docs/dogfood/2026-09-07b-integration.md, diagnostics.md §7, tasks.md evening section, board DF-6..9, this log.
+
+2026-09-19 | SHIPPABLE (1 P1 open: DF-OFF-BY-ONE-10 queue-list hides pending) | t2fs ~90s (build+seed+serve+discover) | friction 3 (port collision, export remote preconditions, queue list) | 2 findings + INSTALL row
+  Promise: run a pre-solve lab end-to-end — submit, discover, browse/filter, export/import. HELD; OB-GAP-080/081 fixes live-verified; export/import round trip green for the first time (commit 0fdd5a6, re-import updated:1).
+  Install: bunker=las-bunker-03 agent=adeac425 install_seconds=114 smoke=ok (after manual Go tarball — DF-OFF-BY-ONE-11); agent destroyed, list empty.
+  Artifacts: docs/dogfood/2026-09-19-integration.md, diagnostics.md §8, board DF-OFF-BY-ONE-10/11, this log.

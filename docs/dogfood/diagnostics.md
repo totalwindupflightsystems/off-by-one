@@ -342,3 +342,28 @@ PASS: stamp 'a8d8b67' resolves to a8d8b67 — code paths match HEAD (data-only d
 check-deploy: PASS — running service (pid 1665810, stamp a8d8b67) serves HEAD's code
 exit code: 0
 ```
+
+## §8 — 2026-09-19 dogfood run (HEAD c5b245c)
+Build: `go build ./cmd/off-by-one` on go1.25.x, seed 14s, serve :18903.
+Errors hit and what they mean:
+- `bind: address already in use` — a leftover serve from a prior leg held the
+  port; the sandbox/cron legs of other runs also leave bwrap processes. Check
+  `pgrep -af off-by-one` before picking a port.
+- Export 400 `unknown field "limit"` / `answer_ids must be non-empty` — the
+  request schema is `target_repo` + `answer_ids[]` + `branch` +
+  `commit_message`; there is no server-side limit field.
+- Export chain of 500s on the way to success: (1) target dir not a git repo →
+  `git clone ... exit 128`; (2) repo without origin → `git remote get-url
+  origin: exit 2`; (3) origin != target_repo → "RepoURL does not match the
+  existing clone"; (4) branch missing on remote → `git checkout main` +
+  `origin/main` fallback both fail. The engine is strict-by-design: bare
+  remote + clone with matching origin + existing branch = green in one shot.
+- Queue list vs per-id asymmetry (DF-OFF-BY-ONE-10): pending rows show in
+  /queue/{id} but /queue returns null entries — reproducible by submitting
+  twice and listing immediately.
+Bunker install leg (las-bunker-03, agent adeac425, destroyed after):
+- git clone over ssh fails on a fresh agent (no credential) → tar-stream
+  fallback (documented in the dogfood skill; no permissions widened).
+- `make build` → `go: command not found`; fixed by go1.25.1 tarball to
+  ~/toolchain (no sudo). Documented path then green end-to-end:
+  INSTALL_SECONDS=114, seed OK, /health 200, discover found:true.

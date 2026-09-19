@@ -193,3 +193,23 @@ Full API on a throwaway DB, no sandbox/keys. Data survives restarts (SQLite WAL)
   (DF-OFF-BY-ONE-6). Skip it; the corpus ships as flat files under `data/answers/`
   (regenerate via `python3 scripts/export-answers.py`) until the fix lands.
 - Both endpoints need `-export-dir`/`-import-dir` (or env) at start, else 501.
+
+## Field-tested 2026-09-19 (dogfood tick): verdict ✅ SHIPPABLE with 1 open P1
+
+Live-verified on a scratch instance (:18903, HEAD c5b245c): OB-GAP-080 (env=/lang=
+filters) and OB-GAP-081 (limit clamp to 100) fixes CONFIRMED live; export/import
+git round trip WORKS for the first time since 09-07 (bare remote → commit 0fdd5a6 →
+re-import updated:1). New pitfalls:
+
+6. **GET /api/v1/queue (list) hides pending entries (DF-OFF-BY-ONE-10, OPEN)** —
+   after a submit, the list endpoint can return `entries:null,total:0` while
+   GET /api/v1/queue/{submission_id} returns the row. Poll the per-id endpoint,
+   not the list, until this is fixed.
+7. **Export preconditions are strict-by-design** — the target needs a BARE git
+   remote whose URL equals `target_repo`, a clone workspace under
+   $OFF_BY_ONE_EXPORT_DIR with that origin, and the branch must already exist
+   on the remote (create it with an orphan/empty commit first). Any miss = 500
+   with the exact git stderr. Full recipe: docs/dogfood/2026-09-19-integration.md.
+8. **Fresh-box install** — README lists Go 1.25+ but Quick Start has no bootstrap;
+   on a sudo-less box install the Go tarball by hand (DF-OFF-BY-ONE-11). Clone of
+   the private repo needs existing credentials; tar-stream is the fallback.
