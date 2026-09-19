@@ -330,4 +330,15 @@ exit code: 2
 
 ### Transcript #2 — after deploy
 
-POST-DEPLOY TRANSCRIPT PENDING — foreman embeds after make build + relaunch.
+Captured live 2026-09-19 immediately after `make build` + relaunch (systemd
+Restart=always re-executed the unit as pid 1665810):
+
+```
+./scripts/check-deploy
+make[1]: Entering directory '~/off-by-one'
+./off-by-one is up to date with source (version stamp changed, but code paths are unchanged)
+make[1]: Leaving directory '~/off-by-one'
+PASS: stamp 'a8d8b67' resolves to a8d8b67 — code paths match HEAD (data-only drift tolerated)
+check-deploy: PASS — running service (pid 1665810, stamp a8d8b67) serves HEAD's code
+exit code: 0
+```
