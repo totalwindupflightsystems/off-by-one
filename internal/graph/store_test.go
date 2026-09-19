@@ -554,7 +554,7 @@ func TestStore_Discovery_VersionHistory_ExcludesFailedSignature(t *testing.T) {
 // statuses keyed by class title.
 func listStatusesByTitle(t *testing.T, s *Store, ctx context.Context, status string) map[string]string {
 	t.Helper()
-	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, status, 100, 0)
+	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, status, "", "", 100, 0)
 	if err != nil {
 		t.Fatalf("ListProblemClassesWithCountsFiltered(%q): %v", status, err)
 	}
@@ -627,7 +627,7 @@ func TestStore_ListProblemClassesWithCounts_ExcludesFailedSignatureStatus(t *tes
 
 func mustList(t *testing.T, s *Store, ctx context.Context) []ProblemClassWithCounts {
 	t.Helper()
-	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", 100, 0)
+	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", "", "", 100, 0)
 	if err != nil {
 		t.Fatalf("ListProblemClassesWithCountsFiltered: %v", err)
 	}
@@ -666,7 +666,7 @@ func TestStore_CountProblemClasses_ExcludesFailedSignatureStatus(t *testing.T) {
 		{"pending", 0, "neither class is pending"},
 		{"", 2, "the unfiltered total is unchanged"},
 	} {
-		got, err := s.CountProblemClasses(ctx, tc.status)
+		got, err := s.CountProblemClasses(ctx, tc.status, "", "")
 		if err != nil {
 			t.Fatalf("CountProblemClasses(%q): %v", tc.status, err)
 		}
@@ -717,5 +717,135 @@ func TestStore_GetProblemClassStatus_ExcludesFailedSignature(t *testing.T) {
 		if listed := listStatusesByTitle(t, s, ctx, "")[tc.class]; listed != got {
 			t.Errorf("detail status %q != list status %q for %q (OB-GAP-024 parity)", got, listed, tc.class)
 		}
+	}
+}
+
+// seedAnswerEnvLang inserts an answer with an explicit env/lang pair, the
+// fixture for the OB-GAP-080 exact-match env/lang list filters.
+func seedAnswerEnvLang(t *testing.T, s *Store, ctx context.Context, classID int64, env, lang, status string) int64 {
+	t.Helper()
+	id, err := s.CreateAnswerNode(ctx, classID, 0, env, lang, "1.0", "solution for "+env+"/"+lang, "evidence", `{"result":"passed"}`)
+	if err != nil {
+		t.Fatalf("CreateAnswerNode(env=%q, lang=%q): %v", env, lang, err)
+	}
+	if err := s.UpdateAnswerStatus(ctx, id, status); err != nil {
+		t.Fatalf("UpdateAnswerStatus(%d, %q): %v", id, status, err)
+	}
+	return id
+}
+
+// TestStore_ListProblemClassesWithCountsFiltered_EnvLang guards OB-GAP-080
+// at the store surface: ListProblemClassesWithCountsFiltered and
+// CountProblemClasses must apply env/lang as exact-match filters with the
+// same semantics as Search — empty string = no filter, a class matches a
+// value when at least one of its answer rows carries it, and both filters
+// intersect. A nonsense value must yield zero rows and a zero count while
+// env="" returns everything.
+func TestStore_ListProblemClassesWithCountsFiltered_EnvLang(t *testing.T) {
+	s := newSharedTestStore(t)
+	ctx := context.Background()
+
+	dockerGo, err := s.CreateProblemClass(ctx, "envlang-docker-go", "docker + go class")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	seedAnswerEnvLang(t, s, ctx, dockerGo, "docker", "go", AnswerVerified)
+
+	kubePy, err := s.CreateProblemClass(ctx, "envlang-kube-python", "kubernetes + python class")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	seedAnswerEnvLang(t, s, ctx, kubePy, "kubernetes", "python", AnswerPending)
+
+	// A class with NO answers: it is part of the unfiltered catalog but
+	// must not match any env/lang value (EXISTS finds no row).
+	if _, err := s.CreateProblemClass(ctx, "envlang-no-answers", "class without answers"); err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+
+	titles := func(rows []ProblemClassWithCounts) []string {
+		out := make([]string, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, r.Title)
+		}
+		return out
+	}
+	count := func(status, env, lang string) int {
+		t.Helper()
+		n, err := s.CountProblemClasses(ctx, status, env, lang)
+		if err != nil {
+			t.Fatalf("CountProblemClasses(%q, %q, %q): %v", status, env, lang, err)
+		}
+		return n
+	}
+	list := func(status, env, lang string) []ProblemClassWithCounts {
+		t.Helper()
+		rows, err := s.ListProblemClassesWithCountsFiltered(ctx, status, env, lang, 100, 0)
+		if err != nil {
+			t.Fatalf("ListProblemClassesWithCountsFiltered(%q, %q, %q): %v", status, env, lang, err)
+		}
+		return rows
+	}
+
+	// Empty filters return the whole catalog (3 classes).
+	if got := titles(list("", "", "")); len(got) != 3 {
+		t.Errorf("no filters: titles = %v, want all 3 classes", got)
+	}
+	if n := count("", "", ""); n != 3 {
+		t.Errorf("no filters: count = %d, want 3", n)
+	}
+
+	// Nonsense env returns zero rows and a zero total.
+	if got := titles(list("", "zzz-no-such-env-xyz", "")); len(got) != 0 {
+		t.Errorf("env=<nonsense>: titles = %v, want none", got)
+	}
+	if n := count("", "zzz-no-such-env-xyz", ""); n != 0 {
+		t.Errorf("env=<nonsense>: count = %d, want 0", n)
+	}
+
+	// Nonsense lang likewise.
+	if got := titles(list("", "", "zzz-no-such-lang-xyz")); len(got) != 0 {
+		t.Errorf("lang=<nonsense>: titles = %v, want none", got)
+	}
+	if n := count("", "", "zzz-no-such-lang-xyz"); n != 0 {
+		t.Errorf("lang=<nonsense>: count = %d, want 0", n)
+	}
+
+	// Real env returns exactly the matching class.
+	if got := titles(list("", "docker", "")); len(got) != 1 || got[0] != "envlang-docker-go" {
+		t.Errorf("env=docker: titles = %v, want [envlang-docker-go]", got)
+	}
+	if n := count("", "docker", ""); n != 1 {
+		t.Errorf("env=docker: count = %d, want 1", n)
+	}
+
+	// Real lang returns exactly the matching class.
+	if got := titles(list("", "", "python")); len(got) != 1 || got[0] != "envlang-kube-python" {
+		t.Errorf("lang=python: titles = %v, want [envlang-kube-python]", got)
+	}
+	if n := count("", "", "python"); n != 1 {
+		t.Errorf("lang=python: count = %d, want 1", n)
+	}
+
+	// env and lang intersect: no class has docker+python.
+	if got := titles(list("", "docker", "python")); len(got) != 0 {
+		t.Errorf("env=docker&lang=python: titles = %v, want none (filters intersect)", got)
+	}
+	if n := count("", "docker", "python"); n != 0 {
+		t.Errorf("env=docker&lang=python: count = %d, want 0", n)
+	}
+
+	// A matching pair (same class carries both) still matches.
+	if got := titles(list("", "kubernetes", "python")); len(got) != 1 || got[0] != "envlang-kube-python" {
+		t.Errorf("env=kubernetes&lang=python: titles = %v, want [envlang-kube-python]", got)
+	}
+
+	// env/lang compose with the status filter: env=docker&status=pending
+	// excludes the verified docker class.
+	if got := titles(list("pending", "docker", "")); len(got) != 0 {
+		t.Errorf("status=pending&env=docker: titles = %v, want none", got)
+	}
+	if got := titles(list("pending", "kubernetes", "")); len(got) != 1 || got[0] != "envlang-kube-python" {
+		t.Errorf("status=pending&env=kubernetes: titles = %v, want [envlang-kube-python]", got)
 	}
 }

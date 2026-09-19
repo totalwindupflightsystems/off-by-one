@@ -757,6 +757,57 @@ func TestListProblems_SearchNoMatch(t *testing.T) {
 	}
 }
 
+// OB-GAP-080: env= and lang= must filter the NON-search branch of
+// handleListProblems exactly like the q branch — before the fix the non-q
+// branch ignored both params, so ?env=<nonsense> returned the whole
+// unfiltered catalog (the shipped SPA hits this shape when a filter chip
+// is clicked with an empty query box).
+func TestListProblems_EnvLangFiltersWithoutQuery(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	seedClass(t, store, "docker-perms", "desc1", "docker", "go", "1.0", "sol1", graph.AnswerVerified)
+	seedClass(t, store, "kube-pods", "desc2", "kubernetes", "python", "1.0", "sol2", graph.AnswerPending)
+
+	get := func(path string) listProblemsResponse {
+		t.Helper()
+		rr := do(t, s, "GET", path, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET %s: status = %d, want 200", path, rr.Code)
+		}
+		var resp listProblemsResponse
+		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("GET %s: decode: %v", path, err)
+		}
+		return resp
+	}
+
+	// Nonsense env with no q → total 0 (the OB-GAP-080 live repro).
+	if resp := get("/api/v1/problems?env=zzz-no-such-env-xyz"); resp.Total != 0 {
+		t.Errorf("env=<nonsense> no q: total = %d, want 0 (env must filter the non-search branch)", resp.Total)
+	}
+	// Nonsense lang with no q → total 0.
+	if resp := get("/api/v1/problems?lang=zzz-no-such-lang-xyz"); resp.Total != 0 {
+		t.Errorf("lang=<nonsense> no q: total = %d, want 0 (lang must filter the non-search branch)", resp.Total)
+	}
+	// Real env → only matching classes.
+	resp := get("/api/v1/problems?env=docker")
+	if resp.Total != 1 || len(resp.Problems) != 1 || resp.Problems[0].Title != "docker-perms" {
+		t.Errorf("env=docker: total = %d problems = %+v, want exactly docker-perms", resp.Total, resp.Problems)
+	}
+	// Real lang → only matching classes.
+	resp = get("/api/v1/problems?lang=python")
+	if resp.Total != 1 || len(resp.Problems) != 1 || resp.Problems[0].Title != "kube-pods" {
+		t.Errorf("lang=python: total = %d problems = %+v, want exactly kube-pods", resp.Total, resp.Problems)
+	}
+	// Combined env+lang must intersect (no class has both docker+python).
+	if resp := get("/api/v1/problems?env=docker&lang=python"); resp.Total != 0 {
+		t.Errorf("env=docker&lang=python: total = %d, want 0 (filters intersect)", resp.Total)
+	}
+	// Empty env/lang keeps the unfiltered total.
+	if resp := get("/api/v1/problems"); resp.Total != 2 {
+		t.Errorf("no filters: total = %d, want 2 (unfiltered catalog unchanged)", resp.Total)
+	}
+}
+
 func TestGetProblemClass(t *testing.T) {
 	s, store, _ := newTestServer(t)
 	seedClass(t, store, "docker-perms", "permissions", "docker", "go", "1.0", "use --user", graph.AnswerVerified)

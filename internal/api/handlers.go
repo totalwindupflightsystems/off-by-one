@@ -423,7 +423,8 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 
 // handleListProblems supports ?q=, ?env=, ?lang=, ?status=, ?limit=,
 // ?offset=. When q is set we use the FTS5 Search; otherwise the
-// ListProblemClassesWithCounts with a status-derived filter.
+// ListProblemClassesWithCounts with a status-derived filter. env and lang
+// are exact-match filters honored by BOTH branches (OB-GAP-080).
 func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit := parseIntDefault(q.Get("limit"), 20, 1, 100)
@@ -459,12 +460,12 @@ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.Store.ListProblemClassesWithCountsFiltered(r.Context(), status, limit, offset)
+	rows, err := s.Store.ListProblemClassesWithCountsFiltered(r.Context(), status, env, lang, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	total, err := s.Store.CountProblemClasses(r.Context(), status)
+	total, err := s.Store.CountProblemClasses(r.Context(), status, env, lang)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return

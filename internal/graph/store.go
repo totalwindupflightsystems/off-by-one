@@ -588,7 +588,7 @@ type ProblemClassWithCounts struct {
 // are placeholder zeros for now — the cron loop will populate them
 // once the discovery endpoint begins logging hits.
 func (s *Store) ListProblemClassesWithCounts(ctx context.Context, limit, offset int) ([]ProblemClassWithCounts, error) {
-	return s.ListProblemClassesWithCountsFiltered(ctx, "", limit, offset)
+	return s.ListProblemClassesWithCountsFiltered(ctx, "", "", "", limit, offset)
 }
 
 // ListProblemClassesWithCountsFiltered is ListProblemClassesWithCounts with
@@ -597,12 +597,18 @@ func (s *Store) ListProblemClassesWithCounts(ctx context.Context, limit, offset 
 // ci_passed, verified, pending, failed, or the UI alias "solved" (matches
 // verified OR ci_passed). Empty = no filter.
 //
+// env and lang are exact-match filters with the same semantics as Search
+// (empty = no filter): a class matches when it has at least one answer row
+// with that env / lang. They are applied in SQL too so pagination totals
+// stay correct (OB-GAP-080: the non-search branch of GET /api/v1/problems
+// must honor env=/lang= exactly like the q branch does).
+//
 // best_status applies the signatureNotFailedSQL backstop to the ci_passed
 // and verified branches (OB-GAP-064): a row whose status says verified but
 // whose signatures JSON says result='failed' can never make a class look
 // solved. answer_count still counts every row for the class — that is
 // deliberate (see the commit for OB-GAP-064).
-func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status string, limit, offset int) ([]ProblemClassWithCounts, error) {
+func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status, env, lang string, limit, offset int) ([]ProblemClassWithCounts, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
 	}
@@ -626,12 +632,18 @@ func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status
 			FROM answer_nodes
 			GROUP BY class_id
 		) ac ON ac.class_id = pc.id
-		WHERE ? = '' OR (CASE WHEN ? = 'solved'
+		WHERE (? = '' OR (CASE WHEN ? = 'solved'
 		                      THEN COALESCE(ac.best_status, 'pending') IN ('verified', 'ci_passed')
-		                      ELSE COALESCE(ac.best_status, 'pending') = ? END)
+		                      ELSE COALESCE(ac.best_status, 'pending') = ? END))
+		  AND (? = '' OR EXISTS (
+		      SELECT 1 FROM answer_nodes a
+		      WHERE a.class_id = pc.id AND a.env = ?))
+		  AND (? = '' OR EXISTS (
+		      SELECT 1 FROM answer_nodes a
+		      WHERE a.class_id = pc.id AND a.lang = ?))
 		ORDER BY pc.id DESC
 		LIMIT ? OFFSET ?
-	`, status, status, status, limit, offset)
+	`, status, status, status, env, env, lang, lang, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("list problem_classes with counts: %w", err)
 	}
@@ -650,14 +662,14 @@ func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status
 }
 
 // CountProblemClasses returns the number of problem classes, optionally
-// filtered by derived best answer status (same semantics as
-// ListProblemClassesWithCountsFiltered). Used for accurate pagination
+// filtered by derived best answer status and by env/lang (same semantics
+// as ListProblemClassesWithCountsFiltered). Used for accurate pagination
 // totals on /api/v1/problems.
 //
 // Like the list view it applies the signatureNotFailedSQL backstop to the
 // ci_passed and verified branches (OB-GAP-064), so ?status=solved cannot
 // count a class whose only verified row has a failed signature.
-func (s *Store) CountProblemClasses(ctx context.Context, status string) (int, error) {
+func (s *Store) CountProblemClasses(ctx context.Context, status, env, lang string) (int, error) {
 	var n int
 	err := s.db.QueryRowContext(ctx, `
 		SELECT COUNT(*)
@@ -673,10 +685,16 @@ func (s *Store) CountProblemClasses(ctx context.Context, status string) (int, er
 			FROM answer_nodes
 			GROUP BY class_id
 		) ac ON ac.class_id = pc.id
-		WHERE ? = '' OR (CASE WHEN ? = 'solved'
+		WHERE (? = '' OR (CASE WHEN ? = 'solved'
 		                      THEN COALESCE(ac.best_status, 'pending') IN ('verified', 'ci_passed')
-		                      ELSE COALESCE(ac.best_status, 'pending') = ? END)
-	`, status, status, status).Scan(&n)
+		                      ELSE COALESCE(ac.best_status, 'pending') = ? END))
+		  AND (? = '' OR EXISTS (
+		      SELECT 1 FROM answer_nodes a
+		      WHERE a.class_id = pc.id AND a.env = ?))
+		  AND (? = '' OR EXISTS (
+		      SELECT 1 FROM answer_nodes a
+		      WHERE a.class_id = pc.id AND a.lang = ?))
+	`, status, status, status, env, env, lang, lang).Scan(&n)
 	if err != nil {
 		return 0, fmt.Errorf("count problem_classes: %w", err)
 	}

@@ -350,14 +350,14 @@ func TestCountProblemClasses_MatchesListPagination(t *testing.T) {
 		}
 	}
 
-	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", 2, 0)
+	rows, err := s.ListProblemClassesWithCountsFiltered(ctx, "", "", "", 2, 0)
 	if err != nil {
 		t.Fatalf("ListProblemClassesWithCountsFiltered: %v", err)
 	}
 	if len(rows) != 2 {
 		t.Fatalf("page size: got %d, want 2", len(rows))
 	}
-	n, err := s.CountProblemClasses(ctx, "")
+	n, err := s.CountProblemClasses(ctx, "", "", "")
 	if err != nil {
 		t.Fatalf("CountProblemClasses: %v", err)
 	}
