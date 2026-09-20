@@ -135,16 +135,29 @@ data/COUNTS.md), corpus test junk (OB-GAP-025 — export filters it),
 
 ```bash
 curl -s localhost:8766/api/v1/stats          # problems/answers/verified/queue/hit_rate
-curl -s localhost:8766/health                # uptime — compare vs binary mtime for deploy lag
-stat -c '%y' off-by-one                      # binary mtime; if older than HEAD commit → NOT deployed
+curl -s localhost:8766/health                # uptime
+make gate-deploy                             # the ONE deploy proof: artifact AND running service serve HEAD
 git log origin/master..HEAD --oneline        # unpushed work (branch IS master)
 gh run list -R totalwindupflightsystems/off-by-one --limit 3   # CI
 ```
 
-**Deploy-lag trap (OB-GAP-062):** a committed fix is NOT live until the binary
-is rebuilt AND the server restarted. `verified_answers == total_answers` in
-stats is the pre-fix signature of OB-GAP-060. If binary mtime < HEAD commit
-time, the fix is not serving — file a board task, don't assume.
+**Deploy-lag trap (OB-GAP-062, now ENFORCED by OB-GAP-085):** a committed fix is
+NOT live until the binary is rebuilt AND the server restarted. Do not infer deploy
+state from `stat -c '%y' off-by-one` vs HEAD's commit time — that is a lag proxy,
+and it is exactly how the live unit served `a8d8b67`-era code for ~13h while CI,
+the guard and the Tier 2 judge all stayed green. Use `make gate-deploy`: it chains
+the artifact check, `systemctl show off-by-one -p MainPID`, `/proc/<MainPID>/exe`
+identity, and the running process's `--version` stamp resolved against HEAD. It
+FAILS (named remedy) until both halves are true, and it SKIPs loudly rather than
+report on a deployment it does not own (run it in the checkout that owns the unit,
+not in a worktree). Remedy when red:
+
+```bash
+# commit or stash board/gitreins state first — a dirty tree stamps '<rev>-dirty'
+make build
+kill <MainPID>          # systemd Restart=always relaunches the service
+make gate-deploy        # must pass before the tick is closed out
+```
 
 **Binary-freshness guard:** `make build` stamps `./off-by-one` from
 `git describe`; `make check-binary-fresh` refuses an artifact the server would
@@ -155,6 +168,9 @@ serve with pre-fix behavior. Its three failures, verbatim:
 - `ERROR: ./off-by-one is stale — source changed since it was built; run 'make build'`
 
 Remedy for all three: commit or stash the working tree, then `make build`.
+`check-binary-fresh` validates only the on-disk artifact — it says nothing about
+the running process, which is what `make gate-deploy` covers.
+
 
 ## Running a scratch instance (safe testing)
 

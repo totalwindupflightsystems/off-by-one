@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh check-deploy connect-muster transport-retry-selftest pi-agent-watchdog-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -91,6 +91,29 @@ check-binary-fresh:
 # (data-only drift tolerated). Run after any code commit on master.
 check-deploy:
 	./scripts/check-deploy
+
+# TICK CLOSE-OUT GATE (OB-GAP-085): the enforced entry point. Runs the
+# check-deploy probe above and FAILS this make invocation on any leg failure, so
+# a stale deployed artifact cannot survive a tick silently. It additionally
+# refuses to report on a deployment it does not own: run from a git worktree (or
+# a host without the unit) it SKIPs loudly instead of passing red herrings back
+# to the live service. `make gate-deploy` is the documented step at tick
+# close-out after ANY Go-source / go.mod / go.sum commit — see
+# docs/dogfood/diagnostics.md ("Tick close-out enforcement") and README.
+#
+# Remedy when it fails: commit/stash board+gitreins state (a dirty tree stamps
+# '<rev>-dirty', which check-binary-fresh refuses by design), `make build`, then
+# `kill <MainPID>` — systemd Restart=always relaunches the service.
+gate-deploy:
+	./scripts/gate-deploy
+
+# Regression self-test for the deploy gate + probe: hermetic scratch clones,
+# stub systemd unit and stub systemctl — it never touches the live service.
+# Covers gate-red (stale artifact) → gate-green (rebuilt), the unstamped-artifact
+# failure, the unit-bound-elsewhere refusal, the not-a-checkout refusal, and the
+# live-checkout SKIP verdict.
+check-deploy-test:
+	bash scripts/check-deploy-test.sh
 
 test:
 	go test -count=1 ./...

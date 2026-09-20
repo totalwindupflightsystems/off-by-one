@@ -323,6 +323,16 @@ make build
 
 > **Rebuild after pulling:** the repo-root `./off-by-one` binary is gitignored (never committed) — after `git pull`, run `make build` and verify with `make check-binary-fresh` before running, so the binary matches HEAD instead of serving pre-fix behavior. A binary that came from a bare `go build` fails that check with `ERROR: ./off-by-one carries no version stamp (0.1.0-dev) — it was not built by 'make build'; run 'make build'` (and a binary built from a dirty tree, or one whose source has changed since it was built, fails the same way).
 
+> **Rebuild after ANY code commit (deploy rotation):** a Go commit is **not live**
+> until the artifact is rebuilt AND the running service is restarted — CI, the
+> GitReins guard and the Tier 2 judge all stay green through that drift. Run
+> `make gate-deploy` before closing out a tick; it fails until `./off-by-one` is
+> rebuilt from HEAD *and* the service is serving it. Remedy: `make build`, then
+> `kill <MainPID>` (systemd `Restart=always` relaunches the service), then
+> `make gate-deploy` again. From a git worktree the gate SKIPs loudly instead of
+> reporting on a deployment it does not own. Details:
+> [Deploy check after any code commit](docs/dogfood/diagnostics.md).
+
 > **Submissions need a solver:** without `bwrap` + `pi-agent` configured, `POST /api/v1/problems/submit` is rejected with `503 solver_unavailable` — the cron loop cannot process queued work, so nothing is accepted silently. Pre-verified answers remain discoverable via `POST /api/v1/problems/discover`.
 
 ### Build, Test, Lint
@@ -343,6 +353,24 @@ go vet ./...
 # Check test coverage
 go test -short -cover ./...
 ```
+
+### Deploy the tick's changes (mandatory close-out step)
+
+Run after ANY commit touching `cmd/ internal/ web/ sql/ pkg/`, `go.mod` or
+`go.sum` — a code commit is **not live** until the artifact is rebuilt AND the
+running service is restarted:
+
+```bash
+make gate-deploy      # fails until the artifact AND the running service serve HEAD
+```
+
+Remedy when red — `make build`, then `kill <MainPID>` (systemd `Restart=always`
+relaunches the service), then `make gate-deploy` again. Commit or stash
+board/gitreins state first: a dirty tree stamps the artifact `<rev>-dirty`, which
+`check-binary-fresh` refuses by design. From a git worktree the gate SKIPs
+loudly; the enforcement belongs to the checkout that owns the unit. Probe detail
+and transcripts: [`docs/dogfood/diagnostics.md`](docs/dogfood/diagnostics.md)
+→ "Tick close-out enforcement". Hermetic self-test: `make check-deploy-test`.
 
 ### GitReins Quality Harness
 
