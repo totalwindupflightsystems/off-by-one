@@ -21,7 +21,25 @@
 #      (state dedup) and a healthy run afterwards clears the stamp;
 #   5. a missing 'node' probe tool and an empty workspace enumeration FAIL LOUD
 #      (never a silent healthy verdict);
-#   6. the pre-existing presence class (hollow-wipe) still alerts unchanged.
+#   6. the pre-existing presence class (hollow-wipe) still alerts unchanged;
+#   7. a TIMEOUT in the per-package resolution probe (host CPU starvation, node
+#      rc=124) is UNVERIFIABLE: exit 3, one WARN naming the unverified packages
+#      and the budget, NO BROKEN/hollow-wipe verdict and NO rebuild recipe;
+#   8. a hard resolution failure (ERR / ERR_MODULE_NOT_FOUND) still produces the
+#      full BROKEN alert with the re-link remedy — and when a package times out
+#      beside it, the alert says its inventory is incomplete instead of
+#      reporting the wedged package as broken.
+#
+# Exit codes under test (documented in the probe's header): 0 healthy,
+# 1 broken, 3 unverifiable.
+#
+# Fixture base precondition: the deleted-link arms depend on node FAILING to
+# resolve a package the fixture does not have, but node walks every ANCESTOR
+# node_modules too (/tmp/pi -> /tmp/node_modules -> /node_modules). A host that
+# carries /tmp/node_modules/@earendil-works/<pkg> (this box does) silently
+# resolves the vanished link and the arms go vacuously green, so the base is
+# chosen from candidates whose ancestors are clean and that precondition is
+# asserted, never assumed.
 #
 # Usage: bash scripts/tests/pi-agent-watchdog-selftest.sh   (or: make pi-agent-watchdog-selftest)
 
@@ -31,8 +49,48 @@ SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPTS_DIR="$(cd "$SELF_DIR/.." && pwd)"
 WATCHDOG="$SCRIPTS_DIR/pi-agent-watchdog.sh"
 BASH_BIN="$(command -v bash)"
+# Mirrors the probe's WORKSPACE_SCOPE (the npm scope the solve path resolves).
+WORKSPACE_SCOPE="@earendil-works"
 
-TMP="$(mktemp -d "${TMPDIR:-/tmp}/ob1-pi-watchdog-selftest-XXXXXX")"
+# Fixture base. node resolves a bare specifier by walking node_modules in every
+# ancestor of the importer's directory, so a fixture under a base that carries a
+# node_modules/@earendil-works/<pkg> resolves packages the fixture does not have
+# and the deleted-link arms go vacuously green (live: this host has
+# /tmp/node_modules/@earendil-works/pi-tui, installed 2026-09-20).
+# Pick the first candidate whose ancestors are clean; never fix the base.
+node_modules_ancestor_hit() { # <base> -> prints the offending dir + shim, if any
+  local dir="$1" pkg="$2"
+  while :; do
+    if [ -e "$dir/node_modules/$WORKSPACE_SCOPE/$pkg" ]; then
+      printf '%s\n' "$dir/node_modules/$WORKSPACE_SCOPE/$pkg"
+      return 0
+    fi
+    [ "$dir" = "/" ] && return 1
+    dir="$(dirname "$dir")"
+  done
+}
+
+TMP=""
+TMP_CANDIDATES=()
+[ -n "${TMPDIR:-}" ] && TMP_CANDIDATES+=("$TMPDIR")
+TMP_CANDIDATES+=(/var/tmp)
+# Deliberately NOT /tmp: /tmp/node_modules is a real ancestor of the fixture and
+# of the live /tmp/pi install on this host.
+for base in "${TMP_CANDIDATES[@]}"; do
+  [ -d "$base" ] && [ -w "$base" ] || continue
+  cand="$(mktemp -d "$base/ob1-pi-watchdog-selftest-XXXXXX")" || continue
+  hit="$(node_modules_ancestor_hit "$cand" pi-tui || true)"
+  if [ -z "$hit" ]; then TMP="$cand"; break; fi
+  printf 'skipping fixture base %s: ancestor module shim present (%s)\n' "$base" "$hit"
+  rm -rf "$cand"
+done
+
+if [ -z "$TMP" ]; then
+  printf 'FATAL: no clean fixture base found (every candidate has an ancestor\n' >&2
+  printf '       node_modules/%s/<pkg> shim; the deleted-link arms would pass\n' "$WORKSPACE_SCOPE" >&2
+  printf '       vacuously). Set TMPDIR to a clean base and re-run.\n' >&2
+  exit 1
+fi
 cleanup() { rm -rf "$TMP"; return 0; }
 trap cleanup EXIT
 
@@ -96,11 +154,91 @@ new_arm() { # <name> -> FIX
 }
 
 # Run a probe copy against a fixture. Output -> $OUT, exit status -> $OUT_RC.
-run_probe() { # <script> <fixture-dir>
+# <script> <fixture-dir> [resolve-timeout]
+# The callers of this helper all depend on node actually FAILING to resolve a
+# package the fixture does not have; that holds only because $TMP was chosen
+# with a clean ancestor chain above (see the base selection) — not because the
+# host happens to lack /tmp/node_modules.
+run_probe() { # <script> <fixture-dir> [resolve-timeout]
   OUT="$TMP/last-out.txt"
   ( PI_DIR="$2" PI_AGENT_WATCHDOG_STAMP="$2/watchdog.stamp" \
+    PI_AGENT_RESOLVE_TIMEOUT="${3:-30}" \
     PI_AGENT_WRAPPER="$2/bin/pi-agent" bash "$1" ) > "$OUT" 2>&1
   OUT_RC=$?
+}
+
+# Same, but in a fixture whose stamps are independent of the shared one, for
+# arms that need several probes of one tree without the dedup masking a re-run.
+run_probe_stamp() { # <script> <fixture-dir> <stamp-path> [resolve-timeout]
+  OUT="$TMP/last-out.txt"
+  ( PI_DIR="$2" PI_AGENT_WATCHDOG_STAMP="$3" \
+    PI_AGENT_RESOLVE_TIMEOUT="${4:-30}" \
+    PI_AGENT_WRAPPER="$2/bin/pi-agent" bash "$1" ) > "$OUT" 2>&1
+  OUT_RC=$?
+}
+
+# A fixture tree carrying a per-run PATH stub dir: every call to the REAL binary
+# is real (fixture dir in, exit status out), except the named one, which is
+# intercepted. This is stubbing the INNER COMMAND (hermetic, deterministic),
+# not the probe's classification logic.
+run_probe_stub_node() { # <script> <fixture-dir> <stub-dir> <resolve-timeout>
+  OUT="$TMP/last-out.txt"
+  ( PATH="$3:$PATH" PI_DIR="$2" PI_AGENT_WATCHDOG_STAMP="$2/watchdog.stamp" \
+    PI_AGENT_RESOLVE_TIMEOUT="$4" \
+    PI_AGENT_WRAPPER="$2/bin/pi-agent" bash "$1" ) > "$OUT" 2>&1
+  OUT_RC=$?
+}
+
+# <stub-dir> <name-substring> <rc> — a node stub that intercepts ONE call: the
+# per-package import probe for the named package (the argv carrying both
+# "import" and that name — the watchdog's own probe shape). Every other
+# invocation, notably the workspace-package ENUMERATION, is passed through to
+# real node, so only the per-package probe's outcome is synthetic and the
+# candidate set stays real.
+#
+# The pass-through target must be a REAL node, not PATH's `node`: on this host
+# PATH's node is a dispatcher (vite-plus `vp`, a symlink to an ELF named `vp`)
+# that itself re-resolves `node` from PATH, so `exec "$(command -v node)"` — or
+# any candidate check that only looks at the symlink target's magic bytes —
+# re-enters the stub. The probe then nested until `timeout` killed it and
+# reported a bogus rc=124 on the ENUMERATION (which reads as "the solve-path
+# dep set is UNKNOWN"). Select the first PATH candidate whose FULLY RESOLVED
+# basename is `node`, and smoke-test the generated stub so a regression here
+# fails loudly instead of silently poisoning every arm.
+write_node_stub() {
+  local stubdir="$1" needle="$2" stubrc="$3" realnode=""
+  local cand resolved
+  for cand in $(type -ap node 2>/dev/null); do
+    resolved="$(readlink -f "$cand" 2>/dev/null)" || continue
+    [ -n "$resolved" ] && [ -x "$resolved" ] || continue
+    [ "$(basename "$resolved")" = "node" ] || continue
+    realnode="$resolved"; break
+  done
+  [ -n "$realnode" ] || realnode="$(command -v node)"
+  mkdir -p "$stubdir"
+  cat > "$stubdir/node" <<NODESTUB
+#!/bin/sh
+# OB-GAP-079 selftest stub: rc $stubrc for the import probe of '$needle'.
+for a in "\$@"; do
+  case "\$a" in
+    *import*'$needle'*) exit $stubrc ;;
+  esac
+done
+exec "$realnode" "\$@"
+NODESTUB
+  chmod +x "$stubdir/node"
+
+  # Loud self-check: the pass-through must be a one-shot real node, not the stub
+  # re-entering itself through PATH.
+  local probe_out probe_rc
+  probe_out="$(PATH="$stubdir:$PATH" "$stubdir/node" -e 'process.stdout.write("PASSTHROUGH_OK")' 2>&1)"
+  probe_rc=$?
+  if [ "$probe_rc" -ne 0 ] || [ "$probe_out" != "PASSTHROUGH_OK" ]; then
+    printf 'FATAL: node stub pass-through is broken (rc=%s out=%s) — the stub\n' "$probe_rc" "$probe_out" >&2
+    printf '       re-enters itself or the target is not a real node; every arm\n' >&2
+    printf '       using it would report bogus probe results.\n' >&2
+    return 1
+  fi
 }
 
 stamp_state() { # <fixture-dir>
@@ -234,6 +372,109 @@ check "exit code 1" "1" "$OUT_RC"
 check_contains "hollow-wipe alert preserved" "pi-agent binary UNHEALTHY (hollow-wipe class)" "$OUT"
 check_contains "reports the failed presence check" "cli.js=0" "$OUT"
 check_contains "carries the rebuild recipe" "npm install --ignore-scripts && npm run build" "$OUT"
+
+# ══ ARM 8 — resolve-probe TIMEOUT is UNVERIFIABLE, not broken (OB-GAP-079) ═══
+# The 2026-09-18 15:50:22 outage-class alert: the host was CPU-starved
+# (loadavg 159) and `timeout $RESOLVE_TIMEOUT node -e import(...)` hit its
+# budget — node rc=124 — for packages whose symlinks were ON DISK. Pre-fix that
+# landed in the SAME bucket as ERR_MODULE_NOT_FOUND and the verdict read
+# "solve path BROKEN ... node TIMEOUT", i.e. the hollow-wipe alert for a merely
+# unverifiable outcome. The inner command is stubbed here (hermetic; the REAL
+# node cannot be made to time out deterministically), everything else is the
+# probe's own path.
+new_arm arm8-timeout-unverifiable
+make_fixture "$FIX" pi-tui chord session-backends/sqlite-node
+mkdir -p "$FIX/stubbin-timeout"
+write_node_stub "$FIX/stubbin-timeout" "pi-tui" 124
+printf '\nARM 8 — node rc=124 (probe TIMEOUT under host load): unverifiable, not broken\n'
+check "stub node is the one that gets used" "taken" "$(PATH="$FIX/stubbin-timeout:$PATH" command -v node | grep -q "stubbin-timeout" && echo taken || echo real)"
+run_probe_stub_node "$WATCHDOG" "$FIX" "$FIX/stubbin-timeout" 7
+check "exit code 3 (distinct from broken=1)" "3" "$OUT_RC"
+check_contains "WARN, not an alert" "WARN (not alert)" "$OUT"
+check_contains "names the timeout as the outcome" "resolve probe TIMED OUT under host load" "$OUT"
+check_contains "names the budget in force" "PI_AGENT_RESOLVE_TIMEOUT=7" "$OUT"
+check_contains "names the unverified package" "@earendil-works/pi-tui" "$OUT"
+check_contains "states the health is unknown" "Solve health UNKNOWN" "$OUT"
+check_contains "instructs a re-run" "re-run when load subsides" "$OUT"
+check_not_contains "no BROKEN verdict" "solve path BROKEN" "$OUT"
+check_not_contains "no hollow-wipe alert" "UNHEALTHY (hollow-wipe class)" "$OUT"
+check_not_contains "no re-link recipe" "npm install --ignore-scripts" "$OUT"
+check_not_contains "does not name the resolvable siblings" "@earendil-works/chord" "$OUT"
+
+# ══ ARM 8b — the same outcome with NO stub: a real node killed by the budget ═
+# Deterministic counterweight to ARM 8: a fixture package whose entry point
+# busy-waits past a small PI_AGENT_RESOLVE_TIMEOUT, so `timeout` genuinely
+# returns 124 for a REAL node doing a REAL import — no stub in the path at all.
+printf '\nARM 8b — real (unstubbed) budget kill: node busy-waits past the timeout\n'
+new_arm arm8b-real-timeout
+make_fixture "$FIX" pi-tui chord
+cat > "$FIX/packages/pi-tui/index.js" <<'SLOWENTRY'
+// busy-wait well past the probe budget, then export normally.
+const end = Date.now() + 12000;
+while (Date.now() < end) {}
+module.exports = {};
+SLOWENTRY
+run_probe "$WATCHDOG" "$FIX" 3
+check "real rc=124 outcome exits 3" "3" "$OUT_RC"
+check_contains "real timeout reported as the outcome" "resolve probe TIMED OUT under host load" "$OUT"
+check_contains "real timeout names the budget" "PI_AGENT_RESOLVE_TIMEOUT=3" "$OUT"
+check_contains "real timeout names the wedged package" "@earendil-works/pi-tui" "$OUT"
+check_not_contains "real timeout does not read as BROKEN" "solve path BROKEN" "$OUT"
+check_not_contains "real timeout carries no rebuild/re-link recipe" "npm install --ignore-scripts" "$OUT"
+check_not_contains "the fast sibling is not implicated" "@earendil-works/chord" "$OUT"
+
+# ══ ARM 9 — dedup carries the unverifiable state (no re-spam) ════════════════
+printf '\nARM 9 — repeated TIMEOUTs: one WARN, and it is not confused with a failure\n'
+# ARM 8 left a stamp behind; clear it so this arm observes the first (alerting)
+# timeout run rather than a deduped repeat of someone else's incident.
+rm -f "$FIX/watchdog.stamp"
+: > "$TMP/arm9-combined.txt"
+run_probe_stub_node "$WATCHDOG" "$FIX" "$FIX/stubbin-timeout" 7
+cat "$OUT" >> "$TMP/arm9-combined.txt"
+check "the timeout run wrote the stamp" "present" "$(stamp_state "$FIX")"
+check "stamp records the unverifiable state" "yes" \
+  "$(grep -q 'resolve=unverifiable:' "$FIX/watchdog.stamp" && echo yes || echo no)"
+run_probe_stub_node "$WATCHDOG" "$FIX" "$FIX/stubbin-timeout" 7
+cat "$OUT" >> "$TMP/arm9-combined.txt"
+check "second identical TIMEOUT is silent (dedup)" "" "$(cat "$OUT")"
+check "second identical TIMEOUT still exits 3" "3" "$OUT_RC"
+# A real failure appearing afterwards must NOT be swallowed by the timeout stamp.
+rm "$FIX/node_modules/@earendil-works/pi-tui"
+run_probe "$WATCHDOG" "$FIX"
+cat "$OUT" >> "$TMP/arm9-combined.txt"
+check "a later real failure still exits 1" "1" "$OUT_RC"
+check_contains "a later real failure still produces the BROKEN alert" "solve path BROKEN" "$OUT"
+check "exactly one WARN across the repeated timeout runs" "1" "$(grep -c 'WARN' "$TMP/arm9-combined.txt")"
+
+# ══ ARM 10 — ERR keeps the full BROKEN alert; mixed reports incompleteness ═══
+printf '\nARM 10 — hard failure preserved; a timeout beside it is disclosed\n'
+new_arm arm10-err-preserved
+make_fixture "$FIX" pi-tui chord
+rm "$FIX/node_modules/@earendil-works/pi-tui"
+run_probe "$WATCHDOG" "$FIX"
+check "ERR outcome exits 1 (not 3)" "1" "$OUT_RC"
+check_contains "BROKEN alert preserved" "pi-agent solve path BROKEN" "$OUT"
+check_contains "names the package" "@earendil-works/pi-tui" "$OUT"
+check_contains "carries the node failure class" "ERR_MODULE_NOT_FOUND" "$OUT"
+check_contains "carries the re-link remedy" "npm install --ignore-scripts" "$OUT"
+check_not_contains "no WARN text on the broken path" "WARN (not alert)" "$OUT"
+
+# Mixed: one package genuinely broken, one timed out. The BROKEN alert must
+# still fire (requirement 4) and must NOT present the wedged package as broken.
+new_arm arm10b-mixed
+make_fixture "$FIX" pi-tui chord
+rm "$FIX/node_modules/@earendil-works/pi-tui"
+mkdir -p "$FIX/stubbin-mixed"
+write_node_stub "$FIX/stubbin-mixed" "chord" 124
+run_probe_stub_node "$WATCHDOG" "$FIX" "$FIX/stubbin-mixed" 7
+check "mixed run exits 1 (a real failure is present)" "1" "$OUT_RC"
+check_contains "mixed run still alerts BROKEN" "solve path BROKEN" "$OUT"
+check_contains "the genuinely broken package is the one reported" \
+  "unresolved: @earendil-works/pi-tui" "$OUT"
+check_not_contains "the timed-out package is NOT called unresolved" \
+  "unresolved: @earendil-works/pi-tui, @earendil-works/chord" "$OUT"
+check_contains "the timed-out package is disclosed as unverified" \
+  "unverified: @earendil-works/chord" "$OUT"
 
 # ══ summary ═════════════════════════════════════════════════════════════════
 total=$((pass + fail))
