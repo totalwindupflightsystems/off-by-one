@@ -690,9 +690,10 @@ func TestOpenAPISpec_ParametersCarryContinuationKeys(t *testing.T) {
 	}
 	walk(doc)
 
-	// Non-vacuity guard: the spec declares 15 parameters across its paths.
-	if len(params) != 15 {
-		t.Fatalf("walked %d parameters, want 15", len(params))
+	// Non-vacuity guard: the spec declares 17 parameters across its paths
+	// (15 before GET /api/v1/queue documented its limit/offset query pair).
+	if len(params) != 17 {
+		t.Fatalf("walked %d parameters, want 17", len(params))
 	}
 	for i, p := range params {
 		name, _ := p["name"].(string)

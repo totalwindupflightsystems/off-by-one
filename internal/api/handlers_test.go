@@ -1104,6 +1104,228 @@ func TestListQueue_ExcludesPlaceholderClasses(t *testing.T) {
 	}
 }
 
+// TestListQueue_NewestFirstHonestTotalAndPendingPosition guards
+// DF-OFF-BY-ONE-10 end to end at the API layer.
+//
+// Pre-fix, GET /api/v1/queue ordered by priority DESC: one old high-priority
+// historical row (or an old pending row with a high score) sat on page 1
+// forever and the live submission a polling user cares about was pushed off
+// the listing — with the default page size, the pre-fix response could show
+// only complete/failed rows while pending submissions existed. `total` was
+// len(entries), i.e. the page size, so a caller could not tell "2 000 jobs
+// waiting" from "100 returned and no more".
+//
+// The fixture deliberately makes the listing order and the solver's order
+// DIFFER, so the test cannot pass by accident: sub_wait_urgent is older but
+// higher-priority than the live submission, so it is solved first while the
+// live row is listed first. A pending entry's `position`/`estimated_time`
+// must follow the solver's order (the jobs actually ahead of it), never the
+// listing's index.
+//
+// Fixture (priority / created_at):
+//
+//	sub_hist_hot    complete 99.0   2024-01-01   (old import, off the listing's front)
+//	sub_wait_urgent pending   5.0   2025-06-01   (solver position 1)
+//	sub_wait_old    pending   0.0   2025-01-01   (solver position 3)
+//	<submitted>     pending   1.0   now          (solver position 2)
+//	sub_eta_done    complete  0.0   2023-01-01   (observed-solve fixture, sorts last)
+func TestListQueue_NewestFirstHonestTotalAndPendingPosition(t *testing.T) {
+	s, store, queue := newTestServer(t)
+	ctx := context.Background()
+	// 133s observed solve time: perJob is 2m13s, so each ETA is distinguishable.
+	seedObservedSolveTime(t, store, "sub_eta_done")
+
+	for _, row := range []struct {
+		id, class, status, at string
+		priority              float64
+	}{
+		{"sub_hist_hot", "legacy-imported-class", ingest.StatusComplete, "2024-01-01 00:00:00", 99.0},
+		{"sub_wait_urgent", "legacy-imported-class", ingest.StatusPending, "2025-06-01 00:00:00", 5.0},
+		{"sub_wait_old", "legacy-imported-class", ingest.StatusPending, "2025-01-01 00:00:00", 0.0},
+	} {
+		if _, err := store.DB().Exec(`INSERT INTO queue_entries
+			(id, problem_class, status, stage, priority, created_at)
+			VALUES (?, ?, ?, 'queued', ?, ?)`,
+			row.id, row.class, row.status, row.priority, row.at); err != nil {
+			t.Fatalf("insert %s: %v", row.id, err)
+		}
+	}
+	// The observed-solve fixture row gets "now" from the DEFAULT clause and
+	// would tie with the submission on created_at; pin it into the past so
+	// the newest-first order is unambiguous.
+	if _, err := store.DB().Exec(
+		`UPDATE queue_entries SET created_at = '2023-01-01 00:00:00' WHERE id = 'sub_eta_done'`); err != nil {
+		t.Fatalf("pin observed row: %v", err)
+	}
+
+	perJob, err := queue.AvgSolveTime(ctx)
+	if err != nil {
+		t.Fatalf("AvgSolveTime: %v", err)
+	}
+	if perJob <= 0 {
+		t.Fatalf("fixture observed average = %s, want > 0", perJob)
+	}
+
+	// The live submission is the newest, low-priority row. The submit
+	// response's position/estimated_time are the post-enqueue DEPTH (jobs
+	// queued ahead of and including this one), which this fix does not
+	// touch: three pending rows, nothing in progress -> 3 x 2m13s.
+	live := submitForTest(t, s, "live-fresh-class")
+	if live.Position != 3 {
+		t.Errorf("submit position = %d, want 3 (post-enqueue depth: 3 pending + 0 in_progress, unchanged by this fix)", live.Position)
+	}
+	if want := estimateTime(3, perJob); live.EstimatedTime != want {
+		t.Errorf("submit estimated_time = %q, want %q (depth 3 x 2m13s, unchanged by this fix)", live.EstimatedTime, want)
+	}
+	if live.Position == 1 {
+		t.Errorf("submit position = 1 would mean the depth read changed semantics")
+	}
+
+	// --- the defect: the listing leads with the newest submission ---------
+	rr := do(t, s, "GET", "/api/v1/queue", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+	}
+	var resp queueListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if resp.Total != 5 {
+		t.Errorf("total = %d, want 5 (every servable row, page holds them all)", resp.Total)
+	}
+	if len(resp.Entries) != 5 {
+		t.Fatalf("entries = %d, want 5: %s", len(resp.Entries), rr.Body.String())
+	}
+	if got := resp.Entries[0].SubmissionID; got != live.SubmissionID {
+		t.Errorf("entries[0] = %q, want the newest submission %q (newest first; pre-fix this was the 2024 high-priority import)",
+			got, live.SubmissionID)
+	}
+	// The historical high-priority row must not be first, and the ordering
+	// must be strictly newest-first.
+	ids := make([]string, 0, len(resp.Entries))
+	for _, e := range resp.Entries {
+		ids = append(ids, e.SubmissionID)
+	}
+	wantOrder := []string{live.SubmissionID, "sub_wait_urgent", "sub_wait_old", "sub_hist_hot", "sub_eta_done"}
+	for i, want := range wantOrder {
+		if ids[i] != want {
+			t.Errorf("listing order[%d] = %q, want %q (created_at DESC); full = %v", i, ids[i], want, ids)
+		}
+	}
+
+	// --- the defect: total is the match count, not the page size ----------
+	oneRR := do(t, s, "GET", "/api/v1/queue?limit=1", nil)
+	var one queueListResponse
+	if err := json.Unmarshal(oneRR.Body.Bytes(), &one); err != nil {
+		t.Fatalf("decode limit=1: %v", err)
+	}
+	if len(one.Entries) != 1 {
+		t.Fatalf("limit=1 entries = %d, want 1", len(one.Entries))
+	}
+	if one.Total != 5 {
+		t.Errorf("total with limit=1 = %d, want 5 (match count, not the page size)", one.Total)
+	}
+	if one.Entries[0].SubmissionID != live.SubmissionID {
+		t.Errorf("limit=1 entries[0] = %q, want %q", one.Entries[0].SubmissionID, live.SubmissionID)
+	}
+	// Paging shifts the page but not the total; page position follows the
+	// offset (documented offset+i+1 behaviour).
+	pageRR := do(t, s, "GET", "/api/v1/queue?limit=2&offset=3", nil)
+	var page queueListResponse
+	if err := json.Unmarshal(pageRR.Body.Bytes(), &page); err != nil {
+		t.Fatalf("decode paged: %v", err)
+	}
+	if page.Total != 5 {
+		t.Errorf("total at offset=3 = %d, want 5", page.Total)
+	}
+	if len(page.Entries) != 2 {
+		t.Fatalf("paged entries = %d, want 2: %s", len(page.Entries), pageRR.Body.String())
+	}
+	if page.Entries[0].SubmissionID != "sub_hist_hot" || page.Entries[0].Position != 4 {
+		t.Errorf("page[0] = %q position %d, want sub_hist_hot at page position 4",
+			page.Entries[0].SubmissionID, page.Entries[0].Position)
+	}
+	if page.Entries[1].SubmissionID != "sub_eta_done" || page.Entries[1].Position != 5 {
+		t.Errorf("page[1] = %q position %d, want sub_eta_done at page position 5",
+			page.Entries[1].SubmissionID, page.Entries[1].Position)
+	}
+
+	// --- filtered path: pending rows, still newest-first ------------------
+	pr := do(t, s, "GET", "/api/v1/queue?status=pending", nil)
+	var pendingResp queueListResponse
+	if err := json.Unmarshal(pr.Body.Bytes(), &pendingResp); err != nil {
+		t.Fatalf("decode pending list: %v", err)
+	}
+	if pendingResp.Total != 3 {
+		t.Errorf("status=pending total = %d, want 3", pendingResp.Total)
+	}
+	if len(pendingResp.Entries) != 3 {
+		t.Fatalf("status=pending entries = %d, want 3: %s", len(pendingResp.Entries), pr.Body.String())
+	}
+	if pendingResp.Entries[0].SubmissionID != live.SubmissionID {
+		t.Errorf("status=pending entries[0] = %q, want the newest pending row %q",
+			pendingResp.Entries[0].SubmissionID, live.SubmissionID)
+	}
+	for i, e := range pendingResp.Entries {
+		if e.Status != ingest.StatusPending {
+			t.Errorf("status=pending entries[%d] status = %q", i, e.Status)
+		}
+		if e.Position != i+1 {
+			t.Errorf("status=pending entries[%d] position = %d, want %d (offset+i+1)", i, e.Position, i+1)
+		}
+	}
+
+	// --- guard the trap: position/ETA follow the SOLVER's pending order ---
+	// The 1-based place in the pending queue, priority-first: sub_wait_urgent,
+	// the live submission, then sub_wait_old. Deriving the place from the
+	// listing instead would give the live row position 1 and one job's wait.
+	for _, tc := range []struct {
+		id  string
+		pos int
+	}{
+		{"sub_wait_urgent", 1},
+		{live.SubmissionID, 2},
+		{"sub_wait_old", 3},
+	} {
+		raw, entry := getQueueEntry(t, s, tc.id)
+		if entry.Status != ingest.StatusPending {
+			t.Fatalf("%s status = %q, want pending", tc.id, entry.Status)
+		}
+		if entry.Position != tc.pos {
+			t.Errorf("%s position = %d, want %d (1-based place in the pending queue, not the listing)",
+				tc.id, entry.Position, tc.pos)
+		}
+		wantETA := estimateTime(tc.pos, perJob)
+		if entry.EstimatedTime != wantETA {
+			t.Errorf("%s estimated_time = %q, want %q", tc.id, entry.EstimatedTime, wantETA)
+		}
+		if got, isNum := raw["position"].(float64); !isNum || int(got) != tc.pos {
+			t.Errorf("%s raw position = %v, want %d", tc.id, raw["position"], tc.pos)
+		}
+	}
+	// A terminal entry is not waiting: no position, no ETA — on both the
+	// detail endpoint and the listing the change did not disturb.
+	rawDone, done := getQueueEntry(t, s, "sub_hist_hot")
+	if done.Position != 0 {
+		t.Errorf("complete entry position = %d, want 0", done.Position)
+	}
+	if done.EstimatedTime != "" {
+		t.Errorf("complete entry estimated_time = %q, want empty", done.EstimatedTime)
+	}
+	if rawDone["position"] != float64(0) {
+		t.Errorf("complete entry raw position = %v, want 0", rawDone["position"])
+	}
+	var listDone queueEntryWire
+	for _, e := range resp.Entries {
+		if e.SubmissionID == "sub_hist_hot" {
+			listDone = e
+		}
+	}
+	if listDone.EstimatedTime != "" {
+		t.Errorf("listing complete entry estimated_time = %q, want empty", listDone.EstimatedTime)
+	}
+}
+
 func TestGetQueueStatus(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	body := submitProblemRequest{ProblemClass: "class-a", Cadence: ingest.CadencePrePhase}
@@ -1611,11 +1833,15 @@ func TestListQueue_PositionAndEstimatedTime(t *testing.T) {
 		t.Fatalf("fixture observed average = %s, want > 0", perJob)
 	}
 
-	// Expected ETA per entry, keyed by ID: pending entries scale with their
-	// place in the pending queue, the solving entry is one job.
-	pendingRows, err := queue.List(ctx, ingest.StatusPending, 1000, 0)
+	// Expected ETA per entry, keyed by ID: a pending entry's ETA scales with
+	// its place in the SOLVER's pending order (priority-first, the order
+	// pickPending works through), the solving entry is one job. Since
+	// DF-OFF-BY-ONE-10 the listing itself is newest-submission-first, so the
+	// two orders differ and the ETA must come from the pending order, not
+	// from the listing's index.
+	pendingRows, err := queue.PendingQueueOrder(ctx, 1000)
 	if err != nil {
-		t.Fatalf("pending list: %v", err)
+		t.Fatalf("pending queue order: %v", err)
 	}
 	wantETA := map[string]string{}
 	for i, e := range pendingRows {

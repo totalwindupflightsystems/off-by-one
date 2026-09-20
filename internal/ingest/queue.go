@@ -369,36 +369,31 @@ func (q *Queue) Get(ctx context.Context, id string) (*Entry, error) {
 	return scanEntry(row)
 }
 
-// List returns queue entries filtered by status (empty = all). Ordered
-// by priority DESC, created_at ASC.
-//
-// Placeholder (self-test/canary/probe) classes are filtered out BEFORE
-// limit/offset pagination so the public queue listing never leaks them and
-// positions stay contiguous (OB-GAP-061). Because the predicate is a Go
-// regexp (SQLite has no REGEXP), we fetch the full status-filtered set and
-// paginate in Go; queue sizes are small (hundreds of rows), so this is fine.
-func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]Entry, error) {
-	if limit <= 0 || limit > 1000 {
-		limit = 100
-	}
-	if offset < 0 {
-		offset = 0
-	}
-	qry := `
-		SELECT id, problem_class, environment, language, version, description,
-		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
-		       result_answer_id, created_at, started_at, completed_at, failure_reason
-		FROM queue_entries`
-	args := []any{}
-	if status != "" {
-		qry += ` WHERE status = ?`
-		args = append(args, status)
-	}
-	qry += ` ORDER BY priority DESC, created_at ASC`
+// defaultListLimit is the page size List/ListPage fall back to when the
+// caller asks for a nonsense limit (<= 0) or more than the 1000-row cap.
+const defaultListLimit = 100
 
+// maxListLimit is the largest page List/ListPage will serve, and the cap on
+// how many entries PendingQueueOrder materialises.
+const maxListLimit = 1000
+
+// queueEntrySelect is the column list every queue read shares, so a column
+// added to the table is added in one place instead of drifting between
+// List/Get/pickPending.
+const queueEntrySelect = `
+	SELECT id, problem_class, environment, language, version, description,
+	       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
+	       result_answer_id, created_at, started_at, completed_at, failure_reason
+	FROM queue_entries`
+
+// scanFiltered runs an already-ordered queue query and returns every row,
+// with placeholder (self-test/canary/probe) classes removed. The predicate
+// is a Go regexp — SQLite has no REGEXP — so the filter happens here, before
+// any caller counts or paginates (OB-GAP-061).
+func (q *Queue) scanFiltered(ctx context.Context, qry string, args ...any) ([]Entry, error) {
 	rows, err := q.db.QueryContext(ctx, qry, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list queue: %w", err)
+		return nil, err
 	}
 	defer rows.Close()
 	var filtered []Entry
@@ -415,14 +410,104 @@ func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]E
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	return filtered, nil
+}
+
+// List returns queue entries filtered by status (empty = all), newest
+// submission first. It returns the first page of the match set with the
+// default/capped page size — see ListPage for the paged variant and for
+// the match count, which is the honest value for the list response's
+// total field (DF-OFF-BY-ONE-10).
+//
+// This is the USER-FACING view: "what did I submit / what is waiting".
+// The ordering is therefore created_at DESC (most recent first), NOT the
+// solver's scheduling order — Queue.pickPending keeps
+// `priority DESC, created_at ASC`, and PendingQueueOrder exposes that same
+// order for callers that derive a pending entry's place in the queue. That
+// divergence is deliberate (DF-OFF-BY-ONE-10), not drift: do not "unify"
+// the two orderings.
+//
+// Placeholder (self-test/canary/probe) classes are filtered out BEFORE
+// limit/offset pagination so the public queue listing never leaks them and
+// positions stay contiguous (OB-GAP-061). Because the predicate is a Go
+// regexp (SQLite has no REGEXP), we fetch the full status-filtered set and
+// paginate in Go; queue sizes are small (hundreds of rows), so this is fine.
+func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]Entry, error) {
+	page, _, err := q.ListPage(ctx, status, limit, offset)
+	return page, err
+}
+
+// ListPage is List plus the number of entries the (unpaginated) match set
+// holds: the filtered set AFTER placeholder exclusion. Pagination applies
+// to that set, so `total` is the count of rows the listing could serve —
+// never the page size — which is what lets GET /api/v1/queue publish an
+// honest total (DF-OFF-BY-ONE-10). The returned page is a sub-slice of the
+// same ordered match set List returns for the same status; the match count
+// is reported even when the page is empty because offset ran past the end.
+func (q *Queue) ListPage(ctx context.Context, status string, limit, offset int) ([]Entry, int, error) {
+	if limit <= 0 || limit > maxListLimit {
+		limit = defaultListLimit
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	// The scan order decides the visible page, so it must be the order the
+	// match count describes: newest submission first. created_at comes from
+	// datetime('now') as a fixed-width UTC "YYYY-MM-DD HH:MM:SS", so a
+	// lexicographic sort is chronological; id is the tiebreak that keeps
+	// rows sharing a timestamp in a stable, deterministic order.
+	qry := queueEntrySelect
+	args := []any{}
+	if status != "" {
+		qry += ` WHERE status = ?`
+		args = append(args, status)
+	}
+	qry += ` ORDER BY created_at DESC, id ASC`
+
+	filtered, err := q.scanFiltered(ctx, qry, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list queue: %w", err)
+	}
+	// The match count is the pre-pagination length: placeholders are gone,
+	// every non-placeholder row matching the status filter is counted.
+	total := len(filtered)
 	if offset >= len(filtered) {
-		return nil, nil
+		return nil, total, nil
 	}
 	end := offset + limit
 	if end > len(filtered) {
 		end = len(filtered)
 	}
-	return filtered[offset:end], nil
+	return filtered[offset:end], total, nil
+}
+
+// PendingQueueOrder returns the pending entries in the order the solver will
+// work through them — `priority DESC, created_at ASC`, the very order
+// pickPending uses to choose the next job — capped at limit entries.
+//
+// It exists because List's order changed: List is the user-facing submission
+// view (newest first), while a pending entry's `position` and
+// `estimated_time` are the number of jobs actually ahead of it. Deriving
+// either from the newest-first listing would promise the freshest submission
+// a zero-job wait while three jobs sat in front of it. Callers that need a
+// pending place (Server.pendingPositions, Server.queuePosition) use this;
+// the scheduling policy itself (pickPending) is untouched.
+//
+// Placeholder classes are filtered exactly as List filters them, so a
+// placeholder row never consumes a position a user sees.
+func (q *Queue) PendingQueueOrder(ctx context.Context, limit int) ([]Entry, error) {
+	if limit <= 0 || limit > maxListLimit {
+		limit = maxListLimit
+	}
+	entries, err := q.scanFiltered(ctx,
+		queueEntrySelect+` WHERE status = ? ORDER BY priority DESC, created_at ASC`, StatusPending)
+	if err != nil {
+		return nil, fmt.Errorf("pending queue order: %w", err)
+	}
+	if len(entries) > limit {
+		entries = entries[:limit]
+	}
+	return entries, nil
 }
 
 // Depth returns the number of pending or in_progress entries in the

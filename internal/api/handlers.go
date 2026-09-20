@@ -617,16 +617,23 @@ func (s *Server) handleGetRelated(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleListQueue returns the queue contents filtered by status. Every
-// entry carries a derived estimated_time (see queueWireEntry); position
-// stays the entry's 1-based place in the returned page, which is what the
-// documented list contract promises.
+// handleListQueue returns the queue contents filtered by status, newest
+// submission first. Every entry carries a derived estimated_time (see
+// queueWireEntry); position stays the entry's 1-based place in the
+// returned page, which is what the documented list contract promises.
+//
+// total is the number of entries the filter matches (the unpaginated match
+// set, placeholder classes excluded) — NOT the page size. Until
+// DF-OFF-BY-ONE-10 it was len(entries), so a caller could not tell a queue
+// holding 2000 waiting jobs from one holding exactly 100, and the default
+// priority-first order pushed live submissions off page 1 behind old
+// high-priority imports.
 func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	status := q.Get("status")
 	limit := parseIntDefault(q.Get("limit"), 100, 1, 1000)
 	offset := parseIntDefault(q.Get("offset"), 0, 0, 1<<20)
-	entries, err := s.Queue.List(r.Context(), status, limit, offset)
+	entries, total, err := s.Queue.ListPage(r.Context(), status, limit, offset)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -636,7 +643,7 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 	// read per entry.
 	perJob, _ := s.Queue.AvgSolveTime(r.Context())
 	pending := s.pendingPositions(r)
-	out := queueListResponse{Total: len(entries)}
+	out := queueListResponse{Total: total}
 	for i, e := range entries {
 		wire := queueWireEntry(&e, pending[e.ID], perJob)
 		wire.Position = offset + i + 1
@@ -802,8 +809,13 @@ func queueWireEntry(e *ingest.Entry, pendingIndex int, perJob time.Duration) que
 // pending queue. It is one fetch per request (shared by the entry's position
 // and its ETA); a read error yields a nil map so callers fall back to
 // position 1 rather than dropping the estimate.
+//
+// The order comes from Queue.PendingQueueOrder (the solver's priority-first
+// order), NOT from Queue.List: since DF-OFF-BY-ONE-10 the listing is
+// newest-submission-first, and a place derived from it would count the
+// waiting jobs in the wrong order.
 func (s *Server) pendingPositions(r *http.Request) map[string]int {
-	entries, err := s.Queue.List(r.Context(), ingest.StatusPending, 1000, 0)
+	entries, err := s.Queue.PendingQueueOrder(r.Context(), 1000)
 	if err != nil {
 		return nil
 	}
@@ -817,8 +829,11 @@ func (s *Server) pendingPositions(r *http.Request) map[string]int {
 // queuePosition returns 1-based position of e in the pending queue.
 // Used by SubmitProblemResponse so the user knows how many problems
 // are ahead. Falls back to 1 if the queue is empty.
+//
+// Same order caveat as pendingPositions: the position is the entry's place in
+// the solver's priority-first pending order, not in the newest-first listing.
 func (s *Server) queuePosition(r *http.Request, e *ingest.Entry) int {
-	entries, err := s.Queue.List(r.Context(), ingest.StatusPending, 1000, 0)
+	entries, err := s.Queue.PendingQueueOrder(r.Context(), 1000)
 	if err != nil {
 		return 1
 	}

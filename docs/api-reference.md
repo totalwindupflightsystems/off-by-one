@@ -353,7 +353,9 @@ curl -s http://localhost:8766/api/v1/problems/so-nil-pointer-deref/related
 
 ### `GET /api/v1/queue`
 
-List all queued submissions. Optionally filter by `status`.
+List all queued submissions, newest submission first. Optionally filter by `status`.
+
+**Ordering.** Entries come back `created_at DESC` — the most recently submitted entry is first. This is the *submission* view ("what did I just send, what is waiting"), so a live submission is on page 1 even when the queue also holds years of imported history; it is deliberately independent of the solver's scheduling order (`priority DESC, created_at ASC`, which decides *which* pending problem the lab solves next, not what the caller is shown).
 
 **Query parameter**
 
@@ -384,6 +386,12 @@ List all queued submissions. Optionally filter by `status`.
 ```
 
 `status` is one of `pending`, `in_progress`, `complete`, `failed`. `stage` may be `queued`, `sandbox_prepare`, `sandbox_solve`, `done`, or `failed`.
+
+**`total` semantics**
+
+`total` is the number of entries the request's filter matches — the size of the whole match set, not the size of the returned page. With `limit=1` over three matching rows the response carries `entries` of length 1 and `total` of 3; `total` does not move when you page with `offset`. Use it to decide whether another page exists (`offset + limit < total`) and to tell "the queue holds 2 000 waiting jobs" from "the queue holds 100".
+
+Placeholder rows are excluded from both the page and the count. Entries whose `problem_class` is a self-test/canary/probe placeholder (see `graph.IsPlaceholderClass`) are filtered out of the listing entirely, and they do not consume `limit`/`offset` slots either — the `status` filter and the placeholder exclusion are both applied *before* the count and before pagination, so `total` and `position` always agree with what the listing can actually serve.
 
 **`started_at` and `completed_at` semantics**
 

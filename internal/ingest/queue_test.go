@@ -779,6 +779,170 @@ func TestQueue_List_ExcludesPlaceholderClasses(t *testing.T) {
 	}
 }
 
+// TestQueue_List_NewestFirstAndHonestTotal guards DF-OFF-BY-ONE-10 at the
+// store layer: the listing is the USER-FACING submission view, so it is
+// ordered newest submission first — a live submission is never pushed off
+// page 1 by older, higher-priority imports — and ListPage reports the size
+// of the whole match set, not the size of the page it returns.
+//
+// The scheduler's ordering is deliberately different and must stay that way:
+// PendingQueueOrder (and pickPending behind it) keep priority DESC,
+// created_at ASC, because that decides which problem the lab solves next.
+func TestQueue_List_NewestFirstAndHonestTotal(t *testing.T) {
+	q, store := newTestQueue(t)
+	ctx := context.Background()
+
+	// (a) HIGH priority but OLD historical import, (b) LOW priority but NEW
+	// live submission. Pre-fix, priority DESC put (a) on page 1 and (b) off
+	// it entirely.
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status, stage, priority, created_at)
+		VALUES ('sub_old_hot', 'legacy-imported-class', 'pending', 'queued', 99.0, '2024-01-01 00:00:00')`); err != nil {
+		t.Fatalf("insert old high-priority row: %v", err)
+	}
+	newID, _, err := q.Submit(ctx, Submission{ProblemClass: "live-fresh-class", Cadence: CadencePrePhase})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	// Pin the new row's created_at to a fixed later stamp so the order is
+	// deterministic rather than "whatever now() happened to be".
+	if _, err := store.DB().Exec(
+		`UPDATE queue_entries SET created_at = '2026-09-20 00:00:00' WHERE id = ?`, newID); err != nil {
+		t.Fatalf("pin created_at: %v", err)
+	}
+
+	page, total, err := q.ListPage(ctx, "", 1, 0)
+	if err != nil {
+		t.Fatalf("ListPage: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("total = %d, want 2 (both matching rows, page size is 1)", total)
+	}
+	if len(page) != 1 {
+		t.Fatalf("page len = %d, want 1", len(page))
+	}
+	if page[0].ID != newID {
+		t.Errorf("page[0] = %s, want the newest row %s (newest submission first)", page[0].ID, newID)
+	}
+	if page[0].Priority >= 99.0 {
+		t.Errorf("page[0].priority = %v, want the low-priority row — the listing must not sort by priority", page[0].Priority)
+	}
+
+	// The count does not move when the caller pages: offset only shifts the
+	// page, and an offset past the end still reports the real match count.
+	second, total2, err := q.ListPage(ctx, "", 1, 1)
+	if err != nil {
+		t.Fatalf("ListPage offset: %v", err)
+	}
+	if total2 != 2 {
+		t.Errorf("total at offset 1 = %d, want 2", total2)
+	}
+	if len(second) != 1 || second[0].ID != "sub_old_hot" {
+		t.Errorf("offset page = %v, want the older row", second)
+	}
+	if past, pastTotal, err := q.ListPage(ctx, "", 10, 99); err != nil {
+		t.Errorf("ListPage past the end: %v", err)
+	} else {
+		if len(past) != 0 {
+			t.Errorf("past-the-end page len = %d, want 0", len(past))
+		}
+		if pastTotal != 2 {
+			t.Errorf("past-the-end total = %d, want 2 (the match count, not the page)", pastTotal)
+		}
+	}
+
+	// Ordering holds for the status-filtered read too.
+	pending, pendingTotal, err := q.ListPage(ctx, StatusPending, 100, 0)
+	if err != nil {
+		t.Fatalf("ListPage pending: %v", err)
+	}
+	if pendingTotal != 2 || len(pending) != 2 {
+		t.Fatalf("pending total = %d, len = %d, want 2/2", pendingTotal, len(pending))
+	}
+	if pending[0].ID != newID {
+		t.Errorf("pending[0] = %s, want the newest row %s", pending[0].ID, newID)
+	}
+
+	// The scheduler order is untouched: the high-priority old row is the job
+	// the lab solves next, and the new row is behind it.
+	order, err := q.PendingQueueOrder(ctx, 1000)
+	if err != nil {
+		t.Fatalf("PendingQueueOrder: %v", err)
+	}
+	if len(order) != 2 {
+		t.Fatalf("pending order len = %d, want 2", len(order))
+	}
+	if order[0].ID != "sub_old_hot" || order[1].ID != newID {
+		t.Errorf("scheduler order = [%s, %s], want [sub_old_hot, %s] (priority DESC unchanged)",
+			order[0].ID, order[1].ID, newID)
+	}
+
+	// List (the page-only wrapper) agrees with ListPage's page.
+	listPage, err := q.List(ctx, "", 1, 0)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(listPage) != 1 || listPage[0].ID != newID {
+		t.Errorf("List page = %v, want [%s]", listPage, newID)
+	}
+}
+
+// TestQueue_ListPage_TotalExcludesPlaceholdersAndCountsMatches pins the two
+// properties handleListQueue's honest total depends on (DF-OFF-BY-ONE-10):
+// the count is taken AFTER the status filter and AFTER placeholder classes
+// are dropped, and it is independent of the page being requested.
+func TestQueue_ListPage_TotalExcludesPlaceholdersAndCountsMatches(t *testing.T) {
+	q, store := newTestQueue(t)
+	ctx := context.Background()
+
+	for _, id := range []string{"sub_m1", "sub_m2", "sub_m3"} {
+		if _, err := store.DB().Exec(`INSERT INTO queue_entries
+			(id, problem_class, status, created_at)
+			VALUES (?, 'real-class', 'pending', ?)`, id, id); err != nil {
+			t.Fatalf("insert %s: %v", id, err)
+		}
+	}
+	// Two placeholder rows and one row of a different status must not be
+	// counted by the pending listing.
+	for _, id := range []string{"sub_ph1", "sub_ph2"} {
+		if _, err := store.DB().Exec(`INSERT INTO queue_entries
+			(id, problem_class, status, created_at)
+			VALUES (?, 'dogfood-field-test-probe', 'pending', ?)`, id, id); err != nil {
+			t.Fatalf("insert placeholder %s: %v", id, err)
+		}
+	}
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status, created_at)
+		VALUES ('sub_done', 'real-class', 'complete', 'sub_done')`); err != nil {
+		t.Fatalf("insert complete row: %v", err)
+	}
+
+	page, total, err := q.ListPage(ctx, StatusPending, 2, 0)
+	if err != nil {
+		t.Fatalf("ListPage: %v", err)
+	}
+	if len(page) != 2 {
+		t.Errorf("page len = %d, want 2 (the requested page size)", len(page))
+	}
+	if total != 3 {
+		t.Errorf("total = %d, want 3 (placeholders and the complete row excluded)", total)
+	}
+	// Placeholders never leak into the page, and the filter runs before
+	// pagination: page 2 holds the third real row, not a placeholder.
+	if page2, total2, err := q.ListPage(ctx, StatusPending, 2, 2); err != nil {
+		t.Fatalf("ListPage page 2: %v", err)
+	} else if len(page2) != 1 || page2[0].ID != "sub_m1" {
+		t.Errorf("page 2 = %v, want [sub_m1] (oldest of the three real rows)", page2)
+	} else if total2 != 3 {
+		t.Errorf("total at offset 2 = %d, want 3 (unchanged by paging)", total2)
+	}
+	for _, e := range page {
+		if graph.IsPlaceholderClass(e.ProblemClass) {
+			t.Errorf("placeholder %q leaked into the listing", e.ProblemClass)
+		}
+	}
+}
+
 func TestSanitizeForID(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"file-ownership-after-container-transfer", "file-ownership-after-container-transfer"},
