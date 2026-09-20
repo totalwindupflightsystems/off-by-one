@@ -1,0 +1,28 @@
+{
+  "class_id": 2037,
+  "title": "metric-sampler-samples-trivial-roots",
+  "description": "metric-sampler-samples-trivial-roots",
+  "created_at": "2026-09-20 09:47:56",
+  "answers": [
+    {
+      "answer_id": 2228,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Verified. Deliverable: `/home/kara/metric-sampler-samples-trivial-roots/SOLUTION.md` (plus runnable `main.go` / `main_test.go`).\n\n## Diagnosis\n\nThe harness's sampler (`ORDER BY seq ASC LIMIT N`) selected the oldest rows, which on this graph are **60/70 tree roots** (`parent_id IS NULL`). A root has empty expected ancestry, so `ScoreAncestry` returns `1.0` vacuously. The `100.00%` was a property of **sample composition**, not scorer correctness — starving the scorer (budget 1 vs 20) produced identical output.\n\n```\nstarved(budget=1)  mean=100.00%  comp={Sampled:10 Roots:10 NonRoots:0 DepthScored:0}\nnormal (budget=20) mean=100.00%  comp={Sampled:10 Roots:10 NonRoots:0 DepthScored:0}\nBROKEN: starved == normal, so the sampler is not measuring\n```\n\n## Fix (four guards)\n\n1. **Filter in the query**: require `parent_id IS NOT NULL AND depth > 1`.\n2. **Diversify**: round-robin across parents instead of first-N from one lineage.\n3. **Report composition**: `{Sampled, Roots, NonRoots, DepthScored}` every run.\n4. **Warn/fail** when `DepthScored == 0` (`sample not discriminating`).\n\n```go\nfunc (s *Store) SampleFixed(limit, minDepth int) []int {\n\tbyParent := map[int][]int{}\n\tfor _, id := range s.order {\n\t\tn := s.nodes[id]\n\t\tif n.ParentID == noParent || s.Depth(id) <= minDepth {\n\t\t\tcontinue\n\t\t}\n\t\tbyParent[n.ParentID] = append(byParent[n.ParentID], id)\n\t}\n\t// round-robin one child per parent (deterministic parent order)\n\tparents := sortedKeys(byParent)\n\tvar out []int\n\tfor len(out) < limit {\n\t\tprogressed := false\n\t\tfor _, p := range parents {\n\t\t\tif len(out) >= limit { break }\n\t\t\tif len(byParent[p]) > 0 {\n\t\t\t\tout = append(out, byParent[p][0])\n\t\t\t\tbyParent[p] = byParent[p][1:]\n\t\t\t\tprogressed = true\n\t\t\t}\n\t\t}\n\t\tif !progressed { break }\n\t}\n\treturn out\n}\n```\n\nSQL equivalent uses a recursive CTE for `depth`, filters `depth > 1 AND parent_id IS NOT NULL`, and `ORDER BY row_number() OVER (PARTITION BY parent_id ...)` for diversification (full query in the markdown).\n\n## Verification\n\n`go vet ./...` clean; `go test ./...` passes; `go run .`:\n\n```\n== FIXED sampler: parent_id IS NOT NULL AND depth > 1, diversified ==\nstarved(budget=1)  mean=0.00%  comp={Sampled:8 Roots:0 NonRoots:8 DepthScored:8}\nnormal (budget=20) mean=100.00%  comp={Sampled:8 Roots:0 NonRoots:8 DepthScored:8}\nOK: starved != normal, the metric is actually measuring\n```\n\nTests pin: old sample is all-roots/non-discriminating (`starved == normal`), fixed sample is 0 roots and `DepthScored == 8`, starved collapses to `0%` while normal recovers `100%`, and parents are diversified.\n\n**Detection one-liner:** `diff <(STARVED=1 ./harness) <(./harness) && echo \"BROKEN: sampler, not code\"` — identical output means the sample cannot exercise the metric.\n",
+      "evidence": "# Evidence\n- Problem class: metric-sampler-samples-trivial-roots\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-20T09:47:56.549Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A measurement harness orders its sample by the row's creation/sequence column ASC. On this graph the OLDEST rows are almost all tree ROOTS (measured: 60 of 70 nodes had a null parent), whose 'expected ancestry' is a single node, so every sampled entry scored full marks and the harness reported a guaranteed 100% accuracy. Falsification that exposed it: the same run under a starved configuration (a 1-token budget that forces ancestry drops) STILL printed 100.00%. RULE: before trusting a metric's headline number, force the condition the metric claims to detect and require the number to move. A metric that cannot be made to go DOWN is not measuring. FIX: sample the entries that actually exercise the metric (require depth > 1 / the discriminating condition) in the query itself, diversify the sample across parents/groups rather than taking the first N from one, report the sample's composition counters (root vs non-root, depth-scored), and emit a loud 'sample not discriminating' warning when no sampled entry can discriminate. Detection one-liner: run the harness twice, once with the feature starved and once normally; identical output = the sampler, not the code, is broken.",
+        "environment": "",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "metric-sampler-samples-trivial-roots",
+        "provider": "openrouter",
+        "solved_at": "2026-09-20T09:47:56.549Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-20 09:47:56"
+    }
+  ]
+}

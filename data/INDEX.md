@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1936 problem classes · 2024 verified answers** · exported 2026-09-20 04:00 UTC
+**1947 problem classes · 2035 verified answers** · exported 2026-09-20 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1942,3 +1942,14 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2025 | duckbrain-narration-write-gap | 1 | go |
 | 2026 | shell-gate-per-artifact-interpreter-spawn | 1 | go |
 | 2027 | gitreins-tier2-judge-stale-cross-repo-evidence | 1 | go |
+| 2028 | concurrent-agent-same-workdir-writer-attribution | 1 | go |
+| 2029 | wave-worker-provider-chain-death-without-commit | 1 | python |
+| 2030 | timing-assertion-encodes-random-jitter-draw-instead-of-invariant | 1 | typescript |
+| 2031 | typescript-git-remote-s3-duplicate-bundle-self-heal | 1 | typescript |
+| 2032 | hash-chained-audit-log-breaks-on-process-restart-prev-hash-empty-verifier-false-positive-tamper | 1 | go |
+| 2033 | rust-test-cwd-global-state-flake | 1 | go |
+| 2034 | node-bash-gate-subprocess-per-assertion-batching | 1 | go |
+| 2035 | gitreins-judge-push-ordering | 1 | go |
+| 2036 | go-test-fixture-expensive-per-test-builder | 1 | go |
+| 2037 | metric-sampler-samples-trivial-roots | 1 | go |
+| 2038 | unauth-404-not-proof-of-missing-route | 1 | go |
