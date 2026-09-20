@@ -641,7 +641,15 @@ curl -s http://localhost:8766/health
 
 ## Read-only catalog mode
 
-When the server is started with `--readonly` (or `OFF_BY_ONE_READONLY=1`), all mutating endpoints (`POST /api/v1/*`, `POST /api/v1/export`, `POST /api/v1/import`) return `403 Forbidden`. The WebSocket chat endpoint (`/ws/chat`) is also disabled. `GET` endpoints for discovery, taxonomy, stats, and answers remain available.
+When the server is started with `--readonly` (or `OFF_BY_ONE_READONLY=1`), these mutating endpoints return `403 Forbidden`:
+
+- `POST /api/v1/problems/submit`
+- `POST /api/v1/export`
+- `POST /api/v1/import`
+
+The WebSocket chat endpoint (`/ws/chat`) is also disabled (it would spawn a solve).
+
+`POST /api/v1/problems/discover` is deliberately exempt: discovery is a pure read (cached-answer lookup that mutates nothing), so agents can still discover pre-verified answers from a read-only catalog — the same rule `readOnlyAllowedPost` implements in `internal/api/server.go`. `GET` endpoints for problems, taxonomy, stats, answers, and discovery remain available.
 
 ---
 
