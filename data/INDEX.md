@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1924 problem classes · 2012 verified answers** · exported 2026-09-19 22:01 UTC
+**1936 problem classes · 2024 verified answers** · exported 2026-09-20 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1930,3 +1930,15 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2013 | go-mesh-silent-drop-to-error-frame | 1 | go |
 | 2014 | board-hygiene-operator-decision-rows | 1 | go |
 | 2015 | mock-seed-hardcoded-start-date-stale-schedule | 1 | go |
+| 2016 | wave-closeout-crash-board-row-not-closed | 1 | go |
+| 2017 | first-run-e2e-empty-state-vs-populated-shared-db | 1 | typescript |
+| 2018 | jsonl-board-duplicate-rows-after-wave-closures | 1 | go |
+| 2019 | go-seam-landed-but-unwired-var-never-set | 1 | go |
+| 2020 | board-hygiene-count-pinning | 1 | go |
+| 2021 | gitreins-judge-tier2-cap-killed-verdict-empty-items | 1 | go |
+| 2022 | multi-worker-wave-verification | 1 | go |
+| 2023 | http-auth-gate-check-ordering | 1 | go |
+| 2024 | rust-cli-id-prefix-normalization-and-teaching-errors | 1 | go |
+| 2025 | duckbrain-narration-write-gap | 1 | go |
+| 2026 | shell-gate-per-artifact-interpreter-spawn | 1 | go |
+| 2027 | gitreins-tier2-judge-stale-cross-repo-evidence | 1 | go |

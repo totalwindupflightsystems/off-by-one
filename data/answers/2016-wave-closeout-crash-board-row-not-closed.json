@@ -1,0 +1,28 @@
+{
+  "class_id": 2016,
+  "title": "wave-closeout-crash-board-row-not-closed",
+  "description": "wave-closeout-crash-board-row-not-closed",
+  "created_at": "2026-09-19 23:38:35",
+  "answers": [
+    {
+      "answer_id": 2207,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I diagnosed the failure, built a reconciler to fix it, and verified it end-to-end against a synthetic fixture. The full solution (including the complete Go source and copy-paste runbook) is written to:\n\n**`/workspace/solution.md`**\n\nHere is the substance:\n\n# Wave-Closeout Crash: Reconcile Board Rows From Durable Verdicts\n\n## Root cause\n\nThe wave tick is a non-atomic sequence across two storage systems:\n\n```\ncompose → spawn → merge branches → tier2 judge → close board rows → annotate manifest → commit/push\n (manifest)        (git: durable)   (verdict: durable)   (board: mutable)   (manifest: mutable)\n                                        ^crash window^\n```\n\nTwo defects combine:\n\n1. **Closeout is not derived from evidence.** Completion lives only in the mutable board row/manifest. If the process dies between merge and `boardctl update`, nothing durable records completion, and the durable `verdict.json` is never consulted on restart.\n2. **Recovery re-judges, and re-judging is lossy.** The second judge run hits the model cap and returns `INCOMPLETE` (`\"Cap exceeded, no merits item\"`), shadowing an earlier `PASS` at the *same* merged SHA. PASS must be monotonic.\n\nKey invariant: a `PASS` verdict keyed by `(task_id, merged_sha)` is immutable evidence. Board row and manifest are caches to be rebuilt, never re-derived by judging.\n\n## Exact fix\n\n**Immediate recovery** (never call the judge): (1) `git fetch` + `git log origin/master..HEAD` + `git worktree list` + `git merge-base --is-ancestor ac12ac1 origin/master` to prove merges landed; (2) scan `.gitreins/history/<date>/**/verdict.json` for `task_id==CHT-045` and `passed==true` at `ac12ac1`, ignoring cap-starved `INCOMPLETE`; (3) verify CI with `gh run list --commit ac12ac1`; (4) `boardctl update CHT-045 --status complete --commit-hash ac12ac1 --guard PASS --ci <GREEN|SKIP> --note ...`; (5) append `task_completed` (id=max+1); (6) `jq`-annotate the manifest worker with `merged_sha`, `judge_id`, `closeout_note`, `closed_at`; (7) `.coding-hermes/bin/worktree.sh reap <project>`; (8) commit/push and assert `git rev-list --count origin/master..HEAD == 0`.\n\n**Durable fix:** a stdlib-only Go reconciler (`wavecloseout`, full source in Appendix A) that runs at the top of every tick before spawn/judge. It loads the manifest, asserts each merged SHA `--is-ancestor origin/master`, selects the `PASS` verdict for `(task_id, sha)`, verifies CI, closes the row, emits the event, annotates the manifest, reaps worktrees, and holds (never re-judges) workers without a PASS. Also make the verdict writer refuse to overwrite an existing PASS with a later `INCOMPLETE`, and add a `closeout_pending: true` checkpoint to the manifest after the merge phase.\n\n**Next wave (run 2):** fresh `base_sha` per worker and `git merge-base --is-ancestor \"$BASE_SHA\" \"$BRANCH\"` before every merge.\n\n## Verification (executed)\n\n```\n$ go build ./... && go vet ./...        # clean\n$ gofmt -l .                            # clean\n\n# fixture: CHT-045 PASS at merged SHA, CHT-046 cap-starved INCOMPLETE\n$ wavecloseout -repo /tmp/wcfix -date 2026-09-19 -integration origin/master\nwavecloseout: MATCH CHT-045 pass judge=c7346235 commit=aabd57d82478 (.../cht-045/verdict.json)\nwavecloseout:   DRY-RUN would close CHT-045\nwavecloseout: HOLD CHT-046: only cap-starved INCOMPLETE at 4631afee9228; PASS not found, leaving for normal tick\n\n$ wavecloseout ... -apply -project CHT -tick 7\nwavecloseout:   CLOSED CHT-045\nwavecloseout: reaped worktrees for CHT\n```\n\nAfter apply: board row `CHT-045` → `status=complete, commit_hash=aabd57d8…, guard_result=PASS`; `events.jsonl` gained a `task_completed` with the commit + judge id (tick 7); manifest worker rewritten to `complete` with `merged_sha/judge_id/closeout_note/closed_at`; `CHT-046` correctly remained `in_progress`/`dispatched` and was **not** re-judged.\n\nPost-recovery checklist and a Go regression test (`TestReconcileDoesNotReJudgePassingWork`) are in the file. Build: `module wavecloseout; go 1.26`, then `go build -o wavecloseout .` (defaults to dry-run; `-apply` mutates).\n",
+      "evidence": "# Evidence\n- Problem class: wave-closeout-crash-board-row-not-closed\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-19T23:38:35.438Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Scheduler wave tick crashes at wall clock AFTER merging wave branches but BEFORE closing board rows: row stays in_progress though a PASSING tier2 verdict exists at the merged commit; wave manifest workers still say dispatched. Next recovery spawn must complete the closeout WITHOUT re-judging already-passing work and then safely compose its own new wave.",
+        "environment": "",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "wave-closeout-crash-board-row-not-closed",
+        "provider": "openrouter",
+        "solved_at": "2026-09-19T23:38:35.439Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-19 23:38:36"
+    }
+  ]
+}

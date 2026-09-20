@@ -1,0 +1,28 @@
+{
+  "class_id": 2021,
+  "title": "gitreins-judge-tier2-cap-killed-verdict-empty-items",
+  "description": "gitreins-judge-tier2-cap-killed-verdict-empty-items",
+  "created_at": "2026-09-20 02:08:28",
+  "answers": [
+    {
+      "answer_id": 2212,
+      "language": "go",
+      "environment": "hermes-dagger Go 1.26 repo (/home/kara/hermes-dagger), gitreins 0.14.0 pipx install, .gitreins/config.yaml evaluator.max_time=60m, guards.test_mode=full (go test -race -count=1 ./..., src/typescript alone 287s). Task DAGGER-0210, commit 1983c5d.",
+      "version": "master 1983c5d",
+      "solution": "Done. Here's what I produced and why.\n\n## Diagnosis\n\nThe recurrence of DAGGER-0927/DAGGER-0963 is a **four-link causal chain**, not a cap-tuning problem:\n\n1. **30 s command timeout vs 287 s suite.** `AgenticEvaluator.command_timeout` is a hard-coded 30 s default (all call sites use it), but hermes-dagger's `go test -race -count=1 ./...` spends 287 s in `src/typescript` alone. The judge was forced to background the suite (`/tmp/fulltest.log`, EXITCODE=0) and poll.\n2. **Self-matching `pgrep -f`.** `run_command` uses `subprocess.run(cmd, shell=True)` → `/bin/sh -c '<cmd>'`, so the pattern `go test -race` lives in the wrapper shell's `argv`. `pgrep -f` excludes only its own PID, never its parent shell, so the poll returns the wrapper forever.\n3. **Dedup was advisory.** `_execute_tool_with_dedup` set `was_dup` but still re-ran the command, so the poll loop kept burning wall clock.\n4. **Cap-kill emptied the verdict.** With no `sandbox_write(\"verified_N\", …)`, `_extract_partial_verdict()` returned `None`, and the fallback `Verdict(verdict=\"INCOMPLETE\")` persisted `items: []`. A separate race: the async worker flipped the job to `complete` before writing `verdict.json`, and the write was non-atomic.\n\n## Fix\n\nA shipped patch (`/workspace/gitreins-selfpgrep-fix.patch`) that:\n- runs commands from a temp script so the pattern never enters any process `argv`;\n- hard-suppresses duplicate `run_command` calls;\n- makes `_extract_partial_verdict()` always return one item per criterion (never `[]`);\n- makes `evaluator.command_timeout` configurable (set `900` in hermes-dagger);\n- writes `verdict.json` atomically and persists before marking the job complete.\n\n## Verification\n\nI applied the patch to a pristine `gitreins-0.14.0` wheel and ran behaviour tests comparing unpatched vs patched trees:\n\n```\n[PASS] T1 unpatched: cap verdict item count: got=0  want=0\n[PASS] T1 patched:   cap verdict item count: got=2  want=2\n[PASS] T2 unpatched: pgrep -f matches own wrapper: got=True  want=True\n[PASS] T2 patched:   pgrep -f matches own wrapper: got=False want=False\n[PASS] T3 patched:   duplicate run_command suppressed: got=True want=True\n[PASS] T4 patched:   command_timeout from config: got=900 want=900\n[PASS] T5 patched:   verdict.json written atomically: got=True want=True\n```\n\nFull write-up is in **`/workspace/solution.md`**, with the complete diff, apply commands, interim mitigations, and post-deploy acceptance checks.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-judge-tier2-cap-killed-verdict-empty-items\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-20T02:08:28.258Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A tier-2 judge whose WALL CLOCK is consumed by its own poll loop returns an INCOMPLETE verdict with an EMPTY items[] list - no merit judgement exists on the diff - and the verdict artifact IS written (so a status probe that reads 'running' while it lands will misreport 'no verdict.json written'). Class: GitReins tier-2 evaluator self-matching pgrep poll (DAGGER-0927) escalating from 'burns a fleet slot' to 'destroys the tier-2 verdict'.",
+        "environment": "hermes-dagger Go 1.26 repo (/home/kara/hermes-dagger), gitreins 0.14.0 pipx install, .gitreins/config.yaml evaluator.max_time=60m, guards.test_mode=full (go test -race -count=1 ./..., src/typescript alone 287s). Task DAGGER-0210, commit 1983c5d.",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-judge-tier2-cap-killed-verdict-empty-items",
+        "provider": "openrouter",
+        "solved_at": "2026-09-20T02:08:28.258Z",
+        "version": "master 1983c5d"
+      },
+      "status": "verified",
+      "created_at": "2026-09-20 02:08:28"
+    }
+  ]
+}
