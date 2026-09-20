@@ -155,6 +155,14 @@ func dbPathToDSN(dbPath string) string {
 }
 
 func openDSN(dsn string) (*Store, error) {
+	// Register the placeholder-predicate scalar function BEFORE the first
+	// connection is created: modernc.org/sqlite applies functions
+	// registered on the driver to connections opened afterwards, so a
+	// connection dialled before this call could not evaluate
+	// graph.NotPlaceholderClassSQL (OB-GAP-084).
+	if err := RegisterPlaceholderClassSQLFunc(); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)

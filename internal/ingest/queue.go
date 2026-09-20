@@ -386,31 +386,76 @@ const queueEntrySelect = `
 	       result_answer_id, created_at, started_at, completed_at, failure_reason
 	FROM queue_entries`
 
-// scanFiltered runs an already-ordered queue query and returns every row,
-// with placeholder (self-test/canary/probe) classes removed. The predicate
-// is a Go regexp — SQLite has no REGEXP — so the filter happens here, before
-// any caller counts or paginates (OB-GAP-061).
-func (q *Queue) scanFiltered(ctx context.Context, qry string, args ...any) ([]Entry, error) {
+// scanEntries runs an already-ordered, already-bounded queue query and
+// returns its rows.
+//
+// Placeholder (self-test/canary/probe) exclusion is part of the SQL — see
+// graph.NotPlaceholderClassSQL — so there is deliberately NO Go-side filter
+// here: nothing to materialise, nothing to slice, and no way for a caller
+// to accidentally count a set the query did not bound (OB-GAP-084).
+func (q *Queue) scanEntries(ctx context.Context, qry string, args ...any) ([]Entry, error) {
 	rows, err := q.db.QueryContext(ctx, qry, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var filtered []Entry
+	var entries []Entry
 	for rows.Next() {
 		e, err := scanEntryRows(rows)
 		if err != nil {
 			return nil, err
 		}
-		if graph.IsPlaceholderClass(e.ProblemClass) {
-			continue
-		}
-		filtered = append(filtered, *e)
+		entries = append(entries, *e)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	return filtered, nil
+	return entries, nil
+}
+
+// listQueuePageQuery builds the paged listing read: the status filter and
+// the placeholder exclusion live in SQL, and LIMIT/OFFSET bound how many
+// rows SQLite hands back. The full status-filtered set is never
+// materialised (OB-GAP-084).
+//
+// created_at comes from datetime('now') as a fixed-width UTC
+// "YYYY-MM-DD HH:MM:SS", so a lexicographic sort is chronological; id is
+// the tiebreak that keeps rows sharing a timestamp in a stable,
+// deterministic order.
+func listQueuePageQuery(status string, limit, offset int) (string, []any) {
+	qry := queueEntrySelect + ` WHERE ` + graph.NotPlaceholderClassSQL
+	args := []any{}
+	if status != "" {
+		qry += ` AND status = ?`
+		args = append(args, status)
+	}
+	qry += ` ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?`
+	// limit/offset are typed ints — never string-concatenated.
+	args = append(args, limit, offset)
+	return qry, args
+}
+
+// listQueueCountQuery builds the match-count read. It carries the SAME
+// status filter and placeholder exclusion as listQueuePageQuery, so the
+// count and the page describe one match set; SQLite computes it with
+// COUNT(*) instead of Go counting a fetched slice (OB-GAP-084).
+func listQueueCountQuery(status string) (string, []any) {
+	qry := `SELECT COUNT(*) FROM queue_entries WHERE ` + graph.NotPlaceholderClassSQL
+	args := []any{}
+	if status != "" {
+		qry += ` AND status = ?`
+		args = append(args, status)
+	}
+	return qry, args
+}
+
+// pendingOrderQuery builds the solver-order read: pending entries in
+// `priority DESC, created_at ASC` — the order pickPending uses to choose the
+// next job — with placeholders excluded in SQL and the cap applied by LIMIT
+// so the materialised set is bounded (OB-GAP-084).
+func pendingOrderQuery(limit int) string {
+	return queueEntrySelect + ` WHERE status = ? AND ` + graph.NotPlaceholderClassSQL +
+		` ORDER BY priority DESC, created_at ASC LIMIT ?`
 }
 
 // List returns queue entries filtered by status (empty = all), newest
@@ -427,11 +472,15 @@ func (q *Queue) scanFiltered(ctx context.Context, qry string, args ...any) ([]En
 // divergence is deliberate (DF-OFF-BY-ONE-10), not drift: do not "unify"
 // the two orderings.
 //
-// Placeholder (self-test/canary/probe) classes are filtered out BEFORE
-// limit/offset pagination so the public queue listing never leaks them and
-// positions stay contiguous (OB-GAP-061). Because the predicate is a Go
-// regexp (SQLite has no REGEXP), we fetch the full status-filtered set and
-// paginate in Go; queue sizes are small (hundreds of rows), so this is fine.
+// Placeholder (self-test/canary/probe) classes are excluded BEFORE
+// pagination so the public queue listing never leaks them and positions
+// stay contiguous (OB-GAP-061). Since OB-GAP-084 that exclusion is a SQL
+// predicate (graph.NotPlaceholderClassSQL, backed by the Go list in
+// internal/graph/placeholder.go), so SQLite applies it while reading:
+// the page arrives via LIMIT/OFFSET and the match count via COUNT(*)
+// over the same bounded key range. Before the pushdown each poll fetched
+// every status-filtered row and filtered/sliced it in Go, which grew
+// without bound as the queue did.
 func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]Entry, error) {
 	page, _, err := q.ListPage(ctx, status, limit, offset)
 	return page, err
@@ -441,9 +490,13 @@ func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]E
 // holds: the filtered set AFTER placeholder exclusion. Pagination applies
 // to that set, so `total` is the count of rows the listing could serve —
 // never the page size — which is what lets GET /api/v1/queue publish an
-// honest total (DF-OFF-BY-ONE-10). The returned page is a sub-slice of the
-// same ordered match set List returns for the same status; the match count
-// is reported even when the page is empty because offset ran past the end.
+// honest total (DF-OFF-BY-ONE-10). The returned page is the next slice of
+// the same ordered match set List returns for the same status; the match
+// count is reported even when the page is empty because offset ran past
+// the end.
+//
+// Both halves are bounded reads (count + LIMIT/OFFSET), never a full Go
+// materialisation (OB-GAP-084).
 func (q *Queue) ListPage(ctx context.Context, status string, limit, offset int) ([]Entry, int, error) {
 	if limit <= 0 || limit > maxListLimit {
 		limit = defaultListLimit
@@ -451,34 +504,22 @@ func (q *Queue) ListPage(ctx context.Context, status string, limit, offset int) 
 	if offset < 0 {
 		offset = 0
 	}
-	// The scan order decides the visible page, so it must be the order the
-	// match count describes: newest submission first. created_at comes from
-	// datetime('now') as a fixed-width UTC "YYYY-MM-DD HH:MM:SS", so a
-	// lexicographic sort is chronological; id is the tiebreak that keeps
-	// rows sharing a timestamp in a stable, deterministic order.
-	qry := queueEntrySelect
-	args := []any{}
-	if status != "" {
-		qry += ` WHERE status = ?`
-		args = append(args, status)
+	countQry, countArgs := listQueueCountQuery(status)
+	var total int
+	if err := q.db.QueryRowContext(ctx, countQry, countArgs...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("list queue count: %w", err)
 	}
-	qry += ` ORDER BY created_at DESC, id ASC`
-
-	filtered, err := q.scanFiltered(ctx, qry, args...)
+	if offset >= total {
+		// The page starts past the end of the match set: no rows, but the
+		// honest match count still comes back.
+		return nil, total, nil
+	}
+	pageQry, pageArgs := listQueuePageQuery(status, limit, offset)
+	page, err := q.scanEntries(ctx, pageQry, pageArgs...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list queue: %w", err)
 	}
-	// The match count is the pre-pagination length: placeholders are gone,
-	// every non-placeholder row matching the status filter is counted.
-	total := len(filtered)
-	if offset >= len(filtered) {
-		return nil, total, nil
-	}
-	end := offset + limit
-	if end > len(filtered) {
-		end = len(filtered)
-	}
-	return filtered[offset:end], total, nil
+	return page, total, nil
 }
 
 // PendingQueueOrder returns the pending entries in the order the solver will
@@ -493,19 +534,18 @@ func (q *Queue) ListPage(ctx context.Context, status string, limit, offset int) 
 // pending place (Server.pendingPositions, Server.queuePosition) use this;
 // the scheduling policy itself (pickPending) is untouched.
 //
-// Placeholder classes are filtered exactly as List filters them, so a
-// placeholder row never consumes a position a user sees.
+// Placeholder classes are filtered exactly as List filters them — the
+// exclusion is the same SQL predicate — so a placeholder row never consumes
+// a position a user sees. The cap is applied by SQL (LIMIT), so the
+// materialised set is bounded even when the pending queue is large
+// (OB-GAP-084).
 func (q *Queue) PendingQueueOrder(ctx context.Context, limit int) ([]Entry, error) {
 	if limit <= 0 || limit > maxListLimit {
 		limit = maxListLimit
 	}
-	entries, err := q.scanFiltered(ctx,
-		queueEntrySelect+` WHERE status = ? ORDER BY priority DESC, created_at ASC`, StatusPending)
+	entries, err := q.scanEntries(ctx, pendingOrderQuery(limit), StatusPending, limit)
 	if err != nil {
 		return nil, fmt.Errorf("pending queue order: %w", err)
-	}
-	if len(entries) > limit {
-		entries = entries[:limit]
 	}
 	return entries, nil
 }
