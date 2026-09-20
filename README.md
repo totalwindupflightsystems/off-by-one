@@ -228,6 +228,25 @@ go run ./cmd/off-by-one --help
 | `--solve-timeout` | Per-solve timeout cap (env `OFF_BY_ONE_SOLVE_TIMEOUT`) |
 | `--version` | Print version and exit |
 
+## Read-only catalog mode
+
+Start the binary with `--readonly` (or `OFF_BY_ONE_READONLY=1`) to serve a public
+catalog with no solver keys on the box. In this mode these endpoints return
+`403 Forbidden`:
+
+- `POST /api/v1/problems/submit`
+- `POST /api/v1/export`
+- `POST /api/v1/import`
+
+The WebSocket AI chat endpoint (`/ws/chat`) is also disabled, and every `GET`
+endpoint (problems, taxonomy, stats, answers) keeps working.
+
+`POST /api/v1/problems/discover` stays available: discovery is a pure read
+(cached-answer lookup that mutates nothing), so agents can still discover
+pre-verified answers from a read-only catalog. `internal/api/server.go`'s
+`readOnlyAllowedPost` is the implementation of that single exemption — see
+[docs/integration.md](docs/integration.md) for the same rule.
+
 ## Solver chain (solving)
 
 Actually solving submitted problems (not just browsing pre-verified answers) requires three pieces on the host: **bubblewrap**, the upstream **Pi** coding agent, and the shipped **pi-agent wrapper**.
