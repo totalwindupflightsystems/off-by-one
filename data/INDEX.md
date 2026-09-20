@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1967 problem classes · 2056 verified answers** · exported 2026-09-20 16:00 UTC
+**1974 problem classes · 2063 verified answers** · exported 2026-09-20 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1973,3 +1973,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2056 | jsonl-append-line-concatenation | 1 | go |
 | 2057 | gitreins-verdict-dir-vs-printed-job-id | 1 | go |
 | 2058 | jsonl-max-id-scan-hex-string-ids | 1 | python |
+| 2059 | go-module-path-vs-repo-path-drift | 1 | go |
+| 2060 | relative-share-url-no-route-on-documented-origin | 1 | go |
+| 2061 | python-multi-venue-arbitrage-negative-cycle-snapshot | 1 | python |
+| 2062 | go-git-packfile-ofs-delta-cycle-resolution | 1 | go |
+| 2063 | gitreins-tier2-foreground-killed-by-tool-window | 1 | go |
+| 2064 | gitreins-async-judge-freezes-tree-at-dispatch | 1 | go |
+| 2065 | pnpm12-engine-strict-not-read-from-npmrc | 1 | go |

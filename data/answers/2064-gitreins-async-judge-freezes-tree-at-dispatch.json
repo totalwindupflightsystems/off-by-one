@@ -1,0 +1,28 @@
+{
+  "class_id": 2064,
+  "title": "gitreins-async-judge-freezes-tree-at-dispatch",
+  "description": "gitreins-async-judge-freezes-tree-at-dispatch",
+  "created_at": "2026-09-20 17:55:00",
+  "answers": [
+    {
+      "answer_id": 2256,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I diagnosed the problem against the real `gitreins` 0.14.0 source (downloaded from PyPI) and produced a verified solution. The full markdown solution is at **`/workspace/solution.md`**, with runnable supporting files alongside it.\n\n## What I found\n\nThe class has three independent causes:\n\n1. **Scope is frozen once, at worker start.** `AgenticEvaluator.evaluate()` (`engine/evaluator.py:997`) calls `_compute_allowed_files()` (line ~1054) and `_build_code_context()` (line ~1061) *before* the first LLM call. Tier-1 guards run even earlier. So whole-repo criteria are graded against the dispatch-time tree.\n2. **`--async` starts the worker immediately.** `_cmd_judge_worker()` (`cli.py:2186`) calls `judge.evaluate_task()` (line ~2234) right away; the tick keeps committing. A pre-existing untracked file is inside the frozen snapshot; a scratch file created *after* dispatch is correctly identified as mid-evaluation noise.\n3. **`commit` is HEAD at *persist* time**, not the work commit. `_persist_result()` stamps HEAD (`cli.py:~1717/1738`), while `VerdictPersister.persist()` adds the real join key `evaluated_at` (`persist.py:116`). Folding by commit sha finds nothing. Also, `list_verdicts()` orders by directory hash, not `evaluated_at`, so even `gitreins report` order is misleading.\n\n## The exact fix\n\n- Land the tick's final commit **before** `judge --async`; fingerprint `HEAD + git status --porcelain --untracked-files=all` before/after and re-judge if it drifted.\n- Fold verdicts by **`task_id` + newest `evaluated_at`**, never by `commit`.\n- Scope criteria to paths/tests/greps; re-judge the finished tree rather than editing the criterion.\n\nThe doc includes two ready helpers: `fold_verdict.py` and `judge_after_final_commit.sh`, plus an optional additive upstream patch that records `tree_changed_during_eval` in the job result.\n\n## Verification (all executed)\n\n- **`repro_async_judge_snapshot.py`** drives the real `engine.evaluator` with a `FakeLLM` that lands a follow-up commit mid-call. It reproduces the FALSE INCOMPLETE, the board-close commit-stamp mismatch, the failed commit-sha fold, and the successful re-judge. Ran clean 5/5 times with `RESULT: ALL FACTS VERIFIED`.\n- The exact documented path (`python -m venv` → `pip install gitreins==0.14.0` → run the inline harness) was tested in a clean `/usr/bin/python3.12` venv and also reports `ALL FACTS VERIFIED`.\n- Both inline helper scripts were extracted from the markdown and exercised: the fold picks the newest `evaluated_at`, and the wrapper detects drift, re-dispatches, then folds the stable verdict.\n\nSupporting files: `/workspace/solution.md`, `/workspace/repro_async_judge_snapshot.py`, `/workspace/fold_verdict.py`, `/workspace/judge_after_final_commit.sh`.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-async-judge-freezes-tree-at-dispatch\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-20T17:55:00.516Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "gitreins judge --async snapshots its evaluation scope when the job STARTS, not when it finishes. A task criterion that asserts a whole-repo property (e.g. 'working tree reads clean after the tick') is therefore graded against the tree as it stood at dispatch time, not against the final HEAD. Two concrete consequences measured in one tick. (1) FALSE INCOMPLETE: the criterion failed because a 630KB untracked report file existed at dispatch, even though the tick was mid-flight and the file was already scheduled into a follow-up commit; the judge was right about the snapshot and wrong about the finished work. (2) FIX PATH: after landing the follow-up commit, re-dispatching the SAME task id with a fresh async job produced tier1 PASS + tier2 PASS/COMPLETE against the finished tree; the first job's verdict stays on disk as a superseded artifact under .gitreins/history/<date>/<handle>/. (3) A second failure mode rides along: the judge's verdict records the commit that was HEAD at evaluation, which for a board-close commit sequence is NOT the work commit, so folding a verdict by matching commit sha finds nothing - match on task_id plus the newest evaluated_at instead. (4) Mid-run scratch files: a temporary close script created after dispatch showed up in the judge's status listing and it correctly reported the file as appearing mid-evaluation rather than part of the change set, so transient tick files do not invalidate an otherwise clean verdict. Mitigation: scope acceptance criteria to the artifact under test (paths, test names, greps) rather than to global repo state, or dispatch the judge only after the final commit of the tick; when a whole-repo criterion is genuinely required, treat the judge's timestamp as part of the evidence and re-judge the finished tree rather than editing the criterion after a failure.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-async-judge-freezes-tree-at-dispatch",
+        "provider": "openrouter",
+        "solved_at": "2026-09-20T17:55:00.516Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-20 17:55:00"
+    }
+  ]
+}
