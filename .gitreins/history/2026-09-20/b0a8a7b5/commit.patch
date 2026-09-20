@@ -1,0 +1,844 @@
+commit e1ba282a986f7c84a709e0dd76e92619e71624aa
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Sun Sep 20 04:17:40 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Sun Sep 20 04:17:40 2026 -0500
+
+    fix(api): queue list newest-first + honest total (DF-OFF-BY-ONE-10)
+    
+    GET /api/v1/queue answered the wrong question twice over.
+    
+    Defect A — order. List scanned `ORDER BY priority DESC, created_at ASC`, so
+    historical rows imported with a priority above a live POST-submit score stayed
+    pinned to page 1 forever; with thousands of pending rows in the DB a live
+    listing returned complete/failed history and zero pending. List is the
+    USER-FACING view ("what did I submit / what is waiting"), so it now scans
+    `ORDER BY created_at DESC, id ASC` — newest submission first. The solver's
+    scheduling order is untouched: pickPending keeps `priority DESC, created_at
+    ASC`, and the new Queue.PendingQueueOrder exposes that same order for the only
+    callers that need a pending place (Server.pendingPositions, Server.queuePosition).
+    
+    Defect B — total. handleListQueue set Total = len(entries), i.e. the page size
+    clamped at limit, so a caller could not tell "2 000 jobs waiting" from "100
+    returned, no more". Queue.ListPage (List delegates to it, signature unchanged)
+    now also returns the size of the unpaginated match set — after the status
+    filter AND after placeholder-class exclusion — and the handler publishes it.
+    An offset past the end still reports the real match count.
+    
+    Because position/estimated_time were derived from List's order, they would have
+    silently inverted with the listing; pendingPositions and queuePosition now read
+    PendingQueueOrder, so a pending entry still reports the jobs actually ahead of
+    it (the trap the brief flagged). Verified identical pre-fix vs post-fix on the
+    same DB: position 1 / estimated_time 3m12s.
+    
+    Regression coverage (all RED-proven by reverting the fix, then restored):
+    - internal/ingest TestQueue_List_NewestFirstAndHonestTotal — old high-priority
+      row vs new low-priority row; asserts page 1 leads with the new row, that the
+      match count survives paging and offset-past-end, and that the scheduler order
+      still ranks the old high-priority row first.
+    - internal/ingest TestQueue_ListPage_TotalExcludesPlaceholdersAndCountsMatches —
+      count is post-status-filter and post-placeholder, independent of page size.
+    - internal/api TestListQueue_NewestFirstHonestTotalAndPendingPosition — full
+      listing order, limit=1 over 5 matches (len==1, total==5), offset paging,
+      status=pending, and the pending-place contract (position follows solver
+      order, not the listing index; terminal rows keep position 0 / empty ETA).
+    - internal/api TestListQueue_PositionAndEstimatedTime: ETA expectations now
+      derive from PendingQueueOrder, not from the listing's index.
+    - pkg/api TestOpenAPISpec_ParametersCarryContinuationKeys: parameter count
+      15 -> 17 (GET /api/v1/queue now documents its limit/offset pair).
+    
+    Docs: api-reference.md documents newest-first ordering and that `total` is the
+    match count, not the page size; openapi.yaml gains the queue operation
+    description, the two query parameters, and the `total` semantics.
+    
+    Live A/B on a scratch copy of off-by-one.db with a pending row on top, both
+    binaries against the same DB — prefix dc69717 on :8769: total 100, entries[0]
+    = sub_3c29e6, index of sub_judge1 null; post-fix on :8768: total 4010,
+    entries[0] = sub_judge1, index 0; `status=pending` -> total 1, [sub_judge1];
+    detail position 1 / 3m12s on both.
+    
+    go build ./... && go vet ./... && gofmt -l cmd/ internal/ pkg/ sql/ clean;
+    go test ./... -short -p 1 -count=1 -timeout 300s all ok.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ docs/api-reference.md         |  10 +-
+ internal/api/handlers.go      |  31 ++++--
+ internal/api/handlers_test.go | 234 +++++++++++++++++++++++++++++++++++++++++-
+ internal/ingest/queue.go      | 143 ++++++++++++++++++++------
+ internal/ingest/queue_test.go | 164 +++++++++++++++++++++++++++++
+ pkg/api/openapi.yaml          |  24 +++++
+ pkg/api/yaml_test.go          |   7 +-
+ 7 files changed, 568 insertions(+), 45 deletions(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 21c064b..fb96d88 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -353,7 +353,9 @@ curl -s http://localhost:8766/api/v1/problems/so-nil-pointer-deref/related
+ 
+ ### `GET /api/v1/queue`
+ 
+-List all queued submissions. Optionally filter by `status`.
++List all queued submissions, newest submission first. Optionally filter by `status`.
++
++**Ordering.** Entries come back `created_at DESC` — the most recently submitted entry is first. This is the *submission* view ("what did I just send, what is waiting"), so a live submission is on page 1 even when the queue also holds years of imported history; it is deliberately independent of the solver's scheduling order (`priority DESC, created_at ASC`, which decides *which* pending problem the lab solves next, not what the caller is shown).
+ 
+ **Query parameter**
+ 
+@@ -385,6 +387,12 @@ List all queued submissions. Optionally filter by `status`.
+ 
+ `status` is one of `pending`, `in_progress`, `complete`, `failed`. `stage` may be `queued`, `sandbox_prepare`, `sandbox_solve`, `done`, or `failed`.
+ 
++**`total` semantics**
++
++`total` is the number of entries the request's filter matches — the size of the whole match set, not the size of the returned page. With `limit=1` over three matching rows the response carries `entries` of length 1 and `total` of 3; `total` does not move when you page with `offset`. Use it to decide whether another page exists (`offset + limit < total`) and to tell "the queue holds 2 000 waiting jobs" from "the queue holds 100".
++
++Placeholder rows are excluded from both the page and the count. Entries whose `problem_class` is a self-test/canary/probe placeholder (see `graph.IsPlaceholderClass`) are filtered out of the listing entirely, and they do not consume `limit`/`offset` slots either — the `status` filter and the placeholder exclusion are both applied *before* the count and before pagination, so `total` and `position` always agree with what the listing can actually serve.
++
+ **`started_at` and `completed_at` semantics**
+ 
+ Both are RFC 3339 UTC timestamps (e.g. `2026-08-15T02:13:43Z`) and both keys are **always present**. `started_at` is set when the entry is dequeued and `completed_at` when the solve finishes or fails; a `pending` entry has not been claimed yet, so it returns `""` for both — the shape the example above shows.
+diff --git a/internal/api/handlers.go b/internal/api/handlers.go
+index bb049bd..0617bca 100644
+--- a/internal/api/handlers.go
++++ b/internal/api/handlers.go
+@@ -617,16 +617,23 @@ func (s *Server) handleGetRelated(w http.ResponseWriter, r *http.Request) {
+ 	writeJSON(w, http.StatusOK, out)
+ }
+ 
+-// handleListQueue returns the queue contents filtered by status. Every
+-// entry carries a derived estimated_time (see queueWireEntry); position
+-// stays the entry's 1-based place in the returned page, which is what the
+-// documented list contract promises.
++// handleListQueue returns the queue contents filtered by status, newest
++// submission first. Every entry carries a derived estimated_time (see
++// queueWireEntry); position stays the entry's 1-based place in the
++// returned page, which is what the documented list contract promises.
++//
++// total is the number of entries the filter matches (the unpaginated match
++// set, placeholder classes excluded) — NOT the page size. Until
++// DF-OFF-BY-ONE-10 it was len(entries), so a caller could not tell a queue
++// holding 2000 waiting jobs from one holding exactly 100, and the default
++// priority-first order pushed live submissions off page 1 behind old
++// high-priority imports.
+ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
+ 	q := r.URL.Query()
+ 	status := q.Get("status")
+ 	limit := parseIntDefault(q.Get("limit"), 100, 1, 1000)
+ 	offset := parseIntDefault(q.Get("offset"), 0, 0, 1<<20)
+-	entries, err := s.Queue.List(r.Context(), status, limit, offset)
++	entries, total, err := s.Queue.ListPage(r.Context(), status, limit, offset)
+ 	if err != nil {
+ 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+ 		return
+@@ -636,7 +643,7 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
+ 	// read per entry.
+ 	perJob, _ := s.Queue.AvgSolveTime(r.Context())
+ 	pending := s.pendingPositions(r)
+-	out := queueListResponse{Total: len(entries)}
++	out := queueListResponse{Total: total}
+ 	for i, e := range entries {
+ 		wire := queueWireEntry(&e, pending[e.ID], perJob)
+ 		wire.Position = offset + i + 1
+@@ -802,8 +809,13 @@ func queueWireEntry(e *ingest.Entry, pendingIndex int, perJob time.Duration) que
+ // pending queue. It is one fetch per request (shared by the entry's position
+ // and its ETA); a read error yields a nil map so callers fall back to
+ // position 1 rather than dropping the estimate.
++//
++// The order comes from Queue.PendingQueueOrder (the solver's priority-first
++// order), NOT from Queue.List: since DF-OFF-BY-ONE-10 the listing is
++// newest-submission-first, and a place derived from it would count the
++// waiting jobs in the wrong order.
+ func (s *Server) pendingPositions(r *http.Request) map[string]int {
+-	entries, err := s.Queue.List(r.Context(), ingest.StatusPending, 1000, 0)
++	entries, err := s.Queue.PendingQueueOrder(r.Context(), 1000)
+ 	if err != nil {
+ 		return nil
+ 	}
+@@ -817,8 +829,11 @@ func (s *Server) pendingPositions(r *http.Request) map[string]int {
+ // queuePosition returns 1-based position of e in the pending queue.
+ // Used by SubmitProblemResponse so the user knows how many problems
+ // are ahead. Falls back to 1 if the queue is empty.
++//
++// Same order caveat as pendingPositions: the position is the entry's place in
++// the solver's priority-first pending order, not in the newest-first listing.
+ func (s *Server) queuePosition(r *http.Request, e *ingest.Entry) int {
+-	entries, err := s.Queue.List(r.Context(), ingest.StatusPending, 1000, 0)
++	entries, err := s.Queue.PendingQueueOrder(r.Context(), 1000)
+ 	if err != nil {
+ 		return 1
+ 	}
+diff --git a/internal/api/handlers_test.go b/internal/api/handlers_test.go
+index 2a3a9fd..21670b0 100644
+--- a/internal/api/handlers_test.go
++++ b/internal/api/handlers_test.go
+@@ -1104,6 +1104,228 @@ func TestListQueue_ExcludesPlaceholderClasses(t *testing.T) {
+ 	}
+ }
+ 
++// TestListQueue_NewestFirstHonestTotalAndPendingPosition guards
++// DF-OFF-BY-ONE-10 end to end at the API layer.
++//
++// Pre-fix, GET /api/v1/queue ordered by priority DESC: one old high-priority
++// historical row (or an old pending row with a high score) sat on page 1
++// forever and the live submission a polling user cares about was pushed off
++// the listing — with the default page size, the pre-fix response could show
++// only complete/failed rows while pending submissions existed. `total` was
++// len(entries), i.e. the page size, so a caller could not tell "2 000 jobs
++// waiting" from "100 returned and no more".
++//
++// The fixture deliberately makes the listing order and the solver's order
++// DIFFER, so the test cannot pass by accident: sub_wait_urgent is older but
++// higher-priority than the live submission, so it is solved first while the
++// live row is listed first. A pending entry's `position`/`estimated_time`
++// must follow the solver's order (the jobs actually ahead of it), never the
++// listing's index.
++//
++// Fixture (priority / created_at):
++//
++//	sub_hist_hot    complete 99.0   2024-01-01   (old import, off the listing's front)
++//	sub_wait_urgent pending   5.0   2025-06-01   (solver position 1)
++//	sub_wait_old    pending   0.0   2025-01-01   (solver position 3)
++//	<submitted>     pending   1.0   now          (solver position 2)
++//	sub_eta_done    complete  0.0   2023-01-01   (observed-solve fixture, sorts last)
++func TestListQueue_NewestFirstHonestTotalAndPendingPosition(t *testing.T) {
++	s, store, queue := newTestServer(t)
++	ctx := context.Background()
++	// 133s observed solve time: perJob is 2m13s, so each ETA is distinguishable.
++	seedObservedSolveTime(t, store, "sub_eta_done")
++
++	for _, row := range []struct {
++		id, class, status, at string
++		priority              float64
++	}{
++		{"sub_hist_hot", "legacy-imported-class", ingest.StatusComplete, "2024-01-01 00:00:00", 99.0},
++		{"sub_wait_urgent", "legacy-imported-class", ingest.StatusPending, "2025-06-01 00:00:00", 5.0},
++		{"sub_wait_old", "legacy-imported-class", ingest.StatusPending, "2025-01-01 00:00:00", 0.0},
++	} {
++		if _, err := store.DB().Exec(`INSERT INTO queue_entries
++			(id, problem_class, status, stage, priority, created_at)
++			VALUES (?, ?, ?, 'queued', ?, ?)`,
++			row.id, row.class, row.status, row.priority, row.at); err != nil {
++			t.Fatalf("insert %s: %v", row.id, err)
++		}
++	}
++	// The observed-solve fixture row gets "now" from the DEFAULT clause and
++	// would tie with the submission on created_at; pin it into the past so
++	// the newest-first order is unambiguous.
++	if _, err := store.DB().Exec(
++		`UPDATE queue_entries SET created_at = '2023-01-01 00:00:00' WHERE id = 'sub_eta_done'`); err != nil {
++		t.Fatalf("pin observed row: %v", err)
++	}
++
++	perJob, err := queue.AvgSolveTime(ctx)
++	if err != nil {
++		t.Fatalf("AvgSolveTime: %v", err)
++	}
++	if perJob <= 0 {
++		t.Fatalf("fixture observed average = %s, want > 0", perJob)
++	}
++
++	// The live submission is the newest, low-priority row. The submit
++	// response's position/estimated_time are the post-enqueue DEPTH (jobs
++	// queued ahead of and including this one), which this fix does not
++	// touch: three pending rows, nothing in progress -> 3 x 2m13s.
++	live := submitForTest(t, s, "live-fresh-class")
++	if live.Position != 3 {
++		t.Errorf("submit position = %d, want 3 (post-enqueue depth: 3 pending + 0 in_progress, unchanged by this fix)", live.Position)
++	}
++	if want := estimateTime(3, perJob); live.EstimatedTime != want {
++		t.Errorf("submit estimated_time = %q, want %q (depth 3 x 2m13s, unchanged by this fix)", live.EstimatedTime, want)
++	}
++	if live.Position == 1 {
++		t.Errorf("submit position = 1 would mean the depth read changed semantics")
++	}
++
++	// --- the defect: the listing leads with the newest submission ---------
++	rr := do(t, s, "GET", "/api/v1/queue", nil)
++	if rr.Code != http.StatusOK {
++		t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
++	}
++	var resp queueListResponse
++	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
++		t.Fatalf("decode list: %v", err)
++	}
++	if resp.Total != 5 {
++		t.Errorf("total = %d, want 5 (every servable row, page holds them all)", resp.Total)
++	}
++	if len(resp.Entries) != 5 {
++		t.Fatalf("entries = %d, want 5: %s", len(resp.Entries), rr.Body.String())
++	}
++	if got := resp.Entries[0].SubmissionID; got != live.SubmissionID {
++		t.Errorf("entries[0] = %q, want the newest submission %q (newest first; pre-fix this was the 2024 high-priority import)",
++			got, live.SubmissionID)
++	}
++	// The historical high-priority row must not be first, and the ordering
++	// must be strictly newest-first.
++	ids := make([]string, 0, len(resp.Entries))
++	for _, e := range resp.Entries {
++		ids = append(ids, e.SubmissionID)
++	}
++	wantOrder := []string{live.SubmissionID, "sub_wait_urgent", "sub_wait_old", "sub_hist_hot", "sub_eta_done"}
++	for i, want := range wantOrder {
++		if ids[i] != want {
++			t.Errorf("listing order[%d] = %q, want %q (created_at DESC); full = %v", i, ids[i], want, ids)
++		}
++	}
++
++	// --- the defect: total is the match count, not the page size ----------
++	oneRR := do(t, s, "GET", "/api/v1/queue?limit=1", nil)
++	var one queueListResponse
++	if err := json.Unmarshal(oneRR.Body.Bytes(), &one); err != nil {
++		t.Fatalf("decode limit=1: %v", err)
++	}
++	if len(one.Entries) != 1 {
++		t.Fatalf("limit=1 entries = %d, want 1", len(one.Entries))
++	}
++	if one.Total != 5 {
++		t.Errorf("total with limit=1 = %d, want 5 (match count, not the page size)", one.Total)
++	}
++	if one.Entries[0].SubmissionID != live.SubmissionID {
++		t.Errorf("limit=1 entries[0] = %q, want %q", one.Entries[0].SubmissionID, live.SubmissionID)
++	}
++	// Paging shifts the page but not the total; page position follows the
++	// offset (documented offset+i+1 behaviour).
++	pageRR := do(t, s, "GET", "/api/v1/queue?limit=2&offset=3", nil)
++	var page queueListResponse
++	if err := json.Unmarshal(pageRR.Body.Bytes(), &page); err != nil {
++		t.Fatalf("decode paged: %v", err)
++	}
++	if page.Total != 5 {
++		t.Errorf("total at offset=3 = %d, want 5", page.Total)
++	}
++	if len(page.Entries) != 2 {
++		t.Fatalf("paged entries = %d, want 2: %s", len(page.Entries), pageRR.Body.String())
++	}
++	if page.Entries[0].SubmissionID != "sub_hist_hot" || page.Entries[0].Position != 4 {
++		t.Errorf("page[0] = %q position %d, want sub_hist_hot at page position 4",
++			page.Entries[0].SubmissionID, page.Entries[0].Position)
++	}
++	if page.Entries[1].SubmissionID != "sub_eta_done" || page.Entries[1].Position != 5 {
++		t.Errorf("page[1] = %q position %d, want sub_eta_done at page position 5",
++			page.Entries[1].SubmissionID, page.Entries[1].Position)
++	}
++
++	// --- filtered path: pending rows, still newest-first ------------------
++	pr := do(t, s, "GET", "/api/v1/queue?status=pending", nil)
++	var pendingResp queueListResponse
++	if err := json.Unmarshal(pr.Body.Bytes(), &pendingResp); err != nil {
++		t.Fatalf("decode pending list: %v", err)
++	}
++	if pendingResp.Total != 3 {
++		t.Errorf("status=pending total = %d, want 3", pendingResp.Total)
++	}
++	if len(pendingResp.Entries) != 3 {
++		t.Fatalf("status=pending entries = %d, want 3: %s", len(pendingResp.Entries), pr.Body.String())
++	}
++	if pendingResp.Entries[0].SubmissionID != live.SubmissionID {
++		t.Errorf("status=pending entries[0] = %q, want the newest pending row %q",
++			pendingResp.Entries[0].SubmissionID, live.SubmissionID)
++	}
++	for i, e := range pendingResp.Entries {
++		if e.Status != ingest.StatusPending {
++			t.Errorf("status=pending entries[%d] status = %q", i, e.Status)
++		}
++		if e.Position != i+1 {
++			t.Errorf("status=pending entries[%d] position = %d, want %d (offset+i+1)", i, e.Position, i+1)
++		}
++	}
++
++	// --- guard the trap: position/ETA follow the SOLVER's pending order ---
++	// The 1-based place in the pending queue, priority-first: sub_wait_urgent,
++	// the live submission, then sub_wait_old. Deriving the place from the
++	// listing instead would give the live row position 1 and one job's wait.
++	for _, tc := range []struct {
++		id  string
++		pos int
++	}{
++		{"sub_wait_urgent", 1},
++		{live.SubmissionID, 2},
++		{"sub_wait_old", 3},
++	} {
++		raw, entry := getQueueEntry(t, s, tc.id)
++		if entry.Status != ingest.StatusPending {
++			t.Fatalf("%s status = %q, want pending", tc.id, entry.Status)
++		}
++		if entry.Position != tc.pos {
++			t.Errorf("%s position = %d, want %d (1-based place in the pending queue, not the listing)",
++				tc.id, entry.Position, tc.pos)
++		}
++		wantETA := estimateTime(tc.pos, perJob)
++		if entry.EstimatedTime != wantETA {
++			t.Errorf("%s estimated_time = %q, want %q", tc.id, entry.EstimatedTime, wantETA)
++		}
++		if got, isNum := raw["position"].(float64); !isNum || int(got) != tc.pos {
++			t.Errorf("%s raw position = %v, want %d", tc.id, raw["position"], tc.pos)
++		}
++	}
++	// A terminal entry is not waiting: no position, no ETA — on both the
++	// detail endpoint and the listing the change did not disturb.
++	rawDone, done := getQueueEntry(t, s, "sub_hist_hot")
++	if done.Position != 0 {
++		t.Errorf("complete entry position = %d, want 0", done.Position)
++	}
++	if done.EstimatedTime != "" {
++		t.Errorf("complete entry estimated_time = %q, want empty", done.EstimatedTime)
++	}
++	if rawDone["position"] != float64(0) {
++		t.Errorf("complete entry raw position = %v, want 0", rawDone["position"])
++	}
++	var listDone queueEntryWire
++	for _, e := range resp.Entries {
++		if e.SubmissionID == "sub_hist_hot" {
++			listDone = e
++		}
++	}
++	if listDone.EstimatedTime != "" {
++		t.Errorf("listing complete entry estimated_time = %q, want empty", listDone.EstimatedTime)
++	}
++}
++
+ func TestGetQueueStatus(t *testing.T) {
+ 	s, _, _ := newTestServer(t)
+ 	body := submitProblemRequest{ProblemClass: "class-a", Cadence: ingest.CadencePrePhase}
+@@ -1611,11 +1833,15 @@ func TestListQueue_PositionAndEstimatedTime(t *testing.T) {
+ 		t.Fatalf("fixture observed average = %s, want > 0", perJob)
+ 	}
+ 
+-	// Expected ETA per entry, keyed by ID: pending entries scale with their
+-	// place in the pending queue, the solving entry is one job.
+-	pendingRows, err := queue.List(ctx, ingest.StatusPending, 1000, 0)
++	// Expected ETA per entry, keyed by ID: a pending entry's ETA scales with
++	// its place in the SOLVER's pending order (priority-first, the order
++	// pickPending works through), the solving entry is one job. Since
++	// DF-OFF-BY-ONE-10 the listing itself is newest-submission-first, so the
++	// two orders differ and the ETA must come from the pending order, not
++	// from the listing's index.
++	pendingRows, err := queue.PendingQueueOrder(ctx, 1000)
+ 	if err != nil {
+-		t.Fatalf("pending list: %v", err)
++		t.Fatalf("pending queue order: %v", err)
+ 	}
+ 	wantETA := map[string]string{}
+ 	for i, e := range pendingRows {
+diff --git a/internal/ingest/queue.go b/internal/ingest/queue.go
+index a9ff747..4cd915a 100644
+--- a/internal/ingest/queue.go
++++ b/internal/ingest/queue.go
+@@ -369,8 +369,63 @@ func (q *Queue) Get(ctx context.Context, id string) (*Entry, error) {
+ 	return scanEntry(row)
+ }
+ 
+-// List returns queue entries filtered by status (empty = all). Ordered
+-// by priority DESC, created_at ASC.
++// defaultListLimit is the page size List/ListPage fall back to when the
++// caller asks for a nonsense limit (<= 0) or more than the 1000-row cap.
++const defaultListLimit = 100
++
++// maxListLimit is the largest page List/ListPage will serve, and the cap on
++// how many entries PendingQueueOrder materialises.
++const maxListLimit = 1000
++
++// queueEntrySelect is the column list every queue read shares, so a column
++// added to the table is added in one place instead of drifting between
++// List/Get/pickPending.
++const queueEntrySelect = `
++	SELECT id, problem_class, environment, language, version, description,
++	       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
++	       result_answer_id, created_at, started_at, completed_at, failure_reason
++	FROM queue_entries`
++
++// scanFiltered runs an already-ordered queue query and returns every row,
++// with placeholder (self-test/canary/probe) classes removed. The predicate
++// is a Go regexp — SQLite has no REGEXP — so the filter happens here, before
++// any caller counts or paginates (OB-GAP-061).
++func (q *Queue) scanFiltered(ctx context.Context, qry string, args ...any) ([]Entry, error) {
++	rows, err := q.db.QueryContext(ctx, qry, args...)
++	if err != nil {
++		return nil, err
++	}
++	defer rows.Close()
++	var filtered []Entry
++	for rows.Next() {
++		e, err := scanEntryRows(rows)
++		if err != nil {
++			return nil, err
++		}
++		if graph.IsPlaceholderClass(e.ProblemClass) {
++			continue
++		}
++		filtered = append(filtered, *e)
++	}
++	if err := rows.Err(); err != nil {
++		return nil, err
++	}
++	return filtered, nil
++}
++
++// List returns queue entries filtered by status (empty = all), newest
++// submission first. It returns the first page of the match set with the
++// default/capped page size — see ListPage for the paged variant and for
++// the match count, which is the honest value for the list response's
++// total field (DF-OFF-BY-ONE-10).
++//
++// This is the USER-FACING view: "what did I submit / what is waiting".
++// The ordering is therefore created_at DESC (most recent first), NOT the
++// solver's scheduling order — Queue.pickPending keeps
++// `priority DESC, created_at ASC`, and PendingQueueOrder exposes that same
++// order for callers that derive a pending entry's place in the queue. That
++// divergence is deliberate (DF-OFF-BY-ONE-10), not drift: do not "unify"
++// the two orderings.
+ //
+ // Placeholder (self-test/canary/probe) classes are filtered out BEFORE
+ // limit/offset pagination so the public queue listing never leaks them and
+@@ -378,51 +433,81 @@ func (q *Queue) Get(ctx context.Context, id string) (*Entry, error) {
+ // regexp (SQLite has no REGEXP), we fetch the full status-filtered set and
+ // paginate in Go; queue sizes are small (hundreds of rows), so this is fine.
+ func (q *Queue) List(ctx context.Context, status string, limit, offset int) ([]Entry, error) {
+-	if limit <= 0 || limit > 1000 {
+-		limit = 100
++	page, _, err := q.ListPage(ctx, status, limit, offset)
++	return page, err
++}
++
++// ListPage is List plus the number of entries the (unpaginated) match set
++// holds: the filtered set AFTER placeholder exclusion. Pagination applies
++// to that set, so `total` is the count of rows the listing could serve —
++// never the page size — which is what lets GET /api/v1/queue publish an
++// honest total (DF-OFF-BY-ONE-10). The returned page is a sub-slice of the
++// same ordered match set List returns for the same status; the match count
++// is reported even when the page is empty because offset ran past the end.
++func (q *Queue) ListPage(ctx context.Context, status string, limit, offset int) ([]Entry, int, error) {
++	if limit <= 0 || limit > maxListLimit {
++		limit = defaultListLimit
+ 	}
+ 	if offset < 0 {
+ 		offset = 0
+ 	}
+-	qry := `
+-		SELECT id, problem_class, environment, language, version, description,
+-		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
+-		       result_answer_id, created_at, started_at, completed_at, failure_reason
+-		FROM queue_entries`
++	// The scan order decides the visible page, so it must be the order the
++	// match count describes: newest submission first. created_at comes from
++	// datetime('now') as a fixed-width UTC "YYYY-MM-DD HH:MM:SS", so a
++	// lexicographic sort is chronological; id is the tiebreak that keeps
++	// rows sharing a timestamp in a stable, deterministic order.
++	qry := queueEntrySelect
+ 	args := []any{}
+ 	if status != "" {
+ 		qry += ` WHERE status = ?`
+ 		args = append(args, status)
+ 	}
+-	qry += ` ORDER BY priority DESC, created_at ASC`
++	qry += ` ORDER BY created_at DESC, id ASC`
+ 
+-	rows, err := q.db.QueryContext(ctx, qry, args...)
++	filtered, err := q.scanFiltered(ctx, qry, args...)
+ 	if err != nil {
+-		return nil, fmt.Errorf("list queue: %w", err)
+-	}
+-	defer rows.Close()
+-	var filtered []Entry
+-	for rows.Next() {
+-		e, err := scanEntryRows(rows)
+-		if err != nil {
+-			return nil, err
+-		}
+-		if graph.IsPlaceholderClass(e.ProblemClass) {
+-			continue
+-		}
+-		filtered = append(filtered, *e)
+-	}
+-	if err := rows.Err(); err != nil {
+-		return nil, err
++		return nil, 0, fmt.Errorf("list queue: %w", err)
+ 	}
++	// The match count is the pre-pagination length: placeholders are gone,
++	// every non-placeholder row matching the status filter is counted.
++	total := len(filtered)
+ 	if offset >= len(filtered) {
+-		return nil, nil
++		return nil, total, nil
+ 	}
+ 	end := offset + limit
+ 	if end > len(filtered) {
+ 		end = len(filtered)
+ 	}
+-	return filtered[offset:end], nil
++	return filtered[offset:end], total, nil
++}
++
++// PendingQueueOrder returns the pending entries in the order the solver will
++// work through them — `priority DESC, created_at ASC`, the very order
++// pickPending uses to choose the next job — capped at limit entries.
++//
++// It exists because List's order changed: List is the user-facing submission
++// view (newest first), while a pending entry's `position` and
++// `estimated_time` are the number of jobs actually ahead of it. Deriving
++// either from the newest-first listing would promise the freshest submission
++// a zero-job wait while three jobs sat in front of it. Callers that need a
++// pending place (Server.pendingPositions, Server.queuePosition) use this;
++// the scheduling policy itself (pickPending) is untouched.
++//
++// Placeholder classes are filtered exactly as List filters them, so a
++// placeholder row never consumes a position a user sees.
++func (q *Queue) PendingQueueOrder(ctx context.Context, limit int) ([]Entry, error) {
++	if limit <= 0 || limit > maxListLimit {
++		limit = maxListLimit
++	}
++	entries, err := q.scanFiltered(ctx,
++		queueEntrySelect+` WHERE status = ? ORDER BY priority DESC, created_at ASC`, StatusPending)
++	if err != nil {
++		return nil, fmt.Errorf("pending queue order: %w", err)
++	}
++	if len(entries) > limit {
++		entries = entries[:limit]
++	}
++	return entries, nil
+ }
+ 
+ // Depth returns the number of pending or in_progress entries in the
+diff --git a/internal/ingest/queue_test.go b/internal/ingest/queue_test.go
+index d3eb80a..80223e0 100644
+--- a/internal/ingest/queue_test.go
++++ b/internal/ingest/queue_test.go
+@@ -779,6 +779,170 @@ func TestQueue_List_ExcludesPlaceholderClasses(t *testing.T) {
+ 	}
+ }
+ 
++// TestQueue_List_NewestFirstAndHonestTotal guards DF-OFF-BY-ONE-10 at the
++// store layer: the listing is the USER-FACING submission view, so it is
++// ordered newest submission first — a live submission is never pushed off
++// page 1 by older, higher-priority imports — and ListPage reports the size
++// of the whole match set, not the size of the page it returns.
++//
++// The scheduler's ordering is deliberately different and must stay that way:
++// PendingQueueOrder (and pickPending behind it) keep priority DESC,
++// created_at ASC, because that decides which problem the lab solves next.
++func TestQueue_List_NewestFirstAndHonestTotal(t *testing.T) {
++	q, store := newTestQueue(t)
++	ctx := context.Background()
++
++	// (a) HIGH priority but OLD historical import, (b) LOW priority but NEW
++	// live submission. Pre-fix, priority DESC put (a) on page 1 and (b) off
++	// it entirely.
++	if _, err := store.DB().Exec(`INSERT INTO queue_entries
++		(id, problem_class, status, stage, priority, created_at)
++		VALUES ('sub_old_hot', 'legacy-imported-class', 'pending', 'queued', 99.0, '2024-01-01 00:00:00')`); err != nil {
++		t.Fatalf("insert old high-priority row: %v", err)
++	}
++	newID, _, err := q.Submit(ctx, Submission{ProblemClass: "live-fresh-class", Cadence: CadencePrePhase})
++	if err != nil {
++		t.Fatalf("Submit: %v", err)
++	}
++	// Pin the new row's created_at to a fixed later stamp so the order is
++	// deterministic rather than "whatever now() happened to be".
++	if _, err := store.DB().Exec(
++		`UPDATE queue_entries SET created_at = '2026-09-20 00:00:00' WHERE id = ?`, newID); err != nil {
++		t.Fatalf("pin created_at: %v", err)
++	}
++
++	page, total, err := q.ListPage(ctx, "", 1, 0)
++	if err != nil {
++		t.Fatalf("ListPage: %v", err)
++	}
++	if total != 2 {
++		t.Errorf("total = %d, want 2 (both matching rows, page size is 1)", total)
++	}
++	if len(page) != 1 {
++		t.Fatalf("page len = %d, want 1", len(page))
++	}
++	if page[0].ID != newID {
++		t.Errorf("page[0] = %s, want the newest row %s (newest submission first)", page[0].ID, newID)
++	}
++	if page[0].Priority >= 99.0 {
++		t.Errorf("page[0].priority = %v, want the low-priority row — the listing must not sort by priority", page[0].Priority)
++	}
++
++	// The count does not move when the caller pages: offset only shifts the
++	// page, and an offset past the end still reports the real match count.
++	second, total2, err := q.ListPage(ctx, "", 1, 1)
++	if err != nil {
++		t.Fatalf("ListPage offset: %v", err)
++	}
++	if total2 != 2 {
++		t.Errorf("total at offset 1 = %d, want 2", total2)
++	}
++	if len(second) != 1 || second[0].ID != "sub_old_hot" {
++		t.Errorf("offset page = %v, want the older row", second)
++	}
++	if past, pastTotal, err := q.ListPage(ctx, "", 10, 99); err != nil {
++		t.Errorf("ListPage past the end: %v", err)
++	} else {
++		if len(past) != 0 {
++			t.Errorf("past-the-end page len = %d, want 0", len(past))
++		}
++		if pastTotal != 2 {
++			t.Errorf("past-the-end total = %d, want 2 (the match count, not the page)", pastTotal)
++		}
++	}
++
++	// Ordering holds for the status-filtered read too.
++	pending, pendingTotal, err := q.ListPage(ctx, StatusPending, 100, 0)
++	if err != nil {
++		t.Fatalf("ListPage pending: %v", err)
++	}
++	if pendingTotal != 2 || len(pending) != 2 {
++		t.Fatalf("pending total = %d, len = %d, want 2/2", pendingTotal, len(pending))
++	}
++	if pending[0].ID != newID {
++		t.Errorf("pending[0] = %s, want the newest row %s", pending[0].ID, newID)
++	}
++
++	// The scheduler order is untouched: the high-priority old row is the job
++	// the lab solves next, and the new row is behind it.
++	order, err := q.PendingQueueOrder(ctx, 1000)
++	if err != nil {
++		t.Fatalf("PendingQueueOrder: %v", err)
++	}
++	if len(order) != 2 {
++		t.Fatalf("pending order len = %d, want 2", len(order))
++	}
++	if order[0].ID != "sub_old_hot" || order[1].ID != newID {
++		t.Errorf("scheduler order = [%s, %s], want [sub_old_hot, %s] (priority DESC unchanged)",
++			order[0].ID, order[1].ID, newID)
++	}
++
++	// List (the page-only wrapper) agrees with ListPage's page.
++	listPage, err := q.List(ctx, "", 1, 0)
++	if err != nil {
++		t.Fatalf("List: %v", err)
++	}
++	if len(listPage) != 1 || listPage[0].ID != newID {
++		t.Errorf("List page = %v, want [%s]", listPage, newID)
++	}
++}
++
++// TestQueue_ListPage_TotalExcludesPlaceholdersAndCountsMatches pins the two
++// properties handleListQueue's honest total depends on (DF-OFF-BY-ONE-10):
++// the count is taken AFTER the status filter and AFTER placeholder classes
++// are dropped, and it is independent of the page being requested.
++func TestQueue_ListPage_TotalExcludesPlaceholdersAndCountsMatches(t *testing.T) {
++	q, store := newTestQueue(t)
++	ctx := context.Background()
++
++	for _, id := range []string{"sub_m1", "sub_m2", "sub_m3"} {
++		if _, err := store.DB().Exec(`INSERT INTO queue_entries
++			(id, problem_class, status, created_at)
++			VALUES (?, 'real-class', 'pending', ?)`, id, id); err != nil {
++			t.Fatalf("insert %s: %v", id, err)
++		}
++	}
++	// Two placeholder rows and one row of a different status must not be
++	// counted by the pending listing.
++	for _, id := range []string{"sub_ph1", "sub_ph2"} {
++		if _, err := store.DB().Exec(`INSERT INTO queue_entries
++			(id, problem_class, status, created_at)
++			VALUES (?, 'dogfood-field-test-probe', 'pending', ?)`, id, id); err != nil {
++			t.Fatalf("insert placeholder %s: %v", id, err)
++		}
++	}
++	if _, err := store.DB().Exec(`INSERT INTO queue_entries
++		(id, problem_class, status, created_at)
++		VALUES ('sub_done', 'real-class', 'complete', 'sub_done')`); err != nil {
++		t.Fatalf("insert complete row: %v", err)
++	}
++
++	page, total, err := q.ListPage(ctx, StatusPending, 2, 0)
++	if err != nil {
++		t.Fatalf("ListPage: %v", err)
++	}
++	if len(page) != 2 {
++		t.Errorf("page len = %d, want 2 (the requested page size)", len(page))
++	}
++	if total != 3 {
++		t.Errorf("total = %d, want 3 (placeholders and the complete row excluded)", total)
++	}
++	// Placeholders never leak into the page, and the filter runs before
++	// pagination: page 2 holds the third real row, not a placeholder.
++	if page2, total2, err := q.ListPage(ctx, StatusPending, 2, 2); err != nil {
++		t.Fatalf("ListPage page 2: %v", err)
++	} else if len(page2) != 1 || page2[0].ID != "sub_m1" {
++		t.Errorf("page 2 = %v, want [sub_m1] (oldest of the three real rows)", page2)
++	} else if total2 != 3 {
++		t.Errorf("total at offset 2 = %d, want 3 (unchanged by paging)", total2)
++	}
++	for _, e := range page {
++		if graph.IsPlaceholderClass(e.ProblemClass) {
++			t.Errorf("placeholder %q leaked into the listing", e.ProblemClass)
++		}
++	}
++}
++
+ func TestSanitizeForID(t *testing.T) {
+ 	cases := []struct{ in, want string }{
+ 		{"file-ownership-after-container-transfer", "file-ownership-after-container-transfer"},
+diff --git a/pkg/api/openapi.yaml b/pkg/api/openapi.yaml
+index 2cb1504..3aa0314 100644
+--- a/pkg/api/openapi.yaml
++++ b/pkg/api/openapi.yaml
+@@ -262,12 +262,30 @@ paths:
+       operationId: listQueue
+       tags: [queue]
+       summary: List all queued problems
++      description: |
++        List queued submissions, newest submission first (created_at DESC).
++        This is the submission view — a live submission is on the first page
++        even when the queue also holds older, higher-priority imports. It is
++        deliberately independent of the solver's scheduling order.
+       parameters:
+         - name: status
+           in: query
+           schema:
+             type: string
+             enum: [pending, in_progress, complete, failed]
++        - name: limit
++          in: query
++          schema:
++            type: integer
++            default: 100
++            minimum: 1
++            maximum: 1000
++        - name: offset
++          in: query
++          schema:
++            type: integer
++            default: 0
++            minimum: 0
+       responses:
+         '200':
+           description: Queue contents
+@@ -586,6 +604,12 @@ components:
+             $ref: '#/components/schemas/QueueEntry'
+         total:
+           type: integer
++          description: |
++            Number of entries the request's filter matches — the unpaginated
++            match set, i.e. after the status filter and after placeholder
++            (self-test/canary/probe) classes are excluded. Never the page
++            size: with limit=1 over three matching rows this is 3 while
++            entries has length 1. Does not move when paging with offset.
+ 
+     QueueEntry:
+       type: object
+diff --git a/pkg/api/yaml_test.go b/pkg/api/yaml_test.go
+index 6e95286..2cbf5db 100644
+--- a/pkg/api/yaml_test.go
++++ b/pkg/api/yaml_test.go
+@@ -690,9 +690,10 @@ func TestOpenAPISpec_ParametersCarryContinuationKeys(t *testing.T) {
+ 	}
+ 	walk(doc)
+ 
+-	// Non-vacuity guard: the spec declares 15 parameters across its paths.
+-	if len(params) != 15 {
+-		t.Fatalf("walked %d parameters, want 15", len(params))
++	// Non-vacuity guard: the spec declares 17 parameters across its paths
++	// (15 before GET /api/v1/queue documented its limit/offset query pair).
++	if len(params) != 17 {
++		t.Fatalf("walked %d parameters, want 17", len(params))
+ 	}
+ 	for i, p := range params {
+ 		name, _ := p["name"].(string)

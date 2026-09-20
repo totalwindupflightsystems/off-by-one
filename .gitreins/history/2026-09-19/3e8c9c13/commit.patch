@@ -1,0 +1,157 @@
+commit 7817065c2c29a9a1da095c853b8d5088af100690
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Sat Sep 19 13:09:32 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Sat Sep 19 13:09:32 2026 -0500
+
+    fix(api): clamp GET /api/v1/problems limit to documented max 100. Addresses OB-GAP-081.
+    
+    Over-max limit values (101, 200, ...) previously fell back to the
+    default 20, silently returning a short page. A new clampIntDefault
+    helper clamps values above max to 100; omitted, non-numeric, and
+    non-positive values keep the default-20 fallback, and the
+    answers/queue endpoints keep parseIntDefault unchanged.
+    
+    docs/api-reference.md now states the exact boundary behavior, and
+    TestListProblems_LimitBoundaries pins 100/101/200/0/-3/abc/omitted
+    plus offset pagination across the clamp boundary (RED-proven against
+    the pre-fix handler).
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ docs/api-reference.md         |  2 +-
+ internal/api/handlers.go      | 25 ++++++++++++++++++-
+ internal/api/handlers_test.go | 57 +++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 82 insertions(+), 2 deletions(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 12a5499..21c064b 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -126,7 +126,7 @@ List or search problem classes. Supports full-text search via `q` and filtering
+ | `env` | string | Filter by environment — matched **exactly** against the `env` stored on the class's answer rows |
+ | `lang` | string | Filter by language — matched **exactly** against the `lang` stored on the class's answer rows |
+ | `status` | string | Filter by status (`pending`, `verified`, `failed`, `ci_passed`) |
+-| `limit` | integer | Page size (default 20, max 100) |
++| `limit` | integer | Page size (default 20, max 100). Values above 100 are clamped to 100; omitted, non-numeric, and values below 1 fall back to the default |
+ | `offset` | integer | Pagination offset (default 0) |
+ 
+ `env` and `lang` are exact matches (`a.env = ?`, `a.lang = ?`) against the value stored on the class's answer rows — not substring, case-insensitive, or alias matches — and a class is filtered out unless one of its answers carries that exact value. A filter copied from the [README submit example](../README.md#example-submit-a-problem) (`environment: "linux"`, `language: "go"`) can therefore legitimately return 0 rows: the stored values are whatever the corpus recorded, and they are not normalized (observed live: `GET /api/v1/problems?q=raft&env=linux` → `{"problems":[],"total":0}`, while `q=raft` alone returns the matching classes, whose answers carry `env` values such as `go1.26`). Check the stored values first — `GET /api/v1/problems/{class}/answers` returns `env` and `lang` for every answer. The same exact-match rule governs `POST /api/v1/problems/discover`'s `environment` / `language` filters — see [Discover Cached Solutions](integration.md#discover-cached-solutions).
+diff --git a/internal/api/handlers.go b/internal/api/handlers.go
+index 205e77c..bb049bd 100644
+--- a/internal/api/handlers.go
++++ b/internal/api/handlers.go
+@@ -427,7 +427,9 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
+ // are exact-match filters honored by BOTH branches (OB-GAP-080).
+ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
+ 	q := r.URL.Query()
+-	limit := parseIntDefault(q.Get("limit"), 20, 1, 100)
++	// Over-max limit clamps to the documented max of 100 (OB-GAP-081);
++	// omitted, non-numeric, and non-positive values use the default.
++	limit := clampIntDefault(q.Get("limit"), 20, 1, 100)
+ 	offset := parseIntDefault(q.Get("offset"), 0, 0, 1<<20)
+ 	status := q.Get("status")
+ 	env := q.Get("env")
+@@ -1002,6 +1004,27 @@ func parseIntDefault(s string, def, min, max int) int {
+ 	return n
+ }
+ 
++// clampIntDefault returns the parsed int clamped into [min, max], or def
++// when the value is absent, non-numeric, or below min (OB-GAP-081).
++// Unlike parseIntDefault, values above max are clamped to max rather
++// than silently falling back to the default.
++func clampIntDefault(s string, def, min, max int) int {
++	if s == "" {
++		return def
++	}
++	n, err := strconv.Atoi(s)
++	if err != nil {
++		return def
++	}
++	if n < min {
++		return def
++	}
++	if n > max {
++		return max
++	}
++	return n
++}
++
+ // formatTimeRFC3339 formats a time.Time as RFC3339 or returns "" for
+ // the zero value.
+ func formatTimeRFC3339(t time.Time) string {
+diff --git a/internal/api/handlers_test.go b/internal/api/handlers_test.go
+index 0a929c3..2a3a9fd 100644
+--- a/internal/api/handlers_test.go
++++ b/internal/api/handlers_test.go
+@@ -4,6 +4,7 @@ import (
+ 	"bytes"
+ 	"context"
+ 	"encoding/json"
++	"fmt"
+ 	"io"
+ 	"mime/multipart"
+ 	"net/http"
+@@ -808,6 +809,62 @@ func TestListProblems_EnvLangFiltersWithoutQuery(t *testing.T) {
+ 	}
+ }
+ 
++// The list endpoint's limit parameter clamps over-max values to the
++// documented max of 100 instead of silently falling back to the default
++// 20 (OB-GAP-081): a client asking for a large page would otherwise get
++// a short page with no error. 0 / negative and non-numeric values keep
++// the documented default of 20, and the response shape is unchanged.
++func TestListProblems_LimitBoundaries(t *testing.T) {
++	s, store, _ := newTestServer(t)
++	const total = 101
++	for i := 0; i < total; i++ {
++		seedClass(t, store, fmt.Sprintf("limit-class-%03d", i), "desc", "docker", "go", "1.0", "sol", graph.AnswerVerified)
++	}
++
++	get := func(path string) listProblemsResponse {
++		t.Helper()
++		rr := do(t, s, "GET", path, nil)
++		if rr.Code != http.StatusOK {
++			t.Fatalf("GET %s: status = %d, want 200", path, rr.Code)
++		}
++		var resp listProblemsResponse
++		if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
++			t.Fatalf("GET %s: decode: %v", path, err)
++		}
++		return resp
++	}
++
++	cases := []struct {
++		name  string
++		path  string
++		wantN int
++	}{
++		{"max accepted", "/api/v1/problems?limit=100", 100},
++		{"over max clamps", "/api/v1/problems?limit=101", 100},
++		{"far over max clamps", "/api/v1/problems?limit=200", 100},
++		{"zero uses default", "/api/v1/problems?limit=0", 20},
++		{"negative uses default", "/api/v1/problems?limit=-3", 20},
++		{"non-numeric uses default", "/api/v1/problems?limit=abc", 20},
++		{"omitted uses default", "/api/v1/problems", 20},
++	}
++	for _, tc := range cases {
++		resp := get(tc.path)
++		if len(resp.Problems) != tc.wantN {
++			t.Errorf("%s (%s): got %d problems, want %d", tc.name, tc.path, len(resp.Problems), tc.wantN)
++		}
++		if resp.Total != total {
++			t.Errorf("%s (%s): total = %d, want %d (limit must not affect total)", tc.name, tc.path, resp.Total, total)
++		}
++	}
++
++	// offset still paginates past the clamp boundary.
++	first := get("/api/v1/problems?limit=100&offset=0")
++	rest := get("/api/v1/problems?limit=200&offset=100")
++	if len(first.Problems) != 100 || len(rest.Problems) != 1 {
++		t.Errorf("offset pagination: first page = %d items, second = %d, want 100 + 1", len(first.Problems), len(rest.Problems))
++	}
++}
++
+ func TestGetProblemClass(t *testing.T) {
+ 	s, store, _ := newTestServer(t)
+ 	seedClass(t, store, "docker-perms", "permissions", "docker", "go", "1.0", "use --user", graph.AnswerVerified)
