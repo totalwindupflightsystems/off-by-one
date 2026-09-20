@@ -288,15 +288,32 @@ ln -s "$(pwd)/scripts/pi-agent" ~/.local/bin/pi-agent   # or: cp scripts/pi-agen
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.25+ — required to build (`make build`). `go.mod` declares `go 1.26.0`, so install a **1.26.x** toolchain: a 1.25 compiler still works but auto-downloads the 1.26 toolchain on the first build (extra network fetch) — the recipe below installs 1.26.8 directly.
 - Bubblewrap (`bwrap`) — optional, tests skip gracefully when absent
 - Pi Agent (`pi-agent`) — optional, solver tests mock the executor
 - Docker (for Muster integration tests)
 
+**No sudo? Bootstrap Go from the official tarball** (a plain user account cannot
+`apt install`, and `make build` fails with `go: command not found` until Go is on
+`PATH`). Pick the archive matching your architecture — `uname -m` prints `x86_64`
+(use `linux-amd64`) or `aarch64`/`arm64` (use `linux-arm64`):
+
+```bash
+curl -fsSL https://go.dev/dl/go1.26.8.linux-amd64.tar.gz -o /tmp/go.tgz
+mkdir -p ~/toolchain && tar -C ~/toolchain -xzf /tmp/go.tgz
+export PATH="$HOME/toolchain/go/bin:$PATH"   # append the same line to ~/.profile to persist
+go version
+```
+
+With sudo, your distro package manager works as well (`sudo apt install golang-go`,
+or follow https://go.dev/doc/install) — the tarball recipe above needs no privileges.
+
 ### Quick Start
 
 ```bash
-# Clone
+# Clone — requires repository access (SSH key or HTTPS token for
+# github.com:totalwindupflightsystems/off-by-one). A fresh box with no
+# credential for that repo cannot clone it.
 git clone git@github.com:totalwindupflightsystems/off-by-one.git
 cd off-by-one
 
