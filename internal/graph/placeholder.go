@@ -9,6 +9,14 @@ import "regexp"
 // keep the two lists in sync. Matching is a case-insensitive regex SEARCH
 // against the class title, same semantics as the Python `re.search` version.
 //
+// This list is the AUTHORITATIVE definition, and it is the only one: the SQL
+// predicate the queue read paths use (graph.NotPlaceholderClassSQL, backed by
+// the ob1_is_placeholder_class scalar function in placeholder_udf.go)
+// evaluates this slice rather than restating it in LIKE/GLOB, so adding a
+// family here changes both surfaces at once. The parity is pinned by
+// TestPlaceholderClassSQLFunc_MatchesGoPredicate and by the row-level oracle
+// in internal/ingest (OB-GAP-084).
+//
 // Keep these specific: real engineering classes whose titles merely contain
 // "test" (e.g. "test-mocking-http-requests", "test-property-based-shrinking")
 // must NOT match.
