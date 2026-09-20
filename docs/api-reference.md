@@ -22,6 +22,7 @@ All timestamps are RFC 3339 strings. All endpoints return JSON unless otherwise 
 5. [Taxonomy / Stats](#taxonomy--stats)
 6. [System](#system)
 7. [Solve timeouts](#solve-timeouts)
+8. [Deploying the server (deploy rotation)](#deploying-the-server-deploy-rotation)
 
 ---
 
@@ -662,3 +663,50 @@ OB1_BWRAP_TIMEOUT=900 ./off-by-one
 ```
 
 Because the bwrap cap is the *outer* limit, raising only `OFF_BY_ONE_SOLVE_TIMEOUT` will not let a solve run past 300s by default — set `OB1_BWRAP_TIMEOUT` above the longest expected solve (and above `OFF_BY_ONE_SOLVE_TIMEOUT` if you intend that solver-level timeout to be the effective one). A repeated `signal: killed` at exactly the configured cap is the sandbox cap doing its job; verify the configured value before treating it as a solver failure.
+
+---
+
+## Deploying the server (deploy rotation)
+
+The server you talk to is this repo's `./off-by-one`, run by the systemd unit
+`off-by-one.service`. Committing Go code does **not** update it — and nothing
+green catches that: CI builds in a container, the GitReins guard's `go build` is a
+compile check, and the Tier 2 judge builds its own binary from HEAD rather than
+probing the service. A commit can therefore sit undeployed for hours while every
+automated signal reports success.
+
+**After ANY commit touching `cmd/ internal/ web/ sql/ pkg/`, `go.mod` or
+`go.sum`, run `make gate-deploy` before closing out the tick.** It exits non-zero
+and names the remedy until both halves are true:
+
+1. the on-disk `./off-by-one` was built by `make build` at a revision whose code
+   paths match HEAD (data-only corpus drift is tolerated);
+2. the RUNNING unit serves that artifact — `systemctl show off-by-one -p
+   MainPID`, `/proc/<MainPID>/exe` identity, and the running process's
+   `--version` stamp resolved against HEAD.
+
+Remedy when it is red:
+
+```bash
+# commit or stash board/gitreins state first — a dirty tree stamps the artifact
+# '<rev>-dirty', which check-binary-fresh refuses by design
+make build
+kill <MainPID>        # systemd Restart=always relaunches the service
+make gate-deploy      # must pass before the tick is closed out
+```
+
+Verdict semantics, precisely:
+
+| Situation | Verdict |
+|---|---|
+| Artifact and running service both serve HEAD | `PASS` (exit 0) |
+| Stale artifact, no version stamp, dirty stamp, unit not running, `/proc/<MainPID>/exe` mismatch, or running stamp behind HEAD | `FAIL` (exit 1, remedy printed) |
+| Run from a git **worktree** (parallel workers), or a host without the unit | `SKIP` (exit 0, loud NOTE) — an artifact built in a worktree is not what the service runs, so no service verdict is honest; enforcement belongs to the checkout that owns the unit |
+| `scripts/check-deploy` missing or not executable | `FAIL` — a missing probe is a broken gate, never a pass |
+| Unit served from a different directory than this checkout | `FAIL` — the gate will not report on someone else's deployment (`OB1_UNIT_SOURCE` overrides the expected root) |
+
+The `check-deploy` probe can also be run directly (`make check-deploy`); the
+unit-testable stamp seam is `./scripts/check-deploy --resolve-stamp <stamp>`.
+Hermetic self-test — scratch clones, stub systemd unit, throwaway instance,
+never the live service: `make check-deploy-test`.
+

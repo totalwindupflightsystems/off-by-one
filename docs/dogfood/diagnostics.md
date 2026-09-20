@@ -308,6 +308,99 @@ cd ~/off-by-one && make check-deploy
 Self-test (fresh / divergence / garbage / live verdict-presence):
 `bash scripts/check-deploy-test.sh`.
 
+### Tick close-out enforcement (OB-GAP-085) — `make gate-deploy`
+
+**The problem it closes:** OB-GAP-077 built the probe; NOTHING called it. On
+2026-09-20 the live unit (MainPID 1665810, started 2026-09-19 12:39:44) was
+serving the `a8d8b67` artifact while HEAD carried fifteen-plus changed code files
+(`internal/api/handlers.go`, `internal/ingest`, …) — ~13h of undeployed drift in
+which CI (3/3 runs), GitReins Tier 1 (4/4) and the Tier 2 judge all reported
+green. The judge is not a deploy gate: it builds its OWN binary from HEAD instead
+of probing the service. At tick start `make check-binary-fresh` exited 2 and that
+was the only signal — and it was somebody else's to read.
+
+**The enforced step: `make gate-deploy`** (Makefile target → `scripts/gate-deploy`),
+run at tick close-out after ANY commit touching `cmd/ internal/ web/ sql/ pkg/`,
+`go.mod` or `go.sum`. Its exit status IS the probe's exit status — an untripped
+leg is never reported as a pass.
+
+It deliberately does more than chain the probe, because a close-out gate must
+refuse to lie about a deployment it does not own:
+
+- **Worktree / foreign unit → SKIP, loudly.** Run from a git worktree (this
+  repo's parallel workers) or on a host without the unit, the artifact you built
+  is not what the service runs; the gate prints the checkout that DOES own the
+  unit and exits 0 without claiming a verdict. (`git rev-parse --absolute-git-dir`
+  vs `--git-common-dir` distinguishes a worktree from the ordinary checkout.)
+- **Unit bound elsewhere → FAIL.** The unit's `WorkingDirectory` (or the
+  directory of its `ExecStart` binary) must be THIS checkout; otherwise the gate
+  is about to measure someone else's deployment. Note the unit FILE location is
+  irrelevant — this host's unit lives at
+  `/etc/systemd/system/off-by-one.service` while running
+  `/home/kara/off-by-one/off-by-one`, so `FragmentPath` can never be the test;
+  `WorkingDirectory`/`ExecStart` are the authoritative evidence. Override the
+  expected root with `OB1_UNIT_SOURCE` for split-checkout deployments.
+- **Missing/unexecutable probe → FAIL.** A broken gate is never a pass.
+- **Not a git checkout → FAIL.** Without git the artifact cannot be tied to HEAD.
+
+**Close-out checklist (after any code commit):**
+
+1. commit or stash board/gitreins state — a dirty tree stamps the artifact
+   `<rev>-dirty`, which `check-binary-fresh` refuses by design;
+2. `make build`;
+3. `kill <MainPID>` — systemd `Restart=always` relaunches the service;
+4. `make gate-deploy` — must PASS before the tick is closed out.
+
+**Red/green proof, captured hermetically** (throwaway `--shared` clone +
+PATH-stubbed `systemctl` + a throwaway instance on port 18998; the live service
+was never touched — its MainPID was unchanged before and after):
+
+```
+# RED — artifact stamped dc69717 (the last code commit's parent), HEAD e1ba282
+$ make gate-deploy
+./scripts/gate-deploy
+make[1]: Entering directory '<scratch>/repo'
+ERROR: ./off-by-one is stale — source changed since it was built; run 'make build'
+make[1]: *** [Makefile:43: check-binary-fresh] Error 1
+make[1]: Leaving directory '<scratch>/repo'
+check-deploy: FAIL — leg 1: make check-binary-fresh rejected ./off-by-one (see ERROR above)
+remedy: commit or stash the working tree if needed, then run 'make build', relaunch the service, and re-run make check-deploy
+
+gate-deploy: FAIL — the running off-by-one service does not serve HEAD's code (check-deploy exit 1; see its output above).
+gate-deploy: remedy (run in <scratch>/repo):
+    1. commit or stash board/gitreins state — a dirty tree stamps the artifact '<rev>-dirty', which check-binary-fresh refuses by design
+    2. make build
+    3. kill 1005021          # systemd Restart=always relaunches the service
+    4. make gate-deploy        # must pass before this tick is closed out
+make: *** [Makefile:108: gate-deploy] Error 1      # MAKE_GATE_DEPLOY_EXIT=2
+
+# GREEN — `make build` from HEAD, then the gate against a throwaway instance
+$ make gate-deploy
+./scripts/gate-deploy
+make[1]: Entering directory '<scratch>/repo'
+./off-by-one is up to date with source (version stamp changed, but code paths are unchanged)
+make[1]: Leaving directory '<scratch>/repo'
+PASS: stamp 'fb45b6e' resolves to fb45b6e — code paths match HEAD (data-only drift tolerated)
+check-deploy: PASS — running service (pid 1008727, stamp fb45b6e) serves HEAD's code
+gate-deploy: PASS — artifact and running service both serve HEAD's code; deploy rotation satisfied for tick close-out.
+# MAKE_GATE_DEPLOY_EXIT=0
+```
+
+The dirty-tree half is real, not theoretical: build the artifact while the tree is
+dirty and `check-binary-fresh` rejects it —
+
+```
+ERROR: ./off-by-one was built from a dirty tree (stamp: 8b69a47-dirty) — the working tree had uncommitted changes when it was compiled; commit or stash them, then run 'make build'
+```
+
+Self-test, extended for the gate (hermetic; scratch clones, stub systemd unit,
+throwaway instance — never the live service): `make check-deploy-test` /
+`bash scripts/check-deploy-test.sh` — cases GATE-WORKTREE (SKIP), GATE-NOTAREPO
+(FAIL), GATE-NOWORK (missing probe, FAIL), GATE-RED (stale artifact → FAIL with
+remedy), GATE-NOSTAMP (bare `go build` → FAIL), GATE-FOREIGN (unit bound
+elsewhere → FAIL), GATE-GREEN (rebuilt from HEAD → PASS).
+
+
 ### Transcript #1 — stale live server, captured pre-deploy (2026-09-19)
 
 At capture time: HEAD `85bbbe6`, last code commit `4a3ff39`

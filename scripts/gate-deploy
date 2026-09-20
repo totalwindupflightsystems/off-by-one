@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+# gate-deploy (OB-GAP-085) — the tick CLOSE-OUT GATE that turns the
+# check-deploy PROBE (OB-GAP-077) into ENFORCEMENT.
+#
+# Why this exists: OB-GAP-077 shipped scripts/check-deploy, but nothing called
+# it. On 2026-09-20 the live unit had been serving the a8d8b67 artifact for
+# ~13h while HEAD carried fifteen-plus changed code files — CI green, GitReins
+# Tier 1 4/4, Tier 2 judge PASS (it builds its OWN binary from HEAD), and
+# check-binary-fresh exit 2 ignored at tick start. A probe that nobody runs is
+# not a gate. `make gate-deploy` is the entry point a tick close-out calls.
+#
+# The gate is fail-closed and deliberately never stops at check-binary-fresh
+# (which validates only the on-disk artifact, not the process):
+#
+#   1. run from the checkout that OWNS the deployment — a git WORKTREE (this
+#      repo's parallel workers) must not stamp its own artifact and call that
+#      deployed. Service legs cannot be proven from a worktree, so the gate
+#      SKIPs (exit 0) there with an explicit note instead of a false PASS or a
+#      red herring aimed at the live service.
+#   2. the unit must be SERVED FROM this checkout: its WorkingDirectory, or the
+#      directory of its ExecStart binary, must be the checkout root. The unit
+#      FILE location is irrelevant (this repo's unit lives in
+#      /etc/systemd/system/off-by-one.service while it runs
+#      /home/kara/off-by-one/off-by-one) — so binding is proven from
+#      WorkingDirectory/ExecStart, never from FragmentPath.
+#   3. scripts/check-deploy must exist AND be executable here (a missing probe
+#      is a broken gate, never a pass).
+#   4. scripts/check-deploy runs, and its exit status IS this gate's exit
+#      status. Any leg failure — stale artifact, no stamp, dirty stamp, unit not
+#      running, /proc/<MainPID>/exe mismatch, running stamp behind HEAD — fails
+#      the make invocation and prints the rebuild+relaunch remedy.
+#
+# SKIP vs FAIL, precisely:
+#   SKIP (exit 0, loud NOTE) — this checkout is a worktree; systemctl is not
+#     available; the unit is not present on this host (no ExecStart). Nothing
+#     can be proven here and nothing is claimed: the note names the checkout
+#     that owns the deployment.
+#   FAIL (exit 1) — the live checkout's unit is bound to a DIFFERENT directory
+#     than this checkout, or the probe rejects any leg. These are the states
+#     where a human/foreman must act.
+#
+# Environment (optional):
+#   OB1_UNIT_SOURCE   expected unit source root (default: this checkout's root).
+#                     Set it when the service runs from a different directory
+#                     than the checkout you gate from.
+#
+# Hermetic self-test (no live-service mutation): bash scripts/check-deploy-test.sh
+# Docs: docs/dogfood/diagnostics.md — "Tick close-out enforcement (make gate-deploy)".
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+UNIT="off-by-one"
+CHECK="$SCRIPT_DIR/check-deploy"
+ARTIFACT_NAME="off-by-one"
+
+note() { printf '%s\n' "$*"; }
+warn() { printf '%s\n' "$*" >&2; }
+fail() {
+	printf '%s\n' "gate-deploy: FAIL — $1" >&2
+	exit 1
+}
+
+cd "$REPO_ROOT" || fail "cannot cd to $REPO_ROOT"
+
+# ---------------------------------------------------------------------------
+# Where is this running?
+# ---------------------------------------------------------------------------
+git_dir="$(git rev-parse --absolute-git-dir 2>/dev/null)" || git_dir=""
+common_dir="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || common_dir=""
+if [ -z "$git_dir" ] || [ -z "$common_dir" ]; then
+	fail "not a git checkout ($REPO_ROOT) — the gate needs git to prove the artifact matches HEAD"
+fi
+# A worktree / separate-git-dir checkout reports git-dir <common>/worktrees/<name>
+# while --git-common-dir is the shared <repo>/.git. In the ordinary checkout they
+# are the same path, and the checkout that owns the deployment is the common
+# dir's parent.
+live_root="$(cd "$(dirname "$common_dir")" 2>/dev/null && pwd)" || live_root=""
+[ -n "$live_root" ] || fail "cannot derive the live checkout root from $common_dir"
+
+is_worktree=no
+[ "$git_dir" = "$common_dir" ] || is_worktree=yes
+contract_source="${OB1_UNIT_SOURCE:-$live_root}"
+
+skip_only=no
+main_pid=""
+unit_workdir=""
+unit_exec=""
+
+# ---------------------------------------------------------------------------
+# Leg A: this checkout must own the deployment.
+# ---------------------------------------------------------------------------
+if [ "$is_worktree" = yes ]; then
+	warn "gate-deploy: NOTE: $REPO_ROOT is a git WORKTREE (git-dir $git_dir != common-dir $common_dir)"
+	warn "gate-deploy: an artifact built here ($REPO_ROOT/$ARTIFACT_NAME) is NOT what the service runs — the service legs cannot be proven from a worktree"
+	warn "gate-deploy: the deploy gate applies to the checkout that owns the unit: $live_root"
+	skip_only=yes
+fi
+
+if [ "$skip_only" = no ]; then
+	# -----------------------------------------------------------------------
+	# Leg B: is the unit present, and is it served from this checkout?
+	# -----------------------------------------------------------------------
+	if ! command -v systemctl >/dev/null 2>&1; then
+		warn "gate-deploy: NOTE: systemctl is not available on this host — the running service cannot be inspected"
+		skip_only=yes
+	else
+		props="$(systemctl show "$UNIT.service" -p MainPID -p WorkingDirectory -p ExecStart 2>/dev/null || true)"
+		main_pid="$(printf '%s\n' "$props" | sed -n 's/^MainPID=//p' | head -1)"
+		unit_workdir="$(printf '%s\n' "$props" | sed -n 's/^WorkingDirectory=//p' | head -1)"
+		unit_exec="$(printf '%s\n' "$props" | sed -n 's/^ExecStart=.*path=\([^ ;]*\).*/\1/p' | head -1)"
+
+		if [ -z "$unit_workdir" ] && [ -z "$unit_exec" ]; then
+			warn "gate-deploy: NOTE: unit $UNIT.service is not present on this host (no WorkingDirectory/ExecStart) — nothing to verify here"
+			skip_only=yes
+		else
+			bound=no
+			[ "$unit_workdir" = "$contract_source" ] && bound=yes
+			if [ -n "$unit_exec" ]; then
+				exec_dir="$(cd "$(dirname "$unit_exec")" 2>/dev/null && pwd)" || exec_dir=""
+				[ -n "$exec_dir" ] && [ "$exec_dir" = "$contract_source" ] && bound=yes
+			fi
+			if [ "$bound" = no ]; then
+				fail "unit $UNIT is served from '$unit_workdir' (ExecStart ${unit_exec:-unset}), not from this checkout ('$contract_source') — this gate would be measuring someone else's deployment; run it in the checkout that owns the unit, or set OB1_UNIT_SOURCE"
+			fi
+		fi
+	fi
+fi
+
+# ---------------------------------------------------------------------------
+# Leg C: the probe must exist in this checkout (checked before any SKIP so a
+# missing probe can never hide behind a skip verdict).
+# ---------------------------------------------------------------------------
+if [ ! -f "$CHECK" ]; then
+	fail "scripts/check-deploy is missing in $REPO_ROOT — the deploy gate has nothing to run (restore it: git checkout -- scripts/check-deploy)"
+fi
+if [ ! -x "$CHECK" ]; then
+	fail "scripts/check-deploy is not executable in $REPO_ROOT — run 'chmod +x scripts/check-deploy' and re-run the gate"
+fi
+
+# ---------------------------------------------------------------------------
+# Verdict: nothing provable here → SKIP, with the enforcement spelled out.
+# ---------------------------------------------------------------------------
+if [ "$skip_only" = yes ]; then
+	note "gate-deploy: SKIP — deploy gate not applicable in this checkout (see NOTEs above)."
+	note "gate-deploy: enforcement (make gate-deploy) belongs to the checkout that owns the unit: $live_root"
+	exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Leg D: run the probe. Its exit status IS this gate's verdict.
+# ---------------------------------------------------------------------------
+"$CHECK"
+rc=$?
+if [ "$rc" -ne 0 ]; then
+	note ""
+	note "gate-deploy: FAIL — the running $UNIT service does not serve HEAD's code (check-deploy exit $rc; see its output above)."
+	note "gate-deploy: remedy (run in $contract_source):"
+	note "    1. commit or stash board/gitreins state — a dirty tree stamps the artifact '<rev>-dirty', which check-binary-fresh refuses by design"
+	note "    2. make build"
+	if [ -n "$main_pid" ] && [ "$main_pid" != "0" ]; then
+		note "    3. kill $main_pid          # systemd Restart=always relaunches the service"
+	else
+		note "    3. kill <MainPID>          # systemd Restart=always relaunches the service"
+	fi
+	note "    4. make gate-deploy        # must pass before this tick is closed out"
+	exit 1
+fi
+
+note "gate-deploy: PASS — artifact and running service both serve HEAD's code; deploy rotation satisfied for tick close-out."
+exit 0
