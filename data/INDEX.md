@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1947 problem classes · 2035 verified answers** · exported 2026-09-20 10:00 UTC
+**1967 problem classes · 2056 verified answers** · exported 2026-09-20 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -38,6 +38,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1464 | gitreins-judge-tier2-evaluator-time-cap-incomplete | 2 | go |
 | 1498 | duckbrain-http-auth-file-hash-only-cli-fallback | 2 | python, shell |
 | 1549 | python-registry-tier-derivation | 2 | go |
+| 1568 | dagger-serve-rest-api-token-required | 2 | go |
 | 1648 | deepseek-v4-flash-alias-still-serves | 2 | shell |
 | 1691 | go-cli-release-published-binary-drift | 2 | go |
 | 1 | unknown | 1 | go |
@@ -1484,7 +1485,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1565 | test-tool-outputdir-points-at-a-tracked-directory | 1 | typescript |
 | 1566 | coverage-pkg-node-granularity-false-covered | 1 | rust |
 | 1567 | typescript-cached-inflight-promise-never-settles-hangs-endpoint | 1 | go |
-| 1568 | dagger-serve-rest-api-token-required | 1 | go |
 | 1569 | dagger-nested-execute-401 | 1 | go |
 | 1570 | rust-mcp-related-unknown-path-contract | 1 | rust |
 | 1571 | go-nested-runner-auth-context-propagation | 1 | go |
@@ -1953,3 +1953,23 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2036 | go-test-fixture-expensive-per-test-builder | 1 | go |
 | 2037 | metric-sampler-samples-trivial-roots | 1 | go |
 | 2038 | unauth-404-not-proof-of-missing-route | 1 | go |
+| 2039 | gitreins-foreground-task-complete-dies-at-terminal-cap | 1 | go |
+| 2040 | go-cgroup-psi-stall-utilization-microsecond-window-drift | 1 | go |
+| 2041 | cuckoo-filter-zero-fingerprint-sentinel-false-negative | 1 | python |
+| 2042 | dsse-pae-signature-does-not-bind-envelope-payload-type | 1 | js |
+| 2043 | rust-cli-command-prints-success-but-writes-nothing | 1 | rust |
+| 2044 | typescript-cli-documented-flag-silent-noop | 1 | typescript |
+| 2045 | git-worktree-reap-deletes-fresh-uncommitted-worktree | 1 | go |
+| 2046 | go-nested-json-struct-go-field-names-leak | 1 | go |
+| 2047 | implemented-row-still-returns-not-implemented-sentinel | 1 | go |
+| 2048 | gitreins-judge-criterion-count-mismatch | 1 | go |
+| 2049 | s3-head-404-display-string-match-not-notfound | 1 | rust |
+| 2050 | gitreins-judge-prose-finalization-pass-without-verdict-artifact | 1 |  |
+| 2051 | foreman-orphan-tick-recovery | 1 | go |
+| 2052 | vitest-host-load-timeout-flake | 1 | go |
+| 2053 | git-add-pathspec-beyond-symlink | 1 | bash |
+| 2054 | release-changelog-reopen-empty-unreleased-section | 1 | go |
+| 2055 | go-symmetric-encryption-per-party-key-derivation | 1 | go |
+| 2056 | jsonl-append-line-concatenation | 1 | go |
+| 2057 | gitreins-verdict-dir-vs-printed-job-id | 1 | go |
+| 2058 | jsonl-max-id-scan-hex-string-ids | 1 | python |

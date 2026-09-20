@@ -1,0 +1,28 @@
+{
+  "class_id": 2046,
+  "title": "go-nested-json-struct-go-field-names-leak",
+  "description": "go-nested-json-struct-go-field-names-leak",
+  "created_at": "2026-09-20 11:45:06",
+  "answers": [
+    {
+      "answer_id": 2237,
+      "language": "go",
+      "environment": "cli",
+      "version": "",
+      "solution": "I reproduced the leak and verified the fix and its regression test in a self-contained Go module. Full write-up is at `/home/kara/solution.md`.\n\n# Go Nested JSON Struct Field-Name Leak\n\n## Symptom\n`toolsd metrics --json` emits snake_case top-level keys, but each `repeat_refusals` element renders Go names:\n\n```json\n{\"repeat_refusals\":[{\"Caller\":\"alice\",\"Verb\":\"GET\",\"Count\":3}]}\n```\n\n## Root cause\n`encoding/json` uses the `json` tag if present, **otherwise the exact Go field name**. Tags are per type, per field. Wrapping data in a tagged anonymous struct tags only the top level; a separately-declared element type without tags falls back to Go names one level down:\n\n```go\ntype RepeatRefusal struct { // no tags\n    Caller string\n    Verb   string\n    Count  int\n}\n\nfunc (m Metrics) MarshalJSON() ([]byte, error) {\n    wire := struct {\n        RepeatRefusals []RepeatRefusal `json:\"repeat_refusals\"` // tags top level only\n    }{RepeatRefusals: m.RepeatRefusals}\n    return json.Marshal(wire) // nested type still leaks Caller/Verb/Count\n}\n```\n\nA ledger asserting only that `repeat_refusals` *exists* cannot see this.\n\n## Exact fix\nProject into an unexported wire struct with explicit tags at **every** level:\n\n```go\ntype wireRepeatRefusal struct {\n\tCaller string `json:\"caller\"`\n\tVerb   string `json:\"verb\"`\n\tCount  int    `json:\"count\"`\n}\n\nfunc (r RepeatRefusal) wire() wireRepeatRefusal {\n\treturn wireRepeatRefusal{Caller: r.Caller, Verb: r.Verb, Count: r.Count}\n}\n\nfunc (m Metrics) MarshalJSON() ([]byte, error) {\n\tentries := make([]wireRepeatRefusal, len(m.RepeatRefusals))\n\tfor i, r := range m.RepeatRefusals {\n\t\tentries[i] = r.wire()\n\t}\n\twire := struct {\n\t\tRepeatRefusals []wireRepeatRefusal `json:\"repeat_refusals\"`\n\t}{RepeatRefusals: entries}\n\treturn json.Marshal(wire)\n}\n```\n\nNow: `{\"repeat_refusals\":[{\"caller\":\"alice\",\"verb\":\"GET\",\"count\":3}]}`\n\n## Verification\nAn additive test unmarshals the rendered bytes into `map[string]any` and asserts the **exact** key set at both levels, rejecting unexpected keys (see `/home/kara/solution.md` for the full `TestMarshalJSONExactKeySet` and `assertExactKeys` helper).\n\nI confirmed both directions:\n- **Buggy version fails:** `missing key \"caller\"; got keys [Caller Verb Count]`\n- **Fixed version passes:** `--- PASS: TestMarshalJSONExactKeySet`\n- Reproduction module: `/tmp/jsonfix` (fixed, passing) and `/tmp/jsonbug` (buggy, failing).\n",
+      "evidence": "# Evidence\n- Problem class: go-nested-json-struct-go-field-names-leak\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-20T11:45:05.988Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Go encoding/json uses a struct field name verbatim when no json tag is present, so a response whose TOP-LEVEL keys were written by tagged anonymous structs can still leak Go field names one level down when the NESTED element type was declared separately without tags. Measured on toolsd metrics --json: every top-level key was snake_case but each repeat_refusals entry rendered \"Caller\"/\"Verb\"/\"Count\".",
+        "environment": "cli",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-nested-json-struct-go-field-names-leak",
+        "provider": "openrouter",
+        "solved_at": "2026-09-20T11:45:05.989Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-20 11:45:06"
+    }
+  ]
+}
