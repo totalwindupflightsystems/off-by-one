@@ -1,0 +1,30 @@
+# Verdict: DF-OFF-BY-ONE-11
+
+**Task:** README: fresh-machine install bootstrap (Go toolchain + clone access)
+**Evaluated:** 2026-09-20T14:00:16.164987
+**Result:** ✓ PASS
+
+## Pipeline Stages
+
+- ✓ **tier1**
+  -   ✓ secrets: secrets: harness state excluded from gitleaks scope (.gitreins/**)
+  ✓ tests: ok  	github.com/totalwindupflightsystems/off-by-one/cmd/off-by-one	2.171s
+- ✓ **tier2**
+  - COMPLETE
+  ✓ README Quick Start prerequisites carry a Go tarball bootstrap one-liner path that a bare non-sudo user can follow and an explicit note that cloning the repo requires access (private-repo clone is not anonymous), matching the bunker-bare-Debian evidence; existing green path unchanged: README.md:296-309 (Prerequisites) carries the non-sudo tarball bootstrap: '**No sudo? Bootstrap Go from the official tarball** (a plain user account cannot `apt install`, and `make build` fails with `go: command not found` until Go is on `PATH`)' with arch guidance ('uname -m prints x86_64 (use linux-amd64) or aarch64/arm64 (use linux-arm64)') and the fenced one-liner path: `curl -fsSL https://go.dev/dl/go1.26.8.linux-amd64.tar.gz -o /tmp/go.tgz` / `mkdir -p ~/toolchain && tar -C ~/toolchain -xzf /tmp/go.tgz` / `export PATH="$HOME/toolchain/go/bin:$PATH"   # append the same line to ~/.profile to persist` / `go version`, closed by 'the tarball recipe above needs no privileges' (sudo path offered separately). README.md:289-291 prerequisite bullet now says install a 1.26.x toolchain, consistent with go.mod:3 `go 1.26.0`. README.md:313-316 (Quick Start) carries the explicit access note: '# Clone — requires repository access (SSH key or HTTPS token for github.com:totalwindupflightsystems/off-by-one). A fresh box with no credential for that repo cannot clone it.' immediately above `git clone git@github.com:totalwindupflightsystems/off-by-one.git`. 'Existing green path unchanged': `git diff HEAD~1 HEAD -- README.md` shows only additive hunks (README.md | 21 +++++++++++++--, no deletions); the rest of Quick Start (cp .env.example .env, make build, ./off-by-one seed, ./off-by-one) is byte-identical. The earlier FAIL verdict (.gitreins/history/2026-09-20/192165b8, commit 8df11f19) was because the hunks were branch-only on wt/DF-OFF-BY-ONE-11 (c2eff7c not an ancestor of HEAD); HEAD is now 7761481 'merge(DF-OFF-BY-ONE-11): README fresh-machine install bootstrap' and the hunks are present in the graded tree as verified by direct sed reads of README.md. Tests: no test_command in .gitreins/config.yaml (guards.tests=false, go.tests=true), so ran `go test ./... -short -count=1 -p 1 -timeout 180s` -> EXIT=0, all 13 packages 'ok' (cmd/off-by-one 2.107s, internal/api 0.462s, internal/graph 2.454s, internal/seed 1.786s, internal/web 1.719s, ...), sql/schema and web '[no test files]'.
+The Go tarball bootstrap (non-sudo, arch-aware, PATH-persisting) and the explicit private-repo clone-access note are both present in README.md Prerequisites/Quick Start on the merged HEAD, the pre-existing green path is unchanged, and the full Go test suite passes (EXIT=0, 13 pkgs ok).
+
+## Summary
+
+Judge Result: DF-OFF-BY-ONE-11
+
+Stage tier1: PASS
+    ✓ secrets: secrets: harness state excluded from gitleaks scope (.gitreins/**)
+  ✓ tests: ok  	github.com/totalwindupflightsystems/off-by-one/cmd/off-by-one	2.171s
+
+Stage tier2: PASS
+  COMPLETE
+  ✓ README Quick Start prerequisites carry a Go tarball bootstrap one-liner path that a bare non-sudo user can follow and an explicit note that cloning the repo requires access (private-repo clone is not anonymous), matching the bunker-bare-Debian evidence; existing green path unchanged: README.md:296-309 (Prerequisites) carries the non-sudo tarball bootstrap: '**No sudo? Bootstrap Go from the official tarball** (a plain user account cannot `apt install`, and `make build` fails with `go: command not found` until Go is on `PATH`)' with arch guidance ('uname -m prints x86_64 (use linux-amd64) or aarch64/arm64 (use linux-arm64)') and the fenced one-liner path: `curl -fsSL https://go.dev/dl/go1.26.8.linux-amd64.tar.gz -o /tmp/go.tgz` / `mkdir -p ~/toolchain && tar -C ~/toolchain -xzf /tmp/go.tgz` / `export PATH="$HOME/toolchain/go/bin:$PATH"   # append the same line to ~/.profile to persist` / `go version`, closed by 'the tarball recipe above needs no privileges' (sudo path offered separately). README.md:289-291 prerequisite bullet now says install a 1.26.x toolchain, consistent with go.mod:3 `go 1.26.0`. README.md:313-316 (Quick Start) carries the explicit access note: '# Clone — requires repository access (SSH key or HTTPS token for github.com:totalwindupflightsystems/off-by-one). A fresh box with no credential for that repo cannot clone it.' immediately above `git clone git@github.com:totalwindupflightsystems/off-by-one.git`. 'Existing green path unchanged': `git diff HEAD~1 HEAD -- README.md` shows only additive hunks (README.md | 21 +++++++++++++--, no deletions); the rest of Quick Start (cp .env.example .env, make build, ./off-by-one seed, ./off-by-one) is byte-identical. The earlier FAIL verdict (.gitreins/history/2026-09-20/192165b8, commit 8df11f19) was because the hunks were branch-only on wt/DF-OFF-BY-ONE-11 (c2eff7c not an ancestor of HEAD); HEAD is now 7761481 'merge(DF-OFF-BY-ONE-11): README fresh-machine install bootstrap' and the hunks are present in the graded tree as verified by direct sed reads of README.md. Tests: no test_command in .gitreins/config.yaml (guards.tests=false, go.tests=true), so ran `go test ./... -short -count=1 -p 1 -timeout 180s` -> EXIT=0, all 13 packages 'ok' (cmd/off-by-one 2.107s, internal/api 0.462s, internal/graph 2.454s, internal/seed 1.786s, internal/web 1.719s, ...), sql/schema and web '[no test files]'.
+The Go tarball bootstrap (non-sudo, arch-aware, PATH-persisting) and the explicit private-repo clone-access note are both present in README.md Prerequisites/Quick Start on the merged HEAD, the pre-existing green path is unchanged, and the full Go test suite passes (EXIT=0, 13 pkgs ok).
+
+Overall: PASS ✓
