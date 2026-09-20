@@ -35,7 +35,16 @@ that answers "does it work and why" without re-running the world.
   /tmp/pi/packages/coding-agent/dist/main.js`. `scripts/pi-agent-watchdog.sh`
   resolves every solve-path workspace package from `$PI_DIR` with node and NAMES
   the missing one(s) (`make pi-agent-watchdog-selftest`); a vanished link is
-  invisible to the directory listing the old probe walked.
+  invisible to the directory listing the old probe walked. **A timed-out probe
+  is not a wipe (OB-GAP-079):** at loadavg 159 on 2026-09-18 the per-package
+  probe hit its `PI_AGENT_RESOLVE_TIMEOUT` budget (node rc=124) on packages
+  whose symlinks were on disk, and the verdict read `solve path BROKEN …
+  (node TIMEOUT)` — the hollow-wipe alert for an UNVERIFIED outcome, which
+  trains its readers to ignore the alert that matters. The resolution stage now
+  reports three states: ok (silent, exit 0), unresolved (BROKEN alert + re-link
+  recipe, exit 1), and unverifiable (a WARN naming the unverified packages and
+  the budget in force, no wipe verdict and no recipe, exit 3) — re-run when load
+  subsides.
 - **Cron loop** (`internal/cron`): wakes every `OFF_BY_ONE_CRON_INTERVAL` (5m),
   only dequeues when loadavg(1) < threshold (idle detection) and a solver exists.
 - **Graph** (`internal/graph`): problem-class tree + FTS5 search + BFS related
