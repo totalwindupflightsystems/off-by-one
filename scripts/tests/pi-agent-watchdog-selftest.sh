@@ -362,6 +362,20 @@ check "exit code 1" "1" "$OUT_RC"
 check_contains "names the enumeration failure" "workspace-package enumeration failed" "$OUT"
 check_contains "does not claim health" "solve path UNVERIFIABLE" "$OUT"
 
+# ── ELF-layout fixture (OB-GAP-086): a release install, no npm tree ─────────
+# /tmp/pi today is an ELF release install: `pi` is a regular file (a real ELF;
+# any executable regular file stands in — the probe checks test -f, the same
+# statSync().isFile() the wrapper's findPiBin uses) and there is NO package.json,
+# NO node_modules/.bin, NO packages/. Only the wrapper needs to be executable.
+make_elf_fixture() {
+  local dir="$1"
+  mkdir -p "$dir/bin"
+  printf '#!/bin/sh\nexit 0\n' > "$dir/pi"
+  chmod +x "$dir/pi"
+  printf '#!/bin/sh\nexit 0\n' > "$dir/bin/pi-agent"
+  chmod +x "$dir/bin/pi-agent"
+}
+
 # ══ ARM 7 — the pre-existing presence class still alerts ═════════════════════
 new_arm arm7-presence-preserved
 make_fixture "$FIX" pi-tui
@@ -372,6 +386,73 @@ check "exit code 1" "1" "$OUT_RC"
 check_contains "hollow-wipe alert preserved" "pi-agent binary UNHEALTHY (hollow-wipe class)" "$OUT"
 check_contains "reports the failed presence check" "cli.js=0" "$OUT"
 check_contains "carries the rebuild recipe" "npm install --ignore-scripts && npm run build" "$OUT"
+
+# ══ ARM 7b — ELF-layout fixture is healthy (OB-GAP-086) ══════════════════════
+# A release install: /tmp/pi/pi regular file + executable wrapper, NO
+# package.json, NO node_modules/.bin, NO packages/. This is THIS host's real
+# layout — the false-alarm shape ("cli=0 pkg=1 bin=0 wrapper=1
+# resolve=probe-error" rc=1) that OB-GAP-086 fixes.
+new_arm arm7b-elf-layout-healthy
+make_elf_fixture "$FIX"
+run_probe "$WATCHDOG" "$FIX"
+printf '\nARM 7b — ELF release layout (no npm tree): healthy, silent, rc 0\\n'
+check "exit code 0" "0" "$OUT_RC"
+check "no alert emitted" "" "$(cat "$OUT")"
+check "no stamp written" "absent" "$(stamp_state "$FIX")"
+
+# ══ ARM 7c — neither layout present still alerts (hollow-wipe stays REAL) ════
+# Same ELF fixture but the `pi` regular file is MISSING and there is no
+# dist/cli.js either: no layout the wrapper can resolve -> the presence alert.
+new_arm arm7c-neither-layout-alerts
+make_elf_fixture "$FIX"
+rm "$FIX/pi"
+run_probe "$WATCHDOG" "$FIX"
+printf '\nARM 7c — pi file missing AND no cli.js: hollow-wipe alert stays real\\n'
+check "exit code 1" "1" "$OUT_RC"
+check_contains "hollow-wipe alert preserved" "pi-agent binary UNHEALTHY (hollow-wipe class)" "$OUT"
+check_contains "reports the unresolvable pi binary" "pi_binary=0" "$OUT"
+check_contains "carries the rebuild recipe" "npm install --ignore-scripts && npm run build" "$OUT"
+
+# ══ ARM 7d — npm layout with dist/cli.js DELETED still fails (board PASS) ════
+# The board PASS criterion's second half, verbatim: "while still failing a
+# fixture whose dist/cli.js is deleted." On this fixture no ELF `pi` exists
+# either (it is an npm-layout workspace), so cli.js was the only resolvable
+# layout — its deletion must still alert.
+new_arm arm7d-npm-clijs-deleted-still-alerts
+make_fixture "$FIX" pi-tui
+rm "$FIX/packages/coding-agent/dist/cli.js"
+run_probe "$WATCHDOG" "$FIX"
+printf '\nARM 7d — npm layout, dist/cli.js deleted (no ELF fallback): rc 1\\n'
+check "exit code 1" "1" "$OUT_RC"
+check_contains "hollow-wipe alert preserved" "pi-agent binary UNHEALTHY (hollow-wipe class)" "$OUT"
+check_contains "reports the failed presence check" "cli.js=0" "$OUT"
+
+# ══ ARM 7e — ELF layout skips stage 2 (resolve state stays ok) ═══════════════
+# An ELF binary has no workspace links to resolve, so the node enumeration
+# (which would exit 3 / probe-error on this tree) must NEVER run. Proof: the
+# probe stays silent and healthy even though this fixture has zero declared
+# workspace packages with entry points — the exact shape that used to alert
+# with "workspace-package enumeration failed".
+new_arm arm7e-elf-skips-stage2
+make_elf_fixture "$FIX"
+run_probe "$WATCHDOG" "$FIX"
+printf '\nARM 7e — ELF layout skips stage 2: no enumeration, resolve stays ok\\n'
+check "exit code 0" "0" "$OUT_RC"
+check "no alert emitted" "" "$(cat "$OUT")"
+check_not_contains "no probe-error text" "UNVERIFIABLE" "$OUT"
+check_not_contains "no enumeration failure named" "workspace-package enumeration failed" "$OUT"
+
+# ══ ARM 7f — pkg/bin legs never gate the verdict when the binary resolves ════
+# An ELF-layout fixture that ALSO carries an empty node_modules/.bin and no
+# package.json (worst-case informational legs) must still be healthy: pkg_ok
+# and bin_ok are informational-only parts of the stamp, never gates.
+new_arm arm7f-demoted-legs-non-gating
+make_elf_fixture "$FIX"
+mkdir -p "$FIX/node_modules/.bin"
+run_probe "$WATCHDOG" "$FIX"
+printf '\nARM 7f — demoted legs (pkg=0 bin=0) never force rc=1 when pi resolves\\n'
+check "exit code 0" "0" "$OUT_RC"
+check "no alert emitted" "" "$(cat "$OUT")"
 
 # ══ ARM 8 — resolve-probe TIMEOUT is UNVERIFIABLE, not broken (OB-GAP-079) ═══
 # The 2026-09-18 15:50:22 outage-class alert: the host was CPU-starved
