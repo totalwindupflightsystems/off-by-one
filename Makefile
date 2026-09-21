@@ -111,7 +111,9 @@ gate-deploy:
 # stub systemd unit and stub systemctl — it never touches the live service.
 # Covers gate-red (stale artifact) → gate-green (rebuilt), the unstamped-artifact
 # failure, the unit-bound-elsewhere refusal, the not-a-checkout refusal, and the
-# live-checkout SKIP verdict.
+# live-checkout SKIP verdict — plus the vendored-unit case (OB-GAP-089): the
+# unit must exist, set Restart=always, run the documented ExecStart/
+# WorkingDirectory, and be pointed at by README.md + docs/api-reference.md.
 check-deploy-test:
 	bash scripts/check-deploy-test.sh
 
