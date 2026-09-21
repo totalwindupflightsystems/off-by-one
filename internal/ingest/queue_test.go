@@ -358,11 +358,42 @@ func TestQueue_Dequeue_ConcurrentSubmits(t *testing.T) {
 	// AC #7: concurrent submit + dequeue. Submit 100 entries from 10
 	// goroutines, then dequeue them all and assert no duplicates and
 	// no missing entries.
-	q, _ := newTestQueue(t)
+	//
+	// CI run 35580590205 flaked this test on the Go 1.25 leg with zero
+	// code changes (an identical-code run passed the same day). Root
+	// cause: the old test swallowed Submit errors with `_, _, _ =`,
+	// so a single SQLITE_BUSY/SQLITE_LOCKED from a pool connection
+	// silently dropped one insert and the test failed as a bare
+	// depth=99. The contention source is the shared-cache in-memory
+	// DB: every pooled connection is another table locker, and the
+	// busy_timeout PRAGMA set in graph.openDSN lands on only one pool
+	// connection (see the store.go comment — DSN pragmas do not
+	// reliably apply to in-memory shared caches), so a busy pool
+	// connection has timeout 0.
+	//
+	// Two fixes, neither of which weakens the guarantee:
+	//   1. store.DB().SetMaxOpenConns(1) serialises the pool through a
+	//      single connection, removing cross-connection table-lock
+	//      contention entirely. Every Queue statement is single-shot
+	//      (QueryRow.Scan, or rows fully drained before returning), so
+	//      a pool of 1 cannot deadlock; Submit CALLER concurrency is
+	//      unchanged — 10 goroutines still race into the mutex-guarded
+	//      Submit path, and the test still proves 100 concurrently
+	//      submitted entries are all present and drain exactly once.
+	//   2. Submit errors are collected and asserted below instead of
+	//      discarded, so any future driver failure names itself rather
+	//      than masquerading as a depth mismatch.
+	//
+	// No retry wrapper: the failure mode is eliminated at its layer
+	// (connection contention), so a retry would only re-roll dice the
+	// test no longer depends on.
+	q, store := newTestQueue(t)
+	store.DB().SetMaxOpenConns(1)
 	ctx := context.Background()
 
 	const workers = 10
 	const perWorker = 10
+	errs := make(chan error, workers*perWorker)
 	var wg sync.WaitGroup
 	wg.Add(workers)
 	for w := 0; w < workers; w++ {
@@ -370,14 +401,36 @@ func TestQueue_Dequeue_ConcurrentSubmits(t *testing.T) {
 			defer wg.Done()
 			for i := 0; i < perWorker; i++ {
 				class := "class-" + string(rune('A'+w)) + "-" + string(rune('0'+i))
-				_, _, _ = q.Submit(ctx, Submission{
+				_, _, err := q.Submit(ctx, Submission{
 					ProblemClass: class,
 					Cadence:      CadencePrePhase,
 				})
+				errs <- err
 			}
 		}(w)
 	}
 	wg.Wait()
+	close(errs)
+
+	// A Submit failure is a test failure, not a silent depth shortfall.
+	// Report the first few errors in full (the driver message is the
+	// diagnostic) and fail before the drain, which would otherwise
+	// assert against a queue that is known-short.
+	var submitErrs []error
+	for err := range errs {
+		if err != nil {
+			submitErrs = append(submitErrs, err)
+		}
+	}
+	if len(submitErrs) > 0 {
+		for i, err := range submitErrs {
+			if i >= 3 {
+				break
+			}
+			t.Errorf("Submit %d/%d failed: %v", i+1, len(submitErrs), err)
+		}
+		t.Fatalf("Submit: %d/%d concurrent submits failed; aborting before drain", len(submitErrs), workers*perWorker)
+	}
 
 	depth, err := q.Depth(ctx)
 	if err != nil {
