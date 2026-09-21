@@ -693,6 +693,14 @@ and names the remedy until both halves are true:
    MainPID`, `/proc/<MainPID>/exe` identity, and the running process's
    `--version` stamp resolved against HEAD.
 
+The canonical unit this check inspects is vendored at
+`deploy/off-by-one.service` — unit name `off-by-one`, `Restart=always` (what
+makes the `kill <MainPID>` remedy below relaunch the service),
+`ExecStart=/home/kara/off-by-one/off-by-one`,
+`WorkingDirectory=/home/kara/off-by-one` (the two properties `gate-deploy` uses
+to prove the unit is bound to this checkout). `make check-deploy-test` fails
+when the unit or those properties drift from this section.
+
 Remedy when it is red:
 
 ```bash

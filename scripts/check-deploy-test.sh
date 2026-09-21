@@ -10,6 +10,10 @@
 # Cases:
 #   STAMP  — fresh / divergence / garbage --resolve-stamp verdicts (the
 #            check-deploy seam; deterministic, no systemctl).
+#   UNIT   — the VENDORED systemd unit (OB-GAP-089) still carries the
+#            properties the deploy story assumes: Restart=always, the
+#            documented ExecStart/WorkingDirectory, and both docs pointing at
+#            deploy/off-by-one.service (textual — hermetic, no systemctl).
 #   GATE   — the close-out gate's enforcement matrix (OB-GAP-085):
 #              WORKTREE  gate run from a git worktree      -> SKIP (exit 0)
 #              NOTAREPO  non-git dir                       -> FAIL
@@ -141,6 +145,71 @@ if [ "$garbage_rc" -ne 0 ]; then
 else
 	fail "garbage stamp should exit non-zero; output:"
 	sed 's/^/    /' "$OUT"
+fi
+
+# --- UNIT case (OB-GAP-089) ---------------------------------------------------
+#
+# The deploy story (check-deploy legs 2-3, gate-deploy Leg B, the README
+# rebuild-then-relaunch remedy, the api-reference running-unit identity check)
+# only holds while the VENDORED unit keeps the properties those readers assume.
+# Asserted textually, so this runs in a CI container with no systemd and never
+# touches a live service.
+echo "--- UNIT: vendored systemd unit vs the deploy story (OB-GAP-089) ---"
+
+UNIT_FILE="$REPO_ROOT/deploy/off-by-one.service"
+# The documented artifact the unit must run. Two independent sources agree:
+# scripts/gate-deploy:23-24 and docs/dogfood/diagnostics.md:347-350 both state
+# this host's unit "runs /home/kara/off-by-one/off-by-one" from that same
+# WorkingDirectory — so these literals ARE the contract, not a preference.
+DOCUMENTED_EXEC="/home/kara/off-by-one/off-by-one"
+DOCUMENTED_WORKDIR="/home/kara/off-by-one"
+
+if [ ! -f "$UNIT_FILE" ]; then
+	fail "deploy/off-by-one.service is missing — the deploy story assumes a unit that is no longer in the repo (check-deploy legs 2-3, gate-deploy Leg B, README/api-reference remedies)"
+else
+	pass "deploy/off-by-one.service exists"
+
+	# Restart=always is what makes the documented remedy `kill <MainPID>`
+	# relaunch the service (README.md:348, docs/api-reference.md:702).
+	if grep -qE '^[[:space:]]*Restart=always[[:space:]]*$' "$UNIT_FILE"; then
+		pass "unit sets Restart=always (the documented relaunch remedy depends on it)"
+	else
+		fail "unit does not set Restart=always — README.md:348 / docs/api-reference.md:702 promise 'systemd Restart=always relaunches the service' after 'kill <MainPID>'"
+	fi
+
+	unit_exec="$(sed -n 's/^ExecStart=\([^[:space:]]*\).*/\1/p' "$UNIT_FILE" | head -1)"
+	if [ "$unit_exec" = "$DOCUMENTED_EXEC" ]; then
+		pass "ExecStart runs the documented artifact ($DOCUMENTED_EXEC)"
+	else
+		fail "ExecStart is '${unit_exec:-unset}', not the documented '$DOCUMENTED_EXEC' (scripts/gate-deploy:23-24, docs/dogfood/diagnostics.md:347-350) — check-deploy leg 3 compares /proc/<MainPID>/exe against <checkout>/off-by-one"
+	fi
+
+	unit_workdir="$(sed -n 's/^WorkingDirectory=\(.*\)/\1/p' "$UNIT_FILE" | head -1)"
+	if [ "$unit_workdir" = "$DOCUMENTED_WORKDIR" ]; then
+		pass "WorkingDirectory is the documented checkout ($DOCUMENTED_WORKDIR)"
+	else
+		fail "WorkingDirectory is '${unit_workdir:-unset}', not the documented '$DOCUMENTED_WORKDIR' — gate-deploy Leg B proves unit binding from this property"
+	fi
+
+	# gate-deploy Leg B accepts EITHER WorkingDirectory OR dirname(ExecStart) as
+	# evidence of the owning checkout; a unit whose halves name different
+	# directories would bind on one leg and not the other.
+	unit_exec_dir="$(dirname "${unit_exec:-.}")"
+	if [ "$unit_exec_dir" = "$unit_workdir" ]; then
+		pass "ExecStart's directory agrees with WorkingDirectory ($unit_workdir)"
+	else
+		fail "ExecStart directory '$unit_exec_dir' disagrees with WorkingDirectory '${unit_workdir:-unset}' — gate-deploy Leg B would bind on one and not the other"
+	fi
+
+	# The pointers are part of the deliverable: a reader following the deploy
+	# story must be able to find the vendored unit.
+	for doc in README.md docs/api-reference.md; do
+		if grep -q 'deploy/off-by-one.service' "$REPO_ROOT/$doc"; then
+			pass "$doc points at deploy/off-by-one.service"
+		else
+			fail "$doc does not point at deploy/off-by-one.service — the documented deploy story and the vendored unit have drifted apart"
+		fi
+	done
 fi
 
 # --- GATE cases --------------------------------------------------------------

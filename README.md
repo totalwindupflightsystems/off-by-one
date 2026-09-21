@@ -349,6 +349,11 @@ make build
 > `make gate-deploy` again. From a git worktree the gate SKIPs loudly instead of
 > reporting on a deployment it does not own. Details:
 > [Deploy check after any code commit](docs/dogfood/diagnostics.md).
+> The unit this assumes is vendored at `deploy/off-by-one.service` — unit name
+> `off-by-one`, `Restart=always` (what makes `kill <MainPID>` relaunch it),
+> `ExecStart`/`WorkingDirectory` in `/home/kara/off-by-one`, installed to
+> `/etc/systemd/system/off-by-one.service`. `make check-deploy-test` fails when
+> the unit or those properties drift from what this section documents.
 
 > **Submissions need a solver:** without `bwrap` + `pi-agent` configured, `POST /api/v1/problems/submit` is rejected with `503 solver_unavailable` — the cron loop cannot process queued work, so nothing is accepted silently. Pre-verified answers remain discoverable via `POST /api/v1/problems/discover`.
 
