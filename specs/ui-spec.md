@@ -26,7 +26,7 @@
 │                                                │  └───────────┘  │
 │                                                │  [Send]         │
 ├────────────────────────────────────────────────┴─────────────────┤
-│  Queue: 3 pending | Cache: 12 answers | Hit rate: 23% | v0.1.0  │
+│  Queue: 3 pending | Cache: 12 answers | Hit rate: 23% | dev     │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -675,7 +675,7 @@ The chat agent (Pi Agent via WebSocket) can:
 ### 9.1 Content
 
 ```
-Queue: 3 pending | Cache: 12 answers | Hit rate: 23% | Uptime: 4h 12m | v0.1.0
+Queue: 3 pending | Cache: 12 answers | Hit rate: 23% | Uptime: 4h 12m | dev
 ```
 
 ### 9.2 Refresh
