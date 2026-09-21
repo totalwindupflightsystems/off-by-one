@@ -1,0 +1,63 @@
+# off-by-one.service — the canonical systemd unit for the Off-by-One pre-solve lab.
+#
+# Board row: OB-GAP-089 — "systemd unit the whole deploy story depends on is not
+# versioned in the repo — docs/scripts assume it exists".
+#
+# This is the VENDORED copy of the unit the deployment actually runs, so the
+# deploy story is reproducible from the repo instead of living only on one host.
+# It must stay consistent with the code and docs that assume it exists:
+#
+#   scripts/check-deploy  — leg 2 `systemctl show off-by-one -p MainPID` (unit
+#                           NAME is `off-by-one`); leg 3 requires
+#                           /proc/<MainPID>/exe to BE the checkout's ./off-by-one
+#                           artifact, i.e. ExecStart runs it in place (no copy).
+#   scripts/gate-deploy   — Leg B proves unit binding from WorkingDirectory /
+#                           dirname(ExecStart) == the owning checkout
+#                           (/home/kara/off-by-one); the unit FILE path is
+#                           irrelevant, these two properties are the evidence.
+#   README.md ~line 348   — "Rebuild after ANY code commit (deploy rotation)":
+#                           the remedy `make build` + `kill <MainPID>` works only
+#                           because Restart=always relaunches the service.
+#   docs/api-reference.md ~line 692 — "Deploying the server (deploy rotation)":
+#                           running-unit identity check via
+#                           `systemctl show off-by-one -p MainPID`.
+#   docs/dogfood/diagnostics.md ~line 344 — same binding rule; names
+#                           /home/kara/off-by-one/off-by-one as the ExecStart
+#                           binary of this host's unit.
+#
+# scripts/check-deploy-test.sh asserts the three properties the rest of the story
+# depends on (unit present, `Restart=always`, documented ExecStart path) plus doc
+# pointers, so unit-vs-docs drift fails a test instead of a deploy.
+#
+# Install on a host (host-local; never done by CI):
+#   install -m 0644 deploy/off-by-one.service /etc/systemd/system/off-by-one.service
+#   systemctl daemon-reload
+#   systemctl enable --now off-by-one.service
+
+[Unit]
+Description=Off-by-One — the pre-solve lab
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kara
+Group=kara
+# EnvironmentFile is OPTIONAL (leading "-"): the unit still starts when .env is
+# absent, and the server falls back to its built-in defaults. Keys live in
+# <install dir>/.env (chmod 600) — never in this unit (OB-GAP-015).
+EnvironmentFile=-/home/kara/off-by-one/.env
+Environment="PATH=/home/kara/.local/bin:/usr/local/bin:/usr/bin:/bin"
+# Runs the checkout's own artifact in place: /proc/<MainPID>/exe must resolve to
+# <checkout>/off-by-one for scripts/check-deploy leg 3, so never copy the binary
+# elsewhere (the remedy is `make build`, then kill the MainPID — Restart=always
+# re-executes the rebuilt file).
+ExecStart=/home/kara/off-by-one/off-by-one --port 8766 -load-threshold -1 -cron-interval 60s -pi-agent /home/kara/.local/bin/pi-agent -bwrap /usr/bin/bwrap
+WorkingDirectory=/home/kara/off-by-one
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
