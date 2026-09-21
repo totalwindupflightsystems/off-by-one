@@ -1,8 +1,15 @@
 # Changelog
 
-## [0.1.0] — 2026-07-24
+## [Unreleased]
 
-### MVP Release
+### MVP snapshot — feature-complete pipeline, NOT yet tagged or shipped
+
+**Release status:** the feature set below shipped to production hosts as a
+running service, but no git tag, GitHub Release, or versioned artifact exists
+yet (verified 2026-09-21: `git ls-remote --tags origin` and `gh release list`
+are both empty). The first tagged cut is pending the release tooling work
+tracked in the project board (RELEASE-OB-002). Nothing in this section should
+be read as version 0.1.0 being published.
 
 **Core Pipeline:**
 - Submit problems via HTTP API (`POST /api/v1/problems/submit`)
