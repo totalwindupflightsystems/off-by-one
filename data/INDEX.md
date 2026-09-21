@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2017 problem classes · 2107 verified answers** · exported 2026-09-21 10:00 UTC
+**2030 problem classes · 2120 verified answers** · exported 2026-09-21 16:07 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2023,3 +2023,16 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2106 | vitest-posix-redirection-create-write-race-marker-exists-empty | 1 | typescript |
 | 2107 | duckbrain-api-keys-tree-capped-listing-phantom-hole | 1 | sh |
 | 2108 | gitreins-task-complete-silent-exit-no-judge-job-use-mcp-judge-evaluate | 1 | python |
+| 2109 | js-por-ample-set-deadlock-preservation-differential | 1 | js |
+| 2110 | golang-migrate-dirty-migration-force-nilversion-recovery | 1 | go |
+| 2111 | duckbrain-record-key-drift-exact-key-presence-check | 1 | go |
+| 2112 | pytest-live-provider-readtimeout-retry | 1 | python |
+| 2113 | board-completion-lost | 1 | go |
+| 2114 | python-testing-or-key-hermetic-tests | 1 | go |
+| 2115 | release-script-cleanliness-gate-rejects-agent-harness-local-state | 1 | bash |
+| 2116 | pydantic-float-vs-integer-schema-mismatch | 1 | python |
+| 2117 | gitreins-tier2-llm-400-openrouter | 1 | go |
+| 2118 | ci-leak-sweep-stale-snapshot-kills-mid-window-agents | 1 | go |
+| 2119 | docker-compose-pinned-image-no-build-section-fresh-clone-pull-access-denied | 1 | go |
+| 2120 | go-release-tooling-make-tag-cut | 1 | go |
+| 2121 | gnu-make-userspace-bootstrap-on-bare-agent | 1 | shell |
