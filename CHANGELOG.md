@@ -2,14 +2,22 @@
 
 ## [Unreleased]
 
-### MVP snapshot — feature-complete pipeline, NOT yet tagged or shipped
+**Release status:** release tooling exists — `make release TAG=v<semver>`
+(added in RELEASE-OB-002). It refuses a missing or non-semver TAG, an already
+existing tag, a dirty tree, or a missing `## [<TAG>]` section in this file,
+and runs the full build+test suite before creating the annotated tag with the
+message taken from that section (`DRY_RUN=1` previews all gates without
+tagging). The first cut, v0.1.0, is being tagged with that tooling in the same
+change; until the tag is pushed and a GitHub Release exists, nothing here is
+published.
 
-**Release status:** the feature set below shipped to production hosts as a
-running service, but no git tag, GitHub Release, or versioned artifact exists
-yet (verified 2026-09-21: `git ls-remote --tags origin` and `gh release list`
-are both empty). The first tagged cut is pending the release tooling work
-tracked in the project board (RELEASE-OB-002). Nothing in this section should
-be read as version 0.1.0 being published.
+## [v0.1.0] - 2026-09-21
+
+### MVP snapshot — feature-complete pipeline
+
+The feature set below shipped to production hosts as a running service;
+v0.1.0 is its first tagged cut (verified 2026-09-21, before this cut: `git
+ls-remote --tags origin` and `gh release list` were both empty).
 
 **Core Pipeline:**
 - Submit problems via HTTP API (`POST /api/v1/problems/submit`)

@@ -115,6 +115,83 @@ gate-deploy:
 check-deploy-test:
 	bash scripts/check-deploy-test.sh
 
+# RELEASE-OB-002 — cut a tagged release. Minimal make+git tooling: no
+# goreleaser, by convention.
+#
+# Usage: make release TAG=v0.1.0
+#
+# Gates, in order:
+#   1. TAG must be set and match v<semver> (vMAJOR.MINOR.PATCH, digits only).
+#   2. The tag must not already exist.
+#   3. The tree must be clean (`git status --porcelain` empty — files under
+#      .gitignore do not count).
+#   4. CHANGELOG.md must have a `## [<TAG>]` section (or `## [<TAG>] - date`);
+#      its body becomes the annotated tag message.
+#   5. Build + FULL test suite must pass BEFORE anything is tagged; any failure
+#      aborts with no tag created.
+#
+# DRY_RUN=1 runs every gate, prints each step (including the exact tag command
+# and the push command for the human), and stops short of creating the tag —
+# the verification mode; a green DRY_RUN run must print the push command.
+#
+# NOTE: TAG is intentionally read from the recipe environment (`$$TAG`), never
+# via `$(TAG)` interpolation — an interpolated TAG is unquoted make text that
+# a malicious/typo'd value could turn into arbitrary shell execution.
+release:
+	@if [ -z "$${TAG:-}" ]; then \
+		echo "ERROR: TAG is required — usage: make release TAG=v0.1.0"; \
+		exit 1; \
+	fi
+	@case "$$TAG" in \
+		v[0-9]*.[0-9]*.[0-9]*) \
+			ok=1 ;; \
+		*) \
+			echo "ERROR: TAG '$$TAG' is not a valid release tag — expected v<semver> (e.g. v0.1.0)"; \
+			exit 1 ;; \
+	esac
+	@if git rev-parse -q --verify "refs/tags/$$TAG" >/dev/null 2>&1; then \
+		echo "ERROR: tag $$TAG already exists — delete it or pick a new version"; \
+		exit 1; \
+	fi
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "ERROR: working tree is dirty — commit or clean it before releasing (git status --porcelain must be empty)"; \
+		exit 1; \
+	fi
+	@version_body=$$(echo "$$TAG" | sed 's/^v//'); \
+	section_start=$$(grep -n "^## \[$${TAG}\]" CHANGELOG.md | head -1 | cut -d: -f1); \
+	if [ -z "$$section_start" ]; then \
+		echo "ERROR: no CHANGELOG.md section '## [$$TAG]' found — add one before tagging"; \
+		exit 1; \
+	fi; \
+	next_header=$$(tail -n +$$((section_start + 1)) CHANGELOG.md | grep -n '^## ' | head -1 | cut -d: -f1); \
+	if [ -n "$$next_header" ]; then \
+		section_end=$$((section_start + next_header - 1)); \
+	else \
+		section_end=$$(wc -l < CHANGELOG.md); \
+	fi; \
+	tag_msg=$$(sed -n "$$((section_start + 1)),$$section_end p" CHANGELOG.md | sed -e '/^[[:space:]]*$$/d' | head -40); \
+	if [ -z "$$(echo "$$tag_msg" | tr -d '[:space:]')" ]; then \
+		echo "ERROR: CHANGELOG section '## [$$TAG]' has no body to use as the tag message"; \
+		exit 1; \
+	fi; \
+	echo "== release gates passed for $$TAG =="; \
+	echo "tag message (from CHANGELOG):"; \
+	echo "$$tag_msg"; \
+	echo ""; \
+	if [ "$${DRY_RUN:-0}" = "1" ]; then \
+		echo "DRY_RUN=1 — stopping before build/test and tag creation."; \
+		echo "Would run: go build && go test ./... (full)"; \
+		echo "Would run: git tag -a $$TAG -m <CHANGELOG section for $$TAG>"; \
+		echo "Next: git push origin $$TAG"; \
+		exit 0; \
+	fi; \
+	echo "== running go build + full test suite =="; \
+	go build ./... || exit 1; \
+	go test -count=1 ./... || exit 1; \
+	git tag -a "$$TAG" -m "$$tag_msg" || exit 1; \
+	echo "Created annotated tag $$TAG."; \
+	echo "Next: git push origin $$TAG"
+
 test:
 	go test -count=1 ./...
 
