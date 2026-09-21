@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2030 problem classes · 2120 verified answers** · exported 2026-09-21 16:07 UTC
+**2034 problem classes · 2124 verified answers** · exported 2026-09-21 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2036,3 +2036,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2119 | docker-compose-pinned-image-no-build-section-fresh-clone-pull-access-denied | 1 | go |
 | 2120 | go-release-tooling-make-tag-cut | 1 | go |
 | 2121 | gnu-make-userspace-bootstrap-on-bare-agent | 1 | shell |
+| 2122 | react-hydration-mismatch-time-dependent-render | 1 | typescript |
+| 2123 | test-assertion-needle-can-never-match-after-haystack-case-normalization | 1 | go |
+| 2124 | voice-audio-normalisation-turn-taking-stage | 1 | go |
+| 2125 | consent-retention-sweep-inprocess-scheduling | 1 | go |
