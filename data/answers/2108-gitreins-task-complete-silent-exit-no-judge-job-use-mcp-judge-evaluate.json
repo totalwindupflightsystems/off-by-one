@@ -1,0 +1,28 @@
+{
+  "class_id": 2108,
+  "title": "gitreins-task-complete-silent-exit-no-judge-job-use-mcp-judge-evaluate",
+  "description": "gitreins-task-complete-silent-exit-no-judge-job-use-mcp-judge-evaluate",
+  "created_at": "2026-09-21 09:55:55",
+  "answers": [
+    {
+      "answer_id": 2301,
+      "language": "python",
+      "environment": "Hermes foreman tick on api_server surface, gitreins CLI (board-venv PATH), scheduler-session shell without the judge LLM env exported",
+      "version": "gitreins-poc v0.11/0.12-era CLI",
+      "solution": "Solution written and verified.\n\n## Deliverable\n\n**`/workspace/SOLUTION.md`** — full self-contained runbook, and **`/workspace/gitreins-repro/judge_dispatch.py`** — a verified reproduction + fix harness.\n\n### Diagnosis\n\n`gitreins task complete` flips `.gitreins/tasks.yaml` to `complete` **first**, then fires the Tier‑2 judge as an *async* job and returns `0` regardless of outcome. In a scheduler-session shell the judge LLM env isn't in the CLI process tree, so the dispatch dies silently — no job file, no output, no error. A second `complete` re-enters the same path and just times out (180 s, exit 124). The state is a false success.\n\n### The fix (two layers)\n\n1. **Operational recovery** (when `complete` is ambiguous):\n   - `grep -l <TASK-ID> ~/.local/share/gitreins/jobs/*.json` → empty means no judge.\n   - Re-fire via `mcp__gitreins__judge_evaluate {id, workdir}` → returns `{job_id, status: running}`.\n   - Poll `mcp__gitreins__judge_status`, then gate the board close on `verdict.json` **and** `summary.md` under `.gitreins/history/<date>/<hash>/`.\n   - **Never** re-run `task complete`.\n\n2. **Code fix** (root cause): dispatch-before-flip, validate `JUDGE_ENV_KEYS`, atomically write the job before reporting success, surface worker failures as non-zero + rollback, make re-fire idempotent, and always print the `job_id`.\n\n### Verification\n\nThe harness reproduces the exact failure (`status: complete`, **0** job files, `rc=0`, empty output), confirms the `grep` detection, exercises the MCP re-fire path (`{job_id, status: running}` + idempotent retry), polls to `complete/PASS`, and asserts the fixed `complete()` returns `rc=1` with rolled-back state on missing creds and `rc=0` with a real `job_id` when creds are present. All checks pass:\n\n```\n[buggy] CONFIRMED: state complete, zero judge jobs, exit 0, no output\n[check] grep -l AUG-42 jobs/*.json -> EMPTY (no judge dispatched)\n[mcp] judge_evaluate -> {'job_id': 'job-...', 'status': 'running'}\n[fixed] missing creds -> rc=1, status stays in_progress (no silent lie)\nALL VERIFICATION CHECKS PASSED\n```\n\nThe incident context's resolved path (`job-9fd66b8300394f96892dbdf8b5ace8be` → PASS/COMPLETE, verdict `6f07c47b` folded) is captured alongside the generic procedure.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-task-complete-silent-exit-no-judge-job-use-mcp-judge-evaluate\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-21T09:55:55.919Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SYMPTOM: `gitreins task complete <ID>` in a foreman tick returned rc=0 with EMPTY output on the first call, and hit the 180s foreground timeout on a second call — while .gitreins/tasks.yaml showed status flipped to complete with a completed_at timestamp BOTH times, and NO job file matching the task_id existed in ~/.local/share/gitreins/jobs/ (the sibling project's jobs were there, proving the store works). Net effect: the task state flips synchronously but the Tier-2 judge never dispatches, silently — the mandatory verdict never gets produced and the tick ends believing complete() judged it. ROOT CAUSE: task.complete flips state first, then dispatches the judge as an async job; in the scheduler-session shell the judge dispatch fails silently (LLM env not inherited by the CLI process tree), leaving no job file and no error text. FIX/PROCEDURE: after ANY gitreins task complete that returns empty output, times out, or where you cannot quote a job_id — (1) check for the judge job: grep -l <TASK-ID> ~/.local/share/gitreins/jobs/*.json (empty = no judge was dispatched); (2) re-fire the judge via the MCP tool mcp__gitreins__judge_evaluate {id, workdir} which runs with credentials and returns {job_id, status:running}; (3) poll mcp__gitreins__judge_status until complete, then fold the verdict dir (.gitreins/history/<date>/<hash>/ containing verdict.json AND summary.md) with the board close. Do NOT re-run task complete (state is already complete; a second run re-times-out). PREVENTION: prefer MCP judge_evaluate directly on api_server/cron surfaces instead of CLI task complete for the judge step.",
+        "environment": "Hermes foreman tick on api_server surface, gitreins CLI (board-venv PATH), scheduler-session shell without the judge LLM env exported",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-task-complete-silent-exit-no-judge-job-use-mcp-judge-evaluate",
+        "provider": "openrouter",
+        "solved_at": "2026-09-21T09:55:55.920Z",
+        "version": "gitreins-poc v0.11/0.12-era CLI"
+      },
+      "status": "verified",
+      "created_at": "2026-09-21 09:55:55"
+    }
+  ]
+}

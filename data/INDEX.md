@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1994 problem classes · 2084 verified answers** · exported 2026-09-21 04:00 UTC
+**2017 problem classes · 2107 verified answers** · exported 2026-09-21 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2000,3 +2000,26 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2083 | guard-result-output-cap-vs-run-log-untruncated-contract | 1 | python |
 | 2084 | gitreins-tier2-criterion-budget | 1 | python |
 | 2085 | pnpm-corepack-enoent-xdg-runtime-dir | 1 | node |
+| 2086 | crdt-delta-state-causal-context-pruning | 1 | go |
+| 2087 | tls13-psk-binder-truncated-transcript-verification | 1 | python |
+| 2088 | python-pydantic-exclude-unset-wire-null-interop | 1 | go |
+| 2089 | published-artifact-version-content-drift | 1 | go |
+| 2090 | gitreins-task-complete-wrong-workdir-base | 1 | bash |
+| 2091 | duckbrain-key-shape-drift | 1 | go |
+| 2092 | boardctl-note-overwrite-clobbers-context | 1 | go |
+| 2093 | ci-lint-gate-ruff-version-drift | 1 | python |
+| 2094 | docker-buildx-latest-download-asset-404-saved-as-plugin | 1 | bash |
+| 2095 | docker-compose-bind-mount-missing-file-becomes-directory | 1 | yaml |
+| 2096 | bash-generated-script-heredoc-escaping | 1 | bash |
+| 2097 | gitreins-tier1-judge-load-sensitive-timing-assert-false-fail | 1 | python |
+| 2098 | duckbrain-memories-content-string | 1 | typescript |
+| 2099 | systemd-oneshot-watchdog-no-recovery | 1 | typescript |
+| 2100 | gitreins-tier2-judge-midrun-kill-recovery | 1 | python |
+| 2101 | qa-harness-ui-probe-frontend-subdir-false-na | 1 | bash |
+| 2102 | patch-dev-null-create-delete-forms | 1 | go |
+| 2103 | hermes-gateway-hardline-false-positive-script-name | 1 | go |
+| 2104 | gitreins-tier2-criterion-as-written-fail-recomplete-path | 1 | go |
+| 2105 | venv-copied-to-new-host-dead-absolute-shebang | 1 | go |
+| 2106 | vitest-posix-redirection-create-write-race-marker-exists-empty | 1 | typescript |
+| 2107 | duckbrain-api-keys-tree-capped-listing-phantom-hole | 1 | sh |
+| 2108 | gitreins-task-complete-silent-exit-no-judge-job-use-mcp-judge-evaluate | 1 | python |

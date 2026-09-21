@@ -1,0 +1,28 @@
+{
+  "class_id": 2086,
+  "title": "crdt-delta-state-causal-context-pruning",
+  "description": "crdt-delta-state-causal-context-pruning",
+  "created_at": "2026-09-21 04:26:12",
+  "answers": [
+    {
+      "answer_id": 2279,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "I built and verified the solution. The complete self-contained document is at **`/home/kara/SOLUTION.md`** (1295 lines, includes all three Go files embedded), and the working project is at **`/home/kara/crdt/`**.\n\n## Summary\n\n**Root cause:** An OR-Map remove carries the explicit set of observed add-dots, so a replica can tombstone a dot it never materialized (it sees the remove before the add). Garbage-collecting that tombstone from *local* knowledge (e.g. \"I know a remove\") lets the delayed add resurrect the key. The decision to forget must be made against a **global watermark** (component-wise minimum of every replica's causal context), never a local version vector.\n\n**Fix:** A tombstone for add-dot `d` is dropped only when **both**:\n1. `wm[d.Replica] >= d.Counter` — the add is globally observed, so nobody will request/re-broadcast it; and\n2. some remove `r` listing `d` satisfies `wm[r.Replica] >= r.Counter` — the deletion is globally applied everywhere.\n\n`d` is not even in `cc` in the adversarial schedule, so condition 1 fails and the tombstone is retained. Log prefixes below the watermark are pruned too.\n\n**Verified result** (`go test -race -count=1 ./...` → `ok`):\n\n```\n--- PASS: TestUnsafePruningResurrects        # proves the bug is real\n--- PASS: TestSafePruningNoResurrect         # watermark suppresses resurrection\n--- PASS: TestSafePruningEventuallyDrops     # GC actually reclaims\n--- PASS: TestSimulation10k                  # 10k ops, partition, reorder, dupe\n--- PASS: TestSimulation10kWithSafePruning   # 0 tombstones, 0 log after quiesce\n--- PASS: TestAdversarialScheduleExhaustive\n--- PASS: TestSimulationManySeeds            # 12 deterministic 10k runs\nok  \tcrdt\n```\n\nThe 10k simulation has 3 replicas, 16 keys, 35% removes, delays `1..7` (reordering), 25% duplication, a hard `{0} | {1,2}` partition for ops `3000..6999`, heal + anti-entropy to quiescence, then final safe prune. All replicas are byte-identical via `CanonicalBytes()` and equal the ground-truth live set (`{adds} \\ ⋃ removed`), so no update is lost. I also re-extracted the code blocks from `SOLUTION.md` into a fresh directory and confirmed `gofmt`/`go vet`/`go test` all pass there, so the document is directly usable.\n\nThe full fix code is in section 4 of `SOLUTION.md`:\n\n```go\nfunc (m *ORMap) PruneTombstones(wm map[ReplicaID]uint64) int {\n\tpruned := 0\n\tfor addDot, removers := range m.tombstones {\n\t\tif !observedGlobally(addDot, wm) { continue }      // condition 1\n\t\tsafe := false\n\t\tfor r := range removers {\n\t\t\tif r.Counter <= wm[r.Replica] { safe = true; break } // condition 2\n\t\t}\n\t\tif safe { delete(m.tombstones, addDot); pruned++ }\n\t}\n\tkept := m.log[:0]\n\tfor _, op := range m.log {\n\t\tif op.Dot.Counter <= wm[op.Dot.Replica] { continue }\n\t\tkept = append(kept, op)\n\t}\n\tm.log = kept\n\treturn pruned\n}\n```\n",
+      "evidence": "# Evidence\n- Problem class: crdt-delta-state-causal-context-pruning\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-21T04:26:12.674Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement a delta-state OR-Map CRDT in Go: an observed-remove map whose keys carry replica-scoped dots, where each replica broadcasts bounded deltas rather than full state and the causal context must be pruned without ever resurrecting a removed key. The harness runs a deterministic 3-replica simulation of 10k randomized ops with reordering, duplication and a hard partition that heals before anti-entropy, then asserts all replicas reach byte-identical state and that no update is lost. Also enforce a configured causal-context watermark: pruning must be provably safe (a key can only be dropped once every live dot exceeds it) and the test suite includes adversarial schedules that fail unsafe pruning.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "crdt-delta-state-causal-context-pruning",
+        "provider": "openrouter",
+        "solved_at": "2026-09-21T04:26:12.674Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-09-21 04:26:12"
+    }
+  ]
+}
