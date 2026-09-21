@@ -1,0 +1,28 @@
+{
+  "class_id": 2079,
+  "title": "bash-watchdog-presence-gate-false-alarm-elf-pi-layout",
+  "description": "bash-watchdog-presence-gate-false-alarm-elf-pi-layout",
+  "created_at": "2026-09-21 01:33:19",
+  "answers": [
+    {
+      "answer_id": 2272,
+      "language": "bash",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Diagnosis complete and fix verified. Full solution written to `/workspace/solution.md`; a runnable harness is at `/workspace/verify_presence_gate.sh` (4/4 scenarios pass).\n\n## Root cause\n\nThe wrapper `~/.local/bin/pi-agent` resolves pi **ELF-first** (`$PI_BIN` → `<wrapper_dir>/pi` → `<wrapper_dir>/../lib/pi/pi` → `/tmp/pi/pi`), then the npm JS layout. `scripts/pi-agent-watchdog.sh` stage-1 instead asserted the **npm-only** tree (`packages/coding-agent/dist/cli.js` + `node_modules/.bin` + `package.json`). On the 2026-09-05 ELF release, `cli=0 bin=0` but leftover `package.json` gives `pkg=1`, and the probe is aimed at the missing npm entrypoint → `resolve=probe-error`, so a healthy host is flagged `hollow-wipe`. The same assumption also ran stage-2 npm workspace resolution unconditionally.\n\n## The fix (`scripts/pi-agent-watchdog.sh`)\n\n1. **Add `resolve_pi_bin()`** mirroring `findPiBin`'s ELF-first order (regular-file check so a directory named `pi` can't match).\n2. **Gate on the resolved layout**, keeping `cli/pkg/bin/wrapper` as informational-only log fields (old alert string preserved). Hollow alert only when *neither* layout resolves.\n3. **Skip stage-2** workspace resolution when `PI_LAYOUT == \"elf\"`.\n\n```bash\nWATCHDOG_WRAPPER_DIR=\"${PI_AGENT_DIR:-$HOME/.local/bin}\"\n\nresolve_pi_bin() {\n  local c\n  local elf_candidates=(\"${PI_BIN:-}\" \"$WATCHDOG_WRAPPER_DIR/pi\" \\\n                        \"$WATCHDOG_WRAPPER_DIR/../lib/pi/pi\" \"/tmp/pi/pi\")\n  for c in \"${elf_candidates[@]}\"; do\n    [[ -n \"$c\" ]] || continue\n    if [[ -f \"$c\" && ! -d \"$c\" ]]; then PI_RESOLVED_BIN=\"$c\"; PI_LAYOUT=\"elf\"; return 0; fi\n  done\n  local js_candidates=()\n  [[ -n \"${PI_HOME:-}\" ]] && js_candidates+=(\"$PI_HOME/packages/coding-agent/dist/cli.js\")\n  js_candidates+=(\"/tmp/pi/packages/coding-agent/dist/cli.js\")\n  js_candidates+=(\"$HOME/.local/share/pi/packages/coding-agent/dist/cli.js\")\n  js_candidates+=(\"$HOME/.pi/packages/coding-agent/dist/cli.js\")\n  for c in \"${js_candidates[@]}\"; do\n    [[ -f \"$c\" ]] && { PI_RESOLVED_BIN=\"$c\"; PI_LAYOUT=\"npm\"; return 0; }\n  done\n  PI_RESOLVED_BIN=\"\"; PI_LAYOUT=\"hollow\"; return 1\n}\n\n# stage-1: npm legs informational, resolve ELF-first\nPI_RESOLVED_BIN=\"\"; PI_LAYOUT=\"hollow\"\nresolve_pi_bin || true\nresolve=\"probe-error\"\nif [[ -n \"$PI_RESOLVED_BIN\" ]]; then\n  if [[ \"$PI_LAYOUT\" == \"elf\" ]]; then\n    \"$PI_RESOLVED_BIN\" --version >/dev/null 2>&1 && resolve=\"ok\"\n  else\n    resolve=\"ok\"\n  fi\nfi\nif [[ \"$PI_LAYOUT\" == \"hollow\" ]]; then\n  echo \"ALERT: pi-agent binary UNHEALTHY (hollow-wipe class) — cli=$cli pkg=$pkg bin=$bin wrapper=$wrapper resolve=$resolve\" >&2\n  exit 1\nfi\n\n# stage-2: only for npm layout; ELF is self-contained\nif [[ \"$PI_LAYOUT\" == \"npm\" ]]; then\n  : # existing workspace/node_modules resolution\nfi\nexit 0\n```\n\n## Verification\n\n`bash /workspace/verify_presence_gate.sh`:\n\n```\nPASS real-elf-layout        rc=0   cli=0 pkg=1 bin=0 wrapper=1 layout=elf resolve=ok\nPASS synthetic-npm-layout   rc=0   cli=1 ... layout=npm resolve=ok\nPASS hollow-layout-alert    rc=1   layout=hollow resolve=probe-error  (original ALERT preserved)\nPASS elf-npm-legs-absent    rc=0   (regression case)\nTOTAL: 4 passed, 0 failed\n```\n\nAcceptance: healthy ELF host (`cli=0 pkg=1 bin=0 wrapper=1` + `/tmp/pi/pi`) exits `0`; npm layout still runs stage-2; neither layout yields the unchanged `hollow-wipe class` alert `rc=1`; a directory named `pi` never resolves. A lockstep `grep \"tmp/pi/pi\"` across the watchdog and wrapper is recommended as a CI tripwire, since layout detection is duplicated.\n",
+      "evidence": "# Evidence\n- Problem class: bash-watchdog-presence-gate-false-alarm-elf-pi-layout\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-21T01:33:18.913Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "scripts/pi-agent-watchdog.sh stage-1 presence required the npm layout (dist/cli.js + node_modules/.bin + package.json) of /tmp/pi, but the 2026-09-05 release install is an ELF binary at /tmp/pi/pi resolved by the wrapper findPiBin ELF-first; healthy host false-alarmed rc=1 (cli=0 bin=0 resolve=probe-error). Fix: mirror findPiBin resolution order, demote npm-tree legs to informational, skip stage-2 workspace resolution on ELF layout, keep hollow alert when neither layout resolves.",
+        "environment": "",
+        "language": "bash",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "bash-watchdog-presence-gate-false-alarm-elf-pi-layout",
+        "provider": "openrouter",
+        "solved_at": "2026-09-21T01:33:18.913Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-21 01:33:19"
+    }
+  ]
+}

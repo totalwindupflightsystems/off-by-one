@@ -1,0 +1,28 @@
+{
+  "class_id": 2081,
+  "title": "go-httptest-sse-deferred-close-client-timeout-flake",
+  "description": "go-httptest-sse-deferred-close-client-timeout-flake",
+  "created_at": "2026-09-21 01:47:54",
+  "answers": [
+    {
+      "answer_id": 2274,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "The solution is written to `/home/kara/solution.md` and verified against a working reproduction in `/home/kara/sseflake/`.\n\n## Summary\n\n**Root cause chain**\n\n1. `http.Client.Timeout` (30s) is a deadline for headers **and the response body**, so a long-lived SSE read stays governed by it. `CloseIdleConnections()` can't cancel an active request.\n2. `httptest.Server.Close()` blocks on all outstanding handlers and deliberately won't close `StateActive` connections — so an in-flight SSE handler pins it.\n3. Teardown ordering was wrong: `defer stub.Close()` runs at function return, while `t.Cleanup(svc.Close)` runs **after** defers → the stub was closed while the service still held the stream open. Only the 30s client timeout unblocked it.\n4. The stub handler ignored `r.Context()` and had no write deadline, extending the hang.\n\n**Fix (4 parts)**\n\n- Service owns a `context`, requests use `http.NewRequestWithContext`, and `Close()` cancels it + waits for the reader goroutine.\n- Stub handler exits on `r.Context().Done()` and sets per-write deadlines via `http.ResponseController.SetWriteDeadline`.\n- Bounded stub close: `CloseClientConnections()` then `Close()` with a 5s timeout guard.\n- Cleanup ordering via LIFO `t.Cleanup`: register stub cleanup first, service cleanup second.\n\n**Verified results** (Go 1.26, Linux)\n\n| Test | Time |\n|---|---|\n| Buggy path (2s scaled timeout) | 2.04s — pinned to client timeout |\n| Fixed path | 210µs |\n| Stress, delayed handler (30s client timeout) | 91µs |\n\nThe bounded `CloseStub` also independently rescues a service that never cancels (~60ms measured), because `CloseClientConnections()` closes the active socket and cancels the handler context.\n",
+      "evidence": "# Evidence\n- Problem class: go-httptest-sse-deferred-close-client-timeout-flake\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-21T01:47:53.327Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Test-only CI flake where teardown waits ~30s: the SSE client default http.Client.Timeout (30s) covers the body read, and the httptest stub was closed via defer BEFORE the service Close (t.Cleanup LIFO runs it after) — teardown waits on the in-flight SSE handler up to the client timeout under CI load. Fix: make the stub handler exit on request-context cancellation, add write deadlines, bound the stub server Close (CloseClientConnections + bounded wait), and order stub cleanup AFTER Service.Close. Add a stress test with a delayed SSE handler asserting Close finishes well under the timeout.",
+        "environment": "",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-httptest-sse-deferred-close-client-timeout-flake",
+        "provider": "openrouter",
+        "solved_at": "2026-09-21T01:47:53.327Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-21 01:47:54"
+    }
+  ]
+}

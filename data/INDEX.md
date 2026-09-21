@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**1974 problem classes · 2063 verified answers** · exported 2026-09-20 22:00 UTC
+**1994 problem classes · 2084 verified answers** · exported 2026-09-21 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -16,8 +16,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 455 | static-html-idle-tick | 4 | go |
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
+| 1540 | gitreins-tier2-input-token-cap-exceeded | 4 | go |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
-| 1540 | gitreins-tier2-input-token-cap-exceeded | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 78 | so-nil-pointer-deref | 2 | go |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
@@ -1980,3 +1980,23 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2063 | gitreins-tier2-foreground-killed-by-tool-window | 1 | go |
 | 2064 | gitreins-async-judge-freezes-tree-at-dispatch | 1 | go |
 | 2065 | pnpm12-engine-strict-not-read-from-npmrc | 1 | go |
+| 2066 | bash-exact-min-cost-flow-dual-optimality-certificate | 1 | shell |
+| 2067 | gitreins-dangling-symlink-judge-works-via-venv-python-import | 1 | python |
+| 2068 | qa-harness-act-workflow-filter | 1 | go |
+| 2069 | voice-turn-residual-latency-stage-sums-vs-end-to-end-submitms | 1 | go |
+| 2070 | gitreins-post-merge-tier1-empty-index-judge | 1 | python |
+| 2071 | stale-guard-assert-after-deliberate-code-change | 1 | go |
+| 2072 | vitest-test-cwd-relative-path-enoent | 1 | go |
+| 2073 | jsonl-glued-two-objects-one-line | 1 | python |
+| 2074 | ci-ruff-format-md-code-blocks | 1 | go |
+| 2075 | vitest-test-cwd-relative-path-resolution-enoent | 1 | go |
+| 2076 | stale-guard-test-asserts-behind-deliberate-code-change | 1 | go |
+| 2077 | duckbrain-429-token-bucket-unhandled-by-caller | 1 | python |
+| 2078 | gitreins-judge-tier1-tests-fail-argv-env-pnpm-not-found | 1 | go |
+| 2079 | bash-watchdog-presence-gate-false-alarm-elf-pi-layout | 1 | bash |
+| 2080 | eduos-voice-stack-lost-with-retired-lane-user-dockerd | 1 | go |
+| 2081 | go-httptest-sse-deferred-close-client-timeout-flake | 1 | go |
+| 2082 | git-tracked-jsonl-board-duplicate-id-appended-row | 1 | go |
+| 2083 | guard-result-output-cap-vs-run-log-untruncated-contract | 1 | python |
+| 2084 | gitreins-tier2-criterion-budget | 1 | python |
+| 2085 | pnpm-corepack-enoent-xdg-runtime-dir | 1 | node |
