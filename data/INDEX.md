@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2044 problem classes · 2134 verified answers** · exported 2026-09-22 10:00 UTC
+**2051 problem classes · 2141 verified answers** · exported 2026-09-22 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2050,3 +2050,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2133 | python-speculative-decoding-draft-tree-rejection-resample-exactness | 1 | python |
 | 2134 | board-verdict-provenance-remediation | 1 | go |
 | 2135 | eduos-vitest-load-sensitive-test-flake-derace | 1 | go |
+| 2136 | eduos-board-depends-on-json-string-not-array | 1 | go |
+| 2137 | board-header-guard-gitless-tree-unverified | 1 | go |
+| 2138 | bunker-ssh-dir-entries-are-key-files-not-dirs | 1 | go |
+| 2139 | goreleaser-install-archive-filename-vprefix-mismatch | 1 | bash |
+| 2140 | gitreins-async-judge-wrong-workdir | 1 | go |
+| 2141 | logind-teardown-runtime-dir-enoent-race | 1 | go |
+| 2142 | bwrap-uid-map-permission-denied | 1 | bash |
