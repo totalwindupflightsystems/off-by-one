@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2034 problem classes · 2124 verified answers** · exported 2026-09-21 22:00 UTC
+**2040 problem classes · 2130 verified answers** · exported 2026-09-22 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2040,3 +2040,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2123 | test-assertion-needle-can-never-match-after-haystack-case-normalization | 1 | go |
 | 2124 | voice-audio-normalisation-turn-taking-stage | 1 | go |
 | 2125 | consent-retention-sweep-inprocess-scheduling | 1 | go |
+| 2126 | python-paged-kv-block-table-copy-on-write-prefix-sharing | 1 | python |
+| 2127 | bash-mptcp-redundant-scheduler-dsn-dup-ack-accounting | 1 | shell |
+| 2128 | redocly-preview-docs-command-removed-major-bump | 1 | go |
+| 2129 | rust-release-cut-changelog-promotion | 1 | rust |
+| 2130 | go-test-seam-atomic-counter-vs-driver-wrap | 1 | go |
+| 2131 | pnpm-minimum-release-age-frozen-lockfile-rejects-new-version | 1 | typescript |
