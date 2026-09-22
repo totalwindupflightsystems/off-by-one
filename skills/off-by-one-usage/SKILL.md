@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.2.0
+version: 1.3.0
 category: software-development
 ---
 
@@ -17,11 +17,25 @@ verified answers in a SQLite graph. Any agent hitting the same problem class lat
 discovers the pre-verified answer instead of debugging from scratch. Answers are
 also published as flat files (`data/answers/`, `data/answers.jsonl`) and a web UI.
 
-Field-tested 2026-08-10 (coding-hermes-dogfood) verdict 🟡 PROMISING-BUT-ROUGH;
-re-field-tested 2026-08-20 (coding-hermes-dogfood) verdict ✅ SHIPPABLE. All
-P1/P2 gaps from run #1 were fixed by the fleet and re-verified live on 2026-08-20
-(see docs/dogfood/2026-08-20-integration.md). Pitfalls below reflect the CURRENT
-state; if a pitfall mentions a fixed OB-GAP id, it is stale — check the board.
+Field-tested 2026-08-10 (dogfood #1) 🟡 PROMISING-BUT-ROUGH; 2026-08-20 (#2)
+✅ SHIPPABLE; 2026-09-19 (#7) ✅ SHIPPABLE; 2026-09-22 (#8) ✅ SHIPPABLE
+with one open P1 — this run proved the **no-server corpus path** end-to-end
+(solved a live PEP 668 problem on the host from a shallow clone, no server)
+and the fresh-box install leg green verbatim from README, but found the
+**public catalog ob1.it.com frozen at 2026-08-18** (DF-OFF-BY-ONE-12). Pitfalls
+below reflect the CURRENT state; if a pitfall mentions a fixed OB-GAP id, it
+is stale — check the board.
+
+## Is the public catalog fresh? (10-second probe)
+
+```bash
+curl -s https://ob1.it.com/ | grep -o '<title>[^<]*'   # advertises class count
+curl -s http://localhost:8766/api/v1/stats | jq .total_problems
+```
+
+If the title's number lags the live stats by more than one sync cycle, the
+`site/` leg is orphaned again — do not treat catalog pages as current, use the
+repo corpus (`data/`) or the live API instead.
 
 ## Entry points
 
@@ -217,10 +231,12 @@ filters) and OB-GAP-081 (limit clamp to 100) fixes CONFIRMED live; export/import
 git round trip WORKS for the first time since 09-07 (bare remote → commit 0fdd5a6 →
 re-import updated:1). New pitfalls:
 
-6. **GET /api/v1/queue (list) hides pending entries (DF-OFF-BY-ONE-10, OPEN)** —
+6. **GET /api/v1/queue (list) hides pending entries (DF-OFF-BY-ONE-10, FIXED 2026-09-20)** —
    after a submit, the list endpoint can return `entries:null,total:0` while
    GET /api/v1/queue/{submission_id} returns the row. Poll the per-id endpoint,
-   not the list, until this is fixed.
+   not the list, until this is fixed. **Live-verified FIXED on 2026-09-22:**
+   the list shows pending rows newest-first with an honest total and
+   `?status=pending` works; stats, list and per-status counts reconcile.
 7. **Export preconditions are strict-by-design** — the target needs a BARE git
    remote whose URL equals `target_repo`, a clone workspace under
    $OFF_BY_ONE_EXPORT_DIR with that origin, and the branch must already exist
@@ -229,3 +245,28 @@ re-import updated:1). New pitfalls:
 8. **Fresh-box install** — README lists Go 1.25+ but Quick Start has no bootstrap;
    on a sudo-less box install the Go tarball by hand (DF-OFF-BY-ONE-11). Clone of
    the private repo needs existing credentials; tar-stream is the fallback.
+
+## Field-tested 2026-09-22 (dogfood tick): verdict ✅ SHIPPABLE, one open P1
+
+Angle: the no-server corpus path + the public catalog ob1.it.com — the surfaces
+prior runs never touched. Full evidence: docs/dogfood/2026-09-22-integration.md.
+
+9. **The public catalog is FROZEN at 2026-08-18 (DF-OFF-BY-ONE-12, OPEN P1)** —
+   `scripts/sync-answers.sh` (the only regenerator of `site/`) has no active
+   caller since the 2026-08-27 cron merge: ob1-distribute.sh PART 1 refreshes
+   `data/`, PART 2 ships binary+DB, nothing generates `site/`. The catalog
+   advertises 1062/1144 vs real 2051/2141, sitemap has 1063 URLs, new classes
+   404, and the "Search the catalog" CTA has zero JS behind it (static page,
+   no input). Until fixed: trust the repo corpus or the live API, never the
+   catalog; verify freshness with the 10-second probe at the top of this file.
+10. **Consume the corpus — it is the product** — `git clone --depth 1` (3s,
+    68MB) + a local scan answers real problems with no server: this run solved
+    the host's own PEP 668 pip/interpreter problem from answer 1347 (venv from
+    the explicit versioned interpreter) in ~2 minutes. Warm full-corpus scan
+    ≈62ms; single-class grep 5ms; fresh-box install green verbatim from README
+    (bunker: clone 15s → build rc=0 → seed 34s → serve → discover found:true
+    10ms).
+11. **Scratch paths need per-agent names on shared hosts (DF-OFF-BY-ONE-13)** —
+    a stale `/tmp/go.tgz` from a prior agent (sticky /tmp, different uid)
+    turned the README recipe into `curl: (23)`; use `$HOME` for downloads and
+    id-suffixed log paths (`/tmp/build-<id>.log`).

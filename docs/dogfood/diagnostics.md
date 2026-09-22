@@ -469,3 +469,52 @@ Bunker install leg (las-bunker-03, agent adeac425, destroyed after):
 - `make build` → `go: command not found`; fixed by go1.25.1 tarball to
   ~/toolchain (no sudo). Documented path then green end-to-end:
   INSTALL_SECONDS=114, seed OK, /health 200, discover found:true.
+
+## §9 — 2026-09-22 dogfood run (HEAD 859081c) — the distribution layer under the microscope
+
+Angle: prior runs exercised the HTTP API; this run consumed the project the
+way an outside user does — the flat-file corpus (no server) and the public
+catalog ob1.it.com.
+
+How the distribution pipeline actually works (and where it silently ends):
+- `export-answers.py` reads SQLite, keeps `status='verified'` answers, drops
+  probe/canary classes via `EXCLUDED_CLASS_PATTERNS` (regex on the class
+  title), writes `data/answers.jsonl`, `data/answers/<id>-<slug>.json`,
+  INDEX.md, COUNTS.md (auto-stamped — the fix for the old count-drift class
+  of bugs), and a generated `data/README.md` consumer guide.
+- `ob1-distribute.sh` (cron 4×/day, canonical copy in repo, deployed copy at
+  `~/.hermes/scripts/` — re-deploy after edits, they were md5-identical on
+  09-22) PART 1: regenerate `data/`, commit, push. PART 2:
+  `publish-catalog.sh` ships the **binary + DB snapshot** to the catalog box.
+- The **static HTML tree (`site/`) is NOT in either half**: only
+  `sync-answers.sh` regenerates it (via `generate-static-site.py`), and that
+  script has no active caller since the 08-27 cron merge — its own header
+  says it absorbed `ob1-sync-answers.sh`, whose site-refresh half was dropped.
+  Net effect: ob1.it.com froze at the Aug 18 generation (1062/1144 advertised
+  vs 2051/2141 real). Any future fix must re-wire `sync-answers.sh` (or fold
+  `generate-static-site.py` into PART 1) AND redeploy the cron copy.
+
+Numbers that reconcile (recompute, don't trust): 2142 live classes − 76
+regex-excluded probes − 15 failed-only classes (checked in SQLite read-only)
+= 2051 corpus classes; 2307 stats-verified − 166 failed-solve answers = 2141
+corpus answers. The corpus is a strict SUBSET of the stats-verified set —
+README's "one further exclusion" phrasing inverts the relationship.
+
+Bunker install leg #2 (agent 92f4b025, destroyed after, list clean):
+- Public HTTPS clone works on a fresh user (no credentials needed) — 15s.
+  Run #7's private-clone limitation is gone for consumers (README Quick Start
+  now documents the access requirement for contributors, and the corpus is
+  the no-clone path anyway).
+- README verbatim install green: Go tarball (~/toolchain) → `make build` rc=0
+  → seed 34s (2051/2141/8510 edges) → serve :18766 → discover found:true 10ms.
+- Two cross-agent `/tmp` collisions cost real time: (1) a stale `/tmp/go.tgz`
+  from the Sep-19 agent (different uid, sticky /tmp) turned the README recipe
+  into `curl: (23)` — the recipe should use `$HOME`; (2) fixed log paths
+  (`/tmp/build.log`, `/tmp/ob1_site.log`) are shared with concurrent agents
+  on the box — a sibling's Rust build overwrote `build.log` mid-read. Lesson:
+  on multi-agent hosts, every scratch path needs the agent id in it.
+
+Right way to answer "is the public catalog fresh?" in 10 seconds:
+`curl -s https://ob1.it.com/ | grep -o '<title>[^<]*'` and compare the number
+against `curl -s http://localhost:8766/api/v1/stats`. A title older than one
+sync cycle = the site leg is orphaned again.
