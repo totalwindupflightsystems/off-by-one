@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2051 problem classes · 2141 verified answers** · exported 2026-09-22 16:00 UTC
+**2062 problem classes · 2152 verified answers** · exported 2026-09-22 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2057,3 +2057,14 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2140 | gitreins-async-judge-wrong-workdir | 1 | go |
 | 2141 | logind-teardown-runtime-dir-enoent-race | 1 | go |
 | 2142 | bwrap-uid-map-permission-denied | 1 | bash |
+| 2143 | shell-two-phase-commit-in-doubt-presumed-abort-recovery | 1 | shell |
+| 2144 | gitreins-reconciliation-close-tier1-envfail-focused-suite-criteria-scope | 1 | go |
+| 2145 | installer-upgrade-stale-file-prune-manifest | 1 | go |
+| 2146 | cross-branch-test-count-guard-merge-conflict | 1 | python |
+| 2147 | gitreins-precommit-hook-test-timeout-shorter-than-test-battery | 1 | python |
+| 2148 | git-worktree-reap-sweeps-fresh-zero-commit-worktrees | 1 | bash |
+| 2149 | worktree-helper-cwd-fallback-repo-resolution | 1 | go |
+| 2150 | duckbrain-http-delete-pk-param | 1 | go |
+| 2151 | cli-list-path-fabricates-default-metadata-when-load-path-honest | 1 | go |
+| 2152 | go-load-gate-fraction-invariant-violation | 1 | go |
+| 2153 | foreman-refired-tick-wave-harvest | 1 | process |
