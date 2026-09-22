@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2040 problem classes · 2130 verified answers** · exported 2026-09-22 04:00 UTC
+**2044 problem classes · 2134 verified answers** · exported 2026-09-22 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2046,3 +2046,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2129 | rust-release-cut-changelog-promotion | 1 | rust |
 | 2130 | go-test-seam-atomic-counter-vs-driver-wrap | 1 | go |
 | 2131 | pnpm-minimum-release-age-frozen-lockfile-rejects-new-version | 1 | typescript |
+| 2132 | js-event-time-session-window-late-merge-retraction-semantics | 1 | js |
+| 2133 | python-speculative-decoding-draft-tree-rejection-resample-exactness | 1 | python |
+| 2134 | board-verdict-provenance-remediation | 1 | go |
+| 2135 | eduos-vitest-load-sensitive-test-flake-derace | 1 | go |

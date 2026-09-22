@@ -1,0 +1,28 @@
+{
+  "class_id": 2133,
+  "title": "python-speculative-decoding-draft-tree-rejection-resample-exactness",
+  "description": "python-speculative-decoding-draft-tree-rejection-resample-exactness",
+  "created_at": "2026-09-22 04:56:42",
+  "answers": [
+    {
+      "answer_id": 2326,
+      "language": "python",
+      "environment": "python3",
+      "version": "3.12",
+      "solution": "I implemented, debugged, and statistically verified a complete lossless tree speculative decoder. The full write-up is in `/home/kara/SOLUTION.md`; runnable code is in `/home/kara/solution.py` and `/home/kara/final_verify.py`.\n\n## Root causes of non-exactness\n\n1. **Sibling attention leakage** — flattening the tree and using a plain causal (lower-triangular) mask lets a node attend to unrelated branches, so its `p_target` is computed under the wrong context. Signature: position 0 is exact, positions ≥ 1 are biased.\n2. **Flattened row index vs. positional id conflated** (the bug I actually hit) — a node's target probability must be read from its **parent's flattened row** (`P + parent.idx`, or `P-1` for root), while PE position ids must use **depth** (`P-1+depth`). Using depth as a row index silently reads the wrong context and biases depth ≥ 2 even with a perfect mask.\n3. **Wrong residual** — must be `normalize(max(p − q̃, 0))` using the *renormalized* proposal actually sampled, applied once on the first rejection, then stop.\n4. **Off-by-one depth accounting** — a round emits `accepted + 1` tokens (residual or bonus); `E[emitted] = E[accepted] + 1`, `E[accepted] = Σ_i P(accepted ≥ i) = Σ_i Π_{j≤i} a_j`.\n\n## Core fix\n\n```python\n# ancestor-only attention: prompt + own ancestors + self, never siblings\nfor nd in nodes:\n    i = prefix_len + nd.idx\n    mask[i, :prefix_len] = True\n    v = nd\n    while v is not None and v.parent is not None:\n        mask[i, prefix_len + v.idx] = True\n        v = v.parent\n    mask[i, i] = True\n\n# root correct row: read p from the PARENT's flattened row\nparent_row = (P - 1) if parent.parent is None else (P + parent.idx)\nnd.p = softmax(logits[parent_row])[nd.token]\n\n# exact residual on first rejection, then stop\nresid = np.maximum(p - qfull, 0.0)\nemitted.append(rng.choice(target.V, p=resid / resid.sum()))\n```\n\n## Verification results\n\n```text\n-- correct tree mask --                       -- broken flatten-causal mask --\nposition 0: chi2=  1.75 p=0.882 -> PASS        position 0: chi2=  6.26 p=0.282 -> PASS\nposition 1: chi2=  0.88 p=0.972 -> PASS        position 1: chi2= 70.39 p=8.5e-14 -> FAIL\nposition 2: chi2=  8.97 p=0.110 -> PASS        position 2: chi2=307.36 p=2.6e-64 -> FAIL\nposition 3: chi2=  1.57 p=0.905 -> PASS        position 3: chi2=155.01 p=1.1e-31 -> FAIL\n\nE[accepted]=1.81475 = sum_i P(acc>=i);  E[emitted]=2.81475 = E[accepted]+1\nchain alpha=0.7,k=5: E[accepted]=1.9433 vs analytic sum alpha^i=1.9412\ntree target logits == causal target logits: max|delta p| = 0.0\n```\n\nThe correct mask passes chi-square at every depth; the broken mask passes only at position 0 and is decisively rejected at depth ≥ 1, exactly matching the sibling-leakage diagnosis.\n",
+      "evidence": "# Evidence\n- Problem class: python-speculative-decoding-draft-tree-rejection-resample-exactness\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-22T04:56:42.589Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement lossless speculative decoding for a transformer language model in Python: a small draft model proposes a branching tree of candidate continuations, the target model verifies the whole tree in a single batched forward pass with a tree-attention mask, and tokens are accepted by the standard rejection-sampling rule min(1, p_target/p_draft) with the residual max(0, p_target - p_draft) resampled on the first rejection, so the emitted distribution is provably identical to target-only sampling. Handle sibling-branch masking (a token in branch B must not attend to branch A), per-position acceptance accounting for tree depth, and the expected accepted-token math for a chain of k candidates at acceptance rate alpha. Verify exactness statistically: with a fixed seed, compare token histograms from tree-decoded and target-only sampling over many samples with a chi-square test, and confirm the acceptance rate matches the analytic expectation.",
+        "environment": "python3",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "python-speculative-decoding-draft-tree-rejection-resample-exactness",
+        "provider": "openrouter",
+        "solved_at": "2026-09-22T04:56:42.589Z",
+        "version": "3.12"
+      },
+      "status": "verified",
+      "created_at": "2026-09-22 04:56:42"
+    }
+  ]
+}
