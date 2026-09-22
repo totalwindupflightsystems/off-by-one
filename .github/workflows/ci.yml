@@ -49,6 +49,27 @@ jobs:
       - name: Install bubblewrap (exercise sandbox tests)
         run: command -v bwrap >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap; }
 
+      # Ubuntu 24.04 runner images ship kernel.apparmor_restrict_unprivileged_userns=1
+      # (AppArmor unprivileged-userns hardening). bwrap gets far enough to create
+      # its user namespace, then dies writing the uid map:
+      #   "bwrap: setting up uid map: Permission denied"
+      # so the OB-GAP-087 install alone flipped the sandbox tests from SKIP to
+      # FAIL (OB-GAP-091). Lift the restriction so the sandbox stays exercised
+      # (the point of OB-GAP-087) instead of degrading to skip-on-error.
+      - name: Lift AppArmor unprivileged-userns restriction
+        # Fail-open by design: a kernel without the knob has no restriction to
+        # lift, and the setuid fallback step below covers that case.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || echo "restrict knob not present on this kernel; skipping"
+
+      # Belt-and-suspenders for future runner images: setuid-root bwrap runs its
+      # privileged path and is immune to the unprivileged-userns restriction.
+      - name: Ensure setuid-root bubblewrap fallback
+        run: |
+          BWRAP="$(command -v bwrap)"
+          test -n "$BWRAP" || { echo "bwrap not found"; exit 1; }
+          test "$(stat -c %a "$BWRAP")" = "4755" || { sudo chown root:root "$BWRAP" && sudo chmod 4755 "$BWRAP"; }
+          echo "bwrap at $BWRAP: $(stat -c '%U:%G %a' "$BWRAP")"
+
       - name: Test (short)
         run: |
           git config --global user.email "totalwindupflightsystems@gmail.com"
