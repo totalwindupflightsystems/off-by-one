@@ -13,8 +13,14 @@ go vet ./...
 All commits must pass GitReins static guards:
 
 ```bash
-PATH="$HOME/gitreins-poc/.venv/bin:$PATH" gitreins guard
+gitreins guard
 ```
+
+`gitreins` resolves through the pipx shim at `~/.local/bin/gitreins` — do NOT
+prefix PATH with a repo venv (the old `PATH="$HOME/gitreins-poc/.venv/bin:$PATH"`
+recipe names a directory that no longer exists, and a stale venv first on PATH
+can shadow the repo interpreter and falsely FAIL the tests lane). The tests
+lane is interpreter-pinned in `.gitreins/config.yaml`.
 
 | Gate | Severity |
 |------|----------|

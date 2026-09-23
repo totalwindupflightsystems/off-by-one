@@ -399,8 +399,17 @@ and transcripts: [`docs/dogfood/diagnostics.md`](docs/dogfood/diagnostics.md)
 Every commit runs static guards. If guards fail, the commit is BLOCKED.
 
 ```bash
-PATH="$HOME/gitreins-poc/.venv/bin:$PATH" gitreins guard
+gitreins guard
 ```
+
+`gitreins` resolves through the pipx shim at `~/.local/bin/gitreins` — do NOT
+prefix PATH with a repo venv. An older recipe suggested
+`PATH="$HOME/gitreins-poc/.venv/bin:$PATH"`; that directory no longer exists
+(the repo was renamed to `~/gitreins`), and where a similar stale venv does
+exist, putting it first on PATH makes its tools shadow the repo interpreter
+and falsely FAIL the tests lane on a clean tree. The tests lane is
+interpreter-pinned in `.gitreins/config.yaml` (`test_command`), so PATH
+ordering is irrelevant.
 
 What's checked:
 
