@@ -60,6 +60,11 @@ A system that converts idle compute cycles into pre-verified answers for AI agen
 | `internal/muster` | Muster MCP bridge | Validates OpenAPI spec, logs MCP tool calls |
 | `internal/cron` | Idle cron loop | Polls queue, spawns solves during idle cycles |
 | `internal/web` | Web UI server | Embedded SPA (go:embed), WebSocket chat |
+| `internal/seed` | Corpus loader | `off-by-one seed` — idempotent load of `data/answers/*.json` into SQLite |
+| `internal/tools` | Release tooling | `make release` gates (semver shape, tag-unused, clean tree, CHANGELOG → tag message) |
+| `deploy/off-by-one.service` | systemd unit | Vendored service definition (`Restart=always`); `make check-deploy-test` fails on drift |
+| `worker/` | Cloudflare Worker | `off-by-one-seo` — serves bots the static mirror, passes browsers through to the app |
+| `site/` | Static mirror | Generated HTML: one page per problem class + sitemap/robots for crawlers |
 | `pkg/api` | OpenAPI spec | Embedded OpenAPI 3.0.3 spec for Muster auto-config |
 | `sql/schema/schema.sql` | Database DDL | Embedded schema for SQLite initialization |
 
@@ -226,7 +231,7 @@ go run ./cmd/off-by-one --help
 | `--readonly` | Public catalog mode: block all mutating endpoints and the AI chat |
 | `--skip-sandbox` | Skip bwrap sandbox (for dev/testing) |
 | `--solve-timeout` | Per-solve timeout cap (env `OFF_BY_ONE_SOLVE_TIMEOUT`) |
-| `--version` | Print version and exit |
+| `--version` | Print the build stamp (e.g. `off-by-one 0287082`) and exit |
 
 ## Read-only catalog mode
 
@@ -288,7 +293,7 @@ ln -s "$(pwd)/scripts/pi-agent" ~/.local/bin/pi-agent   # or: cp scripts/pi-agen
 
 ### Prerequisites
 
-- Go 1.25+ — required to build (`make build`). `go.mod` declares `go 1.26.0`, so install a **1.26.x** toolchain: a 1.25 compiler still works but auto-downloads the 1.26 toolchain on the first build (extra network fetch) — the recipe below installs 1.26.8 directly.
+- Go **1.26+** — required to build (`make build`). `go.mod` declares `go 1.26.0` and CI runs the 1.26 matrix, so use a 1.26.x toolchain; the recipe below installs 1.26.8 directly.
 - Bubblewrap (`bwrap`) — optional, tests skip gracefully when absent
 - Pi Agent (`pi-agent`) — optional, solver tests mock the executor
 - Docker (for Muster integration tests)
@@ -308,13 +313,33 @@ go version
 With sudo, your distro package manager works as well (`sudo apt install golang-go`,
 or follow https://go.dev/doc/install) — the tarball recipe above needs no privileges.
 
-### Quick Start
+### Install from a release (no toolchain needed)
+
+Every tag publishes prebuilt binaries — `off-by-one-<tag>-linux-amd64`, `-linux-arm64` (raw executables, not tarballs) plus `SHA256SUMS`. Latest: [v0.1.1](https://github.com/totalwindupflightsystems/off-by-one/releases/latest).
 
 ```bash
-# Clone — requires repository access (SSH key or HTTPS token for
-# github.com:totalwindupflightsystems/off-by-one). A fresh box with no
-# credential for that repo cannot clone it.
-git clone git@github.com:totalwindupflightsystems/off-by-one.git
+V=v0.1.1
+base=https://github.com/totalwindupflightsystems/off-by-one/releases/download/$V
+curl -fsSLO $base/off-by-one-$V-linux-amd64
+curl -fsSLO $base/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+chmod +x off-by-one-$V-linux-amd64
+
+# The binary embeds the schema + OpenAPI spec but NOT the answer corpus, so
+# seed needs a corpus root: run from a clone, or place a data/ next to the binary.
+git clone --depth 1 https://github.com/totalwindupflightsystems/off-by-one
+cd off-by-one && ../off-by-one-$V-linux-amd64 seed
+../off-by-one-$V-linux-amd64          # serve on :8766
+```
+
+Measured on a clean box with no toolchain: download + SHA256 verify 6s, corpus clone + seed 46s, serve + first `discover` ~9ms — zero to working catalog in under a minute (the same run that takes ~114s when building from source). `seed` resolves its corpus from `./data` (CWD) or `<exeDir>/data`; `seed -dir DIR` points it anywhere else.
+
+### Quick Start (from source)
+
+```bash
+# Clone — the repository is PUBLIC, so HTTPS needs no credentials.
+# (SSH works too if you have a key: git@github.com:totalwindupflightsystems/off-by-one.git)
+git clone https://github.com/totalwindupflightsystems/off-by-one.git
 cd off-by-one
 
 # Configure
@@ -422,17 +447,19 @@ What's checked:
 
 ### CI/CD
 
-GitHub Actions runs on every push to `master` and every PR:
+GitHub Actions runs on every push to `master` and every PR — three jobs in `.github/workflows/ci.yml`:
 
-- **Matrix:** Go 1.25, Go 1.26
-- **Steps:** Checkout → Setup Go → Cache modules → Build → Vet → Test (short)
-- **Workflow:** `.github/workflows/ci.yml`
+- **`Test (short)`** — matrix **Go 1.26**; steps: Checkout → Setup Go → Cache modules → Build → Vet → *Install bubblewrap* → *Lift the AppArmor unprivileged-userns restriction* → *Ensure setuid-root bwrap fallback* → Test (short).
+- **`Transport retry self-test`** — runs `scripts/tests/transport-retry-selftest.sh` against a scratch DB (needs `sqlite3`).
+- **`Deploy gate self-test`** — `make check-deploy-test` against an unshallowed checkout so the version stamp resolves.
+
+The three bubblewrap steps exist because the sandbox tests are only *real* when bwrap can actually create a user namespace. Without the install they silently skip (`BwrapAvailable()`); with the install but without the AppArmor lift, Ubuntu 24.04 runners fail with `bwrap: setting up uid map: Permission denied` — the runner image ships `kernel.apparmor_restrict_unprivileged_userns=1`. CI lifts the knob (fail-open if the kernel has no such sysctl) and additionally forces the setuid-root fallback, so the tests run *and* fail loudly instead of degrading to skips.
 
 ## Project Structure
 
 ```
 off-by-one/
-├── cmd/off-by-one/          # Main binary entrypoint
+├── cmd/off-by-one/          # Main binary entrypoint (incl. `seed` subcommand)
 ├── internal/
 │   ├── api/                 # HTTP server, handlers, tests
 │   ├── cron/                # Idle cron loop
@@ -442,19 +469,31 @@ off-by-one/
 │   ├── ingest/              # Priority queue + submission
 │   ├── muster/              # Muster MCP bridge
 │   ├── sandbox/             # Bubblewrap sandbox
+│   ├── seed/                # Corpus loader (data/answers/*.json -> SQLite)
 │   ├── solver/              # Pi Agent integration
+│   ├── tools/               # Release tooling (make release gates)
 │   └── web/                 # Web UI serving + WebSocket chat
 ├── pkg/api/                 # Embedded OpenAPI spec
+├── deploy/off-by-one.service # Vendored systemd unit (make check-deploy-test guards it)
+├── worker/                  # Cloudflare Worker `off-by-one-seo` (bots -> static, browsers -> app)
+├── site/                    # Generated static mirror (one page per class + sitemap/robots)
+├── data/                    # Flat answer corpus (answers.jsonl, answers/, INDEX.md, COUNTS.md)
 ├── web/                     # Frontend assets (go:embed)
 │   ├── index.html
 │   ├── css/style.css
 │   └── js/*.js
 ├── sql/schema/schema.sql   # Database schema (go:embed)
-├── docs/                   # Integration guide + API reference
+├── docs/                   # Integration guide + API reference + operational records
 │   ├── integration.md
-│   └── api-reference.md
+│   ├── api-reference.md
+│   ├── publish-transport.md  # catalog publish knobs, retry classes, exit codes
+│   ├── landing-spec.md       # public landing page spec
+│   ├── agents-harness-guard.md
+│   ├── dogfood/              # per-run integration reports + diagnostics.md
+│   └── qa/                   # clean-room battery notes
 ├── specs/system-spec.md     # System specification
 ├── specs/ui-spec.md         # UI specification
+├── skills/off-by-one-usage/ # usage skill for agents (pitfalls, recipes)
 ├── tests/                   # Test scripts (guard smoke)
 ├── muster-config.yaml       # Muster connection config
 ├── scripts/connect-muster.sh # Muster connection script
@@ -463,7 +502,10 @@ off-by-one/
 ├── scripts/publish-catalog.sh # Host publish leg: staged binary+DB pair, single activation, retried transport
 ├── scripts/lib/transport-retry.sh # ssh/scp failure classifier + bounded retry (transport class only)
 ├── scripts/tests/transport-retry-selftest.sh # Regression self-test for the publish transport (make transport-retry-selftest)
-├── scripts/pi-agent-watchdog.sh # pi-agent health probe — checks WRAPPER RESOLUTION, not mere presence (packages/coding-agent/dist/cli.js, package.json, non-empty node_modules/.bin, executable wrapper, plus node resolving every solve-path @earendil-works/* workspace package from $PI_DIR); three outcomes (OB-GAP-079): ok = silent exit 0, BROKEN = one ALERT per incident (stamp-deduped) naming the unresolved package(s) + the re-link/rebuild recipe (exit 1), and UNVERIFIABLE = the resolve probe TIMED OUT under host load or the probe environment is unusable — a WARN naming the unverified package(s), no wipe verdict, exit 3 for the timeout class — schedule it (cron, ~15 min)
+├── scripts/generate-static-site.py # Corpus -> site/ static mirror generator (bot-served pages)
+├── scripts/check-deploy           # Deploy-freshness probe (artifact stamp vs HEAD vs running service)
+├── scripts/gate-deploy            # Tick close-out gate: fails until artifact AND service serve HEAD
+├── scripts/pi-agent-watchdog.sh # pi-agent health probe — checks WRAPPER RESOLUTION, not mere presence. Resolution order mirrors the wrapper's own findPiBin: a release ELF install (native binary next to the wrapper, $PI_HOME/pi, /tmp/pi/pi) is checked first; the npm monorepo layout (packages/coding-agent/dist/cli.js, package.json, executable wrapper, resolvable @earendil-works/* solve-path packages) is the alternative and its build-tree legs are informational. Three outcomes: ok = silent exit 0; BROKEN = one ALERT per incident (stamp-deduped) naming the unresolved package(s) + the re-link/rebuild recipe (exit 1); UNVERIFIABLE = the resolve probe TIMED OUT under host load or the probe environment is unusable — a WARN naming the unverified package(s), no wipe verdict (exit 3 for the timeout class). Schedule it (cron, ~15 min).
 ├── scripts/tests/pi-agent-watchdog-selftest.sh # Regression self-test for the pi-agent watchdog (make pi-agent-watchdog-selftest)
 ├── Makefile                 # Build targets
 ├── AGENTS.md                # Agent development guide
@@ -497,7 +539,7 @@ git clone --depth 1 https://github.com/totalwindupflightsystems/off-by-one
 grep -l '"title": ".*raft.*"' data/answers/*.json
 ```
 
-The exported corpus is the set of verified answers. `GET /api/v1/stats` applies one further exclusion on top of that set: an answer whose signatures JSON records a failed solve (`result: "failed"`) is not counted in `verified_answers`, so `hit_rate` (= verified_answers/total_answers) is computed from the live database and is not a fixed constant. Observed on the running lab while this section was written — the values move as the corpus grows, so query your own instance with `curl -s http://localhost:8766/api/v1/stats` instead of trusting them: `total_problems` 1847, `total_answers` 2036, `verified_answers` 2008, `hit_rate` 0.9862475442043221, `coverage` 1.0871683811586357. Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more. To contribute, open a PR adding/updating a file under `data/answers/`. Regenerate the export anytime with `python3 scripts/export-answers.py`.
+The exported corpus is the set of verified answers. `GET /api/v1/stats` applies one further exclusion on top of that set: an answer whose signatures JSON records a failed solve (`result: "failed"`) is not counted in `verified_answers`, so `hit_rate` (= verified_answers/total_answers) is computed from the live database and is not a fixed constant. Counts move as the corpus grows (~4×/day sync), so read them from the source instead of a README: [`data/COUNTS.md`](data/COUNTS.md) and [`data/INDEX.md`](data/INDEX.md) are regenerated on every sync, and a running instance answers `curl -s http://localhost:8766/api/v1/stats`. Problems span systems programming, cryptography, distributed systems, formal methods, machine learning, graphics, algorithms, and more. To contribute, open a PR adding/updating a file under `data/answers/`. Regenerate the export anytime with `python3 scripts/export-answers.py`.
 
 ## Publishing the public catalog
 
@@ -526,9 +568,23 @@ and the distinct exit codes 1–6), the retry classification table and the curre
 state of the legacy deploy host are documented in
 [docs/publish-transport.md](docs/publish-transport.md).
 
+## Web UI and the static mirror
+
+The embedded SPA (`web/`, served by `internal/web`) gives the corpus a browsable face:
+
+- **Search** over problem classes with filters (env / lang / limit), every result deep-linkable
+- **Shareable problem pages** at `#/problem/<slug>` — the problem statement, each verified answer with its solution, evidence and signatures, plus links back to the source JSON in `data/answers/` and the crawler-facing page
+- **Light/dark theme** with a no-flash boot script, a **System view** (pipeline stages, queue window, recent solves, language coverage) and a WebSocket AI chat sidebar — collapsed by default on a read-only catalog, where chat is disabled anyway
+- Asset URLs carry version query params (`style.css?v=15`) so a cached CSS file cannot outlive a deploy
+
+[ob1.it.com](https://ob1.it.com) is a read-only instance of that UI. Crawlers, though, are served a **static mirror** instead of the SPA — the app is JS-heavy and search engines get nothing useful from it:
+
+- `scripts/generate-static-site.py` renders `data/` into `site/`: one HTML page per problem class plus `robots.txt` and `sitemap.xml` (1,000+ pages), with real meta descriptions and a "source in repository" link on each
+- the Cloudflare Worker in `worker/` (`off-by-one-seo`) sits in front of the domain: a bot user-agent is served `site/` from the repo (with `cache: no-store`), a browser passes through to the live app, and `/.well-known/*` always passes through
+- regenerate locally with `python3 scripts/generate-static-site.py`; `scripts/sync-answers.sh` runs it automatically whenever the corpus changes
+
 ## Related Projects
 
-- [Muster](https://github.com/totalwindupflightsystems/muster) — Agent job board that talks to Off-by-One
+- [Musterflow](https://github.com/totalwindupflightsystems/musterflow) — agent job board that talks to Off-by-One (the bridge lives in `internal/muster`)
 - [Pi](https://github.com/earendil-works/pi) — the coding agent used inside the sandbox (install the release ELF or the `@earendil-works/pi-coding-agent` npm package). The `pi-agent solve` CLI contract this server invokes is implemented by the reference wrapper at [`scripts/pi-agent`](scripts/pi-agent) — point `OFF_BY_ONE_PI_AGENT` at it (or a copy on your `PATH`).
-- [GitReins](https://github.com/totalwindupflightsystems/gitreins) — Git-native quality harness
-- [Hilo](https://github.com/totalwindupflightsystems/hilo) — Codebase graph for blast-radius analysis
+- [GitReins](https://github.com/totalwindupflightsystems/gitreins) — Git-native quality harness (the guard that blocks every bad commit in this repo)
