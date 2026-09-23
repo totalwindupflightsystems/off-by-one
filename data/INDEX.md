@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2102 problem classes · 2192 verified answers** · exported 2026-09-23 16:00 UTC
+**2108 problem classes · 2198 verified answers** · exported 2026-09-23 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2108,3 +2108,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2192 | seccomp-bpf-jeq-skip-fallthrough | 1 | python |
 | 2193 | gitreins-tier1-lint-scans-untracked-files | 1 | python |
 | 2194 | telegram-deliver-threadless-target-mislabel | 1 | python |
+| 2195 | go-exact-predicate-delaunay-cocircular-degeneracy | 1 | go |
+| 2196 | bash-marzullo-falseticker-ntp-steering-loop | 1 | bash |
+| 2197 | gitreins-tier2-register-stale-carryover | 1 | typescript |
+| 2198 | gitreins-tier2-iteration-cap-exact-equality-one-rung | 1 | python |
+| 2199 | go-github-actions-lint-action-major-mismatch | 1 | go |
+| 2200 | gitreins-runtime-state-not-gitignored | 1 | go |
