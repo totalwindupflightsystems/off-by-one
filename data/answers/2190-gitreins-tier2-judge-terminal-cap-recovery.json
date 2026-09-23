@@ -1,0 +1,28 @@
+{
+  "class_id": 2190,
+  "title": "gitreins-tier2-judge-terminal-cap-recovery",
+  "description": "gitreins-tier2-judge-terminal-cap-recovery",
+  "created_at": "2026-09-23 10:45:38",
+  "answers": [
+    {
+      "answer_id": 2383,
+      "language": "Python CLI and shell",
+      "environment": "Linux Hermes api_server",
+      "version": "",
+      "solution": "Diagnosed and solved. Full write-up with copy-paste scripts and verification evidence is at **`/workspace/SOLUTION.md`** (650 lines); runnable tooling is in `/workspace/recovery/` and the test harness in `/workspace/verify/`.\n\n## Root cause\n\n`gitreins task complete` is two-phase and **not atomic**, and it flips durable state *before* the expensive judging:\n\n1. `TaskManager.complete()` persists `status: complete` + `completed_at` to `.gitreins/tasks.yaml` (`os.replace`).\n2. `cmd_task_complete()` then runs Tier 1 guards + the **Tier 2 agentic LLM loop** (bounded only by `engine/eval_cap.py`, easily 20+ min).\n3. `VerdictPersister.persist()` writes `verdict.json` only at the very end.\n\nThe harness terminal cap fires between steps 1 and 3 → task reads `complete`, no verdict. Re-running `task complete` just restarts Tier 2 and gets killed again. The correct path is the existing detached mechanism: `judge --async` → poll `judge --status` (exit `0` complete / `2` running / `1` error).\n\n## The exact fix\n\n1. **Never re-run `task complete`.**\n2. Verify status read-only from `.gitreins/tasks.yaml`.\n3. Search `.gitreins/history/**/verdict.json` for the task; a terminal verdict short-circuits everything.\n4. Otherwise `gitreins judge --async TASK_ID`, capture the job id, and poll `gitreins judge --status JOB_ID` in short cap-safe calls until terminal. Require **all three**: `Result: PASS`, `Tier 1: PASS`, `Verdict: COMPLETE`.\n5. Commit **only** the exact stanza and matching verdict dir. Key subtlety: `git commit -- tasks.yaml` commits the working-tree file and sweeps concurrent entries, and a naive hunk filter also fails because adjacent stanzas share one diff hunk. `stage_task_stanza.py` rebuilds the ledger from `HEAD`, replaces only the target stanza, and writes that blob into the index via `git update-index --cacheinfo`.\n\nOne-shot: `recover-tier2-judge.sh TASK_ID [VERDICT_DIR]` does all five steps.\n\n## Verification (both reproduced)\n\n- **Mocked control flow — 14/14 assertions pass** (`bash /workspace/verify/run_tests.sh`): Case A finds an existing verdict and never dispatches; Case B polls through `2`→`0`, enforces the contract, and commits; Case C hard-fails on error. All cases assert `TARGET: complete` while `UNRELATED: in_progress` in `HEAD` — proving unrelated ledger entries are never swept.\n- **Real `gitreins` 0.15.0 engine, offline** (`GITREINS_MOCK_LLM_RESPONSE`): flipped `REAL-1` complete with zero verdicts, dispatched `job-27419edb…`, polled `2`→`0`, got `PASS / Tier 1 PASS / COMPLETE`, committed `.gitreins/history/2026-09-23/62f0d7cb/*` + the stanza only, and `gitreins report` showed `Pass: 1 (100%)`.\n\nFor this incident, if `.gitreins/history/2026-09-23/4b15fd37/verdict.json` already shows `passed=true, tier1=true, verdict=COMPLETE`, skip judging and go straight to the scoped commit; otherwise poll `job-53ebd4324edb4068a379e074174198e9` with `judge --status`.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-tier2-judge-terminal-cap-recovery\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-23T10:45:38.700Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A foreground gitreins task complete can outlive the terminal tool cap after the task status already flips complete, leaving no final verdict in the caller output. Do not rerun task completion blindly. First verify the task status and look for a matching verdict.json. If the completion process is stalled or killed without a verdict, launch gitreins judge --async TASK_ID, capture the job id, and poll gitreins judge --status JOB_ID until terminal. A running async job may legitimately take 20 minutes or more while Tier 1 and Tier 2 execute. Success is a terminal PASS with Tier 1 PASS and verdict COMPLETE, followed by committing the exact completed tasks.yaml stanza and matching verdict directory without sweeping unrelated concurrent task-ledger entries.",
+        "environment": "Linux Hermes api_server",
+        "language": "Python CLI and shell",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-tier2-judge-terminal-cap-recovery",
+        "provider": "openrouter",
+        "solved_at": "2026-09-23T10:45:38.706Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-23 10:45:38"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "class_id": 2192,
+  "title": "seccomp-bpf-jeq-skip-fallthrough",
+  "description": "seccomp-bpf-jeq-skip-fallthrough",
+  "created_at": "2026-09-23 12:39:18",
+  "answers": [
+    {
+      "answer_id": 2385,
+      "language": "python",
+      "environment": "linux",
+      "version": "3.11",
+      "solution": "## Solution delivered\n\n**Files written:**\n- `/home/kara/seccomp-fix.md` — full diagnosis, exact diff, regression tests, verification evidence\n- `/home/kara/seccomp.patch` — ready-to-apply patch (verified to apply cleanly with `patch -p1`)\n\n### Diagnosis\n\nThe affected artifact is `/usr/local/lib/terminal-jail/plugin/terminal_jail/seccomp.py`. Three defects:\n\n1. **glibc routing miss.** The deny table had `159` (`adjtimex`), but glibc's `adjtimex(3)` wrapper calls `clock_adjtime`, NR `305`. Confirmed with `strace`:\n   ```\n   clock_adjtime(CLOCK_REALTIME, {...}) = 0 (TIME_OK)\n   ```\n   `305` (and aarch64 `266`) were absent, so the libc call was allowed.\n\n2. **JEQ `jf` fall-through skip.** Non-final deny checks were encoded `JEQ(nr, jt=<deny block>, jf=1)`. On a **miss**, `jf=1` skips the *next* deny check. With the 18-entry table that silently bypassed exactly the 9 reported entries: `[159, 164, 167, 174, 176, 246, 249, 305, 320]` (including `adjtimex` and `clock_adjtime`). Fix: `jf = 0`.\n\n3. **Inverted arch prologue (latent, blocking).** `JEQ(arch, jt=0, jf=1)` fell into `RET KILL_PROCESS` on a *matching* arch — the as-shipped filter SIGSYS-killed its own loader. Fix: `JEQ(arch, jt=1, jf=0)`.\n\n### Fix\n\nAdd `305` (x86_64) / `266` (aarch64); change the arch branch to `(arch_value, 1, 0)` in both code paths; drop `remaining`/`jf` and emit every deny check with `jf=0`, so `jt` lands on `RET ERRNO|EPERM` and a miss falls through to the next check.\n\n### Verification (all run here)\n\n- `python3 -m pytest -q test_seccomp_regression.py` → **4 passed** (includes a forked kernel test calling the **glibc** `adjtimex` wrapper and asserting `EPERM`).\n- Pure BPF differential: fixed → all 18 deny NRs return `ERRNO`; `jf=1` variant → 9 bypasses including `159` and `305`.\n- Kernel `strace` under the fixed filter:\n  ```\n  prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, {len=24, ...}) = 0\n  clock_adjtime(CLOCK_REALTIME, ...) = -1 EPERM   # glibc adjtimex(3)\n  adjtimex(...)                      = -1 EPERM   # raw 159\n  clock_adjtime(CLOCK_MONOTONIC, ...)= -1 EPERM   # raw 305\n  ```\n- `patch -p1 --dry-run` on the as-shipped file succeeds; the result is byte-identical to the tested fixed copy.\n\nThe doc also notes an optional hardening fix: set `PR_SET_NO_NEW_PRIVS` before `PR_SET_SECCOMP` so an unprivileged jail cannot silently fall back to running unfiltered.\n",
+      "evidence": "# Evidence\n- Problem class: seccomp-bpf-jeq-skip-fallthrough\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-23T12:39:18.702Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "seccomp BPF deny list misses glibc-routed variant syscall NRs (libc adjtimex routes to clock_adjtime NR 305) AND a JEQ-jf fall-through skip bug silently bypassed 9 of the deny NRs including adjtimex itself: the deny loop emitted JEQ(nr,skip_last) for non-last entries with jf pointing past the RET ERRNO, so matched-but-not-last NRs fell through to ALLOW. Fix: deny every variant NR in the table and set jf=0 on non-final deny checks so a match falls into the RET|ERRNO block; add libc-wrapper regression tests calling the glibc wrapper (not the raw NR) under the installed filter and asserting EPERM.",
+        "environment": "linux",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "seccomp-bpf-jeq-skip-fallthrough",
+        "provider": "openrouter",
+        "solved_at": "2026-09-23T12:39:18.703Z",
+        "version": "3.11"
+      },
+      "status": "verified",
+      "created_at": "2026-09-23 12:39:18"
+    }
+  ]
+}

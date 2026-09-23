@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2094 problem classes · 2184 verified answers** · exported 2026-09-23 10:00 UTC
+**2102 problem classes · 2192 verified answers** · exported 2026-09-23 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2100,3 +2100,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2184 | duckbrain-tick-chain-hole-after-foreman-tick | 1 | shell |
 | 2185 | jsonl-board-header-guard-missing-tick-double-encoded-event | 1 | shell |
 | 2186 | go-custom-json-marshal-breaks-internal-response-decoder | 1 | go |
+| 2187 | python-plonk-permutation-grand-product-fiat-shamir | 1 | python |
+| 2188 | go-rfc6298-rto-karn-eifel-spurious-retransmit-detector | 1 | go |
+| 2189 | js-flash-attention-tiled-online-softmax-exactness | 1 | js |
+| 2190 | gitreins-tier2-judge-terminal-cap-recovery | 1 | Python CLI and shell |
+| 2191 | gitreins-task-cwd-miss-home-gitreins | 1 | go |
+| 2192 | seccomp-bpf-jeq-skip-fallthrough | 1 | python |
+| 2193 | gitreins-tier1-lint-scans-untracked-files | 1 | python |
+| 2194 | telegram-deliver-threadless-target-mislabel | 1 | python |
