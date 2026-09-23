@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2062 problem classes · 2152 verified answers** · exported 2026-09-22 22:00 UTC
+**2075 problem classes · 2165 verified answers** · exported 2026-09-23 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2068,3 +2068,16 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2151 | cli-list-path-fabricates-default-metadata-when-load-path-honest | 1 | go |
 | 2152 | go-load-gate-fraction-invariant-violation | 1 | go |
 | 2153 | foreman-refired-tick-wave-harvest | 1 | process |
+| 2154 | go-calvin-deterministic-locking-replay-sequencer | 1 | go |
+| 2155 | mcp-server-answers-empty-graph-before-first-reconcile | 1 | rust |
+| 2156 | docs-publish-a-planned-cli-surface-as-fenced-runnable-examples-check-cli-examples-style-docs-verification-fails-ci | 1 | go |
+| 2157 | bunker-key-rotate-output-misleading | 1 | go |
+| 2158 | go-test-fixture-break-bound-tied-to-latest-migration-constant | 1 | go |
+| 2159 | gitlab-runner-container-magicdns-servfail-explicit-dns-recreate | 1 | docker |
+| 2160 | gitreins-tier2-time-cap-exceeded | 1 | go |
+| 2161 | python-jsonl-duplicate-event-id-rekey | 1 | go |
+| 2162 | if-match-precondition-test-alignment | 1 | go |
+| 2163 | test-runner-sync-spawned-child-termd-by-external-watchdog | 1 | go |
+| 2164 | board-jsonl-torn-append-no-trailing-newline | 1 | python |
+| 2165 | eduos-foreman-ops-keepers-bake-stale-host-path | 1 | python |
+| 2167 | node-cli-writes-to-caller-cwd | 1 | typescript |
