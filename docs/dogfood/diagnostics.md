@@ -518,3 +518,55 @@ Right way to answer "is the public catalog fresh?" in 10 seconds:
 `curl -s https://ob1.it.com/ | grep -o '<title>[^<]*'` and compare the number
 against `curl -s http://localhost:8766/api/v1/stats`. A title older than one
 sync cycle = the site leg is orphaned again.
+
+## §10 — 2026-09-23 dogfood run (HEAD 239cbdb) — the solve pipeline, the chat, and the release binary
+
+**Why this run exists:** runs #1-8 hit the API, the corpus, and the distribution
+layer — never the thing the product is named for: submitting a real problem and
+getting it SOLVED. This run turned the crank on the full pipeline and on the two
+remaining untouched surfaces (WS chat, release-binary consumption).
+
+**How the solve pipeline actually works, learned by driving it:**
+1. Submit → `ingest.Queue.Submit` dedups on `(class, env, lang, version)` (409
+   with `existing_solutions` when the class already has a verified answer).
+2. The idle cron (`--cron-interval`, default 5m; `--load-threshold -1` disables
+   the idle gate for testing) dequeues in `priority DESC, created_at ASC`.
+3. The solver wraps pi-agent in bwrap; `--skip-sandbox` is dev-only. Real solves
+   measured 24s and 58s with correct, executed-verification solutions.
+4. On completion the answer lands in the graph (status verified) and discover/
+   browse serve it — EXCEPT when the title trips a placeholder regex (§ the P1).
+
+**The P1 lesson (DF-OFF-BY-ONE-15): probe filters must be anchored.**
+`internal/graph/placeholder.go`'s regexes exist to keep the lab's own
+self-test/canary probes out of the public surface. Unanchored (`(?i)dogfood`),
+they quarantine real users' classes: submit 200, solve complete, browse
+visible, discover 404, queue list empty (SQL variant `NotPlaceholderClassSQL`
+hides the row from three list paths while the by-id path returns it). The
+failure is silent and looks like data loss. The right way: anchor probe
+patterns to the actual probe prefixes (off-by-one-self-test-*, docs-canary-*,
+dogfood-field-test-*) and add a submit→solve→discover round-trip test with a
+probe-word in the title. This is the third dogfood run to find a "green
+everywhere, wrong for one whole user class" defect — the pattern repeats
+because serve-surface filters are never round-trip tested against the
+ingest surface that feeds them.
+
+**WS chat mechanics (measured, probe scripts in /tmp/dogfood-ob-2026-09-23):**
+server sends pings every 15s and expects pongs — a naive client that skips
+pongs is dropped at the first ping. The answer arrives as ONE frame after the
+full sandbox+pi-agent cycle (74s measured); there are no interim progress
+frames (DF-OFF-BY-ONE-16). A browser user sees a frozen chat; the fix is a
+"thinking" frame on receipt plus stage updates.
+
+**Release-binary consumer path (first proof):** v0.1.1 ships raw binaries +
+SHA256SUMS (not tarballs — the download name in a README recipe of the form
+`off-by-one-v0.1.1-linux-amd64.tar.gz` would 404; nothing in the README points
+at the release artifacts at all, which is why no doc update is contradicted).
+Fresh Debian: curl 2 assets + verify 6s; seed needs the corpus, which the
+release does NOT bundle — clone `--depth 1` the public repo and pass
+`-dir <repo>/data` (the seed path search order is CWD/data, ./data, /data —
+see the 2026-09-07 CWD finding). Total 58s to a serving lab with discover green.
+
+**Right way to test the solver without touching production:** dedicated port,
+dedicated `-db`, `--load-threshold -1` (idle gate off), `--cron-interval 20s`
+(fast pickup), `--solve-timeout 300s`. Never point a scratch instance at the
+live off-by-one.db — the seed is idempotent but solves write real rows.

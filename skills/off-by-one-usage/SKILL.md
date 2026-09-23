@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.3.0
+version: 1.4.0
 category: software-development
 ---
 
@@ -270,3 +270,30 @@ prior runs never touched. Full evidence: docs/dogfood/2026-09-22-integration.md.
     a stale `/tmp/go.tgz` from a prior agent (sticky /tmp, different uid)
     turned the README recipe into `curl: (23)`; use `$HOME` for downloads and
     id-suffixed log paths (`/tmp/build-<id>.log`).
+
+## Field-tested 2026-09-23 (dogfood tick): verdict ✅ SHIPPABLE, one open P1
+
+First exercise of the solve pipeline, the WS chat, and the release-binary
+install path. **Pitfall 12: never put the words `dogfood`, `canary`,
+`field-test`, `self-test` (or any placeholder probe word) in a problem-class
+slug you intend to DISCOVER** (DF-OFF-BY-ONE-15, OPEN P1): the placeholder
+filter regexes are unanchored, so such a class submits fine, solves fine, is
+browsable — but POST discover 404s it and the queue list hides it. Control
+classes without probe words discover normally. Until fixed, choose slugs
+without those substrings.
+
+Other verified facts this run added:
+
+12. **The solve pipeline works end-to-end for real** (first live proof):
+    submit → idle cron picks up (`--cron-interval 20s --load-threshold -1` for
+    testing) → bwrap + pi-agent solve → answer stored → dedup 409 on re-submit.
+    Real solve times: 24s (simple bug) and 58s (goroutine-leak analysis) with
+    correct, execution-verified solutions.
+13. **WS chat (`/ws/chat`)**: pings every 15s (answer them or be dropped); the
+    answer arrives as ONE frame after the full solve cycle (74s measured, no
+    interim progress — DF-OFF-BY-ONE-16). For scripted clients, pong the pings.
+14. **Release-binary install is now the fastest fresh path (~58s)**: download
+    `off-by-one-v0.1.1-linux-amd64` + `SHA256SUMS` from the GitHub Release
+    (raw binaries, NOT tarballs), `sha256sum -c`, chmod, seed from a corpus
+    clone (`-dir <clone>/data` — the release does NOT bundle the corpus),
+    serve. Faster than building from source (114s on 2026-09-19).

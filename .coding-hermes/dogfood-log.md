@@ -125,3 +125,10 @@ Chronological record of dogfood field-test runs (real-use value checks, not test
   Install: bunker=las-bunker-03 agent=92f4b025 clone=15s (public HTTPS, fresh-user path) build=rc0 seed=34s (2051/2141/8510) smoke=discover found:true 10ms; agent destroyed, list clean. README instructions green VERBATIM this time (DF-11 fixes hold); /tmp collision frictions filed as DF-13.
   Perf: no row filed — corpus scan 62ms warm, grep 5ms, discover 10ms; nothing a user would feel.
   Artifacts: docs/dogfood/2026-09-22-integration.md, diagnostics.md §9, board DF-OFF-BY-ONE-12/13/14, skills/off-by-one-usage/SKILL.md v1.3.0, this log.
+
+2026-09-23 | SHIPPABLE (1 open P1: DF-OFF-BY-ONE-15 unanchored placeholder regexes) | t2fs ~7min scratch (seed 45s + server + first solve 24s) | friction 2 (discover-404 trap, chat silence) | 2 findings (15/16) + INSTALL row (release-binary leg)
+  Angle: surfaces runs #1-8 never touched — solve pipeline (submit→bwrap→pi-agent→store), WS chat, release-binary consumer install.
+  Promise: "submit a real problem, get a verified answer; a fresh box consumes the lab without building". HELD for pipeline+install (solves 24s/58s, correct solutions; release-binary install 58s, sha256 ok, discover 9ms); FAILED for probe-word users: discover 404s any class whose title contains 'dogfood'/'canary'/etc. (unanchored regexes, placeholder.go:34 + NotPlaceholderClassSQL in queue list paths).
+  Install: bunker=las-bunker-03 agent=8e3d704f download+sha256=6s clone+seed=46s serve+discover=3s smoke=found:true 9ms×3; agent destroyed, list clean. First install leg via RELEASE BINARY (no toolchain needed).
+  Perf: no PERF row — discover 9-12ms warm, search 32ms, install 58s, solves 24-58s; only user-noticeable wait is the 74s chat silence (filed as UX DF-16, not perf).
+  Artifacts: docs/dogfood/2026-09-23-integration.md, diagnostics.md §10, board DF-OFF-BY-ONE-15/16, skills/off-by-one-usage/SKILL.md v1.4.0, this log.
