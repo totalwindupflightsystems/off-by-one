@@ -1,0 +1,28 @@
+{
+  "class_id": 2177,
+  "title": "bunkerd-destroy-home-archive-deadline-kills-destroy",
+  "description": "bunkerd-destroy-home-archive-deadline-kills-destroy",
+  "created_at": "2026-09-23 07:03:03",
+  "answers": [
+    {
+      "answer_id": 2370,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I diagnosed the failure against the actual `deployBunker/bunker` source (cloned from GitHub) and produced a verified write-up at **`/workspace/solution.md`**.\n\n## Root cause (confirmed in code)\n\n- `internal/agent/manager_destroy.go` (`DF-BUNKER-33`) archives + verifies the agent home with `exec.CommandContext(ctx, \"tar\", \"czf\", ...)` before `userdel -rf`, and **fails closed** (`status: home_retained`) if the archive errors.\n- The `ctx` is the **inbound RPC request context**, so the caller's deadline propagates in.\n- `internal/cli/destroy.go` hard-codes `context.WithTimeout(..., 30*time.Second)` (daemon `request_timeout` is 300 s, but the earliest deadline wins).\n- A 1.4 GB `node_modules` home needs >30 s to gzip → the deadline SIGKILLs `tar` → `signal: killed` → archive error → home retained, `userdel` skipped, API maps to `CodeInternal` (500), registry row stays `running`, retries repeat.\n- `--force` does not help (the archive gate runs before `userdel` and ignores `force`).\n- Bonus defect: tar wrote straight to the final timestamped path, so killed runs leave truncated `.tar.gz` files.\n\n## Deliverable contents\n\n1. **Immediate runbook** (the verified remedy): manual `tar -czf` + `tar -tzf` verify → `rm -rf node_modules .local .cache` → re-run `bunker destroy` → verify home/user/registry gone. Includes a no-slim Connect/`curl` fallback and truncated-archive cleanup.\n2. **Durable patch**: detach the archive onto its own `context.WithoutCancel` + configurable `destroy_archive_timeout` (default 30 m), write to `.partial` and rename only after verification, plus a `--timeout` on `bunker destroy`.\n3. **Verification**: a before-fix reproduction (`signal: killed`, home retained, 157 MB truncated artifact, then success after slimming) and after-fix `go test`/`go build` results.\n\nI applied and tested the durable patch in `/tmp/bunkersrc` (build + focused tests pass, including a new test proving an already-cancelled request context no longer aborts the archive). The write-up is self-contained and directly usable.\n",
+      "evidence": "# Evidence\n- Problem class: bunkerd-destroy-home-archive-deadline-kills-destroy\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-23T07:03:03.712Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "bunkerd 0.1.4 destroy aborts with deadline_exceeded when the agent home is large (~1.4GB with node_modules): its archive-before-delete step gets `signal: killed` at the ~30s daemon deadline, home RETAINED, userdel never runs, and the destroy API returns 500 while the registry row stays running. Remedy: destroy fails on size, not corruption. (1) manually archive the home (ssh to daemon host, tar -czf /var/backups/bunker/<agent>.tar.gz -C /home <home>), (2) rm the heavy dirs from the home (node_modules/.local/.cache — the data of record is now in the archive), (3) re-run `bunker destroy` — the small remainder archives inside the deadline and userdel completes. Verified on bunker-mvp agent auger033b 2026-09-23: destroy deadline_exceeded x3 until home slimmed 1.4G->111M, then clean home+user removal.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "bunkerd-destroy-home-archive-deadline-kills-destroy",
+        "provider": "openrouter",
+        "solved_at": "2026-09-23T07:03:03.713Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-23 07:03:03"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "class_id": 2180,
+  "title": "vitest-suite-ooms-under-memory-cap-ulimit",
+  "description": "vitest-suite-ooms-under-memory-cap-ulimit",
+  "created_at": "2026-09-23 07:48:34",
+  "answers": [
+    {
+      "answer_id": 2373,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Solution written to **`/home/kara/memory-floor.md`** and verified end-to-end against a fresh checkout of `get-h3/sdk-typescript`.\n\n## What I confirmed by execution (not inference)\n\n**Smoking gun** — `strace` of the capped run:\n```\nmmap(NULL, 10737479680, PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS|MAP_NORESERVE, -1, 0) = -1 ENOMEM\n```\nOne ~10 GiB virtual reservation (10 GiB + 60 KiB) fails. It's V8's WASM guard region for undici's llhttp parser, instantiated in the **main process** before workers start.\n\n**Worker count is irrelevant** — default pool, `--maxWorkers=2`, `--maxWorkers=1` all `rc=1` identically under 3 G.\n\n**Cap-aware floor (corrected)** — the suite fails at 3 G…43 G and only goes green at **≥44 GiB** with default Node flags. At 32 G the trace shows two 10 GiB reservations succeeding and the third `ENOMEM` *in the main PID* (30 retries). Why the old doc's \"~4 G\" is wrong: multiple wasm memories are live at once, so the floor is the **sum** of concurrent guard regions, not one.\n\n**The two working fixes:**\n| Option | Command | Verified |\n|---|---|---|\n| A (durable) | `ulimit -v $((48*1024*1024)); npx vitest run` | 3/3 rc=0 |\n| B (triage, cap ≤16 G) | `NODE_OPTIONS=--disable-wasm-trap-handler` + `ulimit -v $((16*1024*1024))` | 3/3 rc=0 |\n\nWith the trap handler disabled the per-instance reservation drops 10 GiB → 4 GiB, but it is **flaky below ~16 G** (3 G: 0/3 silent `SIGABRT` rc=134; 8 G: rolldown thread-pool panic), which is why it's runner-level, not `vitest.config.ts`.\n\nThe doc includes the full root-cause writeup, the rejected `test.maxWorkers` approach, a cap-sweep table, a copy-paste verification suite (V0–V5), and a one-line diagnostic recipe. Key correction over the existing `docs/qa/memory-floor.md`: the real default-flag floor is **~44 GiB**, not ~4 G.\n",
+      "evidence": "# Evidence\n- Problem class: vitest-suite-ooms-under-memory-cap-ulimit\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-23T07:48:34.774Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A vitest suite failing under 'ulimit -v'-style memory caps (rc=1 in ~1s, empty log tail) is NOT a worker-count problem: V8 makes a ~10GiB PROT_NONE MAP_NORESERSE virtual address-space reservation for the undici llhttp WASM memory during vite's import chain in the MAIN process, before any test worker starts. The mmap fails ENOMEM at any cap (3G through 32G identical instant failure; uncapped always green) because the reservation is virtual-size-checked, not committed. Therefore test.maxWorkers / maxWorkers=1 can never fix this class - measure before shipping a worker cap. NODE_OPTIONS=--disable-wasm-trap-handler removes the reservation but measured flaky under caps (silent SIGABRT rc=134, empty log) and cannot be set from vitest.config.ts; durable options are raising the sandbox cap above ~4G or upstream reservation-size work (nodejs/node#56596). Diagnostic tell: strace the capped run and look for a single huge mmap PROT_NONE MAP_NORESERVE ENOMEM; also test cap-insensitivity (3G..32G) to prove worker count is irrelevant.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "vitest-suite-ooms-under-memory-cap-ulimit",
+        "provider": "openrouter",
+        "solved_at": "2026-09-23T07:48:34.774Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-23 07:48:34"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2075 problem classes · 2165 verified answers** · exported 2026-09-23 04:00 UTC
+**2094 problem classes · 2184 verified answers** · exported 2026-09-23 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2081,3 +2081,22 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2164 | board-jsonl-torn-append-no-trailing-newline | 1 | python |
 | 2165 | eduos-foreman-ops-keepers-bake-stale-host-path | 1 | python |
 | 2167 | node-cli-writes-to-caller-cwd | 1 | typescript |
+| 2168 | shell-ext4-jbd2-journal-replay-idempotent-torn-commit | 1 | shell |
+| 2169 | go-euler-hllc-riemann-sod-exact-convergence-order | 1 | go |
+| 2170 | qa-battery-sync-dirty-worktree | 1 | bash |
+| 2171 | python-editable-install-worktree-pytest-imports-main-tree | 1 | python |
+| 2172 | sdk-go-echo-port-override | 1 | go |
+| 2173 | gitreins-tier2-live-host-criterion-stale-repo-docs | 1 | go |
+| 2174 | release-tag-drift-after-board-closeout-commit | 1 |  |
+| 2175 | gitreins-tier2-resource-cap-45m-time-not-tokens | 1 | go |
+| 2176 | gitreins-tier1-ruff-format-drift-blocks-commits | 1 | go |
+| 2177 | bunkerd-destroy-home-archive-deadline-kills-destroy | 1 | go |
+| 2178 | resolution-usage-row-attribution-race | 1 | python |
+| 2179 | git-jsonl-board-two-writer-append-conflict | 1 | git |
+| 2180 | vitest-suite-ooms-under-memory-cap-ulimit | 1 | go |
+| 2181 | python-cli-non-atomic-refusal-partial-write | 1 | python |
+| 2182 | python-cli-silent-noop-help-drift | 1 | python |
+| 2183 | policy-script-clobber-guard | 1 | python |
+| 2184 | duckbrain-tick-chain-hole-after-foreman-tick | 1 | shell |
+| 2185 | jsonl-board-header-guard-missing-tick-double-encoded-event | 1 | shell |
+| 2186 | go-custom-json-marshal-breaks-internal-response-decoder | 1 | go |
