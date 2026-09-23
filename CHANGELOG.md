@@ -7,9 +7,26 @@
 existing tag, a dirty tree, or a missing `## [<TAG>]` section in this file,
 and runs the full build+test suite before creating the annotated tag with the
 message taken from that section (`DRY_RUN=1` previews all gates without
-tagging). The first cut, v0.1.0, is being tagged with that tooling in the same
-change; until the tag is pushed and a GitHub Release exists, nothing here is
-published.
+tagging). v0.1.0 was the first cut with that tooling; v0.1.1 is the first cut
+to ship with a GitHub Release object and artifacts (the release gate: a tag
+without a Release object is not a release).
+
+## [v0.1.1] - 2026-09-22
+
+### Operational hardening (no API or behavior changes)
+
+- CI honesty bundle: bwrap installed for sandbox tests, honest Go 1.26 matrix,
+  grouped sqlite3 guard (OB-GAP-087/088/090), AppArmor unprivileged-userns
+  restriction lifted (OB-GAP-091)
+- Deploy: off-by-one systemd unit vendored in-repo with doc pointers and a
+  drift guard (OB-GAP-089)
+- Docs: gitreins guard recipe corrected in README/CONTRIBUTING (the deleted
+  gitreins-poc venv path replaced by the pipx shim); AGENTS.md replacement
+  text parked in docs/agents-harness-guard.md pending approval
+- Hygiene: churning classes untracked (.gitreins/logs/, board *.pre-*
+  snapshots) so `git status` stays clean
+- Release surface: GitHub Release objects published for v0.1.0 (backfilled)
+  and v0.1.1; answer-corpus data syncs continued through the cycle
 
 ## [v0.1.0] - 2026-09-21
 
