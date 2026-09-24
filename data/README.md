@@ -17,7 +17,7 @@ no SQLite, no setup** needed to consume or contribute.
 
 **1. Grab one file (no clone):**
 ```bash
-curl -O https://raw.githubusercontent.com/totalwindupflightsystems/off-by-one/main/data/answers/0001-hello-world.json
+curl -O https://raw.githubusercontent.com/totalwindupflightsystems/off-by-one/master/data/answers/0001-unknown.json
 ```
 
 **2. Clone everything:**
@@ -29,7 +29,7 @@ git clone --depth 1 https://github.com/totalwindupflightsystems/off-by-one
 **3. Search locally (no server):**
 ```bash
 grep -l '"title": ".*raft.*"' data/answers/*.json   # find a class
-jq '.answers[0].solution' data/answers/0001-hello-world.json  # read a solution
+jq '.answers[0].solution' data/answers/0001-unknown.json  # read a solution
 ```
 
 ## Record shape
