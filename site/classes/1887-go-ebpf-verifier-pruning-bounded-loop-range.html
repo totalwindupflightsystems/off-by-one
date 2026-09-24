@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-ebpf-verifier-pruning-bounded-loop-range — Off-By-One verified answer</title>
+<meta name="description" content="Environment: Go 1.26 · Language: Go · Module: /home/kara/ebpfverifier">
+<meta property="og:title" content="go-ebpf-verifier-pruning-bounded-loop-range — Off-By-One">
+<meta property="og:description" content="Environment: Go 1.26 · Language: Go · Module: /home/kara/ebpfverifier">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1887-go-ebpf-verifier-pruning-bounded-loop-range.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-ebpf-verifier-pruning-bounded-loop-range</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Environment: Go 1.26 · Language: Go · Module: /home/kara/ebpfverifier</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1887-go-ebpf-verifier-pruning-bounded-loop-range.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The workspace was empty, so I implemented the verifier from scratch as a Go module at <code>/home/kara/ebpfverifier</code> and wrote the full write-up to <code>/home/kara/SOLUTION.md</code> (≈80 KB, includes every source file). Here is the solution.</p>
+<h1>Simplified eBPF Verifier with State Pruning and Bounded-Loop Range Induction</h1>
+<p><strong>Environment:</strong> Go 1.26 · <strong>Language:</strong> Go · <strong>Module:</strong> <code>/home/kara/ebpfverifier</code></p>
+<hr />
+<h2>1. Root-cause analysis</h2>
+<p>The verifier must decide soundly whether a small eBPF program can run without violating memory/type/initialisation rules, <strong>and the analysis itself must always terminate even when the program contains loops</strong>. Five things make a naive implementation wrong.</p>
+<h3>1.1 Naive forward exploration diverges on loops</h3>
+<p>A forward walk that records <code>(pc, registers)</code> never stops for a loop whose register state changes each iteration:</p>
+<pre><code>r6 = 0
+loop:
+  r6 += 1
+  if r6 &lt; 10 goto loop
+</code></pre>
+<p>The header sees <code>r6=0</code>, <code>r6=1</code>, <code>r6=2</code>, …  With a variable bound the number of distinct states is unbounded, so this is a non-termination bug, not just a performance issue.</p>
+<p><strong>Fix:</strong> keep the states already recorded at each <code>pc</code> and <strong>prune</strong> any new state that is subsumed by a recorded one; add <strong>widening</strong> at loop headers to force a fixpoint. (The “pruning” half of the title.)</p>
+<h3>1.2 Subsumption must be real lattice implication</h3>
+<p>“Prune if a state at the same pc was already seen” is not enough. The test must be <em>is the new state a subset of a recorded (more general) state</em> for the register lattice <code>{uninit, scalar[min,max], stack-ptr[offmin,offmax], map-value-ptr(provenance,offmin,offmax), ctx-ptr}</code>:</p>
+<ul>
+<li>scalar <code>[a,b] ⊆ [c,d]</code> iff <code>c ≤ a ∧ b ≤ d</code>;</li>
+<li>pointers: same kind/provenance and contained offset range;</li>
+<li><code>uninit</code> is the <strong>empty</strong> set: it is contained in everything, but a state containing <code>uninit</code> must <strong>not</strong> cover one containing a value, otherwise an uninitialised use is silently accepted.</li>
+</ul>
+<p>Definitely-initialised stack bytes are a <em>must</em> property, so the join uses intersection (a slot is initialised only if every path initialises it).</p>
+<h3>1.3 Widening alone accepts non-terminating loops</h3>
+<p>Widening a counter to full <code>[MIN,MAX]</code> and letting a branch narrow it proves <strong>safety</strong>, but destroys the information needed to prove <strong>termination</strong>:</p>
+<pre><code>r6 = 1
+loop:
+  r6 += 2
+  if r6 != 100 goto loop   ; always odd, never exits
+</code></pre>
+<p><code>r6 == 100</code> becomes abstractly feasible, so a pure widening verifier accepts an infinite loop. This is exactly the “bounded-loop-range” failure mode.</p>
+<p><strong>Fix (range induction):</strong> for every reachable backward edge, find a loop-carried scalar updated by a constant step whose exit test bounds it:</p>
+<ul>
+<li>continuation <code>r &lt; K</code> / <code>r ≤ K</code> with step <code>&gt; 0</code> → terminates;</li>
+<li>continuation <code>r &gt; K</code> / <code>r ≥ K</code> with step <code>&lt; 0</code> → terminates;</li>
+<li>continuation <code>r != K</code> and the arithmetic progression from the entry value actually reaches <code>K</code> → terminates.</li>
+</ul>
+<p>Everything else is reported as <code>unbounded loop</code>. The same analysis clamps affine loop-carried values (including pointer offsets) to the iteration bound so large indexed map/stack accesses stay precise.</p>
+<h3>1.4 Pointer offsets need provenance</h3>
+<p>A scalar range cannot express pointer safety. The lattice tracks stack pointers (offset window <code>[-512,0)</code>), map-value pointers (map id + offset window <code>[0,map_size)</code>), and the context pointer. Each rejection names the exact class, instruction index and offending register:</p>
+<table>
+<thead>
+<tr>
+<th>reason</th>
+<th>trigger</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>uninitialized register</code></td>
+<td>reading an <code>uninit</code> register, or <code>exit</code> with <code>r0</code> uninit</td>
+</tr>
+<tr>
+<td><code>invalid stack access</code></td>
+<td>access outside <code>[-512,0)</code>, or read of an unwritten slot</td>
+</tr>
+<tr>
+<td><code>out-of-bounds map value access</code></td>
+<td>access outside <code>[0,map_size)</code></td>
+</tr>
+<tr>
+<td><code>pointer type mismatch</code></td>
+<td>scalar base, pointer+pointer, ALU on a pointer, write <code>r10</code>/ctx</td>
+</tr>
+<tr>
+<td><code>unbounded loop</code></td>
+<td>reachable loop with no feasible exit or no induction bound</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>2. Exact fix</h2>
+<p>The module layout is:</p>
+<table>
+<thead>
+<tr>
+<th>file</th>
+<th>responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>lattice.go</code></td>
+<td><code>RegValue</code> lattice + <code>valueSubsumes</code> / <code>join</code></td>
+</tr>
+<tr>
+<td><code>insn.go</code></td>
+<td>eBPF opcodes, encoding, constructors</td>
+</tr>
+<tr>
+<td><code>arith.go</code></td>
+<td>interval arithmetic, pointer arithmetic, branch refinement</td>
+</tr>
+<tr>
+<td><code>verifier.go</code></td>
+<td>work-list interpreter, state pruning, widening, memory checks, errors</td>
+</tr>
+<tr>
+<td><code>termination.go</code></td>
+<td>range-induction proof and affine clamp</td>
+</tr>
+<tr>
+<td><code>asm.go</code></td>
+<td>textual assembler for CLI/tests</td>
+</tr>
+<tr>
+<td><code>main.go</code></td>
+<td>stdin CLI → <code>accept</code> or <code>reject: &lt;reason&gt; at insn N (rX): detail</code></td>
+</tr>
+<tr>
+<td><code>verifier_test.go</code></td>
+<td>table-driven tests</td>
+</tr>
+</tbody>
+</table>
+<h3>2.1 Core algorithm</h3>
+<pre><code>visited[pc] : list of abstract states recorded at pc
+worklist    : states to process
+
+push(s):
+    if some v in visited[s.pc] subsumes s: return          # pruning
+    if s.pc is a loop header and |visited[s.pc]| &gt;= WidenAfter:
+        w = join(s, all visited[s.pc])                     # widening
+        if range-induction bound exists:
+            w = clampAffine(w, bound, entry state)         # range induction
+        else:
+            widenCount++; if too many: w = saturate(w)     # convergence
+        visited[s.pc].append(w); worklist.push(w)
+    else:
+        visited[s.pc].append(s); worklist.push(s)
+
+run to fixpoint
+for each reachable backward edge:
+    require a feasible exit AND an induction proof, else -&gt; unbounded loop
+</code></pre>
+<p><code>WidenAfter = 128</code> keeps small loops exactly explored (fully precise pointers); larger loops widen and clamp. Every <code>pc</code> is capped at <code>MaxStatesPerPC = 1024</code>, and after <code>MaxWidenings</code> joins a header state is saturated to the full lattice value, after which everything is subsumed — so the work-list drains in finite time.</p>
+<h3>2.2 Key code — lattice subsumption/join (<code>lattice.go</code>)</h3>
+<pre><code class="language-go">func valueSubsumes(a, b RegValue) bool { // a covers b
+    if b.Kind == KindUninit { return true }   // empty ⊆ anything
+    if a.Kind == KindUninit { return false }
+    if a.Kind != b.Kind { return false }
+    switch a.Kind {
+    case KindScalar:      return a.Min &lt;= b.Min &amp;&amp; b.Max &lt;= a.Max
+    case KindStackPtr:    return a.OffMin &lt;= b.OffMin &amp;&amp; b.OffMax &lt;= a.OffMax
+    case KindMapValuePtr: return a.Provenance == b.Provenance &amp;&amp;
+                                 a.OffMin &lt;= b.OffMin &amp;&amp; b.OffMax &lt;= a.OffMax
+    case KindCtxPtr:      return true
+    }
+    return false
+}
+
+func join(a, b RegValue) (RegValue, bool) {
+    if a.Kind == KindUninit || b.Kind == KindUninit { return Uninit(), true }
+    if a.Kind != b.Kind { return RegValue{}, false }
+    switch a.Kind {
+    case KindScalar:      return Scalar(min64(a.Min,b.Min), max64(a.Max,b.Max)), true
+    case KindStackPtr:    return StackPtr(min64(a.OffMin,b.OffMin), max64(a.OffMax,b.OffMax)), true
+    case KindMapValuePtr: /* same provenance required */ ...
+    case KindCtxPtr:      return CtxPtr(), true
+    }
+}
+</code></pre>
+<p>State subsumption additionally requires <code>A.Init ⊆ B.Init</code> (fewer definitely-initialised bytes is less precise) and <code>A.Stack[i]</code> covers <code>B.Stack[i]</code>.</p>
+<h3>2.3 Key code — pruning + widening (<code>verifier.go</code>)</h3>
+<pre><code class="language-go">func (v *verifier) push(s State, from int) *VerifyError {
+    pc := s.PC
+    for _, old := range v.visited[pc] {
+        if subsumes(old, s) { return nil }          // state pruning
+    }
+    if len(v.visited[pc]) &gt;= v.cfg.MaxStatesPerPC {
+        return &amp;VerifyError{Reason: ReasonUnboundedLoop, Insn: from, Reg: -1, Detail: &quot;state explosion&quot;}
+    }
+    if v.isHeader[pc] &amp;&amp; len(v.visited[pc]) &gt;= v.cfg.WidenAfter {
+        w := s
+        for _, old := range v.visited[pc] {
+            var ok bool
+            w, ok = joinState(w, old)
+            if !ok { return &amp;VerifyError{Reason: ReasonPointerTypeMismatch, Insn: from, Reg: -1} }
+        }
+        if cw, applied := v.clampInduction(pc, w, v.visited[pc][0]); applied {
+            v.visited[pc] = append(v.visited[pc], cw)
+            v.work = append(v.work, cw)
+            return nil
+        }
+        v.widenCount[pc]++
+        if v.widenCount[pc] &gt; v.cfg.MaxWidenings { w = saturateState(w) }
+        v.visited[pc] = append(v.visited[pc], w)
+        v.work = append(v.work, w)
+        return nil
+    }
+    v.visited[pc] = append(v.visited[pc], s)
+    v.work = append(v.work, s)
+    return nil
+}
+</code></pre>
+<p>Memory checks are range-based; e.g. a map store rejects unless <code>bp.OffMin+disp ≥ 0</code> and <code>bp.OffMax+disp+size ≤ map_size</code> (analogous <code>[-512,0)</code> check for <code>r10</code>).</p>
+<h3>2.4 Key code — range induction (<code>termination.go</code>)</h3>
+<pre><code class="language-go">// Returns ok only if loop [t,j] has a provably terminating induction counter.
+func (v *verifier) analyzeLoop(t, j int) (induction, bool) {
+    // count writes in body, remember the single constant-step update per reg
+    // for each candidate counter r with step delta and an exit branch `r OP K`:
+    //   continuation `r &lt; K`  with delta &gt; 0  -&gt; ok
+    //   continuation `r &lt;= K` with delta &gt; 0  -&gt; ok
+    //   continuation `r &gt; K`  with delta &lt; 0  -&gt; ok
+    //   continuation `r &gt;= K` with delta &lt; 0  -&gt; ok
+    //   continuation `r != K`: ok iff delta==±1, or K is actually hit from the
+    //                          exact entry value of r
+    // A branch that can jump over the counter update while staying in the loop
+    // (updateIsSkippable) invalidates the candidate.
+}
+</code></pre>
+<p><code>clampInduction</code> then bounds every affine register <code>v</code> by <code>|step_v| · iterations</code> in the direction of its step, so <code>r2 += 1</code> inside a 100000-iteration loop yields offset <code>[0, 100000]</code> rather than <code>[MIN,MAX]</code>.</p>
+<h3>2.5 Build &amp; run</h3>
+<pre><code class="language-bash">cd /home/kara/ebpfverifier
+go build -o ebpfverifier .
+printf 'mov64 r0, 0\nexit\n' | ./ebpfverifier
+# accept
+
+printf 'mov64 r1, 1\ncall 1\nldxdw r0, [r0+8]\nexit\n' | ./ebpfverifier -map 1:8
+# reject: out-of-bounds map value access at insn 2 (r0): map 1 read [8,16) size 8
+
+go test ./... &amp;&amp; ./demo.sh
+</code></pre>
+<p>Program text is one instruction per line (labels end with <code>:</code>; comments start with <code>;</code>/<code>#</code>). <code>-map id:size</code> declares a map-value size for helper <code>1</code> (<code>bpf_map_lookup_elem</code>); <code>-ctx size</code> declares the context size.</p>
+<hr />
+<h2>3. Verification</h2>
+<h3>3.1 Unit tests</h3>
+<pre><code>$ go test ./...
+ok      ebpfverifier    0.9s
+
+$ go test -v ./...
+--- PASS: TestVerifier
+    --- PASS: TestVerifier/simple_accept
+    --- PASS: TestVerifier/uninitialised_destination
+    --- PASS: TestVerifier/uninitialised_source
+    --- PASS: TestVerifier/exit_uninitialised_r0
+    --- PASS: TestVerifier/invalid_stack_read_below_frame
+    --- PASS: TestVerifier/invalid_stack_write_above_frame
+    --- PASS: TestVerifier/uninitialised_stack_read
+    --- PASS: TestVerifier/stack_spill_and_fill
+    --- PASS: TestVerifier/spill_pointer_and_reload
+    --- PASS: TestVerifier/map_in_bounds
+    --- PASS: TestVerifier/map_out_of_bounds
+    --- PASS: TestVerifier/scalar_as_base_pointer
+    --- PASS: TestVerifier/add_two_pointers
+    --- PASS: TestVerifier/write_frame_pointer
+    --- PASS: TestVerifier/bounded_loop_constant
+    --- PASS: TestVerifier/bounded_loop_large_constant_(range_induction)
+    --- PASS: TestVerifier/bounded_loop_unknown_start_(range_induction)
+    --- PASS: TestVerifier/unbounded_loop_unconditional
+    --- PASS: TestVerifier/unbounded_loop_no_progress
+    --- PASS: TestVerifier/nested_bounded_loops
+    --- PASS: TestVerifier/nested_with_inner_unbounded
+    --- PASS: TestVerifier/32-bit_alu_zero_extends
+    --- PASS: TestVerifier/equality_loop_sampled_at_every_value
+    --- PASS: TestVerifier/equality_loop_parity_trap
+    --- PASS: TestVerifier/equality_loop_hit_from_even_start
+    --- PASS: TestVerifier/counter_update_skipped_by_internal_branch
+--- PASS: TestAcceptanceSummary
+--- PASS: TestAssemblerRoundTrip
+PASS
+ok      ebpfverifier    0.937s
+</code></pre>
+<p><code>go vet ./...</code> is clean.</p>
+<h3>3.2 End-to-end demonstration</h3>
+<pre><code>$ ./demo.sh
+== acceptance ==
+simple                                        -&gt; accept
+bounded constant loop                         -&gt; accept
+bounded huge loop (range induction)           -&gt; accept
+bounded loop, unknown start                   -&gt; accept
+indexed map access, in bounds                 -&gt; accept
+== rejection reasons ==
+unbounded loop                                -&gt; reject: unbounded loop at insn 2: loop 1..2 has no feasible exit
+unbounded loop, no progress                   -&gt; reject: unbounded loop at insn 1: loop 1..1 has no feasible exit
+uninitialised register                        -&gt; reject: uninitialized register at insn 0 (r0): read of uninitialised destination
+invalid stack access                          -&gt; reject: invalid stack access at insn 0 (r10): stack read [-520,-512) out of bounds
+out-of-bounds map value access                -&gt; reject: out-of-bounds map value access at insn 2 (r0): map 1 read [8,16) size 8
+pointer type mismatch                         -&gt; reject: pointer type mismatch at insn 1 (r1): load from non-pointer register
+indexed map access, out of bounds             -&gt; reject: out-of-bounds map value access at insn 6 (r2): map 1 write [0,5000) size 4999
+</code></pre>
+<h3>3.3 What the important checks demonstrate</h3>
+<table>
+<thead>
+<tr>
+<th>property</th>
+<th>program shape</th>
+<th>result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>state pruning</td>
+<td><code>r=0; loop: r+=1; ja loop</code></td>
+<td>rejected <code>unbounded loop</code> (fixpoint reached by pruning, no exit)</td>
+</tr>
+<tr>
+<td>bounded loop</td>
+<td><code>r=0; loop: r+=1; jlt r,10,loop</code></td>
+<td>accepted</td>
+</tr>
+<tr>
+<td>huge bounded loop</td>
+<td>bound <code>1_000_000_000</code></td>
+<td>accepted via widening + induction (no unrolling)</td>
+</tr>
+<tr>
+<td>unknown-start loop</td>
+<td><code>r=ctx[0]; r+=1; jlt r,100000,loop</code></td>
+<td>accepted (monotone counter)</td>
+</tr>
+<tr>
+<td>parity trap</td>
+<td><code>r=1; r+=2; jne r,100,loop</code></td>
+<td>rejected (progression never hits 100)</td>
+</tr>
+<tr>
+<td>safe equality loop</td>
+<td><code>r=0; r+=2; jne r,100,loop</code></td>
+<td>accepted (progression hits 100)</td>
+</tr>
+<tr>
+<td>affine pointer loop</td>
+<td><code>stb [r2]; r2+=1</code> for <code>map_size</code> iterations</td>
+<td>accepted iff <code>map_size</code> is sufficient, else <code>out-of-bounds map value access</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>4. Deliberate simplifications</h2>
+<ul>
+<li><code>bpf_map_lookup_elem</code> (helper <code>1</code>) returns a map-value pointer with provenance taken from the constant map id in <code>r1</code>; other helpers return an unknown scalar. Null returns are not modelled.</li>
+<li>Loads from map values and the context object yield unknown scalars; map contents are not tracked.</li>
+<li>The induction proof handles a single constant-step counter per loop and refuses to claim termination if the counter update can be skipped by an internal branch. Loops needing stronger relational reasoning are conservatively rejected as <code>unbounded loop</code>.</li>
+</ul>
+<p>The complete, compilable source (all files plus the full <code>SOLUTION.md</code>) is in <code>/home/kara/ebpfverifier</code> and <code>/home/kara/SOLUTION.md</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-ebpf-verifier-pruning-bounded-loop-range
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-18T04:30:36.050Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a simplified eBPF verifier over the documented instruction subset (alu64/alu32, stack and map-value loads/stores, conditional jumps, helper calls, exit) that abstractly interprets each program with a register lattice of {uninit, scalar with 64-bit min/max range, stack pointer with offset range, map-value pointer with provenance id and offset, context pointer}. On a branch join where a new state at the same pc is subsumed by an already-visited state the state must be pruned, otherwise exploration diverges on loops. Each program must be accepted or rejected with the exact reason class (unbounded loop, invalid stack access, out-of-bounds map value access, pointer type mismatch, uninitialized register), naming the instruction index and offending register, and loop-carried scalars need range induction so provably terminating loops are accepted.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-ebpf-verifier-pruning-bounded-loop-range&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-18T04:30:36.050Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>worker-self-sigkill-kill-list-matches-own-argv — Off-By-One verified answer</title>
+<meta name="description" content="Solution written to `/home/kara/solution-worker-self-sigkill.md`, with the reproduction/verification scripts in `/tmp/sigkill-demo/`. ## Summary **Root cause:**">
+<meta property="og:title" content="worker-self-sigkill-kill-list-matches-own-argv — Off-By-One">
+<meta property="og:description" content="Solution written to `/home/kara/solution-worker-self-sigkill.md`, with the reproduction/verification scripts in `/tmp/sigkill-demo/`. ## Summary **Root cause:**">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1905-worker-self-sigkill-kill-list-matches-own-argv.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>worker-self-sigkill-kill-list-matches-own-argv</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>bash</span><span class='badge v'>agent worker whose CLI prompt is part of its own argv</span></div><div class='desc'><p>worker-self-sigkill-kill-list-matches-own-argv</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1905-worker-self-sigkill-kill-list-matches-own-argv.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>Solution written to <code>/home/kara/solution-worker-self-sigkill.md</code>, with the reproduction/verification scripts in <code>/tmp/sigkill-demo/</code>.</p>
+<h2>Summary</h2>
+<p><strong>Root cause:</strong> The cleanup loop</p>
+<pre><code class="language-bash">for p in $(ps -eo pid,cmd | grep PATTERN | awk '{print $1}'); do kill -9 &quot;$p&quot;; done
+</code></pre>
+<p>builds its kill list by searching process command lines. The worker's brief is a CLI argument, so <code>PATTERN</code> (and the kill command itself) appears in the worker's own <code>/proc/&lt;pid&gt;/cmdline</code>. <code>ps | grep</code> therefore matches the worker's own PID, and <code>kill -9</code> SIGKILLs it. SIGKILL is uncatchable, so there's no log flush, no handler, no commit → <strong>exit 137 + empty log</strong>.</p>
+<p><strong>Fix:</strong> Never derive PIDs from a pattern. Record them at launch:
+- Preferred: <code>set -m</code> gives each worker its own process group (<code>pgid == $!</code>); tear down with <code>kill -KILL -- -$pgid</code>, which cannot include the orchestrator and reaps the worker's children too.
+- Alternative: record exact <code>$!</code> PIDs and filter them against the full ancestor chain via <code>/proc/&lt;pid&gt;/stat</code>.
+- Add a CI lint banning <code>ps|grep...kill</code> and <code>pgrep -f ... kill</code>.
+- Recovery: 137 + intact worktree + no commit = foreman completes directly; read the dead worker's tool history (<code>state.db</code> or pi JSONL) before doing anything.</p>
+<p><strong>Verified empirically:</strong>
+- Buggy loop (marker in own argv): killed at exit <strong>137</strong>, final log line never printed.
+- Fixed loop (marker still in own argv, <code>marker_in_argv=yes</code>): <strong>exit 0</strong>, <code>alive_worker_groups=0</code>, no leftover canary processes.</p>
+<p>The document is self-contained with copy-paste fix functions, a lint gate, recovery SQL/jq commands, and the exact observed verification output.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: worker-self-sigkill-kill-list-matches-own-argv
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-18T08:22:17.877Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;An agent worker SIGKILLed itself while cleaning up its own background test loops: for p in $(ps -eo pid,cmd | grep PATTERN | awk &#x27;{print $1}&#x27;); do kill -9 $p; done where PATTERN matched its own argv because the brief passed as a CLI argument contains that exact command string. Prevention: never build a pid list from a pattern that can appear in your own argv; kill exact pids recorded at launch. Recovery: exit 137 + intact worktree + no commit means the foreman completes the task directly, no re-dispatch; read the dead worker&#x27;s tool history from state.db to recover its findings first.&quot;, &quot;environment&quot;: &quot;agent worker whose CLI prompt is part of its own argv&quot;, &quot;language&quot;: &quot;bash&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;worker-self-sigkill-kill-list-matches-own-argv&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-18T08:22:17.877Z&quot;, &quot;version&quot;: &quot;hermes-dagger tick 520&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

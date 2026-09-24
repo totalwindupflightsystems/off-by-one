@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>shell-ext4-jbd2-journal-replay-idempotent-torn-commit — Off-By-One verified answer</title>
+<meta name="description" content="A post-mortem tool that replays an extracted ext4 jbd2 journal onto a target block range with a naive &quot;walk the log and dd every tagged block&quot; loop produces met">
+<meta property="og:title" content="shell-ext4-jbd2-journal-replay-idempotent-torn-commit — Off-By-One">
+<meta property="og:description" content="A post-mortem tool that replays an extracted ext4 jbd2 journal onto a target block range with a naive &quot;walk the log and dd every tagged block&quot; loop produces met">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2168-shell-ext4-jbd2-journal-replay-idempotent-torn-commit.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>shell-ext4-jbd2-journal-replay-idempotent-torn-commit</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>A post-mortem tool that replays an extracted ext4 jbd2 journal onto a target block range with a naive "walk the log and dd every tagged block" loop produces metadata that is wrong and that changes on a second run. The symptom is stale metadata resurrected on power-loss recovery, and a target whose bytes depend on how many times recovery ran.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2168-shell-ext4-jbd2-journal-replay-idempotent-torn-commit.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is implemented, tested, and written to <code>/home/kara/SOLUTION.md</code> (self-contained with both scripts). Here is the document:</p>
+<hr />
+<h1>Post-mortem jbd2 journal replay: idempotent, revoke-aware, torn-tail-safe</h1>
+<h2>1. The failure being diagnosed</h2>
+<p>A post-mortem tool that replays an extracted ext4 <code>jbd2</code> journal onto a target block range with a naive "walk the log and <code>dd</code> every tagged block" loop produces metadata that is <em>wrong</em> and that changes on a second run. The symptom is stale metadata resurrected on power-loss recovery, and a target whose bytes depend on how many times recovery ran.</p>
+<h2>2. Root cause analysis</h2>
+<p>The journal is not a flat write-ahead byte stream; it is a set of transactions that must be reduced to an <em>effective final state</em> before a single byte is written.</p>
+<ol>
+<li><strong>Data blocks are anonymous.</strong> A descriptor carries a tag list with per-block checksums; the payloads are the blocks immediately following the descriptor. A walker that does not consume <code>N</code> trailing data blocks per descriptor mistakes payload for metadata.</li>
+<li><strong>Revoke records undo earlier writes.</strong> A revoke for block <code>B</code> invalidates writes to <code>B</code> whose sequence is <code>&lt;=</code> the revoke's sequence. Applying the log left-to-right (or applying every tag) resurrects those stale writes. The correct result is a <strong>monotone merge keyed on the highest sequence number</strong>: for each block keep the write with the highest sequence <code>Sw</code> such that <code>Sw &gt; max(revoke sequences for B)</code>. Because the merge is a pure function of the record set, order does not matter.</li>
+<li><strong>A transaction is only durable when its commit validates.</strong> Power loss can leave a descriptor plus data blocks with a missing/corrupt commit block (<em>torn tail</em>). Partially applying it corrupts metadata; the whole transaction must be discarded. Per-block tag checksums catch corrupt payloads; the commit checksum catches a torn descriptor/commit group.</li>
+<li><strong>Idempotency requires applying a precomputed survivor set.</strong> If replay writes while scanning, or reapplies obsolete records on the second run, run-twice differs from run-once. Computing the final <code>block -&gt; payload</code> map first, then writing each survivor exactly once, makes replay a deterministic function of the journal.</li>
+<li><strong>An inconsistent header must abort before touching the target.</strong> All superblock validation happens before any <code>dd</code> to the target.</li>
+</ol>
+<h2>3. Format handled</h2>
+<ul>
+<li>Superblock: <code>h_magic = 0xC03B3998</code>, <code>h_blocktype = 4</code>, <code>s_blocksize @12</code>, <code>s_maxlen @16</code>, <code>s_first @20</code>, <code>s_sequence @24</code>, <code>s_start @28</code>.</li>
+<li>Descriptor <code>1</code>: 12-byte header, then 8-byte tags <code>t_blocknr(4) t_checksum(2) t_flags(2)</code> (<code>--tag64</code> adds <code>t_blocknr_high(4)</code> =&gt; 12-byte tags), terminated by <code>JBD2_FLAG_LAST_TAG (8)</code>; the next <code>N</code> blocks are the tagged payloads.</li>
+<li>Revoke <code>5</code>: <code>r_count @12</code>, block numbers from <code>@16</code>.</li>
+<li>Commit <code>2</code>: CRC32 of the whole block with the 4-byte checksum at <code>@16</code> zeroed.</li>
+<li>The ring wraps from <code>s_maxlen-1</code> back to <code>s_first</code>.</li>
+</ul>
+<blockquote>
+<p>The harness substitutes coreutils <code>cksum</code> (CRC-32) for the kernel's CRC-32C so the deliverable needs no crypto library. Recovery logic is identical; swap <code>crc_range</code>/<code>crc_block_zeroed</code> for CRC-32C to run against a real image.</p>
+</blockquote>
+<h2>4. Exact fix</h2>
+<h3>4.1 <code>jbd2_replay.sh</code></h3>
+<pre><code class="language-bash">#!/usr/bin/env bash
+#
+# jbd2_replay.sh - deterministic, idempotent post-mortem replay of an
+#                  extracted ext4/jbd2 journal image onto a target block range.
+#
+set -u
+
+MAGIC=$((0xC03B3998))
+TYPE_DESC=1; TYPE_COMMIT=2; TYPE_SB=4; TYPE_REVOKE=5
+FLAG_ESCAPE=1; FLAG_SAME_UUID=2; FLAG_DELETED=4; FLAG_LAST_TAG=8
+
+PROG=${0##*/}; TAG64=0; DRY_RUN=0; QUIET=0
+die()     { printf '%s: error: %s\n' &quot;$PROG&quot; &quot;$*&quot; &gt;&amp;2; exit 3; }
+hdr_die() { printf '%s: inconsistent journal header: %s\n' &quot;$PROG&quot; &quot;$*&quot; &gt;&amp;2; exit 2; }
+note()    { [ &quot;$QUIET&quot; -eq 1 ] || printf '%s\n' &quot;$*&quot;; }
+
+usage() { cat &gt;&amp;2 &lt;&lt;EOF
+usage: $PROG --journal FILE --target FILE [--tag64] [--dry-run] [--quiet]
+EOF
+    exit 64; }
+
+read_u16() { local f=$1 o=$2 a; read -r -a a &lt; &lt;(od -An -tu1 -j &quot;$o&quot; -N2 &quot;$f&quot;)
+    [ &quot;${#a[@]}&quot; -lt 2 ] &amp;&amp; { echo 0; return; }; echo $(( (a[0]&lt;&lt;8)|a[1] )); }
+read_u32() { local f=$1 o=$2 a; read -r -a a &lt; &lt;(od -An -tu1 -j &quot;$o&quot; -N4 &quot;$f&quot;)
+    [ &quot;${#a[@]}&quot; -lt 4 ] &amp;&amp; { echo 0; return; }; echo $(( (a[0]&lt;&lt;24)|(a[1]&lt;&lt;16)|(a[2]&lt;&lt;8)|a[3] )); }
+crc_range() { dd if=&quot;$1&quot; bs=1 skip=&quot;$2&quot; count=&quot;$3&quot; status=none | cksum | awk '{print $1}'; }
+crc_block_zeroed() { local f=$1 off=$2 bs=$3 zoff=$4
+    { dd if=&quot;$f&quot; bs=1 skip=&quot;$off&quot; count=&quot;$zoff&quot; status=none; printf '\0\0\0\0'
+      dd if=&quot;$f&quot; bs=1 skip=$((off+zoff+4)) count=$((bs-zoff-4)) status=none; } | cksum | awk '{print $1}'; }
+
+JOURNAL=&quot;&quot;; TARGET=&quot;&quot;
+while [ $# -gt 0 ]; do case &quot;$1&quot; in
+    --journal) JOURNAL=${2:-}; shift ;; --target) TARGET=${2:-}; shift ;;
+    --tag64) TAG64=1 ;; --dry-run) DRY_RUN=1 ;; --quiet) QUIET=1 ;;
+    -h|--help) usage ;; *) die &quot;unknown argument: $1&quot; ;; esac; shift; done
+[ -n &quot;$JOURNAL&quot; ] || usage; [ -n &quot;$TARGET&quot; ] || usage; [ -r &quot;$JOURNAL&quot; ] || die &quot;cannot read journal: $JOURNAL&quot;
+
+sb_magic=$(read_u32 &quot;$JOURNAL&quot; 0);   sb_type=$(read_u32 &quot;$JOURNAL&quot; 4)
+sb_bs=$(read_u32 &quot;$JOURNAL&quot; 12);     sb_maxlen=$(read_u32 &quot;$JOURNAL&quot; 16)
+sb_first=$(read_u32 &quot;$JOURNAL&quot; 20);  sb_seq=$(read_u32 &quot;$JOURNAL&quot; 24)
+sb_start=$(read_u32 &quot;$JOURNAL&quot; 28)
+
+[ &quot;$sb_magic&quot; -eq &quot;$MAGIC&quot; ]      || hdr_die &quot;bad magic $(printf 0x%08x &quot;$sb_magic&quot;)&quot;
+[ &quot;$sb_type&quot; -eq &quot;$TYPE_SB&quot; ]     || hdr_die &quot;superblock blocktype is $sb_type&quot;
+[ &quot;$sb_bs&quot; -ge 1024 ]             || hdr_die &quot;block size $sb_bs &lt; 1024&quot;
+(( (sb_bs &amp; (sb_bs-1)) == 0 ))    || hdr_die &quot;block size $sb_bs not a power of two&quot;
+[ &quot;$sb_maxlen&quot; -gt &quot;$sb_first&quot; ]  || hdr_die &quot;maxlen $sb_maxlen &lt;= first $sb_first&quot;
+[ &quot;$sb_first&quot; -ge 1 ]             || hdr_die &quot;first log block $sb_first &lt; 1&quot;
+[ &quot;$sb_seq&quot; -ge 1 ]               || hdr_die &quot;first sequence $sb_seq &lt; 1&quot;
+
+BS=$sb_bs; MAXLEN=$sb_maxlen; FIRST=$sb_first
+jsize=$(stat -c %s &quot;$JOURNAL&quot; 2&gt;/dev/null || echo 0)
+[ &quot;$jsize&quot; -ge $((MAXLEN*BS)) ] || hdr_die &quot;journal image too small&quot;
+[ &quot;$sb_start&quot; -eq 0 ] &amp;&amp; { note &quot;journal is clean (s_start=0); nothing to replay&quot;; exit 0; }
+[ &quot;$sb_start&quot; -ge &quot;$FIRST&quot; ] &amp;&amp; [ &quot;$sb_start&quot; -lt &quot;$MAXLEN&quot; ] || hdr_die &quot;s_start $sb_start outside [$FIRST,$MAXLEN)&quot;
+
+CAP=$(( MAXLEN - FIRST )); TAGSZ=8; [ &quot;$TAG64&quot; -eq 1 ] &amp;&amp; TAGSZ=12
+pos=$sb_start; seen=0
+adv() { pos=$(( pos+1 )); [ &quot;$pos&quot; -ge &quot;$MAXLEN&quot; ] &amp;&amp; pos=$FIRST; seen=$(( seen+1 )); }
+
+WRITES=&quot;&quot;; REVOKES=&quot;&quot;; ALLSEQ=&quot;&quot;; TORNSEQ=&quot;&quot;
+declare -A TXN_TORN
+
+parse_descriptor() {
+    local base=$(( pos*BS )) o=$(( base+12 )) end=$(( base+BS )) blk flags csum hi
+    TAG_BLK=(); TAG_CSUM=(); TAG_FLAGS=()
+    while [ $(( o+TAGSZ )) -le &quot;$end&quot; ]; do
+        blk=$(read_u32 &quot;$JOURNAL&quot; &quot;$o&quot;); csum=$(read_u16 &quot;$JOURNAL&quot; $((o+4))); flags=$(read_u16 &quot;$JOURNAL&quot; $((o+6)))
+        if [ &quot;$TAG64&quot; -eq 1 ]; then hi=$(read_u32 &quot;$JOURNAL&quot; $((o+8))); blk=$(( hi*4294967296 + blk )); fi
+        TAG_BLK+=(&quot;$blk&quot;); TAG_CSUM+=(&quot;$csum&quot;); TAG_FLAGS+=(&quot;$flags&quot;)
+        o=$(( o+TAGSZ )); (( flags &amp; FLAG_LAST_TAG )) &amp;&amp; break
+    done
+}
+
+cur_writes=&quot;&quot;; cur_revokes=&quot;&quot;; have_desc=0; commit_ok=0; torn=0; cur_seq=$sb_seq
+while [ &quot;$seen&quot; -lt &quot;$CAP&quot; ]; do
+    hm=$(read_u32 &quot;$JOURNAL&quot; $(( pos*BS ))); [ &quot;$hm&quot; -ne &quot;$MAGIC&quot; ] &amp;&amp; break
+    ht=$(read_u32 &quot;$JOURNAL&quot; $(( pos*BS+4 ))); hs=$(read_u32 &quot;$JOURNAL&quot; $(( pos*BS+8 )))
+    [ &quot;$hs&quot; -ne &quot;$cur_seq&quot; ] &amp;&amp; break
+    case &quot;$ht&quot; in
+        &quot;$TYPE_DESC&quot;)
+            parse_descriptor; n=${#TAG_BLK[@]}; adv; i=0
+            while [ &quot;$i&quot; -lt &quot;$n&quot; ]; do
+                [ &quot;$seen&quot; -ge &quot;$CAP&quot; ] &amp;&amp; { overrun=1; break; }
+                src=$pos; blk=${TAG_BLK[$i]}; csum=${TAG_CSUM[$i]}; flags=${TAG_FLAGS[$i]}
+                if (( flags &amp; FLAG_DELETED )); then :; else cur_writes+=&quot;$cur_seq|$blk|$src|$csum&quot;$'\n'; fi
+                adv; i=$(( i+1 ))
+            done
+            have_desc=1; [ &quot;${overrun:-0}&quot; -eq 1 ] &amp;&amp; break ;;
+        &quot;$TYPE_REVOKE&quot;)
+            base=$(( pos*BS )); rcount=$(read_u32 &quot;$JOURNAL&quot; $((base+12))); o=$(( base+16 )); rend=$(( base+rcount ))
+            [ &quot;$rend&quot; -gt $(( base+BS )) ] &amp;&amp; rend=$(( base+BS ))
+            while [ $(( o+4 )) -le &quot;$rend&quot; ]; do blk=$(read_u32 &quot;$JOURNAL&quot; &quot;$o&quot;); [ &quot;$blk&quot; -eq 0 ] &amp;&amp; break
+                cur_revokes+=&quot;$cur_seq|$blk&quot;$'\n'; o=$(( o+4 )); done
+            adv ;;
+        &quot;$TYPE_COMMIT&quot;)
+            base=$(( pos*BS )); stored=$(read_u32 &quot;$JOURNAL&quot; $((base+16))); calc=$(crc_block_zeroed &quot;$JOURNAL&quot; &quot;$base&quot; &quot;$BS&quot; 16)
+            [ &quot;$stored&quot; -eq &quot;$calc&quot; ] &amp;&amp; commit_ok=1 || torn=1
+            adv
+            if [ &quot;$commit_ok&quot; -eq 1 ]; then
+                bad=0
+                if [ -n &quot;$cur_writes&quot; ]; then while IFS='|' read -r s b src c; do
+                    [ -z &quot;$s&quot; ] &amp;&amp; continue
+                    rc=$(crc_range &quot;$JOURNAL&quot; $(( src*BS )) &quot;$BS&quot;)
+                    [ $(( rc &amp; 0xffff )) -eq &quot;$c&quot; ] || { bad=1; break; }
+                done &lt;&lt;&lt; &quot;$cur_writes&quot;; fi
+                if [ &quot;$bad&quot; -eq 1 ]; then torn=1; else
+                    WRITES+=&quot;$cur_writes&quot;; REVOKES+=&quot;$cur_revokes&quot;; ALLSEQ+=&quot;$cur_seq&quot;$'\n'; fi
+            fi
+            stop=0
+            if [ &quot;$torn&quot; -eq 1 ]; then TORNSEQ+=&quot;$cur_seq&quot;$'\n'; TXN_TORN[$cur_seq]=1; stop=1; fi
+            cur_writes=&quot;&quot;; cur_revokes=&quot;&quot;; have_desc=0; commit_ok=0; torn=0; cur_seq=$(( cur_seq+1 ))
+            [ &quot;$stop&quot; -eq 1 ] &amp;&amp; break ;;
+        *) break ;;
+    esac
+done
+if [ -n &quot;$cur_writes&quot; ] || [ -n &quot;$cur_revokes&quot; ] || [ &quot;$have_desc&quot; -eq 1 ]; then
+    TORNSEQ+=&quot;$cur_seq&quot;$'\n'; TXN_TORN[$cur_seq]=1; fi
+
+# monotone merge keyed on highest sequence
+declare -A BEST_SEQ BEST_SRC MAXREV
+if [ -n &quot;$WRITES&quot; ]; then while IFS='|' read -r s b src c; do [ -z &quot;$s&quot; ] &amp;&amp; continue
+    [ -z &quot;${BEST_SEQ[$b]:-}&quot; ] || [ &quot;$s&quot; -gt &quot;${BEST_SEQ[$b]}&quot; ] &amp;&amp; { BEST_SEQ[$b]=$s; BEST_SRC[$b]=$src; }
+done &lt;&lt;&lt; &quot;$WRITES&quot;; fi
+if [ -n &quot;$REVOKES&quot; ]; then while IFS='|' read -r s b; do [ -z &quot;$s&quot; ] &amp;&amp; continue
+    [ -z &quot;${MAXREV[$b]:-}&quot; ] || [ &quot;$s&quot; -gt &quot;${MAXREV[$b]}&quot; ] &amp;&amp; MAXREV[$b]=$s
+done &lt;&lt;&lt; &quot;$REVOKES&quot;; fi
+SURVIVORS=&quot;&quot;
+for b in &quot;${!BEST_SEQ[@]}&quot;; do sw=${BEST_SEQ[$b]}; sr=${MAXREV[$b]:-0}
+    [ &quot;$sw&quot; -gt &quot;$sr&quot; ] &amp;&amp; SURVIVORS+=&quot;$b|${BEST_SRC[$b]}|$sw&quot;$'\n'; done
+
+# per-transaction verdicts
+declare -A VERDICT T_HASSURV T_HASPRIORREVOKE T_HASREVOKEDWRITE
+while IFS= read -r s; do [ -z &quot;$s&quot; ] &amp;&amp; continue; VERDICT[$s]=&quot;applied&quot;; done &lt;&lt;&lt; &quot;$ALLSEQ&quot;
+if [ -n &quot;$WRITES&quot; ]; then while IFS='|' read -r s b src c; do [ -z &quot;$s&quot; ] &amp;&amp; continue
+    bs=${BEST_SEQ[$b]}; sr=${MAXREV[$b]:-0}
+    if [ &quot;$s&quot; -eq &quot;$bs&quot; ] &amp;&amp; [ &quot;$bs&quot; -gt &quot;$sr&quot; ]; then T_HASSURV[$s]=1; [ &quot;$sr&quot; -gt 0 ] &amp;&amp; T_HASPRIORREVOKE[$s]=1
+    elif [ &quot;$sr&quot; -ge &quot;$s&quot; ]; then T_HASREVOKEDWRITE[$s]=1; fi
+done &lt;&lt;&lt; &quot;$WRITES&quot;; fi
+for s in &quot;${!VERDICT[@]}&quot;; do
+    if [ &quot;${T_HASPRIORREVOKE[$s]:-0}&quot; -eq 1 ]; then VERDICT[$s]=&quot;revoked-then-applied&quot;
+    elif [ &quot;${T_HASSURV[$s]:-0}&quot; -eq 1 ]; then VERDICT[$s]=&quot;applied&quot;
+    elif [ &quot;${T_HASREVOKEDWRITE[$s]:-0}&quot; -eq 1 ]; then VERDICT[$s]=&quot;revoked&quot;; fi
+done
+
+if [ &quot;$QUIET&quot; -eq 0 ]; then
+    allseq_sorted=$(printf '%s\n' &quot;$ALLSEQ&quot; &quot;$TORNSEQ&quot; | grep -v '^$' | sort -n -u)
+    while IFS= read -r s; do [ -z &quot;$s&quot; ] &amp;&amp; continue
+        v=${VERDICT[$s]:-applied}; [ &quot;${TXN_TORN[$s]:-0}&quot; -eq 1 ] &amp;&amp; v=&quot;torn-discarded&quot;
+        printf 'TXN %s %s\n' &quot;$s&quot; &quot;$v&quot;; done &lt;&lt;&lt; &quot;$allseq_sorted&quot;
+    while IFS='|' read -r b src sw; do [ -z &quot;$b&quot; ] &amp;&amp; continue
+        printf 'REPLAY target-block %s &lt;- journal-block %s (seq %s)\n' &quot;$b&quot; &quot;$src&quot; &quot;$sw&quot;; done &lt;&lt;&lt; &quot;$SURVIVORS&quot;
+fi
+
+[ &quot;$DRY_RUN&quot; -eq 1 ] &amp;&amp; { note &quot;dry-run: target not modified&quot;; exit 0; }
+if [ -n &quot;$SURVIVORS&quot; ]; then while IFS='|' read -r b src sw; do [ -z &quot;$b&quot; ] &amp;&amp; continue
+    dd if=&quot;$JOURNAL&quot; of=&quot;$TARGET&quot; bs=&quot;$BS&quot; skip=&quot;$src&quot; seek=&quot;$b&quot; count=1 conv=notrunc status=none \
+       || die &quot;write to target failed&quot;
+done &lt;&lt;&lt; &quot;$SURVIVORS&quot;; fi
+note &quot;replay complete: ${#BEST_SEQ[@]} candidate block(s), $(printf '%s' &quot;$SURVIVORS&quot; | grep -c '^[0-9]') survivor(s)&quot;
+exit 0
+</code></pre>
+<h3>4.2 <code>jbd2_harness.sh</code></h3>
+<p>The full harness is embedded in <code>SOLUTION.md</code>. It builds synthetic images (<code>new_image</code>, <code>add_sb</code>, <code>add_txn</code>, <code>add_revoke</code>, <code>write_commit</code>) and asserts six scenarios. Key cases:</p>
+<ul>
+<li><strong>normal</strong> — two writes, verdict <code>applied</code>, <code>sha256(run2)==sha256(run1)</code></li>
+<li><strong>revoke</strong> — seq 2 revokes block 10 and 12; seq 3 rewrites block 10. Asserts block 10 = seq 3 value, block 12 stays sentinel, <code>TXN 1 revoked</code>, <code>TXN 3 revoked-then-applied</code></li>
+<li><strong>torn tail</strong> — seq 2 commit checksum corrupted; <strong>both</strong> seq 2 writes discarded whole, <code>TXN 2 torn-discarded</code></li>
+<li><strong>wraparound</strong> — commit wraps from block 63 to block 1</li>
+<li><strong>inconsistent header</strong> — bad magic =&gt; exit <code>2</code>, target SHA-256 unchanged</li>
+<li><strong>corrupt tag checksum</strong> — payload poisoned =&gt; whole transaction discarded</li>
+</ul>
+<p>Run it with <code>./jbd2_harness.sh</code>.</p>
+<h2>5. Verification</h2>
+<pre><code>== jbd2 replay harness ==
+[1] normal transaction
+  PASS block 10 written (applied)
+  PASS block 11 written (applied)
+  PASS idempotent: run2 == run1
+  PASS verdict: TXN 1 applied
+[2] revoke then re-apply (monotone merge on highest sequence)
+  PASS block 10 = seq3 (revoked-then-applied)
+  PASS block 12 not resurrected (revoke wins)
+  PASS idempotent: run2 == run1
+  PASS verdict: TXN 1 revoked
+  PASS verdict: TXN 3 revoked-then-applied
+[3] torn tail: invalid commit checksum discards whole transaction
+  PASS seq1 applied
+  PASS seq2 discarded whole (block 11 untouched)
+  PASS seq2 discarded whole (block 13 untouched)
+  PASS idempotent after torn discard
+  PASS verdict: TXN 2 torn-discarded
+[4] wraparound log ring
+  PASS wraparound: block 20 written
+  PASS wraparound: block 21 written
+  PASS idempotent across wraparound
+[5] inconsistent header: abort without touching target
+  PASS inconsistent header exits nonzero (2)
+  PASS target untouched on header failure
+[6] corrupt per-block tag checksum discards its transaction
+  PASS seq1 applied
+  PASS bad tag checksum discards seq2 whole
+  PASS idempotent after tag-checksum discard
+
+harness result: 22 passed, 0 failed
+</code></pre>
+<h3>Why idempotency is guaranteed, not just observed</h3>
+<p>Replay is split into two phases: (1) <strong>Reduce</strong> — scan the ring once, accept only commit-validated transactions (commit checksum + every tag checksum), then compute <code>BEST_SEQ</code>/<code>BEST_SRC</code>/<code>MAXREV</code> and emit survivors where <code>BEST_SEQ &gt; MAXREV</code>; this phase only reads the journal. (2) <strong>Apply</strong> — <code>dd</code> each survivor once with <code>conv=notrunc</code>. Phase 1 is a pure function <code>journal -&gt; survivors</code>; phase 2 writes identical bytes to identical offsets every run, so <code>replay² = replay</code>.</p>
+<h3>Exit codes</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>replay complete (or clean journal, <code>s_start == 0</code>)</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>inconsistent journal header — target not touched</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>I/O or argument error</td>
+</tr>
+<tr>
+<td><code>64</code></td>
+<td>usage</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Artifacts on disk:</strong> <code>/home/kara/jbd2_replay.sh</code>, <code>/home/kara/jbd2_harness.sh</code>, <code>/home/kara/SOLUTION.md</code>. All 22 assertions pass (<code>./jbd2_harness.sh</code> exits 0).</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: shell-ext4-jbd2-journal-replay-idempotent-torn-commit
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-23T04:36:34.943Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Write a bash post-mortem tool that replays an extracted ext4 jbd2 journal image onto a target block range and proves the replay is idempotent: running it twice on the same journal must leave the target byte-identical to a single run, and a transaction whose commit-block checksum does not validate (a torn tail from power loss) must be discarded whole rather than partially applied. The journal semantics that make this hard are that descriptor blocks carry a magic tag list with per-block checksums but the order of descriptor and revoke records is not the application order, revoke records invalidate earlier writes to the same block so replay must be a monotone merge keyed on the highest sequence number, and the final commit block documents how many tags are live; a naive left-to-right dd of every tagged block double-applies revoked writes and resurrects stale metadata. Your tool must parse the superblock to locate the log start and sequence, walk descriptor, revocation, and commit blocks in sequence-number order, apply only the surviving writes, report per-transaction verdicts (applied, revoked-then-applied, torn-discarded), and exit non-zero without touching the target when the journal header itself is inconsistent; include a harness that builds synthetic journal images (normal, revoked, torn-tail, wraparound) and asserts the idempotency and torn-tail properties for each.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;shell-ext4-jbd2-journal-replay-idempotent-torn-commit&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-23T04:36:34.944Z&quot;, &quot;version&quot;: &quot;5.2&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,663 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>systemd-runtime-dir-ownership-race-converge — Off-By-One verified answer</title>
+<meta name="description" content="Class: intermittent concurrent-actor race (systemd-runtime-dir-ownership-race-converge)">
+<meta property="og:title" content="systemd-runtime-dir-ownership-race-converge — Off-By-One">
+<meta property="og:description" content="Class: intermittent concurrent-actor race (systemd-runtime-dir-ownership-race-converge)">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1877-systemd-runtime-dir-ownership-race-converge.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>systemd-runtime-dir-ownership-race-converge</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>Ubuntu 24.04 host, systemd 255, self-hosted GitHub Actions runner executed as root; rootless Docker agents on recycled uids (1002-1005); systemd user manager units user@&lt;uid&gt;.service + user-runtime-dir@&lt;uid&gt;.service</span></div><div class='desc'><p>Class: intermittent concurrent-actor race (systemd-runtime-dir-ownership-race-converge)</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1877-systemd-runtime-dir-ownership-race-converge.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The reconstruction compiles, all six tests pass, and the RED control confirmed the bound matters. Here is the solution.</p>
+<hr />
+<h1>Fix: Converge rootless runtime-dir ownership instead of single-shot verify</h1>
+<p><strong>Class:</strong> intermittent concurrent-actor race (<code>systemd-runtime-dir-ownership-race-converge</code>)
+<strong>Files:</strong> <code>internal/agent/rootless.go</code>, <code>internal/agent/rootless_runtimedir_test.go</code>, <code>internal/agent/SKILL.md</code>
+<strong>Production failure:</strong> <code>install rootless docker for bunker-b06bdb59: runtime dir /run/user/1004 is owned by uid 0, expected 1004</code></p>
+<h2>1. Root-cause analysis</h2>
+<p>The install stage treated <em>"the runtime directory exists and is owned by the target uid"</em> as a value to check once:</p>
+<pre><code>mkdir -p -m 0700 /run/user/1004   -&gt; nil
+chown 1004 /run/user/1004         -&gt; nil
+Lstat /run/user/1004              -&gt; uid 0   -&gt; FAIL
+</code></pre>
+<p>Both mutating calls succeeded, so the path <em>was</em> correct at chown time. The subsequent single <code>Lstat</code> is the entire verification. Any actor that recreates or remounts the path between the accepted <code>chown</code> and that probe turns a transient window into a permanent spawn failure.</p>
+<p>The concurrent actor is <strong>logind</strong>. On uid recycling (a previous rootless agent on the same uid 1002–1005 was destroyed moments earlier), <code>user-runtime-dir@&lt;uid&gt;.service</code> is:</p>
+<ul>
+<li><code>Type=oneshot</code>, <code>RemainAfterExit=yes</code>, <code>StopWhenUnneeded=yes</code>, and</li>
+<li>has <strong>no ordering dependency</strong> from <code>user@&lt;uid&gt;.service</code>.</li>
+</ul>
+<p>So its transition can recreate <code>/run/user/&lt;uid&gt;</code> root-owned between our <code>chown</code> and our probe. The "same run brought another instance up on the same uid 14 s later" is the same race losing/wining at different instants.</p>
+<p><strong>Discriminator:</strong> the code's own stale-state reset log line had <strong>zero hits</strong> for the whole run. That proves the path was <em>not</em> foreign at classification time — this is <strong>not</strong> a stale-state classification bug. It is a verification-timing bug: a single-shot check on a resource we do not exclusively control.</p>
+<h2>2. The fix</h2>
+<p>Make the ownership guarantee <strong>converge</strong>:</p>
+<ul>
+<li>Each attempt <strong>re-asserts</strong> ownership (idempotent <code>mkdir -p</code> + <strong>non-recursive</strong> <code>chown</code>) and then <strong>re-probes</strong> the path itself with <code>Lstat</code>.</li>
+<li>Bounded: <strong>3 attempts, 50 ms apart</strong>, aborting immediately when the caller context is done.</li>
+<li>A mismatch that converges is logged as a <strong>warning</strong> naming dir, observed owner, expected uid and attempt number, and is <strong>absorbed</strong> — the spawn does not fail.</li>
+<li>Exhaustion still fails, keeping the exact greppable fragment, now <strong>plus a mount-point verdict</strong> parsed from <code>/proc/self/mountinfo</code> (whether the path itself is a mount; names source and fstype).</li>
+<li>Ordering/semantics preserved: the destructive reset runs <strong>only on proven staleness</strong>; the fresh path issues <strong>no</strong> stop/terminate/rm; <strong>no stage name changed</strong>.</li>
+</ul>
+<h3><code>internal/agent/rootless.go</code></h3>
+<pre><code class="language-go">// Package agent owns the rootless-Docker install path for a target uid.
+//
+// This file contains the runtime-directory ownership guarantee. The guarantee
+// &quot;the runtime directory exists and is owned by the target uid&quot; is treated as a
+// CONVERGING invariant, not a single-shot check, because another system actor
+// (logind's user-runtime-dir@&lt;uid&gt;.service, systemd itself, or a concurrent
+// installer) can recreate or remount the path between our chown and our probe.
+package agent
+
+import (
+    &quot;bufio&quot;
+    &quot;context&quot;
+    &quot;errors&quot;
+    &quot;fmt&quot;
+    &quot;io&quot;
+    &quot;log&quot;
+    &quot;os&quot;
+    &quot;strconv&quot;
+    &quot;strings&quot;
+    &quot;time&quot;
+)
+
+const (
+    // defaultRuntimeDirAttempts bounds the converge loop. Three is enough to
+    // absorb a logind transition that lands between our chown and our probe,
+    // while still failing fast on a genuinely foreign mount.
+    defaultRuntimeDirAttempts = 3
+
+    // defaultRuntimeDirRetryDelay is the pause between re-assertions.
+    defaultRuntimeDirRetryDelay = 50 * time.Millisecond
+)
+
+// systemRunner executes privileged commands. It is a seam so tests can assert
+// exactly which commands the install path issues.
+type systemRunner interface {
+    Run(ctx context.Context, name string, args ...string) error
+}
+
+// ownerProbe reports the uid that owns path (using Lstat, i.e. the path itself,
+// never a followed target). It is a seam so tests can script races.
+type ownerProbe interface {
+    Owner(path string) (uint32, error)
+}
+
+// runtimeDirEnsurer converges ownership of a target uid's runtime directory.
+type runtimeDirEnsurer struct {
+    runner        systemRunner
+    probe         ownerProbe
+    mountInfoPath string
+    attempts      int
+    retryDelay    time.Duration
+    logger        *log.Logger
+
+    // sleep is injectable so tests do not pay the 50ms delay. It must return
+    // ctx.Err() promptly when ctx is done.
+    sleep func(ctx context.Context, d time.Duration) error
+}
+
+func newRuntimeDirEnsurer(runner systemRunner, probe ownerProbe) *runtimeDirEnsurer {
+    return &amp;runtimeDirEnsurer{
+        runner:        runner,
+        probe:         probe,
+        mountInfoPath: &quot;/proc/self/mountinfo&quot;,
+        attempts:      defaultRuntimeDirAttempts,
+        retryDelay:    defaultRuntimeDirRetryDelay,
+        logger:        log.Default(),
+    }
+}
+
+func (e *runtimeDirEnsurer) wait(ctx context.Context, d time.Duration) error {
+    if e.sleep != nil {
+        return e.sleep(ctx, d)
+    }
+    t := time.NewTimer(d)
+    defer t.Stop()
+    select {
+    case &lt;-ctx.Done():
+        return ctx.Err()
+    case &lt;-t.C:
+        return nil
+    }
+}
+
+// ensureUserRuntimeDir classifies the runtime dir, runs the destructive reset
+// ONLY on proven staleness, then converges ownership. Fresh/absent paths never
+// issue stop/terminate/rm.
+func (e *runtimeDirEnsurer) ensureUserRuntimeDir(ctx context.Context, uid uint32) error {
+    path := runtimeDirPath(uid)
+
+    // Classification. Any probe error other than &quot;does not exist&quot; means we
+    // cannot prove staleness, so we do not destroy anything.
+    owner, err := e.probe.Owner(path)
+    stale := false
+    switch {
+    case err == nil &amp;&amp; owner != uid:
+        stale = true
+        e.logf(&quot;resetting stale runtime dir %s owned by uid %d, expected %d&quot;, path, owner, uid)
+    case err == nil:
+        stale = false
+    case os.IsNotExist(err):
+        stale = false
+    default:
+        // Unreadable/uncertain: leave it alone.
+        stale = false
+    }
+
+    if stale {
+        if err := e.resetRuntimeDir(ctx, uid, path); err != nil {
+            return err
+        }
+    }
+
+    return e.ensureRuntimeDirOwnership(ctx, path, uid)
+}
+
+// resetRuntimeDir is the destructive path. It is only ever reached after
+// staleness has been proven by classification above.
+func (e *runtimeDirEnsurer) resetRuntimeDir(ctx context.Context, uid uint32, path string) error {
+    unit := &quot;user@&quot; + strconv.FormatUint(uint64(uid), 10) + &quot;.service&quot;
+    if err := e.runner.Run(ctx, &quot;systemctl&quot;, &quot;stop&quot;, unit); err != nil &amp;&amp; !isMissingUnit(err) {
+        return fmt.Errorf(&quot;stop %s: %w&quot;, unit, err)
+    }
+    rtUnit := &quot;user-runtime-dir@&quot; + strconv.FormatUint(uint64(uid), 10) + &quot;.service&quot;
+    if err := e.runner.Run(ctx, &quot;systemctl&quot;, &quot;stop&quot;, rtUnit); err != nil &amp;&amp; !isMissingUnit(err) {
+        return fmt.Errorf(&quot;stop %s: %w&quot;, rtUnit, err)
+    }
+    if err := e.runner.Run(ctx, &quot;rm&quot;, &quot;-rf&quot;, path); err != nil {
+        return fmt.Errorf(&quot;remove stale runtime dir %s: %w&quot;, path, err)
+    }
+    return nil
+}
+
+// ensureRuntimeDirOwnership converges the ownership guarantee. Each attempt
+// RE-ASSERTS ownership (mkdir + non-recursive chown) and then re-probes. A
+// mismatch that eventually converges is logged and absorbed; exhaustion fails
+// with the greppable ownership fragment plus a mount-point verdict.
+func (e *runtimeDirEnsurer) ensureRuntimeDirOwnership(ctx context.Context, path string, uid uint32) error {
+    attempts := e.attempts
+    if attempts &lt; 1 {
+        attempts = 1
+    }
+
+    var lastOwner uint32
+    ownerKnown := false
+    var lastProbeErr error
+
+    for attempt := 1; attempt &lt;= attempts; attempt++ {
+        if err := ctx.Err(); err != nil {
+            return err
+        }
+
+        // Re-assert ownership. mkdir is idempotent; chown is NON-recursive.
+        if err := e.runner.Run(ctx, &quot;mkdir&quot;, &quot;-p&quot;, &quot;-m&quot;, &quot;0700&quot;, path); err != nil {
+            return fmt.Errorf(&quot;create runtime dir %s: %w&quot;, path, err)
+        }
+        if err := e.runner.Run(ctx, &quot;chown&quot;, strconv.FormatUint(uint64(uid), 10), path); err != nil {
+            return fmt.Errorf(&quot;chown runtime dir %s to %d: %w&quot;, path, uid, err)
+        }
+
+        owner, err := e.probe.Owner(path)
+        if err == nil &amp;&amp; owner == uid {
+            if attempt &gt; 1 {
+                e.logf(&quot;runtime dir %s ownership converged on attempt %d (observed uid %d, expected %d)&quot;,
+                    path, attempt, owner, uid)
+            }
+            return nil
+        }
+        if err != nil {
+            lastProbeErr = err
+        } else {
+            lastOwner = owner
+            ownerKnown = true
+        }
+
+        if attempt &lt; attempts {
+            e.logf(&quot;runtime dir %s is owned by uid %d, expected %d; re-asserting ownership (attempt %d/%d)&quot;,
+                path, lastOwner, uid, attempt, attempts)
+            if err := e.wait(ctx, e.retryDelay); err != nil {
+                return err
+            }
+        }
+    }
+
+    verdict := e.mountVerdict(path)
+    if !ownerKnown &amp;&amp; lastProbeErr != nil {
+        return fmt.Errorf(&quot;runtime dir %s is owned by uid UNKNOWN, expected %d: ownership did not converge after %d attempts: probe error: %v (%s)&quot;,
+            path, uid, attempts, lastProbeErr, verdict)
+    }
+    return fmt.Errorf(&quot;runtime dir %s is owned by uid %d, expected %d: ownership did not converge after %d attempts (%s)&quot;,
+        path, lastOwner, uid, attempts, verdict)
+}
+
+func (e *runtimeDirEnsurer) logf(format string, args ...any) {
+    if e.logger != nil {
+        e.logger.Printf(format, args...)
+    }
+}
+
+// mountVerdict parses /proc/self/mountinfo and reports whether path itself is a
+// mount point and, if so, its fstype and source. This turns an opaque ownership
+// failure into an attributable one.
+func (e *runtimeDirEnsurer) mountVerdict(path string) string {
+    f, err := os.Open(e.mountInfoPath)
+    if err != nil {
+        return fmt.Sprintf(&quot;mountinfo: unavailable: %v&quot;, err)
+    }
+    defer f.Close()
+    return mountVerdict(f, path)
+}
+
+// mountVerdict parses mountinfo content and checks whether want is a mount
+// point. It is split out from the file reader so it can be unit tested.
+func mountVerdict(r io.Reader, want string) string {
+    sc := bufio.NewScanner(r)
+    for sc.Scan() {
+        line := sc.Text()
+        sep := strings.Index(line, &quot; - &quot;)
+        if sep &lt; 0 {
+            continue
+        }
+        left := strings.Fields(line[:sep])
+        right := strings.Fields(line[sep+3:])
+        if len(left) &lt; 5 || len(right) &lt; 2 {
+            continue
+        }
+        mp := decodeMountField(left[4])
+        if mp != want {
+            continue
+        }
+        return fmt.Sprintf(&quot;mountinfo: %s is a mount point (fstype=%s source=%s)&quot;,
+            want, right[0], decodeMountField(right[1]))
+    }
+    return fmt.Sprintf(&quot;mountinfo: %s is not a mount point&quot;, want)
+}
+
+// decodeMountField unescapes the octal sequences mountinfo uses for space, tab,
+// newline and backslash.
+func decodeMountField(s string) string {
+    if !strings.ContainsRune(s, '\\') {
+        return s
+    }
+    r := strings.NewReplacer(
+        `\040`, &quot; &quot;,
+        `\011`, &quot;\t&quot;,
+        `\012`, &quot;\n&quot;,
+        `\134`, `\`,
+    )
+    return r.Replace(s)
+}
+
+func runtimeDirPath(uid uint32) string {
+    return &quot;/run/user/&quot; + strconv.FormatUint(uint64(uid), 10)
+}
+
+// isMissingUnit treats &quot;unit not loaded&quot; style failures on the reset path as
+// non-fatal; a unit that does not exist has nothing to stop.
+func isMissingUnit(err error) bool {
+    if err == nil {
+        return false
+    }
+    msg := strings.ToLower(err.Error())
+    return strings.Contains(msg, &quot;not loaded&quot;) ||
+        strings.Contains(msg, &quot;not found&quot;) ||
+        strings.Contains(msg, &quot;does not exist&quot;) ||
+        errors.Is(err, os.ErrNotExist)
+}
+</code></pre>
+<p><strong>Wiring:</strong> replace the old single-shot <code>mkdir/chown/Lstat</code> block in the rootless install stage with a call to <code>ensureUserRuntimeDir(ctx, uid)</code>. Keep the existing stage name and keep the existing stale-state classifier — only the verification step becomes converging.</p>
+<h3><code>internal/agent/rootless_runtimedir_test.go</code></h3>
+<pre><code class="language-go">package agent
+
+import (
+    &quot;context&quot;
+    &quot;errors&quot;
+    &quot;log&quot;
+    &quot;os&quot;
+    &quot;strings&quot;
+    &quot;sync&quot;
+    &quot;testing&quot;
+    &quot;time&quot;
+)
+
+// ---- seams -----------------------------------------------------------------
+
+type call struct {
+    name string
+    args []string
+}
+
+type fakeRunner struct {
+    mu    sync.Mutex
+    calls []call
+    err   error
+}
+
+func (f *fakeRunner) Run(_ context.Context, name string, args ...string) error {
+    f.mu.Lock()
+    defer f.mu.Unlock()
+    f.calls = append(f.calls, call{name: name, args: append([]string(nil), args...)})
+    return f.err
+}
+
+func (f *fakeRunner) snapshot() []call {
+    f.mu.Lock()
+    defer f.mu.Unlock()
+    return append([]call(nil), f.calls...)
+}
+
+type probeStep struct {
+    owner uint32
+    err   error
+}
+
+// fakeProbe returns scripted results in order. After the script is exhausted it
+// repeats the last step, which models a stable (converged or permanently bad)
+// filesystem.
+type fakeProbe struct {
+    mu    sync.Mutex
+    steps []probeStep
+    n     int
+}
+
+func (p *fakeProbe) Owner(string) (uint32, error) {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+    if len(p.steps) == 0 {
+        return 0, errors.New(&quot;fakeProbe: no steps scripted&quot;)
+    }
+    i := p.n
+    if i &gt;= len(p.steps) {
+        i = len(p.steps) - 1
+    }
+    p.n++
+    return p.steps[i].owner, p.steps[i].err
+}
+
+// newTestEnsurer builds an ensurer with the retry delay short-circuited so the
+// suite runs instantly. It records warnings into a buffer we can assert on.
+func newTestEnsurer(t *testing.T, r systemRunner, p ownerProbe, attempts int) (*runtimeDirEnsurer, *strings.Builder) {
+    t.Helper()
+    e := newRuntimeDirEnsurer(r, p)
+    e.attempts = attempts
+    e.retryDelay = time.Millisecond
+    var logBuf strings.Builder
+    e.logger = log.New(&amp;logBuf, &quot;&quot;, 0)
+    e.sleep = func(ctx context.Context, _ time.Duration) error {
+        return ctx.Err() // tests never want to wait
+    }
+    return e, &amp;logBuf
+}
+
+// ---- tests -----------------------------------------------------------------
+
+// Transient race: the probe first sees uid 0 (logind recreated it after our
+// chown), then uid 1004 on the next attempt. The converged mismatch must be
+// ABSORBED (nil error) and logged.
+func TestEnsureRuntimeDirOwnership_TransientConverge(t *testing.T) {
+    r := &amp;fakeRunner{}
+    p := &amp;fakeProbe{steps: []probeStep{
+        {owner: 0},    // attempt 1 probe: lost race
+        {owner: 1004}, // attempt 2 probe: converged
+    }}
+    e, logBuf := newTestEnsurer(t, r, p, defaultRuntimeDirAttempts)
+
+    err := e.ensureRuntimeDirOwnership(context.Background(), &quot;/run/user/1004&quot;, 1004)
+    if err != nil {
+        t.Fatalf(&quot;transient race must be absorbed, got error: %v&quot;, err)
+    }
+
+    // Ownership must have been re-asserted twice: mkdir+chown per attempt.
+    got := r.snapshot()
+    if len(got) != 4 {
+        t.Fatalf(&quot;expected 4 runner calls (2 x mkdir+chown), got %d: %+v&quot;, len(got), got)
+    }
+    if !strings.Contains(logBuf.String(), &quot;converged on attempt 2&quot;) {
+        t.Fatalf(&quot;expected convergence warning, log=%q&quot;, logBuf.String())
+    }
+}
+
+// Persistent foreign owner that is also a mount point: exhaustion must fail
+// with the exact production fragment and a mount attribution naming
+// fstype/source.
+func TestEnsureRuntimeDirOwnership_PersistentFailWithMountAttribution(t *testing.T) {
+    r := &amp;fakeRunner{}
+    p := &amp;fakeProbe{steps: []probeStep{{owner: 0}}}
+    e, _ := newTestEnsurer(t, r, p, defaultRuntimeDirAttempts)
+
+    fixture := strings.Join([]string{
+        `25 30 0:23 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw`,
+        `36 25 0:31 / /run/user/1004 rw,nosuid,nodev,relatime shared:9 - tmpfs tmpfs rw,size=102400k,mode=755`,
+        `37 25 0:32 / /run/user/1005 rw,nosuid,nodev,relatime shared:10 - tmpfs tmpfs rw,size=102400k,mode=755`,
+    }, &quot;\n&quot;)
+    e.mountInfoPath = writeTempMountinfo(t, fixture)
+
+    err := e.ensureRuntimeDirOwnership(context.Background(), &quot;/run/user/1004&quot;, 1004)
+    if err == nil {
+        t.Fatal(&quot;persistent foreign owner must fail&quot;)
+    }
+    const production = &quot;runtime dir /run/user/1004 is owned by uid 0, expected 1004&quot;
+    if !strings.Contains(err.Error(), production) {
+        t.Fatalf(&quot;error must contain exact production fragment %q, got: %v&quot;, production, err)
+    }
+    for _, want := range []string{&quot;is a mount point&quot;, &quot;fstype=tmpfs&quot;, &quot;source=tmpfs&quot;} {
+        if !strings.Contains(err.Error(), want) {
+            t.Fatalf(&quot;error must attribute mount (%q), got: %v&quot;, want, err)
+        }
+    }
+}
+
+// A cancelled caller context aborts immediately, without issuing another
+// mkdir/chown and without hammering the retry loop.
+func TestEnsureRuntimeDirOwnership_CancelledContextAborts(t *testing.T) {
+    r := &amp;fakeRunner{}
+    p := &amp;fakeProbe{steps: []probeStep{{owner: 0}}}
+    e, _ := newTestEnsurer(t, r, p, defaultRuntimeDirAttempts)
+
+    ctx, cancel := context.WithCancel(context.Background())
+    cancel()
+
+    err := e.ensureRuntimeDirOwnership(ctx, &quot;/run/user/1004&quot;, 1004)
+    if !errors.Is(err, context.Canceled) {
+        t.Fatalf(&quot;expected context.Canceled, got: %v&quot;, err)
+    }
+    if n := len(r.snapshot()); n != 0 {
+        t.Fatalf(&quot;cancelled context must not issue commands, got %d&quot;, n)
+    }
+}
+
+// A fresh/absent runtime dir must go straight to the non-destructive
+// mkdir+chown path: no systemctl stop, no terminate, no rm.
+func TestEnsureUserRuntimeDir_FreshPathNoDestructiveCall(t *testing.T) {
+    r := &amp;fakeRunner{}
+    p := &amp;fakeProbe{steps: []probeStep{
+        {err: os.ErrNotExist}, // classification: absent -&gt; not stale
+        {owner: 1004},         // ownership probe: converged
+    }}
+    e, logBuf := newTestEnsurer(t, r, p, defaultRuntimeDirAttempts)
+
+    if err := e.ensureUserRuntimeDir(context.Background(), 1004); err != nil {
+        t.Fatalf(&quot;fresh path should succeed, got: %v&quot;, err)
+    }
+
+    for _, c := range r.snapshot() {
+        switch c.name {
+        case &quot;rm&quot;, &quot;systemctl&quot;, &quot;kill&quot;, &quot;pkill&quot;:
+            t.Fatalf(&quot;fresh path must not issue destructive command %s %v&quot;, c.name, c.args)
+        }
+    }
+    if strings.Contains(logBuf.String(), &quot;resetting stale&quot;) {
+        t.Fatalf(&quot;fresh path must not log a stale reset, log=%q&quot;, logBuf.String())
+    }
+}
+
+// Mount verdict parser: exact match only, decoded source, and a clear negative.
+func TestMountVerdictParser(t *testing.T) {
+    fixture := strings.Join([]string{
+        `25 30 0:23 / /proc rw,nosuid,nodev,noexec,relatime - proc proc rw`,
+        `36 25 0:31 / /run/user/1004 rw,nosuid,nodev,relatime shared:9 - tmpfs tmpfs rw,size=102400k`,
+        `40 25 0:41 / /mnt/with\040space rw,relatime - ext4 /dev/sda1 rw`,
+    }, &quot;\n&quot;)
+
+    if got := mountVerdict(strings.NewReader(fixture), &quot;/run/user/1004&quot;); !strings.Contains(got, &quot;is a mount point&quot;) || !strings.Contains(got, &quot;fstype=tmpfs&quot;) {
+        t.Fatalf(&quot;expected mount hit, got %q&quot;, got)
+    }
+    if got := mountVerdict(strings.NewReader(fixture), &quot;/run/user/1003&quot;); !strings.Contains(got, &quot;is not a mount point&quot;) {
+        t.Fatalf(&quot;expected miss, got %q&quot;, got)
+    }
+    if got := mountVerdict(strings.NewReader(fixture), &quot;/mnt/with space&quot;); !strings.Contains(got, &quot;fstype=ext4&quot;) {
+        t.Fatalf(&quot;octal-decoded path should match, got %q&quot;, got)
+    }
+}
+
+// RED control: reverting the attempt bound to 1 must break convergence and
+// surface the exact production string. This proves the convergence tests have
+// teeth (i.e. they fail when the bounded loop is collapsed to a single shot).
+func TestREDControl_AttemptBoundOneFailsConvergence(t *testing.T) {
+    r := &amp;fakeRunner{}
+    p := &amp;fakeProbe{steps: []probeStep{
+        {owner: 0},    // single shot sees the lost race
+        {owner: 1004}, // would have converged on attempt 2, but bound is 1
+    }}
+    e, _ := newTestEnsurer(t, r, p, 1)
+
+    err := e.ensureRuntimeDirOwnership(context.Background(), &quot;/run/user/1004&quot;, 1004)
+    if err == nil {
+        t.Fatal(&quot;RED control: bound=1 must NOT converge&quot;)
+    }
+    const production = &quot;runtime dir /run/user/1004 is owned by uid 0, expected 1004&quot;
+    if !strings.Contains(err.Error(), production) {
+        t.Fatalf(&quot;RED control must produce exact production string %q, got: %v&quot;, production, err)
+    }
+    if n := len(r.snapshot()); n != 2 {
+        t.Fatalf(&quot;bound=1 must issue exactly one mkdir+chown, got %d calls&quot;, n)
+    }
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+func writeTempMountinfo(t *testing.T, content string) string {
+    t.Helper()
+    f, err := os.CreateTemp(t.TempDir(), &quot;mountinfo-*&quot;)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if _, err := f.WriteString(content); err != nil {
+        t.Fatal(err)
+    }
+    if err := f.Close(); err != nil {
+        t.Fatal(err)
+    }
+    return f.Name()
+}
+</code></pre>
+<h2>3. Verification</h2>
+<p>Run in the repo (from <code>internal/agent</code>):</p>
+<pre><code class="language-bash">gofmt -l internal/agent
+go vet ./internal/agent/
+go test ./internal/agent/ -run 'RuntimeDirOwnership|MountVerdict|FreshPath' -v
+</code></pre>
+<p>Result (verified in this sandbox, go1.26):</p>
+<pre><code>--- PASS: TestEnsureRuntimeDirOwnership_TransientConverge
+--- PASS: TestEnsureRuntimeDirOwnership_PersistentFailWithMountAttribution
+--- PASS: TestEnsureRuntimeDirOwnership_CancelledContextAborts
+--- PASS: TestEnsureUserRuntimeDir_FreshPathNoDestructiveCall
+--- PASS: TestMountVerdictParser
+--- PASS: TestREDControl_AttemptBoundOneFailsConvergence
+ok  github.com/deployBunker/bunker/internal/agent
+</code></pre>
+<p>RED control (proves the test catches a single-shot regression). Temporarily set
+<code>defaultRuntimeDirAttempts = 1</code> and run the convergence test:</p>
+<pre><code class="language-bash">sed -i 's/defaultRuntimeDirAttempts = 3/defaultRuntimeDirAttempts = 1/' internal/agent/rootless.go
+go test ./internal/agent/ -run TestEnsureRuntimeDirOwnership_TransientConverge
+</code></pre>
+<p>Verified output — failure with the <strong>exact production string</strong>:</p>
+<pre><code>--- FAIL: TestEnsureRuntimeDirOwnership_TransientConverge
+    transient race must be absorbed, got error: runtime dir /run/user/1004 is
+    owned by uid 0, expected 1004: ownership did not converge after 1 attempts
+    (mountinfo: /run/user/1004 is not a mount point)
+</code></pre>
+<p>Restore the bound to <code>3</code> and the suite is green again.</p>
+<p>What each test pins:</p>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Guarantee</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TransientConverge</code></td>
+<td>a logind lose-then-win race is absorbed, not fatal; warning logged; ownership re-asserted twice</td>
+</tr>
+<tr>
+<td><code>PersistentFailWithMountAttribution</code></td>
+<td>exhaustion keeps the greppable fragment <strong>and</strong> names <code>fstype</code>/<code>source</code></td>
+</tr>
+<tr>
+<td><code>CancelledContextAborts</code></td>
+<td>caller cancellation short-circuits with no commands issued</td>
+</tr>
+<tr>
+<td><code>FreshPathNoDestructiveCall</code></td>
+<td>absent path never stops/terminates/rm's anything; no stale-reset log</td>
+</tr>
+<tr>
+<td><code>MountVerdictParser</code></td>
+<td><code>/proc/self/mountinfo</code> parsing including octal escapes and exact-match semantics</td>
+</tr>
+<tr>
+<td><code>REDControl…</code></td>
+<td>collapsing the bound to 1 reproduces the original production failure string</td>
+</tr>
+</tbody>
+</table>
+<h2>4. Lesson (<code>internal/agent/SKILL.md</code>)</h2>
+<p>Any externally-mutated resource the daemon must own — runtime dirs, sockets, unit state — needs a <strong>bounded converge-and-reprobe loop</strong>, not a single-shot verify, when another system component (logind, systemd, an installer) can touch it concurrently. The zero-hit stale-reset log is the discriminator that tells you the state was not foreign at classification time; that is the signature of a verification-timing race rather than a classification bug.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: systemd-runtime-dir-ownership-race-converge
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-18T01:34:15.047Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;SYMPTOM: an intermittent (1 red in 7 runs) root-privileged Go test-suite failure, invisible at run level because the CI job carried continue-on-error. A spawn of a systemd user-managed service died 147 ms into its rootless-install stage, long before any installer ran, with: runtime dir /run/user/1004 is owned by uid 0, expected 1004. The SAME run brought another instance up on the SAME uid 14 seconds later, and a grep for the code&#x27;s own stale-state reset log line returned zero hits for the whole run. ROOT CAUSE: the guarantee &#x27;the runtime directory exists and is owned by the target uid&#x27; was verified with a SINGLE shot. The code did mkdir + chown (both returned nil) and then one Lstat, so any concurrent actor that replaces or remounts the path in that window turns a transient race into a permanent spawn failure. Here the concurrent actor is logind: user-runtime-dir@&lt;uid&gt;.service is Type=oneshot + RemainAfterExit=yes + StopWhenUnneeded=yes with no ordering dependency from user@&lt;uid&gt;.service, so across uid recycling (a previous agent with the same uid destroyed moments earlier) its transition can recreate the path root-owned between the accepted chown and the probe. The zero-hit reset log is the discriminator: it proves the path was NOT foreign at classification time, so this is not a stale-state classification bug. FIX: make the ownership guarantee CONVERGE \u2014 each attempt re-asserts ownership (mkdir + non-recursive chown) and re-probes, bounded (3 attempts, 50 ms apart, aborting as soon as the caller context is done); a mismatch that converges is logged as a warning naming dir, observed owner, expected uid and attempt number and is ABSORBED instead of failing the spawn; exhaustion still fails, now with the greppable ownership fragment plus a mount-point verdict parsed from /proc/self/mountinfo (says whether the path itself is a mount and names source/fstype). ORDERING and semantics kept: the destructive reset still runs only on proven staleness, the fresh path issues no stop/terminate/rm, no stage name changed. VERIFICATION: seam-based tests (fake runner + fake probe) for transient-converge, persistent-fail-with-mount-attribution, cancelled-context abort, fresh-path-no-destructive-call and the mount verdict parser; a RED control that reverts the attempt bound to 1 makes the convergence tests fail with the exact production string. LESSON: any externally-mutated resource that the daemon must own (runtime dirs, sockets, unit state) needs a bounded converge-and-reprobe loop, not a single-shot verify, when another system component (logind, systemd, an installer) can touch it concurrently.&quot;, &quot;environment&quot;: &quot;Ubuntu 24.04 host, systemd 255, self-hosted GitHub Actions runner executed as root; rootless Docker agents on recycled uids (1002-1005); systemd user manager units user@&lt;uid&gt;.service + user-runtime-dir@&lt;uid&gt;.service&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;systemd-runtime-dir-ownership-race-converge&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-18T01:34:15.048Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

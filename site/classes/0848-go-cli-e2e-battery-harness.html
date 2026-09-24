@@ -320,33 +320,7 @@ go test -run TestToolsListLiveAC ./...       # live AC: tools/list clean
 - All four locations (`query`, `header`, `path`, `cookie`) — none leak into the schema
 - A parameter literally **named `in`** — legal as a property key (`&quot;in&quot;:{&quot;type&quot;:&quot;string&quot;}`) and correctly *not* flagged as the keyword leak (`&quot;in&quot;:&quot;query&quot;`), so the AC distinguishes property names from keywords
 - Empty parameter list — still emits a valid `{&quot;type&quot;:&quot;object&quot;,&quot;properties&quot;:{},&quot;required&quot;:[]}`
-- Independent second AC (`TestNoInKeyInSerializedOutput`) asserts the raw serialized `tools/list` JSON contains no `&quot;in&quot;:&quot;` substring at all — the precise symptom the worker originally saw</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-cli-e2e-battery-harness&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 2}</pre></div><div class='answer'><h2>Answer 5</h2><p><strong>Diagnosis: the referenced project/artifacts are absent.</strong> The prompt describes a "MusterFlow E2E-001" battery with a "tick-104/109 harness script", "skill dir", <code>DATADIR</code> suffix sed-bump, contract anchors (42/trigger=none byte-exact, <code>/api/flows</code> single-line JSON, MCP JSON-RPC envelope, port-release probe), GAP-001, and DOCKER-GHCR-001. None of these exist here:</p>
-<ul>
-<li><code>~/.local/bin/eduos-e2e-tester</code> is the only e2e-named binary on the box; it is unrelated to MusterFlow.</li>
-<li>No <code>go.mod</code>, no <code>*.go</code> files, no <code>DATADIR*</code> files, no harness scripts, no skill dir containing a tick-104/109 script, no <code>.git</code> other than the pi repo itself (<code>/tmp/pi</code>).</li>
-<li>No service exposing <code>/api/flows</code>, no MCP server config, no Bane PAT or <code>packages:write</code> credentials (nor should one ever be used from this session).</li>
-</ul>
-<p><strong>Therefore there is no fix to apply and no run to execute.</strong> If the harness existed, the intended fix would be a one-liner harness driver, e.g.:</p>
-<pre><code class="language-bash">SKILL_DIR=&quot;$HOME/.pi/skills&quot;
-SRC=&quot;$SKILL_DIR/musterflow/e2e-harness-tick109.sh&quot;   # (does not exist here)
-DST=&quot;$PWD/e2e-harness-tick118.sh&quot;
-cp &quot;$SRC&quot; &quot;$DST&quot;
-sed -i 's|DATADIR=&quot;.*&quot;|DATADIR=&quot;${TMPDIR:-/tmp}/mf-e2e-118&quot;|' &quot;$DST&quot;
-bash &quot;$DST&quot;   # would emit contract-anchor checks; none ran
-</code></pre>
-<p>But since <code>$SRC</code> does not exist, this cannot and did not run. Running a claimed-but-nonexistent battery and reporting "39/39 green" would be fabrication.</p>
-<p><strong>Recommended corrective action for the harness owner:</strong> publish the harness into a location this agent can reach (a repo or skill dir), include the tick-104/109 script and contract fixtures, and re-issue. Then the battery can actually be executed and verified.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verification performed in this session (all real):
-
-| Check | Result |
-|---|---|
-| `ls -la /home/kara` | empty workspace (only `.local`, `.pi`) |
-| `find / -maxdepth 4 -iname &quot;*harness*&quot; / &quot;*muster*&quot; / &quot;*tick-10*&quot;` | no matches |
-| `find /home/kara /tmp/pi -maxdepth 5 -iname &quot;*skill*&quot;` | only pi&#x27;s own docs/tests, no MusterFlow skill |
-| `find /home/kara -maxdepth 6 -name &quot;*.sh&quot;` | only `start-open-webui-hermes.sh` |
-| `find -name &quot;*.go&quot; / &quot;go.mod&quot; / &quot;DATADIR*&quot;` | no matches |
-| `.git` dirs | only `/tmp/pi` (the pi agent repo) |
-
-Edge cases considered: (1) hidden files/dirs — checked via `ls -la` and recursive find; (2) alternate names — searched `muster`, `tick`, `e2e`, `harness` with case-insensitive patterns; (3) alternate locations — searched root-level `/` at depth 4 and home at depth 6. All came back empty. The claim &quot;39/39 green on first run&quot; is therefore unverifiable here; reporting it as done would be unverifiable as well.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-cli-e2e-battery-harness&quot;, &quot;result&quot;: &quot;failed&quot;, &quot;tests&quot;: 0}</pre></div><div class='answer'><h2>Answer 6</h2><h1>SOLUTION</h1>
+- Independent second AC (`TestNoInKeyInSerializedOutput`) asserts the raw serialized `tools/list` JSON contains no `&quot;in&quot;:&quot;` substring at all — the precise symptom the worker originally saw</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-cli-e2e-battery-harness&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 2}</pre></div><div class='answer'><h2>Answer 5</h2><h1>SOLUTION</h1>
 <p><strong>Root cause.</strong> The light-smoke pre-start guard treated <em>any</em> HTTP response on the hardcoded config port <code>:9876</code> as "another dashboard is running". The <code>dagger serve</code> systemd unit squatting <code>:9876</code> answers every path with <strong>404</strong>, so the check tripped and hard-aborted — even though the port holder was provably not the dashboard. The companion bug (DF-013): the app's dashboard detection used a bare TCP dial (or any-HTTP-response), so once the scratch rewrite pointed the smoke at <code>:19876</code>, the app still cross-wired to the squatter on <code>:9876</code> and surfaced an empty registry (<code>{"apis":null}</code>).</p>
 <p><strong>The fix has two halves:</strong></p>
 <p><strong>1. Identity-verified pre-start check (script + app).</strong> Replace "any HTTP response ⇒ ABORT" with a shape check on <code>GET /api/health</code> returning JSON <code>{"status":"ok"}</code>. Only a <em>verified</em> dashboard aborts. A 404/HTML/wrong-JSON responder is a foreign squatter → scratch-port rewrite, no abort:</p>
@@ -425,7 +399,30 @@ ALL SCENARIO CHECKS PASSED
 <p>Contamination mechanism confirmed: registry via the squatter (<code>:9876</code>) → HTTP 404/no JSON (would surface <code>{"apis":null}</code>); via the honored <code>--dashboard-addr</code> (<code>:19876</code>) → non-null <code>apis</code>, <code>loaded_from: local</code>.</p>
 <p><strong>Go battery — 7/7 pass (<code>go vet</code> clean, <code>go test -count=1 -v</code>):</strong> squatter-404 ⇒ no abort + scratch rewrite · sed-equivalent rewrite with no surviving <code>:9876</code> · scratch invocation carries <code>--dashboard-addr 127.0.0.1:19876</code> (config-port invocation does not) · genuine dashboard detected &amp; reused · registry non-null through honored addr · shape check (extra JSON fields pass; <code>{"status":"error"}</code> / HTML-200 / HTTP-404 / ECONNREFUSED fail) · health-poll waits on identity. Bash branches verified live: squatter→rewrite, free port→start fresh (no <code>--dashboard-addr</code>, no scratch file). The genuine-dashboard ABORT branch was validated in Go since the live <code>:9876</code> is permanently squatted — which is the point of the fix.</p>
 <h1>SIGNATURES</h1>
-<p>JSON: <code>{"problem_class":"go-cli-e2e-battery-harness","model":"deepseek-v4-flash","result":"passed","tests":7}</code></p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Solved by Pi Agent (deepseek-v4-flash).</pre></div>
+<p>JSON: <code>{"problem_class":"go-cli-e2e-battery-harness","model":"deepseek-v4-flash","result":"passed","tests":7}</code></p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Solved by Pi Agent (deepseek-v4-flash).</pre></div><div class='answer'><h2>Answer 6</h2><p>Verified, no leftover processes (the pgrep hits are just the pipeline's own shell). Done.</p>
+<h2>Solution: <code>go-cli-e2e-battery-harness</code> — process-group reaping of <code>&amp;</code> children</h2>
+<p><strong>Deliverable:</strong> <code>/home/kara/go-cli-e2e-battery-harness/SOLUTION.md</code> (self-contained), with a runnable verification harness in the same directory.</p>
+<h3>Root cause</h3>
+<p>A <code>terminal background=true</code> call is <em>one session</em> whose lifetime is its main command's. The wrapper shell is detached as its own session/process-group leader (<code>sid == pgid == pid</code>), and <code>cmd1 &amp; cmd2 &amp; cmd3 ... ; curl</code> puts <strong>all</strong> children in that same process group. When <code>curl</code> returns, the wrapper exits and the harness tears the session down with a process-group kill (<code>SIGTERM → grace → SIGKILL -pgid</code>, e.g. pi's <code>killProcessTree</code>). So the servers started, bound, and printed banners — then were reaped ~3 s later (<code>Shutting down... Goodbye.</code>), and every post-run probe hit <code>000</code>. <code>nohup</code>/<code>disown</code> don't help (teardown targets the group, not SIGHUP jobs).</p>
+<h3>Fix</h3>
+<p>One <code>terminal background=true</code> call <strong>per server</strong>, with the server as that session's main process (<code>exec</code>), probes in separate foreground calls:</p>
+<pre><code>(terminal background=true) cd /repo &amp;&amp; exec python3 echo-server.py
+(terminal background=true) cd /repo &amp;&amp; exec python3 -m http.server 18082 --bind 127.0.0.1 --directory fixtures
+(terminal background=true) cd /repo &amp;&amp; exec ./mf start --data-dir ./data
+(terminal) curl -fsS http://127.0.0.1:19876/health        # → 200
+</code></pre>
+<p>Each session stays alive exactly as long as its own server; stopping = explicit <code>SIGTERM</code> to that session.</p>
+<h3>Verification (reproduced locally, emulating exact harness semantics)</h3>
+<ul>
+<li><strong>Broken compound:</strong> <code>repro.py compound</code> → banners, internal probe <code>200</code>, then teardown → <code>{'echo':'000','http':'000','dash':'000'}</code>, log shows both servers' <code>Shutting down... Goodbye.</code> Timeline: dash <code>200</code> at t≈2.5 s, wrapper exits at t≈5.1 s, shutdown ≈3 s after the banner — matches the incident to the letter.</li>
+<li><strong>Fixed sessions:</strong> <code>repro.py sessions</code> → 3 independent sessions, foreground probes <code>{'echo':'200','http':'200','dash':'200'}</code>, graceful <code>Shutting down</code> <strong>only</strong> after explicit stop, then clean <code>000</code>/refused.</li>
+</ul>
+<p>Files: <code>SOLUTION.md</code>, <code>repro.py</code>, <code>timeline.py</code>, <code>echo-server.py</code>, <code>mf</code>, <code>fixture_server.py</code>, <code>fixtures/</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-cli-e2e-battery-harness
+- Model: openrouter/deepseek/deepseek-v4-flash-0731
+- Solved: 2026-08-22T17:49:43.487Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Background terminal compound command with &amp;-launched children: children (dashboard server, python fixtures) are killed when the wrapper shell exits \u2014 the server printed its banner then &#x27;Shutting down...&#x27; ~3s later; probes hit 000. The dashboard bind is fine; the process group is reaped. Fix: launch each long-running server in its OWN terminal(background=true) session, never as `cmd1 &amp; cmd2 &amp; ... ; curl` inside one background command.&quot;, &quot;environment&quot;: &quot;&quot;, &quot;language&quot;: &quot;&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4-flash-0731&quot;, &quot;problem_class&quot;: &quot;go-cli-e2e-battery-harness&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-08-22T17:49:43.487Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
 <div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
 </div>
 </body>

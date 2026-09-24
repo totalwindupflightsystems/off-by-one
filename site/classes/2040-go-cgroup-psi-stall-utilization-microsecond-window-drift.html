@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-cgroup-psi-stall-utilization-microsecond-window-drift — Off-By-One verified answer</title>
+<meta name="description" content="The original collector had three independent defects that compound into a spurious throttle:">
+<meta property="og:title" content="go-cgroup-psi-stall-utilization-microsecond-window-drift — Off-By-One">
+<meta property="og:description" content="The original collector had three independent defects that compound into a spurious throttle:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2040-go-cgroup-psi-stall-utilization-microsecond-window-drift.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-cgroup-psi-stall-utilization-microsecond-window-drift</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>The original collector had three independent defects that compound into a spurious throttle:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2040-go-cgroup-psi-stall-utilization-microsecond-window-drift.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Fix: cgroup v2 PSI stall-utilization sampling (key=value parsing, per-sample clock, honest regression handling)</h1>
+<h2>Root-cause analysis</h2>
+<p>The original collector had three independent defects that compound into a spurious throttle:</p>
+<ol>
+<li>
+<p><strong>Positional field parsing.</strong> PSI lines are <code>some avg10=… avg60=… avg300=… total=…</code> and <code>full …</code>. Reading fixed column indices means any field reorder (<code>total</code> first) or any added field (<code>avg1000=…</code>) silently shifts what is read as <code>total</code>. The fix must parse <code>key=value</code> by key and keep unknown fields.</p>
+</li>
+<li>
+<p><strong>One shared timestamp for the whole read loop.</strong> The wall time was captured once before iterating cgroups, then reused for every file. Each counter delta was therefore divided by a wall delta that did not correspond to when that particular file was read. Across multiple cgroups the fabricated <code>delta_total / delta_wall</code> can exceed 1.0 and trip the admission throttle. The fix is a per-file timestamp obtained from an injectable <code>Clock</code>.</p>
+</li>
+<li>
+<p><strong>No honest handling of counter regression, missing files, or clamping.</strong> PSI counters reset to 0 when a cgroup is recreated. Subtracting across a reset produced a huge/negative ratio. Missing <code>*.pressure</code> files and clamping to 1.0 happened silently, so operators could not tell a real stall from a reset or a missing file.</p>
+</li>
+</ol>
+<p>Correctness contract:</p>
+<pre><code>raw     = (total_now - total_prev) / ((wall_now - wall_prev) in microseconds)
+clamped = clamp(raw, 0, 1)   // consumed by the throttle
+reason  = &quot;&quot; | counter_reset | missing_pressure | ratio_above_one | ...
+</code></pre>
+<p><code>raw</code> is <strong>always</strong> emitted unmodified; clamping is explicit and carries a reason. <code>NaN</code>/<code>Inf</code> are impossible because division only occurs after <code>delta_wall &gt; 0</code>.</p>
+<h2>The fix</h2>
+<p>Source below is verified with Go 1.26 (<code>go vet</code>, <code>go test</code>, <code>go test -race</code> all clean).</p>
+<pre><code>psistall/
+├── go.mod
+├── psi.go
+├── collector.go
+└── collector_test.go
+</code></pre>
+<h3><code>go.mod</code></h3>
+<pre><code class="language-go">module psistall
+
+go 1.26
+</code></pre>
+<h3><code>psi.go</code> — order-independent parser + result types</h3>
+<pre><code class="language-go">// Package psistall samples cgroup v2 PSI (Pressure Stall Information)
+// counters and turns them into a stall-utilization ratio.
+//
+// Design constraints this package is built around:
+//
+//  1. PSI fields MUST be parsed by key=value, never by column index. Kernel
+//     versions and future kernels may emit avg10/avg60/avg300/total in any
+//     order, may add fields, and may emit the &quot;some&quot;/&quot;full&quot; lines in any
+//     order.
+//  2. Every pressure file is stamped with its own wall-clock time obtained
+//     from an injected Clock. A single timestamp shared across a read loop
+//     fabricates deltas when more than one cgroup is sampled.
+//  3. Counters can regress (PSI counters reset when a cgroup is recreated).
+//     That is reported, never hidden as a huge or negative ratio.
+//  4. The raw ratio is always reported next to a clamped ratio and the
+//     reason it was clamped, so a throttle never acts on a silently
+//     saturated value.
+package psistall
+
+import (
+    &quot;bufio&quot;
+    &quot;bytes&quot;
+    &quot;fmt&quot;
+    &quot;strconv&quot;
+    &quot;strings&quot;
+    &quot;time&quot;
+)
+
+// Line identifies a PSI summary line.
+type Line string
+
+const (
+    LineSome Line = &quot;some&quot;
+    LineFull Line = &quot;full&quot;
+)
+
+// LineValues holds one parsed PSI summary line. Unknown future fields are
+// preserved in Extra rather than discarded.
+type LineValues struct {
+    Avg10    float64
+    Avg60    float64
+    Avg300   float64
+    Total    uint64
+    HasTotal bool
+    Extra    map[string]float64
+}
+
+// Pressure is the parsed content of a cpu.pressure / memory.pressure /
+// io.pressure file.
+type Pressure struct {
+    Lines map[Line]LineValues
+}
+
+// ParsePressure parses a PSI file strictly by key=value. It never relies on
+// field position, tolerates extra/unknown fields, and tolerates the &quot;total&quot;
+// field appearing before or after the averages.
+func ParsePressure(data []byte) (Pressure, error) {
+    p := Pressure{Lines: make(map[Line]LineValues)}
+
+    sc := bufio.NewScanner(bytes.NewReader(data))
+    sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+    for sc.Scan() {
+        raw := strings.TrimSpace(sc.Text())
+        if raw == &quot;&quot; {
+            continue
+        }
+        fields := strings.Fields(raw)
+        name := Line(fields[0])
+        if name != LineSome &amp;&amp; name != LineFull {
+            // Unknown summary line: ignore, do not guess at its layout.
+            continue
+        }
+
+        lv := LineValues{Extra: make(map[string]float64)}
+        for _, f := range fields[1:] {
+            k, v, ok := strings.Cut(f, &quot;=&quot;)
+            if !ok {
+                return p, fmt.Errorf(&quot;psistall: malformed field %q in %q line&quot;, f, name)
+            }
+            switch k {
+            case &quot;avg10&quot;:
+                x, err := strconv.ParseFloat(v, 64)
+                if err != nil {
+                    return p, fmt.Errorf(&quot;psistall: %s avg10: %w&quot;, name, err)
+                }
+                lv.Avg10 = x
+            case &quot;avg60&quot;:
+                x, err := strconv.ParseFloat(v, 64)
+                if err != nil {
+                    return p, fmt.Errorf(&quot;psistall: %s avg60: %w&quot;, name, err)
+                }
+                lv.Avg60 = x
+            case &quot;avg300&quot;:
+                x, err := strconv.ParseFloat(v, 64)
+                if err != nil {
+                    return p, fmt.Errorf(&quot;psistall: %s avg300: %w&quot;, name, err)
+                }
+                lv.Avg300 = x
+            case &quot;total&quot;:
+                u, err := parseTotal(v)
+                if err != nil {
+                    return p, fmt.Errorf(&quot;psistall: %s total: %w&quot;, name, err)
+                }
+                lv.Total = u
+                lv.HasTotal = true
+            default:
+                x, err := strconv.ParseFloat(v, 64)
+                if err != nil {
+                    return p, fmt.Errorf(&quot;psistall: %s %s: %w&quot;, name, k, err)
+                }
+                lv.Extra[k] = x
+            }
+        }
+        p.Lines[name] = lv
+    }
+    if err := sc.Err(); err != nil {
+        return p, err
+    }
+    return p, nil
+}
+
+func parseTotal(v string) (uint64, error) {
+    if u, err := strconv.ParseUint(v, 10, 64); err == nil {
+        return u, nil
+    }
+    f, err := strconv.ParseFloat(v, 64)
+    if err != nil {
+        return 0, err
+    }
+    if f &lt; 0 {
+        return 0, fmt.Errorf(&quot;negative total %q&quot;, v)
+    }
+    return uint64(f), nil
+}
+
+// Clamp reasons emitted on Utilization.Reason.
+const (
+    ReasonNone            = &quot;&quot;
+    ReasonFirstSample     = &quot;first_sample&quot;
+    ReasonCounterReset    = &quot;counter_reset&quot;
+    ReasonMissingPressure = &quot;missing_pressure&quot;
+    ReasonTotalMissing    = &quot;total_field_missing&quot;
+    ReasonNonPositiveWall = &quot;non_positive_wall_delta&quot;
+    ReasonRatioAboveOne   = &quot;ratio_above_one&quot;
+    ReasonRatioBelowZero  = &quot;ratio_below_zero&quot;
+    ReasonReadError       = &quot;read_error&quot;
+    ReasonParseError      = &quot;parse_error&quot;
+)
+
+// Utilization is the computed ratio for one (cgroup, pressure kind, PSI
+// line). Raw is always the honest delta_total/delta_wall value; Clamped is
+// the value a throttle should consume and Reason explains any clamping.
+type Utilization struct {
+    Cgroup string
+    Kind   Kind
+    Line   Line
+    Wall   time.Time
+
+    DeltaTotal uint64
+    DeltaWall  time.Duration
+
+    Raw     float64
+    Clamped float64
+    Reason  string
+    Valid   bool
+    Missing bool
+}
+</code></pre>
+<h3><code>collector.go</code> — per-sample timestamp, regression + missing handling</h3>
+<pre><code class="language-go">package psistall
+
+import (
+    &quot;errors&quot;
+    &quot;os&quot;
+    &quot;path/filepath&quot;
+    &quot;time&quot;
+)
+
+// Kind identifies which cgroup v2 pressure file is sampled.
+type Kind string
+
+const (
+    KindCPU    Kind = &quot;cpu&quot;
+    KindMemory Kind = &quot;memory&quot;
+    KindIO     Kind = &quot;io&quot;
+)
+
+// defaultKinds is the fixed set sampled for every cgroup.
+var defaultKinds = []Kind{KindCPU, KindMemory, KindIO}
+
+// Clock is the injectable wall-clock source. Real callers pass nil (or
+// systemClock{}); tests inject a deterministic, advancing clock.
+type Clock interface {
+    Now() time.Time
+}
+
+type systemClock struct{}
+
+func (systemClock) Now() time.Time { return time.Now() }
+
+type prevKey struct {
+    Cgroup string
+    Kind   Kind
+    Line   Line
+}
+
+type prevSample struct {
+    Total uint64
+    Wall  time.Time
+}
+
+// Collector samples a fixture or real sysfs root. It keeps the previous
+// counter + wall time for every (cgroup, kind, line) it has seen.
+type Collector struct {
+    root  string
+    clock Clock
+    prev  map[prevKey]prevSample
+}
+
+// New returns a Collector rooted at root. If clock is nil, time.Now is used.
+func New(root string, clock Clock) *Collector {
+    if clock == nil {
+        clock = systemClock{}
+    }
+    return &amp;Collector{
+        root:  root,
+        clock: clock,
+        prev:  make(map[prevKey]prevSample),
+    }
+}
+
+// Reset drops all previous counters, e.g. after a configuration reload.
+func (c *Collector) Reset() {
+    c.prev = make(map[prevKey]prevSample)
+}
+
+// Collect samples every pressure file of every cgroup in order and returns
+// one Utilization per (cgroup, kind, PSI line).
+func (c *Collector) Collect(cgroups []string) []Utilization {
+    var out []Utilization
+    for _, cg := range cgroups {
+        for _, kind := range defaultKinds {
+            out = append(out, c.collectKind(cg, kind)...)
+        }
+    }
+    return out
+}
+
+func (c *Collector) collectKind(cgroup string, kind Kind) []Utilization {
+    // Key fix: the wall timestamp belongs to THIS pressure file. It is not
+    // captured once outside the loop (which would mis-stamp every cgroup).
+    wall := c.clock.Now()
+
+    path := filepath.Join(c.root, cgroup, string(kind)+&quot;.pressure&quot;)
+    data, err := os.ReadFile(path)
+    if err != nil {
+        reason := ReasonReadError
+        missing := false
+        if errors.Is(err, os.ErrNotExist) {
+            reason = ReasonMissingPressure
+            missing = true
+        }
+        // Emit one result per PSI line so callers always see the same key
+        // shape, even when the file is absent.
+        out := make([]Utilization, 0, 2)
+        for _, ln := range []Line{LineSome, LineFull} {
+            out = append(out, Utilization{
+                Cgroup:  cgroup,
+                Kind:    kind,
+                Line:    ln,
+                Wall:    wall,
+                Reason:  reason,
+                Missing: missing,
+            })
+        }
+        return out
+    }
+
+    p, perr := ParsePressure(data)
+
+    out := make([]Utilization, 0, 2)
+    for _, ln := range []Line{LineSome, LineFull} {
+        lv, ok := p.Lines[ln]
+        out = append(out, c.observe(cgroup, kind, ln, wall, lv, ok, perr))
+    }
+    return out
+}
+
+func (c *Collector) observe(
+    cgroup string, kind Kind, line Line, wall time.Time,
+    lv LineValues, hasLine bool, parseErr error,
+) Utilization {
+    u := Utilization{Cgroup: cgroup, Kind: kind, Line: line, Wall: wall}
+
+    if parseErr != nil {
+        u.Reason = ReasonParseError
+        return u
+    }
+    if !hasLine || !lv.HasTotal {
+        u.Reason = ReasonTotalMissing
+        return u
+    }
+
+    key := prevKey{Cgroup: cgroup, Kind: kind, Line: line}
+    prev, seen := c.prev[key]
+    // Always move the baseline forward, including after a reset, so the
+    // next interval is measurable again.
+    c.prev[key] = prevSample{Total: lv.Total, Wall: wall}
+
+    if !seen {
+        u.Reason = ReasonFirstSample
+        return u
+    }
+
+    dw := wall.Sub(prev.Wall)
+    u.DeltaWall = dw
+
+    // Counter regression: PSI counters reset when a cgroup is recreated.
+    // Report it honestly instead of emitting a negative/huge ratio.
+    if lv.Total &lt; prev.Total {
+        u.Reason = ReasonCounterReset
+        u.Raw = 0
+        u.Clamped = 0
+        return u
+    }
+
+    dt := lv.Total - prev.Total
+    u.DeltaTotal = dt
+
+    if dw &lt;= 0 {
+        u.Reason = ReasonNonPositiveWall
+        u.Raw = 0
+        u.Clamped = 0
+        return u
+    }
+
+    // total is microseconds; convert wall to microseconds to keep the ratio
+    // dimensionless. delta_total / delta_wall_us.
+    wallUs := float64(dw) / float64(time.Microsecond)
+    raw := float64(dt) / wallUs
+
+    u.Raw = raw
+    u.Valid = true
+
+    // Raw is preserved; clamping is explicit and carries a reason.
+    switch {
+    case raw &gt; 1:
+        u.Clamped = 1
+        u.Reason = ReasonRatioAboveOne
+    case raw &lt; 0:
+        u.Clamped = 0
+        u.Reason = ReasonRatioBelowZero
+    default:
+        u.Clamped = raw
+        u.Reason = ReasonNone
+    }
+    return u
+}
+</code></pre>
+<h3><code>collector_test.go</code> — fixture sysfs table tests</h3>
+<pre><code class="language-go">package psistall
+
+import (
+    &quot;math&quot;
+    &quot;os&quot;
+    &quot;path/filepath&quot;
+    &quot;strconv&quot;
+    &quot;testing&quot;
+    &quot;time&quot;
+)
+
+// stepClock advances by a fixed step on every Now() call, so a test can
+// predict the exact wall delta between two samples of the same file.
+type stepClock struct {
+    now  time.Time
+    step time.Duration
+}
+
+func newStepClock(step time.Duration) *stepClock {
+    return &amp;stepClock{now: time.Unix(1_700_000_000, 0), step: step}
+}
+
+func (c *stepClock) Now() time.Time {
+    t := c.now
+    c.now = c.now.Add(c.step)
+    return t
+}
+
+func writeFiles(t *testing.T, root string, files map[string]string) {
+    t.Helper()
+    for rel, content := range files {
+        p := filepath.Join(root, rel)
+        if content == &quot;&quot; {
+            if err := os.Remove(p); err != nil &amp;&amp; !os.IsNotExist(err) {
+                t.Fatalf(&quot;remove %s: %v&quot;, p, err)
+            }
+            continue
+        }
+        if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+            t.Fatalf(&quot;mkdir %s: %v&quot;, filepath.Dir(p), err)
+        }
+        if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+            t.Fatalf(&quot;write %s: %v&quot;, p, err)
+        }
+    }
+}
+
+// psiDoc builds a two-line PSI file. order is &quot;avg-first&quot; or &quot;total-first&quot;;
+// extra appends an unknown field to prove added fields are tolerated.
+func psiDoc(someTotal, fullTotal uint64, order string, extra bool) string {
+    line := func(name string, total uint64) string {
+        avg := &quot;avg10=0.50 avg60=0.25 avg300=0.10&quot;
+        if extra {
+            avg += &quot; avg1000=0.00&quot;
+        }
+        tf := &quot;total=&quot; + strconv.FormatUint(total, 10)
+        if order == &quot;total-first&quot; {
+            return name + &quot; &quot; + tf + &quot; &quot; + avg
+        }
+        return name + &quot; &quot; + avg + &quot; &quot; + tf
+    }
+    return line(&quot;some&quot;, someTotal) + &quot;\n&quot; + line(&quot;full&quot;, fullTotal) + &quot;\n&quot;
+}
+
+func resultKey(u Utilization) string {
+    return u.Cgroup + &quot;/&quot; + string(u.Kind) + &quot;/&quot; + string(u.Line)
+}
+
+func findByKey(t *testing.T, us []Utilization, key string) Utilization {
+    t.Helper()
+    for _, u := range us {
+        if resultKey(u) == key {
+            return u
+        }
+    }
+    t.Fatalf(&quot;no result for %s&quot;, key)
+    return Utilization{}
+}
+
+// checkInvariants enforces the hard guarantees for every emitted result:
+// no NaN/Inf, and every valid ratio equals delta_total/delta_wall_us to
+// within 1e-9.
+func checkInvariants(t *testing.T, all [][]Utilization) {
+    t.Helper()
+    for i, us := range all {
+        for _, u := range us {
+            if math.IsNaN(u.Raw) || math.IsInf(u.Raw, 0) {
+                t.Fatalf(&quot;interval %d %s: Raw not finite: %v&quot;, i, resultKey(u), u.Raw)
+            }
+            if math.IsNaN(u.Clamped) || math.IsInf(u.Clamped, 0) {
+                t.Fatalf(&quot;interval %d %s: Clamped not finite: %v&quot;, i, resultKey(u), u.Clamped)
+            }
+            if !u.Valid {
+                continue
+            }
+            wallUs := float64(u.DeltaWall) / float64(time.Microsecond)
+            if wallUs &lt;= 0 {
+                t.Fatalf(&quot;interval %d %s: valid with wallUs=%v&quot;, i, resultKey(u), wallUs)
+            }
+            want := float64(u.DeltaTotal) / wallUs
+            if math.Abs(u.Raw-want) &gt; 1e-9 {
+                t.Fatalf(&quot;interval %d %s: Raw=%v want=%v (diff=%g)&quot;,
+                    i, resultKey(u), u.Raw, want, math.Abs(u.Raw-want))
+            }
+            if u.Clamped &lt; 0 || u.Clamped &gt; 1 {
+                t.Fatalf(&quot;interval %d %s: clamped out of range: %v&quot;, i, resultKey(u), u.Clamped)
+            }
+            if u.Reason == ReasonRatioAboveOne &amp;&amp; u.Clamped != 1 {
+                t.Fatalf(&quot;interval %d %s: above-one reason but clamp=%v&quot;, i, resultKey(u), u.Clamped)
+            }
+            if u.Reason == ReasonNone &amp;&amp; u.Clamped != u.Raw {
+                t.Fatalf(&quot;interval %d %s: unclamped value changed: raw=%v clamped=%v&quot;,
+                    i, resultKey(u), u.Raw, u.Clamped)
+            }
+        }
+    }
+}
+
+func TestCollectorTable(t *testing.T) {
+    const step = 100 * time.Millisecond
+
+    cases := []struct {
+        name      string
+        cgroups   []string
+        snapshots []map[string]string
+        check     func(t *testing.T, all [][]Utilization)
+    }{
+        {
+            name:    &quot;reordered_and_added_fields_two_cgroups&quot;,
+            cgroups: []string{&quot;cg1&quot;, &quot;cg2&quot;},
+            snapshots: []map[string]string{
+                {
+                    &quot;cg1/cpu.pressure&quot;:    psiDoc(100000, 200000, &quot;avg-first&quot;, false),
+                    &quot;cg1/memory.pressure&quot;: psiDoc(10000, 20000, &quot;avg-first&quot;, false),
+                    &quot;cg1/io.pressure&quot;:     psiDoc(0, 0, &quot;avg-first&quot;, false),
+                    &quot;cg2/cpu.pressure&quot;:    psiDoc(50000, 60000, &quot;avg-first&quot;, false),
+                    &quot;cg2/memory.pressure&quot;: psiDoc(1000, 2000, &quot;avg-first&quot;, false),
+                    &quot;cg2/io.pressure&quot;:     psiDoc(4000, 5000, &quot;avg-first&quot;, false),
+                },
+                {
+                    // Second interval: total-first, plus an extra field.
+                    &quot;cg1/cpu.pressure&quot;:    psiDoc(400000, 800000, &quot;total-first&quot;, true),
+                    &quot;cg1/memory.pressure&quot;: psiDoc(40000, 50000, &quot;total-first&quot;, true),
+                    &quot;cg1/io.pressure&quot;:     psiDoc(0, 0, &quot;total-first&quot;, true),
+                    &quot;cg2/cpu.pressure&quot;:    psiDoc(65000, 66000, &quot;total-first&quot;, true),
+                    &quot;cg2/memory.pressure&quot;: psiDoc(1000, 2000, &quot;total-first&quot;, true),
+                    &quot;cg2/io.pressure&quot;:     psiDoc(30000, 31000, &quot;total-first&quot;, true),
+                },
+            },
+            check: func(t *testing.T, all [][]Utilization) {
+                last := all[len(all)-1]
+                // 2 cgroups * 3 kinds * 100ms per Now() call = 600ms wall delta.
+                const wallUs = 600000.0
+                expect := map[string]float64{
+                    &quot;cg1/cpu/some&quot;:    300000 / wallUs,
+                    &quot;cg1/cpu/full&quot;:    600000 / wallUs,
+                    &quot;cg1/memory/some&quot;: 30000 / wallUs,
+                    &quot;cg1/memory/full&quot;: 30000 / wallUs,
+                    &quot;cg1/io/some&quot;:     0,
+                    &quot;cg1/io/full&quot;:     0,
+                    &quot;cg2/cpu/some&quot;:    15000 / wallUs,
+                    &quot;cg2/cpu/full&quot;:    6000 / wallUs,
+                    &quot;cg2/memory/some&quot;: 0,
+                    &quot;cg2/memory/full&quot;: 0,
+                    &quot;cg2/io/some&quot;:     26000 / wallUs,
+                    &quot;cg2/io/full&quot;:     26000 / wallUs,
+                }
+                for key, want := range expect {
+                    u := findByKey(t, last, key)
+                    if !u.Valid {
+                        t.Fatalf(&quot;%s: not valid, reason=%q&quot;, key, u.Reason)
+                    }
+                    if math.Abs(u.Raw-want) &gt; 1e-9 {
+                        t.Fatalf(&quot;%s: raw=%v want=%v&quot;, key, u.Raw, want)
+                    }
+                    if u.Clamped != u.Raw {
+                        t.Fatalf(&quot;%s: expected no clamp, raw=%v clamped=%v&quot;, key, u.Raw, u.Clamped)
+                    }
+                }
+                // The averages must have been parsed by key, not ignored.
+                if u := findByKey(t, last, &quot;cg1/cpu/some&quot;); u.Wall.IsZero() {
+                    t.Fatalf(&quot;wall timestamp not set&quot;)
+                }
+            },
+        },
+        {
+            name:    &quot;counter_reset_then_recovery&quot;,
+            cgroups: []string{&quot;cg1&quot;},
+            snapshots: []map[string]string{
+                {
+                    &quot;cg1/cpu.pressure&quot;:    psiDoc(900000, 900000, &quot;avg-first&quot;, false),
+                    &quot;cg1/memory.pressure&quot;: psiDoc(1000, 1000, &quot;avg-first&quot;, false),
+                    &quot;cg1/io.pressure&quot;:     psiDoc(2000, 2000, &quot;avg-first&quot;, false),
+                },
+                {
+                    // Counter regression: cgroup was recreated.
+                    &quot;cg1/cpu.pressure&quot;:    psiDoc(100000, 100000, &quot;avg-first&quot;, false),
+                    &quot;cg1/memory.pressure&quot;: psiDoc(1000, 1000, &quot;avg-first&quot;, false),
+                    &quot;cg1/io.pressure&quot;:     psiDoc(2000, 2000, &quot;avg-first&quot;, false),
+                },
+                {
+                    // Recovery: baseline is the post-reset value.
+                    &quot;cg1/cpu.pressure&quot;:    psiDoc(250000, 250000, &quot;avg-first&quot;, false),
+                    &quot;cg1/memory.pressure&quot;: psiDoc(1000, 1000, &quot;avg-first&quot;, false),
+                    &quot;cg1/io.pressure&quot;:     psiDoc(2000, 2000, &quot;avg-first&quot;, false),
+                },
+            },
+            check: func(t *testing.T, all [][]Utilization) {
+                const wallUs = 300000.0 // 1 cgroup * 3 kinds * 100ms
+
+                reset := findByKey(t, all[1], &quot;cg1/cpu/some&quot;)
+                if reset.Reason != ReasonCounterReset {
+                    t.Fatalf(&quot;reset: reason=%q, want %q&quot;, reset.Reason, ReasonCounterReset)
+                }
+                if reset.Valid {
+                    t.Fatalf(&quot;reset must not be reported as valid&quot;)
+                }
+                if reset.Raw != 0 || reset.Clamped != 0 {
+                    t.Fatalf(&quot;reset: raw=%v clamped=%v, want 0/0&quot;, reset.Raw, reset.Clamped)
+                }
+
+                recovered := findByKey(t, all[2], &quot;cg1/cpu/some&quot;)
+                if !recovered.Valid {
+                    t.Fatalf(&quot;recovered: not valid, reason=%q&quot;, recovered.Reason)
+                }
+                const want = 150000 / wallUs
+                if math.Abs(recovered.Raw-want) &gt; 1e-9 {
+                    t.Fatalf(&quot;recovered raw=%v want=%v&quot;, recovered.Raw, want)
+                }
+            },
+        },
+        {
+            name:    &quot;missing_io_pressure&quot;,
+            cgroups: []string{&quot;cg1&quot;},
+            snapshots: []map[string]string{
+                {
+                    &quot;cg1/cpu.pressure&quot;:    psiDoc(0, 0, &quot;avg-first&quot;, false),
+                    &quot;cg1/memory.pressure&quot;: psiDoc(0, 0, &quot;avg-first&quot;, false),
+                    // io.pressure intentionally omitted
+                },
+                {
+                    &quot;cg1/cpu.pressure&quot;:    psiDoc(150000, 150000, &quot;avg-first&quot;, false),
+                    &quot;cg1/memory.pressure&quot;: psiDoc(150000, 150000, &quot;avg-first&quot;, false),
+                },
+            },
+            check: func(t *testing.T, all [][]Utilization) {
+                for _, iv := range all {
+                    for _, key := range []string{&quot;cg1/io/some&quot;, &quot;cg1/io/full&quot;} {
+                        u := findByKey(t, iv, key)
+                        if !u.Missing || u.Reason != ReasonMissingPressure {
+                            t.Fatalf(&quot;%s: missing=%v reason=%q&quot;, key, u.Missing, u.Reason)
+                        }
+                    }
+                }
+                // cpu/memory still work.
+                u := findByKey(t, all[1], &quot;cg1/cpu/some&quot;)
+                if !u.Valid || u.Raw != 0.5 {
+                    t.Fatalf(&quot;cpu: valid=%v raw=%v want 0.5&quot;, u.Valid, u.Raw)
+                }
+            },
+        },
+        {
+            name:    &quot;ratio_above_one_is_raw_plus_clamped_with_reason&quot;,
+            cgroups: []string{&quot;cg1&quot;},
+            snapshots: []map[string]string{
+                {&quot;cg1/cpu.pressure&quot;: psiDoc(0, 0, &quot;avg-first&quot;, false)},
+                {&quot;cg1/cpu.pressure&quot;: psiDoc(900000, 900000, &quot;avg-first&quot;, false)},
+            },
+            check: func(t *testing.T, all [][]Utilization) {
+                u := findByKey(t, all[1], &quot;cg1/cpu/some&quot;)
+                if !u.Valid {
+                    t.Fatalf(&quot;not valid: reason=%q&quot;, u.Reason)
+                }
+                const want = 900000 / 300000.0 // = 3.0
+                if math.Abs(u.Raw-want) &gt; 1e-9 {
+                    t.Fatalf(&quot;raw=%v want=%v&quot;, u.Raw, want)
+                }
+                if u.Reason != ReasonRatioAboveOne {
+                    t.Fatalf(&quot;reason=%q, want %q&quot;, u.Reason, ReasonRatioAboveOne)
+                }
+                if u.Clamped != 1 {
+                    t.Fatalf(&quot;clamped=%v, want 1&quot;, u.Clamped)
+                }
+            },
+        },
+    }
+
+    for _, tc := range cases {
+        t.Run(tc.name, func(t *testing.T) {
+            root := t.TempDir()
+            clock := newStepClock(step)
+            col := New(root, clock)
+
+            var all [][]Utilization
+            for _, snap := range tc.snapshots {
+                writeFiles(t, root, snap)
+                all = append(all, col.Collect(tc.cgroups))
+            }
+
+            checkInvariants(t, all)
+            tc.check(t, all)
+        })
+    }
+}
+
+// TestParsePressureKeyOrder proves the parser is positional-independent and
+// preserves unknown fields.
+func TestParsePressureKeyOrder(t *testing.T) {
+    avgFirst := &quot;some avg10=1.00 avg60=2.00 avg300=3.00 total=111\nfull avg10=4.00 avg60=5.00 avg300=6.00 total=222\n&quot;
+    totalFirst := &quot;full total=222 avg10=4.00 avg60=5.00 avg300=6.00 avg999=7.00\nsome total=111 avg10=1.00 avg60=2.00 avg300=3.00 avg999=7.00\n&quot;
+
+    for name, data := range map[string]string{&quot;avg-first&quot;: avgFirst, &quot;total-first&quot;: totalFirst} {
+        t.Run(name, func(t *testing.T) {
+            p, err := ParsePressure([]byte(data))
+            if err != nil {
+                t.Fatalf(&quot;parse: %v&quot;, err)
+            }
+            some := p.Lines[LineSome]
+            full := p.Lines[LineFull]
+            if !some.HasTotal || some.Total != 111 {
+                t.Fatalf(&quot;some total=%d has=%v, want 111&quot;, some.Total, some.HasTotal)
+            }
+            if !full.HasTotal || full.Total != 222 {
+                t.Fatalf(&quot;full total=%d has=%v, want 222&quot;, full.Total, full.HasTotal)
+            }
+            if some.Avg10 != 1 || some.Avg60 != 2 || some.Avg300 != 3 {
+                t.Fatalf(&quot;some averages parsed wrong: %+v&quot;, some)
+            }
+            if name == &quot;total-first&quot; {
+                if got := some.Extra[&quot;avg999&quot;]; got != 7 {
+                    t.Fatalf(&quot;extra field not preserved: %v&quot;, got)
+                }
+            }
+        })
+    }
+}
+
+// TestPerSampleTimestamp ensures each pressure file gets its own timestamp
+// from the injected clock rather than one shared pre-loop timestamp.
+func TestPerSampleTimestamp(t *testing.T) {
+    root := t.TempDir()
+    writeFiles(t, root, map[string]string{
+        &quot;cg1/cpu.pressure&quot;:    psiDoc(0, 0, &quot;avg-first&quot;, false),
+        &quot;cg1/memory.pressure&quot;: psiDoc(0, 0, &quot;avg-first&quot;, false),
+        &quot;cg1/io.pressure&quot;:     psiDoc(0, 0, &quot;avg-first&quot;, false),
+        &quot;cg2/cpu.pressure&quot;:    psiDoc(0, 0, &quot;avg-first&quot;, false),
+        &quot;cg2/memory.pressure&quot;: psiDoc(0, 0, &quot;avg-first&quot;, false),
+        &quot;cg2/io.pressure&quot;:     psiDoc(0, 0, &quot;avg-first&quot;, false),
+    })
+
+    clock := newStepClock(10 * time.Millisecond)
+    col := New(root, clock)
+    got := col.Collect([]string{&quot;cg1&quot;, &quot;cg2&quot;})
+
+    // Six files =&gt; six distinct timestamps. The some/full lines of one file
+    // legitimately share the file's timestamp.
+    fileWall := map[string]time.Time{}
+    for _, u := range got {
+        file := u.Cgroup + &quot;/&quot; + string(u.Kind)
+        if prev, ok := fileWall[file]; ok &amp;&amp; !prev.Equal(u.Wall) {
+            t.Fatalf(&quot;%s: some/full lines of one file have different stamps&quot;, file)
+        }
+        fileWall[file] = u.Wall
+    }
+    if len(fileWall) != 6 {
+        t.Fatalf(&quot;got %d files, want 6&quot;, len(fileWall))
+    }
+    seen := map[time.Time]bool{}
+    for _, w := range fileWall {
+        if seen[w] {
+            t.Fatalf(&quot;duplicate wall timestamp %v: timestamp was shared across files&quot;, w)
+        }
+        seen[w] = true
+    }
+}
+</code></pre>
+<h2>Verification</h2>
+<p>Run:</p>
+<pre><code class="language-bash">cd psistall
+gofmt -l .          # must print nothing
+go vet ./...
+go test -v ./...
+go test -race -count=1 ./...
+</code></pre>
+<p>Observed result (Go 1.26.0, linux/amd64):</p>
+<pre><code>=== RUN   TestCollectorTable
+=== RUN   TestCollectorTable/reordered_and_added_fields_two_cgroups
+=== RUN   TestCollectorTable/counter_reset_then_recovery
+=== RUN   TestCollectorTable/missing_io_pressure
+=== RUN   TestCollectorTable/ratio_above_one_is_raw_plus_clamped_with_reason
+--- PASS: TestCollectorTable (0.00s)
+    --- PASS: TestCollectorTable/reordered_and_added_fields_two_cgroups (0.00s)
+    --- PASS: TestCollectorTable/counter_reset_then_recovery (0.00s)
+    --- PASS: TestCollectorTable/missing_io_pressure (0.00s)
+    --- PASS: TestCollectorTable/ratio_above_one_is_raw_plus_clamped_with_reason (0.00s)
+=== RUN   TestParsePressureKeyOrder
+    --- PASS: TestParsePressureKeyOrder/avg-first (0.00s)
+    --- PASS: TestParsePressureKeyOrder/total-first (0.00s)
+=== RUN   TestPerSampleTimestamp
+--- PASS: TestPerSampleTimestamp (0.00s)
+PASS
+ok      psistall    0.005s
+ok      psistall    1.019s        # -race
+coverage: 76.3% of statements
+</code></pre>
+<p>What each table case proves, mapped to the original defects:</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Fixture action</th>
+<th>Assertion</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>reordered_and_added_fields_two_cgroups</code></td>
+<td>interval 1 has <code>total</code> first and an unknown <code>avg1000</code> field; two cgroups</td>
+<td><code>Raw == delta_total/delta_wall</code> within <code>1e-9</code> for all 12 <code>(cgroup,kind,line)</code> keys; <code>Clamped == Raw</code> (no clamp)</td>
+</tr>
+<tr>
+<td><code>counter_reset_then_recovery</code></td>
+<td>interval 1 drops <code>total</code> from 900000 → 100000; interval 2 rises to 250000</td>
+<td>interval 1: <code>Reason == counter_reset</code>, <code>Valid == false</code>, <code>Raw == Clamped == 0</code>; interval 2: <code>Raw == 150000/300000 == 0.5</code> within <code>1e-9</code></td>
+</tr>
+<tr>
+<td><code>missing_io_pressure</code></td>
+<td><code>io.pressure</code> never exists</td>
+<td><code>Missing == true</code>, <code>Reason == missing_pressure</code> for both PSI lines; cpu/memory still <code>0.5</code></td>
+</tr>
+<tr>
+<td><code>ratio_above_one_is_raw_plus_clamped_with_reason</code></td>
+<td>interval delta drives ratio to 3.0</td>
+<td><code>Raw == 3.0</code> (preserved), <code>Clamped == 1</code>, <code>Reason == ratio_above_one</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>checkInvariants</code> runs over <strong>every</strong> result of <strong>every</strong> interval in <strong>every</strong> subtest and fails on:</p>
+<ul>
+<li>any <code>NaN</code> or <code>±Inf</code> in <code>Raw</code> or <code>Clamped</code>;</li>
+<li>any valid result where <code>|Raw − delta_total/delta_wall_us| &gt; 1e-9</code>;</li>
+<li>any <code>Clamped</code> outside <code>[0,1]</code>;</li>
+<li>a <code>ratio_above_one</code> reason that wasn't actually clamped to 1;</li>
+<li>an unclamped result whose <code>Clamped != Raw</code>.</li>
+</ul>
+<p><code>TestPerSampleTimestamp</code> additionally asserts the six pressure files of a two-cgroup run receive six distinct, increasing timestamps, while the <code>some</code> and <code>full</code> lines of the same file legitimately share one file timestamp — i.e. the timestamp is sampled per pressure file, not once before the read loop.</p>
+<h3>Using it against real sysfs</h3>
+<pre><code class="language-go">col := psistall.New(&quot;/sys/fs/cgroup&quot;, nil) // nil =&gt; time.Now
+for range ticker.C {
+    for _, u := range col.Collect(cgroups) {
+        if !u.Valid {
+            log.Printf(&quot;psi %s/%s/%s skipped: %s&quot;, u.Cgroup, u.Kind, u.Line, u.Reason)
+            continue
+        }
+        throttle.Set(u.Cgroup, u.Clamped) // use the clamped value
+        if u.Reason != &quot;&quot; {
+            metrics.PSIClampReason.WithLabelValues(string(u.Kind), u.Reason).Inc()
+        }
+    }
+}
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-cgroup-psi-stall-utilization-microsecond-window-drift
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-20T10:28:42.808Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;A cgroup v2 stall collector samples cpu.pressure / memory.pressure / io.pressure for every cgroup once per interval and reports a stall-utilization ratio (delta of the kernel&#x27;s cumulative `total=` microseconds divided by delta wall-clock microseconds) that feeds an admission throttle. The collector parses the pressure lines by fixed column index, so it breaks the moment a kernel emits the fields in a different order (avg10/avg60/avg300/total vs total-first) or adds a field, and it pairs every file&#x27;s counter with one shared timestamp taken before the read loop, so multi-cgroup runs fabricate deltas and the ratio drifts above 1.0 and fires the throttle spuriously. Fix the sampler so utilization is computed from key=value parsing (never positional), from a per-sample wall timestamp injected through an interface, with honest handling of counter regression (PSI counters reset when a cgroup is recreated), missing pressure files, and a raw-plus-clamped-with-reason output instead of a silent clamp. Prove it with table tests over a fixture sysfs root that reorders fields, resets a counter mid-run, omits io.pressure, and advances an injected clock, asserting the ratio equals delta_total/delta_wall to within 1e-9 and that no NaN/Inf is ever emitted.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-cgroup-psi-stall-utilization-microsecond-window-drift&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-20T10:28:42.808Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

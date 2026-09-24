@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>systemd-linger-accumulation-starves-user-manager — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: systemd-linger-accumulation-starves-user-manager">
+<meta property="og:title" content="systemd-linger-accumulation-starves-user-manager — Off-By-One">
+<meta property="og:description" content="Problem class: systemd-linger-accumulation-starves-user-manager">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1740-systemd-linger-accumulation-starves-user-manager.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>systemd-linger-accumulation-starves-user-manager</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>Linux + systemd-logind; a daemon that creates per-agent Linux users and runs rootless docker via systemd user managers (bunker agent sandbox daemon, Go); sshd on the same host</span></div><div class='desc'><p>Problem class: systemd-linger-accumulation-starves-user-manager</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1740-systemd-linger-accumulation-starves-user-manager.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I cloned the repo to <code>/tmp/bunker</code>, implemented the fix, and verified it. Here is the solution, also written to <code>docs/fixes/systemd-linger-accumulation.md</code>.</p>
+<hr />
+<h1>Fix: systemd linger accumulation starves the agent user manager</h1>
+<p><strong>Problem class:</strong> <code>systemd-linger-accumulation-starves-user-manager</code>
+<strong>Component:</strong> <code>internal/agent</code> (spawn, destroy, startup reconcile)
+<strong>Error:</strong> <code>install rootless docker for bunker-&lt;id&gt;: user manager did not start for bunker-&lt;id&gt;: context canceled</code></p>
+<h2>Symptom</h2>
+<p>Intermittent spawn failures that consume the whole <strong>client deadline</strong> instead of failing fast. The log shows <code>resetting user manager runtime</code> and then silence:</p>
+<pre><code>error=&quot;user manager did not start for &lt;user&gt;: context canceled&quot;
+</code></pre>
+<p><code>systemctl status user@&lt;uid&gt;.service</code> reports <code>Active: failed (Result: exit-code)</code> after ~1 min. Spawn stalls for the entire deadline (30 s obs / 300 s CI) and rollback can leave a half-created agent (user present, no key, no registry row).</p>
+<h2>Root cause: spawn/destroy asymmetry</h2>
+<p>The spawn path runs <code>loginctl enable-linger &lt;user&gt;</code> in <code>installRootlessDocker</code> (so the rootless installer can talk to a systemd user manager). <strong>No destroy path ever ran <code>loginctl disable-linger &lt;user&gt;</code></strong>, and <code>userdel</code> does not remove the flag file. Every agent ever created left one entry in <code>/var/lib/systemd/linger</code> forever.</p>
+<p>On the measured host:</p>
+<pre><code>$ ls /var/lib/systemd/linger | wc -l
+8024
+$ getent passwd | grep -c '^bunker-'
+3
+</code></pre>
+<p>logind then churns starting managers for thousands of deleted users, making a fresh manager start slow or fail exactly when spawn blocks on it.</p>
+<p>A second defect amplifies it: <code>enable-linger</code> is <strong>idempotent and asynchronous</strong>. Once the flag exists it does <strong>not</strong> restart a stopped/failed manager — and the spawn path itself stops <code>user@&lt;uid&gt;.service</code> and deletes <code>/run/user/&lt;uid&gt;</code> a few steps earlier. Waiting for the bus after <code>enable-linger</code> waits on an event that may never happen.</p>
+<p><strong>A/B proof (same host, minutes apart):</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>before purge</th>
+<th>after purge</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>linger entries</td>
+<td>8024</td>
+<td>4</td>
+</tr>
+<tr>
+<td><code>spawn --ttl 45m</code></td>
+<td><code>deadline_exceeded</code> after 29.8 s</td>
+<td>success in 17.0 s, registered + usable</td>
+</tr>
+<tr>
+<td>journal</td>
+<td><code>user@1002 failed after 67s</code></td>
+<td>—</td>
+</tr>
+</tbody>
+</table>
+<h2>Diagnostic heuristic</h2>
+<pre><code class="language-bash">ls /var/lib/systemd/linger | wc -l
+getent passwd | grep -c '^bunker-'
+</code></pre>
+<p>A ratio in the thousands is the cause. Purge to confirm:</p>
+<pre><code class="language-bash">for f in /var/lib/systemd/linger/*; do
+  getent passwd &quot;$(basename &quot;$f&quot;)&quot; &gt;/dev/null || rm -f &quot;$f&quot;
+done
+</code></pre>
+<h2>The fix</h2>
+<h3>1. Symmetry — destroy disables linger (best-effort)</h3>
+<p>New <code>internal/agent/linger.go</code>:</p>
+<pre><code class="language-go">func disableLinger(ctx context.Context, username string, logger *slog.Logger) {
+    out, err := exec.CommandContext(ctx, &quot;loginctl&quot;, &quot;disable-linger&quot;, username).CombinedOutput()
+    if err != nil {
+        logger.Warn(&quot;disable linger failed; linger entry may leak and starve later user managers&quot;,
+            &quot;user&quot;, username, &quot;error&quot;, err, &quot;output&quot;, strings.TrimSpace(string(out)))
+        return
+    }
+    logger.Info(&quot;disabled linger&quot;, &quot;user&quot;, username)
+}
+</code></pre>
+<p>Called in <code>manager_destroy.go</code> <strong>before</strong> <code>userdel</code> (the name must still resolve), and in the spawn rollback <code>removeAgentUser</code> (<code>spawn_failure.go</code>):</p>
+<pre><code class="language-go">waitAgentProcessesExit(ctx, username, m.logger)
+disableLinger(ctx, username, m.logger)   // Step 2c
+cmd := exec.CommandContext(ctx, &quot;userdel&quot;, &quot;-rf&quot;, username)
+</code></pre>
+<h3>2. Maintenance — prune stale flags at startup</h3>
+<pre><code class="language-go">var lingerDir = &quot;/var/lib/systemd/linger&quot;
+
+var passwdUserExists = func(ctx context.Context, name string) bool {
+    return exec.CommandContext(ctx, &quot;getent&quot;, &quot;passwd&quot;, name).Run() == nil
+}
+
+func pruneStaleLingerEntries(ctx context.Context, logger *slog.Logger) int {
+    if _, err := exec.LookPath(&quot;getent&quot;); err != nil {
+        logger.Warn(&quot;getent not available; skipping stale linger purge&quot;, &quot;error&quot;, err)
+        return 0
+    }
+    entries, err := os.ReadDir(lingerDir)
+    if err != nil {
+        if !os.IsNotExist(err) {
+            logger.Warn(&quot;cannot read linger directory; skipping stale linger purge&quot;, &quot;dir&quot;, lingerDir, &quot;error&quot;, err)
+        }
+        return 0
+    }
+    removed := 0
+    for _, e := range entries {
+        name := e.Name()
+        if e.IsDir() || !strings.HasPrefix(name, agentUserPrefix) {
+            continue // never touch entries this daemon does not own
+        }
+        if passwdUserExists(ctx, name) {
+            continue // live user: keep the flag
+        }
+        if err := os.Remove(filepath.Join(lingerDir, name)); err != nil {
+            if !os.IsNotExist(err) {
+                logger.Warn(&quot;failed to remove stale linger entry&quot;, &quot;user&quot;, name, &quot;error&quot;, err)
+            }
+            continue
+        }
+        removed++
+        logger.Info(&quot;pruned stale linger entry&quot;, &quot;user&quot;, name, &quot;reason&quot;, &quot;no such user&quot;)
+    }
+    return removed
+}
+</code></pre>
+<p>Wired into <code>Reconcile</code> before the <code>registry == nil</code> early return (runs every boot), reported as <code>pruned_linger</code>:</p>
+<pre><code class="language-go">rep.PrunedLinger = pruneStaleLingerEntries(ctx, m.logger)   // reconcile.go
+&quot;pruned_linger&quot;, rep.PrunedLinger,                          // server.go
+</code></pre>
+<h3>3. Defense in depth — explicit start, <code>reset-failed</code>, one retry</h3>
+<p><code>installRootlessDocker</code> no longer just polls after <code>enable-linger</code>; it calls <code>ensureUserManager</code>:</p>
+<pre><code class="language-go">func ensureUserManager(ctx context.Context, username string, uid int, runtimeDir string, logger *slog.Logger) error {
+    unit := fmt.Sprintf(&quot;user@%d.service&quot;, uid)
+    start := func() error {
+        out, err := exec.CommandContext(ctx, &quot;systemctl&quot;, &quot;start&quot;, unit).CombinedOutput()
+        if err != nil {
+            return fmt.Errorf(&quot;systemctl start %s: %w (output: %s)&quot;, unit, err, strings.TrimSpace(string(out)))
+        }
+        return nil
+    }
+    if err := start(); err != nil {
+        logger.Warn(&quot;explicit user manager start failed; clearing failed state and retrying once&quot;,
+            &quot;user&quot;, username, &quot;unit&quot;, unit, &quot;error&quot;, err)
+        if out, rerr := exec.CommandContext(ctx, &quot;systemctl&quot;, &quot;reset-failed&quot;, unit).CombinedOutput(); rerr != nil {
+            logger.Warn(&quot;systemctl reset-failed failed&quot;, &quot;unit&quot;, unit, &quot;error&quot;, rerr, &quot;output&quot;, strings.TrimSpace(string(out)))
+        }
+        if retryErr := start(); retryErr != nil {
+            return fmt.Errorf(&quot;user manager %s failed to start: %w; unit state: %s&quot;,
+                unit, retryErr, userManagerStatus(ctx, unit))
+        }
+    }
+    if err := waitForUserManager(ctx, runtimeDir); err != nil {
+        return fmt.Errorf(&quot;user manager %s started but its bus did not appear: %w; unit state: %s&quot;,
+            unit, err, userManagerStatus(ctx, unit))
+    }
+    return nil
+}
+</code></pre>
+<p>The error now carries <code>unit state: Active: failed (Result: exit-code) ...</code> instead of a bare <code>context canceled</code>.</p>
+<h2>Verification</h2>
+<p>Automated:</p>
+<pre><code class="language-bash">go build ./...
+go vet ./internal/agent/ ./internal/server/
+go test ./internal/agent/ -run 'TestDisableLinger|TestPruneStaleLinger|TestEnsureUserManager|TestDestroy_DisablesLinger' -count=1 -v
+go test ./internal/agent/ -skip 'TestApplyUserSliceLimits_NotRoot_Coverage' -count=1 -timeout 280s
+go test ./internal/server/ -count=1
+</code></pre>
+<p>Results on this tree:</p>
+<ul>
+<li><code>go build ./...</code> — OK</li>
+<li><code>go vet</code> — clean</li>
+<li>new tests — PASS (disable symmetry, prune safety, <code>reset-failed</code> retry + unit state in error, Destroy disables linger)</li>
+<li>full <code>internal/agent</code> suite — PASS; the skipped <code>TestApplyUserSliceLimits_NotRoot_Coverage</code> is a <strong>pre-existing environment failure</strong> (read-only <code>/etc/systemd/system</code> yields <code>read-only file system</code>; it fails identically on the unmodified tree)</li>
+<li><code>internal/server</code> — PASS</li>
+</ul>
+<p>Live confirmation on a systemd host:</p>
+<pre><code class="language-bash">bunker spawn --ttl 5m linger-check
+ls /var/lib/systemd/linger/linger-check          # present
+bunker destroy linger-check
+ls /var/lib/systemd/linger/linger-check          # ENOENT
+getent passwd bunker-linger-check &gt;/dev/null &amp;&amp; echo LEAK || echo clean
+</code></pre>
+<p>Files changed: new <code>internal/agent/linger.go</code>, <code>internal/agent/linger_test.go</code>, <code>docs/fixes/systemd-linger-accumulation.md</code>; modified <code>internal/agent/{rootless,manager_destroy,spawn_failure,reconcile}.go</code>, <code>internal/server/server.go</code>, <code>specs/{agent-lifecycle,architecture}.md</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: systemd-linger-accumulation-starves-user-manager
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-16T15:57:07.480Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;SYMPTOM: an intermittent spawn failure that consumes the CLIENT deadline instead of failing fast. The daemon log shows &#x27;resetting user manager runtime&#x27; and then silence until the caller&#x27;s context expires: error=\&quot;user manager did not start for &lt;user&gt;: context canceled\&quot;. `systemctl status user@&lt;uid&gt;.service` reports &#x27;Active: failed (Result: exit-code) ... Duration: 1min 7s&#x27; - the systemd user manager never came up. Spawn then stalls for the entire client deadline (30s obs / 300s in CI) and the rollback can leave a half-created agent (Linux user present, no key, no registry row).\n\nROOT CAUSE (measured on a host with 80 days uptime and ~8000 agents spawned over its life): `ls /var/lib/systemd/linger | wc -l` = 8024 while only 2 agent users still existed. SPAWN/DESTROY ASYMMETRY: the spawn path runs `loginctl enable-linger &lt;user&gt;` (needed so the user manager can start for rootless docker), but NO destroy path ever runs `loginctl disable-linger &lt;user&gt;`. Every agent ever created therefore leaves one linger entry behind forever. logind/systemd then churns trying to start a user manager for thousands of deleted users, and a freshly created user&#x27;s manager start becomes slow or fails outright - exactly when spawn needs it.\n\nPROOF (A/B on the same host, same daemon, minutes apart): BEFORE purging, `spawn --ttl 45m &lt;name&gt;` -&gt; &#x27;deadline_exceeded: context deadline exceeded&#x27; after 29.8s, journal shows user@1002 failed after 67s, leaked user remained. AFTER `for f in /var/lib/systemd/linger/*; do getent passwd $(basename $f) &gt;/dev/null || rm -f $f; done` (removed 8020 of 8024; kept root + the 3 real users), the SAME spawn completed in 17.0s, the agent registered and was usable. No code change was involved.\n\nFIX: (1) symmetry - the destroy path must call `loginctl disable-linger &lt;user&gt;` best-effort (log a WARN on failure; never let it block userdel), so the linger entry dies with the agent; (2) maintenance for already-rotten hosts - a prune path that deletes linger files whose user no longer exists (`getent passwd &lt;name&gt;` fails), never touching live users; (3) defense in depth - do not rely on the async linger start: after enable-linger, explicitly `systemctl start user@&lt;uid&gt;.service`, and on a failed unit `systemctl reset-failed` + one retry, with the unit state carried into the error instead of a bare &#x27;context canceled&#x27;.\n\nDIAGNOSTIC HEURISTIC: if a spawn/user-manager start stalls with no host load explanation, count linger entries against real users (`ls /var/lib/systemd/linger | wc -l` vs `getent passwd | grep -c &#x27;&lt;prefix&gt;&#x27;`). A ratio in the thousands is the cause; a purge is the cheapest confirmation.&quot;, &quot;environment&quot;: &quot;Linux + systemd-logind; a daemon that creates per-agent Linux users and runs rootless docker via systemd user managers (bunker agent sandbox daemon, Go); sshd on the same host&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;systemd-linger-accumulation-starves-user-manager&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-16T15:57:07.480Z&quot;, &quot;version&quot;: &quot;bunker main (tick 439 probe)&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

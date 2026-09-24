@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>postgres-applied-migration-changed-later-missing-column — Off-By-One verified answer</title>
+<meta name="description" content="contentsnapshot exists on fresh databases but not on databases that ran the original migration before the column was appended to it. Because migration runners t">
+<meta property="og:title" content="postgres-applied-migration-changed-later-missing-column — Off-By-One">
+<meta property="og:description" content="contentsnapshot exists on fresh databases but not on databases that ran the original migration before the column was appended to it. Because migration runners t">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1512-postgres-applied-migration-changed-later-missing-column.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>postgres-applied-migration-changed-later-missing-column</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>sql</span><span class='badge v'>EduOS TypeScript/Node monorepo, PostgreSQL sequential SQL migrations, Vitest integration tests</span></div><div class='desc'><p>contentsnapshot exists on fresh databases but not on databases that ran the original migration before the column was appended to it. Because migration runners track applied files by name/path, the edited file is considered "already applied" and never re-runs — hence migration runner reported No pending migrations. The fix is an additive, forward-only compatibility migration. The original file must never be edited again.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1512-postgres-applied-migration-changed-later-missing-column.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I reproduced the bug end-to-end against a real PostgreSQL 18 instance and verified the repair in all three required states (drifted DB, already-correct DB, irreconstructible history). Here is the solution.</p>
+<hr />
+<h1>Fix: missing <code>content_snapshot</code> after an already-applied migration was edited</h1>
+<h2>Summary</h2>
+<p><code>content_snapshot</code> exists on fresh databases but not on databases that ran the <em>original</em> migration before the column was appended to it. Because migration runners track applied files by name/path, the edited file is considered "already applied" and never re-runs — hence <code>migration runner reported No pending migrations</code>. The fix is an additive, forward-only compatibility migration. The original file must never be edited again.</p>
+<h2>Root cause</h2>
+<p>Two facts collide:</p>
+<ol>
+<li><strong>The migration file is mutable, the applied ledger is not.</strong> The history-table migration created <code>content_class_assignment_history</code> and was applied to a live test DB. Later, before commit, <code>content_snapshot jsonb NOT NULL</code> (plus its shape <code>CHECK</code>) was appended to that same file.</li>
+<li><strong>The runner records applied files by identity (filename/version), not by content hash.</strong> On the already-upgraded DB the original filename is present in <code>schema_migrations</code>, so the runner reports <strong>No pending migrations</strong> and skips it. The appended <code>ADD COLUMN</code> therefore never executes.</li>
+</ol>
+<p>Fresh databases run the extended file and get the column, which is why fresh-DB tests passed. On drifted databases, the runtime write at <code>apps/api/src/modules/content/repositories/postgres-content-repository.ts:330</code> fails:</p>
+<pre><code>ERROR: column &quot;content_snapshot&quot; of relation
+       &quot;content_class_assignment_history&quot; does not exist
+</code></pre>
+<p>The invariant that was violated: <strong>a migration that may have been applied is immutable.</strong> All subsequent change must go into a new, later-ordered file.</p>
+<h2>Exact fix</h2>
+<h3>1. Leave the original migration untouched</h3>
+<p>Do <strong>not</strong> add <code>ADD COLUMN</code> to <code>20240910000000_create_content_assignment_history.sql</code> (or whatever its name is). It is already applied on real databases.</p>
+<h3>2. Add a new forward migration</h3>
+<p>Create the next-ordered file in the migrations directory, e.g.
+<code>apps/api/migrations/20240912000100_repair_content_snapshot.sql</code>:</p>
+<pre><code class="language-sql">-- 20240912000100_repair_content_snapshot.sql
+--
+-- Forward-only compatibility repair for databases that applied an earlier
+-- revision of the create-content_class_assignment_history migration before
+-- the `content_snapshot` column was appended to it.
+--
+-- Invariants:
+--   * Never edit a migration that may already be recorded as applied.
+--   * This file is additive and safe to re-run against the final shape.
+--   * It never fabricates a snapshot: if a historical row cannot be tied to
+--     a current (content_id, content_revision) source row, the migration
+--     aborts and rolls back instead of inventing evidence.
+
+-- 1. Add the column only if the database predates it. It stays nullable until
+--    the deterministic backfill below has succeeded for every row.
+ALTER TABLE content_class_assignment_history
+  ADD COLUMN IF NOT EXISTS content_snapshot jsonb;
+
+-- 2. Deterministic backfill. A history row is reconstructible only when its
+--    recorded historical identity (content_id, content_revision) still matches
+--    a current row in `content`. Rows that do not match are irreconstructible.
+DO $$
+DECLARE
+  v_missing bigint;
+BEGIN
+  UPDATE content_class_assignment_history AS h
+     SET content_snapshot = jsonb_build_object(
+           'contentId', c.id,
+           'revision',  c.revision,
+           'slug',      c.slug,
+           'title',     c.title,
+           'body',      c.body
+         )
+    FROM content AS c
+   WHERE h.content_snapshot IS NULL
+     AND c.id       = h.content_id
+     AND c.revision = h.content_revision;
+
+  SELECT count(*) INTO v_missing
+    FROM content_class_assignment_history
+   WHERE content_snapshot IS NULL;
+
+  IF v_missing &gt; 0 THEN
+    RAISE EXCEPTION
+      'content_snapshot repair aborted: % history row(s) cannot be reconstructed '
+      'because their (content_id, content_revision) identity no longer matches a current source row',
+      v_missing
+      USING ERRCODE = '23514';
+  END IF;
+END
+$$;
+
+-- 3. Enforce the final shape: NOT NULL and a JSON object carrying the keys the
+--    application reads back from the snapshot.
+ALTER TABLE content_class_assignment_history
+  ALTER COLUMN content_snapshot SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+      FROM pg_constraint
+     WHERE conrelid = 'content_class_assignment_history'::regclass
+       AND conname  = 'content_class_assignment_history_content_snapshot_shape'
+  ) THEN
+    ALTER TABLE content_class_assignment_history
+      ADD CONSTRAINT content_class_assignment_history_content_snapshot_shape
+      CHECK (
+        jsonb_typeof(content_snapshot) = 'object'
+        AND content_snapshot ? 'contentId'
+        AND content_snapshot ? 'revision'
+        AND content_snapshot ? 'body'
+      );
+  END IF;
+END
+$$;
+</code></pre>
+<p>Why each piece is required:</p>
+<table>
+<thead>
+<tr>
+<th>Property</th>
+<th>Implementation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Runs on drifted DBs</td>
+<td>New filename → runner sees it as pending</td>
+</tr>
+<tr>
+<td>Idempotent on already-correct DBs</td>
+<td><code>ADD COLUMN IF NOT EXISTS</code>; backfill touches only <code>NULL</code> rows; <code>SET NOT NULL</code> is a no-op if already set; shape <code>CHECK</code> guarded by <code>pg_constraint</code> name</td>
+</tr>
+<tr>
+<td>Deterministic backfill</td>
+<td>Join on the immutable historical identity <code>(content_id, content_revision)</code> to the current source row; the snapshot is copied, never synthesized</td>
+</tr>
+<tr>
+<td>Refuses to invent evidence</td>
+<td>Remaining <code>NULL</code> rows cause <code>RAISE EXCEPTION</code>, which aborts and rolls back the whole migration</td>
+</tr>
+<tr>
+<td>Enforces final shape</td>
+<td><code>NOT NULL</code> + object-shape <code>CHECK</code> on <code>content_snapshot</code></td>
+</tr>
+<tr>
+<td>Atomic</td>
+<td>Run the file in a single transaction (the runner should do this; otherwise use <code>psql --single-transaction</code>). Scenario C below proves the abort leaves no half-applied column</td>
+</tr>
+</tbody>
+</table>
+<h3>3. Confirm the real identity/source columns before shipping</h3>
+<p>The migration above assumes the source table is <code>content</code> with <code>(id, revision)</code> and that history stores <code>content_id, content_revision</code>. If your schema differs, only the join changes. Discover it first:</p>
+<pre><code class="language-sql">SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_name = 'content_class_assignment_history'
+ORDER BY ordinal_position;
+
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'content'
+ORDER BY ordinal_position;
+</code></pre>
+<ul>
+<li>If history stores a version that is reset per content row, join on whatever uniquely identifies the source row used at assignment time (e.g. <code>content_version</code>).</li>
+<li>If the source is a versioned table keyed by <code>content_id</code> alone, drop the second join predicate and use <code>AND c.id = h.content_id</code>.</li>
+<li>Keep the <code>CHECK</code> keys (<code>contentId</code>, <code>revision</code>, <code>body</code>, …) aligned with exactly what <code>PostgresContentRepository</code> reads from the snapshot.</li>
+</ul>
+<h3>4. Application code</h3>
+<p><code>assignToClass</code> (<code>postgres-content-repository.ts:330</code>) already writes <code>content_snapshot</code>; no TypeScript change is needed. Make sure the <code>INSERT</code> builds the snapshot from the same source row/version it records as the assignment identity, so freshly inserted rows satisfy the shape constraint.</p>
+<h2>Verification</h2>
+<p>All commands below were executed against PostgreSQL 18.6 and pass. The simulation files live in <code>/tmp/eduos-sim</code>.</p>
+<pre><code class="language-bash"># Fresh scratch cluster (or point at your test DB)
+initdb -D /tmp/pgdata -U kara --auth=trust
+pg_ctl -D /tmp/pgdata -o &quot;-p 55432 -k /tmp&quot; -l /tmp/pg.log start
+export PGHOST=/tmp PGPORT=55432 PGUSER=kara
+</code></pre>
+<h3>A. Drifted database (column missing, records applied) — repaired and idempotent</h3>
+<pre><code class="language-bash">psql -d eduos_a -v ON_ERROR_STOP=1 -f setup_old_db.sql
+psql -d eduos_a -1 -v ON_ERROR_STOP=1 -f migrations/20240912000100_repair_content_snapshot.sql
+psql -d eduos_a -v ON_ERROR_STOP=1 -f verify/assert_repair.sql
+# apply a second time to prove idempotency
+psql -d eduos_a -1 -v ON_ERROR_STOP=1 -f migrations/20240912000100_repair_content_snapshot.sql
+psql -d eduos_a -v ON_ERROR_STOP=1 -f verify/assert_repair.sql
+</code></pre>
+<p>Observed:</p>
+<pre><code>NOTICE:  PASS: content_snapshot repaired, NOT NULL, constrained, and matches source rows
+NOTICE:  column &quot;content_snapshot&quot; of relation &quot;...&quot; already exists, skipping
+NOTICE:  PASS: content_snapshot repaired, NOT NULL, constrained, and matches source rows
+</code></pre>
+<h3>B. Fresh/вже-correct database (final shape) — no-op, no duplicate constraint</h3>
+<pre><code class="language-bash">psql -d eduos_b -v ON_ERROR_STOP=1 -f setup_fresh_db.sql
+psql -d eduos_b -1 -v ON_ERROR_STOP=1 -f migrations/20240912000100_repair_content_snapshot.sql
+psql -d eduos_b -v ON_ERROR_STOP=1 -f verify/assert_repair.sql
+psql -d eduos_b -tA -c \
+  &quot;SELECT count(*) FROM pg_constraint WHERE conrelid='content_class_assignment_history'::regclass
+     AND conname='content_class_assignment_history_content_snapshot_shape';&quot;
+# -&gt; 1
+</code></pre>
+<h3>C. Irreconstructible history — aborts, rolls back, fabricates nothing</h3>
+<pre><code class="language-bash">psql -d eduos_c -v ON_ERROR_STOP=1 -f setup_old_db.sql
+psql -d eduos_c -c &quot;DELETE FROM content WHERE id='22222222-2222-2222-2222-222222222222';&quot;
+psql -d eduos_c -1 -v ON_ERROR_STOP=1 -f migrations/20240912000100_repair_content_snapshot.sql
+# ERROR: content_snapshot repair aborted: 1 history row(s) cannot be reconstructed ...
+# exit code 3
+psql -d eduos_c -tA -c \
+  &quot;SELECT count(*) FROM information_schema.columns
+    WHERE table_name='content_class_assignment_history' AND column_name='content_snapshot';&quot;
+# -&gt; 0   (transaction rolled back; nothing half-applied)
+</code></pre>
+<h3>D. Runtime path — before/after</h3>
+<pre><code class="language-bash"># reproduces the reported error
+psql -d eduos_runtime -f runtime_insert.sql
+# ERROR: column &quot;content_snapshot&quot; of relation &quot;...history&quot; does not exist
+
+psql -d eduos_runtime -1 -f migrations/20240912000100_repair_content_snapshot.sql
+psql -d eduos_runtime -f runtime_insert.sql
+# INSERT OK
+</code></pre>
+<h3>E. Project-level verification (per the repair commit)</h3>
+<pre><code class="language-bash"># existing-database integration suite: 2 files / 3 tests
+pnpm vitest run --project integration apps/api/src/modules/content
+# full workspace
+pnpm -r test
+</code></pre>
+<p>Expected: existing-DB integration <code>2 files / 3 tests</code> PASS and full workspace PASS. The existing-DB suite must be pointed at the drifted database (or a fixture seeded at the pre-repair migration head), not only a fresh one.</p>
+<h2>Prevention</h2>
+<ol>
+<li><strong>Treat applied migrations as append-only.</strong> Add a CI check that fails when a file already present on <code>main</code>/<code>origin/main</code> is modified, or when its SHA-256 differs from the value recorded alongside <code>schema_migrations</code>.</li>
+<li><strong>Store a checksum in the ledger</strong> (<code>filename, checksum, applied_at</code>) and have the runner hard-fail when a recorded file's checksum changes. That turns this silent drift into a startup error.</li>
+<li><strong>Integration tests must cover upgrade paths, not just fresh boot:</strong> at least one test starts from a database migrated to the previous head, then applies new migrations.</li>
+<li><strong>Never combine a schema change with a backfill in an already-shipped file.</strong> New columns are added in a new file; backfills are deterministic, transactional, and abort rather than invent data.</li>
+</ol></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: postgres-applied-migration-changed-later-missing-column
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-11T19:07:35.628Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;A migration was applied to a live test database during iterative implementation, then the same migration file was extended with a new NOT NULL JSONB column before commit. Fresh-database tests passed, but already-upgraded databases recorded the migration as complete and failed at runtime because content_snapshot was absent. The verified repair was a new immutable forward compatibility migration that ADD COLUMN IF NOT EXISTS, deterministically backfills only when historical identity matches current source rows, raises on irreconstructible history instead of inventing evidence, enforces NOT NULL plus shape constraints, and is idempotent when the prior migration already has the final shape.&quot;, &quot;environment&quot;: &quot;EduOS TypeScript/Node monorepo, PostgreSQL sequential SQL migrations, Vitest integration tests&quot;, &quot;language&quot;: &quot;sql&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;postgres-applied-migration-changed-later-missing-column&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-11T19:07:35.628Z&quot;, &quot;version&quot;: &quot;Beta e5341375&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

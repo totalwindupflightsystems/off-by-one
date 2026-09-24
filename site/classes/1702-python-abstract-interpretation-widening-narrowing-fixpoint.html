@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>python-abstract-interpretation-widening-narrowing-fixpoint — Off-By-One verified answer</title>
+<meta name="description" content="A verified, self-contained Python implementation of an interval abstract-interpretation analyzer for a small imperative IR (assign, guard, if, while, goto). It ">
+<meta property="og:title" content="python-abstract-interpretation-widening-narrowing-fixpoint — Off-By-One">
+<meta property="og:description" content="A verified, self-contained Python implementation of an interval abstract-interpretation analyzer for a small imperative IR (assign, guard, if, while, goto). It ">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1702-python-abstract-interpretation-widening-narrowing-fixpoint.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>python-abstract-interpretation-widening-narrowing-fixpoint</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>python3</span></div><div class='desc'><p>A verified, self-contained Python implementation of an interval abstract-interpretation analyzer for a small imperative IR (assign, guard, if, while, goto). It computes a fixpoint by chaotic worklist iteration, widens at loop headers so divergent loops terminate, narrows to recover lost precision, reports intervals at every program point, proves division-by-zero and array-bounds safety, and emits a destabilizing-widening diagnostic for non-monotone counters.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1702-python-abstract-interpretation-widening-narrowing-fixpoint.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I've built and verified the full solution. The complete, extraction-tested markdown is on disk at <code>/home/kara/interval_analysis/SOLUTION.md</code> (with all three source files embedded), and the tested sources are at <code>/home/kara/interval_analysis/{ia.py,test_ia.py,verify.py}</code>. Here is the solution.</p>
+<hr />
+<h1>Interval Abstract Interpretation with Widening + Narrowing</h1>
+<p>A verified, self-contained Python implementation of an interval abstract-interpretation analyzer for a small imperative IR (<code>assign</code>, <code>guard</code>, <code>if</code>, <code>while</code>, <code>goto</code>). It computes a fixpoint by chaotic worklist iteration, widens at loop headers so divergent loops terminate, narrows to recover lost precision, reports intervals at every program point, proves division-by-zero and array-bounds safety, and emits a <em>destabilizing-widening</em> diagnostic for non-monotone counters.</p>
+<hr />
+<h2>1. Root-cause analysis</h2>
+<p>The interval domain itself is mechanical. Every real failure lives in the <strong>fixpoint engine</strong> and in <strong>how the domain is combined across the CFG</strong>.</p>
+<h3>1.1 No widening ⇒ non-termination</h3>
+<p>Intervals have infinite ascending chains: <code>while c do x := x + 1</code> gives <code>[0,0] ⊏ [0,1] ⊏ [0,2] ⊏ …</code>. Pure join-based Kleene iteration never stabilizes. <strong>Fix:</strong> at every loop header (target of a DFS back edge) replace <code>join</code> with widening</p>
+<pre><code>x ∇ y = ( y.lo if y.lo ≥ x.lo else -∞ ,  y.hi if y.hi ≤ x.hi else +∞ )
+</code></pre>
+<p>Widening is extensive and has finite height over program constants ∪ {−∞,+∞}, so the ascending chain is finite.</p>
+<h3>1.2 Widening alone destroys precision ⇒ false alarms</h3>
+<p>Widening <code>i</code> for <code>i = 0; while i &lt; 10: i := i + 1</code> yields <code>i ∈ [0,+∞]</code> at the header, so <code>100/(i+1)</code> and <code>a[i]</code> look unsafe even though the guard gives <code>i ≤ 9</code> on the body — an analyzer with zero proving power. <strong>Fix:</strong> after the widening <em>post</em>-fixpoint, run a descending <strong>narrowing</strong> pass</p>
+<pre><code>x △ y = ( y.lo if x.lo = -∞ and y.lo ≠ -∞ else x.lo ,
+          y.hi if x.hi = +∞ and y.hi ≠ +∞ else x.hi )
+</code></pre>
+<p>Narrowing only replaces an infinite bound with a finite one (<code>y ⊑ x △ y ⊑ x</code>), so it is sound and the descending chain is finite. The header is refined back to <code>i ∈ [0,10]</code>, the body to <code>i ∈ [0,9]</code>.</p>
+<h3>1.3 The subtle bug: narrowing per <em>edge</em> instead of per <em>node</em></h3>
+<p>This is the defect that breaks most first attempts (and the one found and fixed while building this). During the descending pass it is tempting to reuse the edge-driven worklist: for each back edge <code>p → h</code>, do <code>in[h] := in[h] △ edge(p)</code>. That is <strong>wrong when a header has more than one predecessor</strong>. In the counting loop the header has the pre-loop edge <code>i = 0</code> <em>and</em> the back edge <code>i = i + 1</code>. If the pre-loop edge is processed first, the header narrows against <code>[0,0]</code> alone and collapses to <code>[0,0]</code>, discarding the back edge — precision and the proof are lost. <strong>Fix:</strong> recompute the <strong>join of all incoming edges</strong> <code>F(X)(n) = ⋁ edge_p(out(p))</code> and narrow/meet against that aggregate (see <code>pred_candidate()</code>).</p>
+<h3>1.4 Bottom/Top bookkeeping</h3>
+<p><code>None</code> means <em>unreachable</em>; an empty dict means <em>all variables are ⊤</em> (missing key reads as <code>⊤</code>). Conflating them lets unreachable code contribute <code>⊤</code> at merges and creates spurious alarms. Join/widen treat <code>None</code> as identity; meet treats it as absorbing.</p>
+<h3>1.5 Identifying loop headers</h3>
+<p>Widening must apply to every cycle or termination is not guaranteed. Headers are derived automatically as the targets of DFS back edges, which also handles unstructured <code>goto</code> loops.</p>
+<h3>1.6 Destabilizing-widening diagnostic</h3>
+<p>Widening a counter to ±∞ is only meaningful when the update is monotone in the guarded direction. The detector reads the provenance bound from the header guard, classifies each in-loop assignment as <code>inc</code>/<code>dec</code>/<code>same</code>/<code>nonmono</code>, and reports when a <strong>non-monotone</strong> update <strong>escapes a finite provenance bound</strong>.</p>
+<hr />
+<h2>2. Exact fix — <code>ia.py</code></h2>
+<pre><code class="language-python">&quot;&quot;&quot;
+Interval abstract-interpretation analyzer for a small imperative IR.
+
+Supports:
+  * assign, guard, if, while, goto  (structured front-end lowered to a CFG)
+  * chaotic worklist fixpoint with widening at loop headers
+  * a narrowing pass that recovers precision lost to widening
+  * interval reporting at every program point
+  * division-by-zero and array-bounds safety proofs
+  * destabilizing-widening diagnostics for non-monotone loop counters
+&quot;&quot;&quot;
+
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from typing import Any, Callable, Optional
+
+NEG = -math.inf
+POS = math.inf
+
+
+# --------------------------------------------------------------------------- #
+# Interval domain
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Interval:
+    lo: float
+    hi: float
+
+    @staticmethod
+    def top() -&gt; &quot;Interval&quot;:
+        return Interval(NEG, POS)
+
+    @staticmethod
+    def bottom() -&gt; &quot;Interval&quot;:
+        return Interval(POS, NEG)
+
+    @staticmethod
+    def const(n: Any) -&gt; &quot;Interval&quot;:
+        return Interval(float(n), float(n))
+
+    def is_bottom(self) -&gt; bool:
+        return self.lo &gt; self.hi
+
+    def is_top(self) -&gt; bool:
+        return self.lo == NEG and self.hi == POS
+
+    def contains(self, n: float) -&gt; bool:
+        return self.lo &lt;= n &lt;= self.hi
+
+    def join(self, o: &quot;Interval&quot;) -&gt; &quot;Interval&quot;:
+        if self.is_bottom():
+            return o
+        if o.is_bottom():
+            return self
+        return Interval(min(self.lo, o.lo), max(self.hi, o.hi))
+
+    def meet(self, o: &quot;Interval&quot;) -&gt; &quot;Interval&quot;:
+        if self.is_bottom() or o.is_bottom():
+            return Interval.bottom()
+        r = Interval(max(self.lo, o.lo), min(self.hi, o.hi))
+        return r if not r.is_bottom() else Interval.bottom()
+
+    def widen(self, o: &quot;Interval&quot;) -&gt; &quot;Interval&quot;:
+        &quot;&quot;&quot;Standard widening: only jump to infinity on growth.&quot;&quot;&quot;
+        if self.is_bottom():
+            return o
+        if o.is_bottom():
+            return self
+        lo = self.lo if o.lo &gt;= self.lo else NEG
+        hi = self.hi if o.hi &lt;= self.hi else POS
+        return Interval(lo, hi)
+
+    def narrow(self, o: &quot;Interval&quot;) -&gt; &quot;Interval&quot;:
+        &quot;&quot;&quot;Standard narrowing: replace an infinity by a finite bound from o.&quot;&quot;&quot;
+        if self.is_bottom() or o.is_bottom():
+            return Interval.bottom()
+        lo = o.lo if (self.lo == NEG and o.lo != NEG) else self.lo
+        hi = o.hi if (self.hi == POS and o.hi != POS) else self.hi
+        return Interval(lo, hi)
+
+    def __str__(self) -&gt; str:
+        if self.is_bottom():
+            return &quot;empty&quot;
+        lo = &quot;-inf&quot; if self.lo == NEG else _fmt(self.lo)
+        hi = &quot;+inf&quot; if self.hi == POS else _fmt(self.hi)
+        return f&quot;[{lo},{hi}]&quot;
+
+
+def _fmt(x: float) -&gt; str:
+    return str(int(x)) if float(x).is_integer() else repr(x)
+
+
+TOP = Interval.top()
+BOTTOM = Interval.bottom()
+
+
+# --------------------------------------------------------------------------- #
+# Interval arithmetic
+# --------------------------------------------------------------------------- #
+def _pt_mul(x: float, y: float) -&gt; float:
+    if x == 0 or y == 0:
+        return 0.0
+    return x * y
+
+
+def _mul(a: Interval, b: Interval) -&gt; Interval:
+    vals = [_pt_mul(a.lo, b.lo), _pt_mul(a.lo, b.hi),
+            _pt_mul(a.hi, b.lo), _pt_mul(a.hi, b.hi)]
+    return Interval(min(vals), max(vals))
+
+
+def _div(a: Interval, b: Interval) -&gt; Interval:
+    if b.contains(0.0):          # divisor may be zero -&gt; unconstrained
+        return TOP
+    vals = [a.lo / b.lo, a.lo / b.hi, a.hi / b.lo, a.hi / b.hi]
+    return Interval(min(vals), max(vals))
+
+
+# --------------------------------------------------------------------------- #
+# Expressions and conditions
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Const:
+    val: Any
+
+
+@dataclass(frozen=True)
+class Var:
+    name: str
+
+
+@dataclass(frozen=True)
+class Bin:
+    op: str
+    a: Any
+    b: Any
+
+
+@dataclass(frozen=True)
+class Cmp:
+    op: str
+    a: Any
+    b: Any
+
+
+def eval_expr(e: Any, env: Optional[dict]) -&gt; Interval:
+    if isinstance(e, Const):
+        return Interval.const(e.val)
+    if isinstance(e, Var):
+        if env is None:
+            return BOTTOM
+        return env.get(e.name, TOP)
+    if isinstance(e, Bin):
+        a = eval_expr(e.a, env)
+        b = eval_expr(e.b, env)
+        if a.is_bottom() or b.is_bottom():
+            return BOTTOM
+        if e.op == &quot;+&quot;:
+            return Interval(a.lo + b.lo, a.hi + b.hi)
+        if e.op == &quot;-&quot;:
+            return Interval(a.lo - b.hi, a.hi - b.lo)
+        if e.op == &quot;*&quot;:
+            return _mul(a, b)
+        if e.op == &quot;/&quot;:
+            return _div(a, b)
+    raise TypeError(f&quot;unsupported expression: {e!r}&quot;)
+
+
+def _tighten(op: str, a: Interval, b: Interval):
+    &quot;&quot;&quot;Return (new_a, new_b) intervals satisfying `a op b`, or (None, None).&quot;&quot;&quot;
+    if op == &quot;&lt;&quot;:
+        na = Interval(a.lo, min(a.hi, b.hi - 1))
+        nb = Interval(max(b.lo, a.lo + 1), b.hi)
+    elif op == &quot;&lt;=&quot;:
+        na = Interval(a.lo, min(a.hi, b.hi))
+        nb = Interval(max(b.lo, a.lo), b.hi)
+    elif op == &quot;&gt;&quot;:
+        na = Interval(max(a.lo, b.lo + 1), a.hi)
+        nb = Interval(b.lo, min(b.hi, a.hi - 1))
+    elif op == &quot;&gt;=&quot;:
+        na = Interval(max(a.lo, b.lo), a.hi)
+        nb = Interval(b.lo, min(b.hi, a.hi))
+    elif op == &quot;==&quot;:
+        inter = a.meet(b)
+        if inter.is_bottom():
+            return None, None
+        return inter, inter
+    elif op == &quot;!=&quot;:
+        if a.lo == a.hi and b.lo == b.hi and a.lo == b.lo:
+            return None, None
+        return a, b
+    else:
+        raise ValueError(f&quot;unknown comparison {op!r}&quot;)
+
+    if na.is_bottom() or nb.is_bottom():
+        return None, None
+    return na, nb
+
+
+def refine(cond: Cmp, env: Optional[dict]) -&gt; Optional[dict]:
+    &quot;&quot;&quot;Refine the environment so `cond` holds; None means unreachable.&quot;&quot;&quot;
+    if env is None:
+        return None
+    a = eval_expr(cond.a, env)
+    b = eval_expr(cond.b, env)
+    if a.is_bottom() or b.is_bottom():
+        return None
+    na, nb = _tighten(cond.op, a, b)
+    if na is None:
+        return None
+    env = dict(env)
+    if isinstance(cond.a, Var):
+        env[cond.a.name] = na
+    if isinstance(cond.b, Var):
+        env[cond.b.name] = nb
+    return env
+
+
+_NEG_OPS = {&quot;&lt;&quot;: &quot;&gt;=&quot;, &quot;&lt;=&quot;: &quot;&gt;&quot;, &quot;&gt;&quot;: &quot;&lt;=&quot;, &quot;&gt;=&quot;: &quot;&lt;&quot;, &quot;==&quot;: &quot;!=&quot;, &quot;!=&quot;: &quot;==&quot;}
+
+
+def negate(cond: Cmp) -&gt; Cmp:
+    return Cmp(_NEG_OPS[cond.op], cond.a, cond.b)
+
+
+# --------------------------------------------------------------------------- #
+# Environments
+# --------------------------------------------------------------------------- #
+Env = Optional[dict]  # None == unreachable / bottom
+
+
+def _combine(a: Env, b: Env, op: Callable[[Interval, Interval], Interval]) -&gt; Env:
+    if a is None:
+        return b
+    if b is None:
+        return a
+    out = {}
+    for k in set(a) | set(b):
+        out[k] = op(a.get(k, TOP), b.get(k, TOP))
+    return out
+
+
+def join_env(a: Env, b: Env) -&gt; Env:
+    return _combine(a, b, lambda x, y: x.join(y))
+
+
+def widen_env(a: Env, b: Env) -&gt; Env:
+    return _combine(a, b, lambda x, y: x.widen(y))
+
+
+def narrow_env(a: Env, b: Env) -&gt; Env:
+    return _combine(a, b, lambda x, y: x.narrow(y))
+
+
+def meet_env(a: Env, b: Env) -&gt; Env:
+    if a is None or b is None:
+        return None
+    out = {}
+    for k in set(a) | set(b):
+        out[k] = a.get(k, TOP).meet(b.get(k, TOP))
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# IR: statements, terminators, blocks
+# --------------------------------------------------------------------------- #
+@dataclass
+class Assign:
+    var: str
+    expr: Any
+
+
+@dataclass
+class Guard:
+    cond: Cmp
+
+
+@dataclass
+class CheckDiv:
+    divisor: Any
+    point: str = &quot;&quot;
+
+
+@dataclass
+class CheckBounds:
+    index: Any
+    length: int
+    point: str = &quot;&quot;
+
+
+@dataclass
+class Goto:
+    target: str
+
+
+@dataclass
+class Branch:
+    cond: Cmp
+    true_label: str
+    false_label: str
+
+
+@dataclass
+class Halt:
+    pass
+
+
+@dataclass
+class Block:
+    label: str
+    stmts: list
+    term: Any
+
+
+@dataclass
+class If:
+    cond: Cmp
+    then_stmts: list
+    else_stmts: list = field(default_factory=list)
+
+
+@dataclass
+class While:
+    cond: Cmp
+    body_stmts: list
+
+
+SIMPLE = (Assign, Guard, CheckDiv, CheckBounds)
+
+
+class CFGBuilder:
+    &quot;&quot;&quot;Lower structured `if` / `while` statements into a CFG of basic blocks.&quot;&quot;&quot;
+
+    def __init__(self) -&gt; None:
+        self.blocks: dict[str, Block] = {}
+        self._n = 0
+
+    def _fresh(self, prefix: str = &quot;B&quot;) -&gt; str:
+        self._n += 1
+        return f&quot;{prefix}{self._n}&quot;
+
+    def lower(self, stmts: list, cont: str) -&gt; str:
+        stmts = list(stmts)
+        if not stmts:
+            return cont
+        idx = 0
+        while idx &lt; len(stmts) and isinstance(stmts[idx], SIMPLE):
+            idx += 1
+        prefix = stmts[:idx]
+
+        if idx == len(stmts):
+            lbl = self._fresh(&quot;B&quot;)
+            self.blocks[lbl] = Block(lbl, prefix, Goto(cont))
+            return lbl
+
+        st = stmts[idx]
+        rest = stmts[idx + 1 :]
+
+        if isinstance(st, If):
+            rest_entry = self.lower(rest, cont)
+            then_entry = self.lower(st.then_stmts, rest_entry)
+            else_entry = self.lower(st.else_stmts, rest_entry)
+            lbl = self._fresh(&quot;If&quot;)
+            self.blocks[lbl] = Block(lbl, prefix, Branch(st.cond, then_entry, else_entry))
+            return lbl
+
+        if isinstance(st, While):
+            rest_entry = self.lower(rest, cont)
+            header = self._fresh(&quot;WhileH&quot;)
+            body_entry = self.lower(st.body_stmts, header)
+            self.blocks[header] = Block(header, [], Branch(st.cond, body_entry, rest_entry))
+            if prefix:
+                lbl = self._fresh(&quot;B&quot;)
+                self.blocks[lbl] = Block(lbl, prefix, Goto(header))
+                return lbl
+            return header
+
+        raise TypeError(f&quot;unsupported structured statement {st!r}&quot;)
+
+    def build(self, stmts: list, entry: str = &quot;entry&quot;, exit_: str = &quot;exit&quot;) -&gt; str:
+        self.blocks[exit_] = Block(exit_, [], Halt())
+        start = self.lower(stmts, exit_)
+        self.blocks[entry] = Block(entry, [], Goto(start))
+        return entry
+
+
+# --------------------------------------------------------------------------- #
+# Control-flow helpers
+# --------------------------------------------------------------------------- #
+def successors(block: Block) -&gt; list[str]:
+    t = block.term
+    if isinstance(t, Goto):
+        return [t.target]
+    if isinstance(t, Branch):
+        return [t.true_label, t.false_label]
+    return []
+
+
+def find_widening_points(blocks: dict[str, Block], entry: str) -&gt; set[str]:
+    &quot;&quot;&quot;Loop headers == targets of DFS back edges.&quot;&quot;&quot;
+    color: dict[str, int] = {}
+    back: set[str] = set()
+
+    def dfs(root: str) -&gt; None:
+        if color.get(root, 0) != 0:
+            return
+        color[root] = 1
+        stack = [(root, iter(successors(blocks[root])))]
+        while stack:
+            node, it = stack[-1]
+            try:
+                s = next(it)
+            except StopIteration:
+                color[node] = 2
+                stack.pop()
+                continue
+            c = color.get(s, 0)
+            if c == 1:
+                back.add(s)
+            elif c == 0:
+                color[s] = 1
+                stack.append((s, iter(successors(blocks[s]))))
+
+    dfs(entry)
+    for lbl in blocks:
+        dfs(lbl)
+    return back
+
+
+# --------------------------------------------------------------------------- #
+# Transfer function
+# --------------------------------------------------------------------------- #
+@dataclass
+class CheckResult:
+    kind: str          # 'div' or 'bounds'
+    point: str
+    interval: Interval
+    proven: bool
+    length: Optional[int] = None
+
+
+def transfer(block: Block, env: Env, record: Optional[list] = None) -&gt; Env:
+    if env is None:
+        return None
+    env = dict(env)
+    for st in block.stmts:
+        if isinstance(st, Assign):
+            if isinstance(st.expr, Bin) and st.expr.op == &quot;/&quot;:
+                di = eval_expr(st.expr.b, env)
+                if record is not None and not di.is_bottom():
+                    record.append(CheckResult(&quot;div&quot;, f&quot;{block.label}:{st.var}&quot;, di,
+                                              not di.contains(0.0)))
+            val = eval_expr(st.expr, env)
+            if val.is_bottom():
+                return None
+            env[st.var] = val
+        elif isinstance(st, Guard):
+            env = refine(st.cond, env)
+            if env is None:
+                return None
+        elif isinstance(st, CheckDiv):
+            di = eval_expr(st.divisor, env)
+            if record is not None and not di.is_bottom():
+                record.append(CheckResult(&quot;div&quot;, st.point or block.label, di,
+                                          not di.contains(0.0)))
+        elif isinstance(st, CheckBounds):
+            ii = eval_expr(st.index, env)
+            if record is not None and not ii.is_bottom():
+                ok = ii.lo &gt;= 0 and ii.hi &lt;= st.length - 1
+                record.append(CheckResult(&quot;bounds&quot;, st.point or block.label, ii, ok, st.length))
+        else:
+            raise TypeError(f&quot;unsupported statement {st!r}&quot;)
+    return env
+
+
+def _edge_envs(block: Block, out: Env):
+    t = block.term
+    if isinstance(t, Goto):
+        return [(t.target, out)]
+    if isinstance(t, Branch):
+        return [(t.true_label, refine(t.cond, out)),
+                (t.false_label, refine(negate(t.cond), out))]
+    return []
+
+
+# --------------------------------------------------------------------------- #
+# Fixpoint: widening then narrowing
+# --------------------------------------------------------------------------- #
+@dataclass
+class Diagnostic:
+    loop: str
+    var: str
+    provenance: str
+    widened: Interval
+    update_kind: str
+    message: str
+
+
+@dataclass
+class Report:
+    entry: str
+    widening_points: set
+    in_state: dict
+    out_state: dict
+    checks: list
+    diagnostics: list
+
+
+def solve(blocks, entry, widening_points=None, initial_env=None, max_iters=100_000):
+    if widening_points is None:
+        widening_points = find_widening_points(blocks, entry)
+
+    in_state: dict[str, Env] = {lbl: None for lbl in blocks}
+    in_state[entry] = dict(initial_env) if initial_env is not None else {}
+
+    def run(widen: bool) -&gt; None:
+        worklist = [entry]
+        in_wl = {entry}
+        iters = 0
+        while worklist:
+            iters += 1
+            if iters &gt; max_iters:
+                raise RuntimeError(&quot;fixpoint did not terminate&quot;)
+            lbl = worklist.pop()
+            in_wl.discard(lbl)
+            out = transfer(blocks[lbl], in_state[lbl])
+            for succ, cand in _edge_envs(blocks[lbl], out):
+                if succ == entry:
+                    continue
+                old = in_state[succ]
+                if old is None:
+                    new = cand
+                elif widen and succ in widening_points:
+                    new = widen_env(old, cand)
+                else:
+                    new = join_env(old, cand)
+                if new != old:
+                    in_state[succ] = new
+                    if succ not in in_wl:
+                        worklist.append(succ)
+                        in_wl.add(succ)
+
+    # Phase 1: widening guarantees termination.
+    run(widen=True)
+    widened_state = dict(in_state)
+
+    # Phase 2: narrowing recovers precision.
+    # Recompute the JOIN OF ALL incoming edges before narrowing; narrowing
+    # against a single predecessor edge would discard the others' contributions.
+    def pred_candidate(label: str) -&gt; Env:
+        cand: Env = None
+        for p in blocks:
+            pout = transfer(blocks[p], in_state[p])
+            for succ, e in _edge_envs(blocks[p], pout):
+                if succ == label:
+                    cand = e if cand is None else join_env(cand, e)
+        return cand
+
+    changed = True
+    iters = 0
+    while changed:
+        changed = False
+        iters += 1
+        if iters &gt; max_iters:
+            raise RuntimeError(&quot;narrowing did not terminate&quot;)
+        for lbl in blocks:
+            if lbl == entry or in_state[lbl] is None:
+                continue
+            cand = pred_candidate(lbl)
+            if cand is None:
+                new: Env = None
+            elif lbl in widening_points:
+                new = narrow_env(in_state[lbl], cand)
+            else:
+                new = meet_env(in_state[lbl], cand)
+            if new != in_state[lbl]:
+                in_state[lbl] = new
+                changed = True
+
+    out_state = {lbl: transfer(blocks[lbl], in_state[lbl]) for lbl in blocks}
+    return {&quot;in_state&quot;: in_state, &quot;out_state&quot;: out_state,
+            &quot;widened_state&quot;: widened_state, &quot;widening_points&quot;: widening_points}
+
+
+# --------------------------------------------------------------------------- #
+# Safety checks
+# --------------------------------------------------------------------------- #
+def collect_checks(blocks: dict[str, Block], in_state: dict) -&gt; list:
+    checks: list = []
+    for lbl in blocks:
+        if in_state[lbl] is None:
+            continue
+        transfer(blocks[lbl], in_state[lbl], record=checks)
+    return checks
+
+
+# --------------------------------------------------------------------------- #
+# Destabilizing-widening diagnostics
+# --------------------------------------------------------------------------- #
+def _classify_expr(var: str, expr: Any) -&gt; str:
+    &quot;&quot;&quot;Classify an update expression as inc / dec / same / nonmono.&quot;&quot;&quot;
+    if isinstance(expr, Var) and expr.name == var:
+        return &quot;same&quot;
+    if isinstance(expr, Bin):
+        if expr.op == &quot;+&quot;:
+            if isinstance(expr.a, Var) and expr.a.name == var and isinstance(expr.b, Const):
+                return &quot;inc&quot; if expr.b.val &gt; 0 else (&quot;dec&quot; if expr.b.val &lt; 0 else &quot;same&quot;)
+            if isinstance(expr.b, Var) and expr.b.name == var and isinstance(expr.a, Const):
+                return &quot;inc&quot; if expr.a.val &gt; 0 else (&quot;dec&quot; if expr.a.val &lt; 0 else &quot;same&quot;)
+        if expr.op == &quot;-&quot;:
+            if isinstance(expr.a, Var) and expr.a.name == var and isinstance(expr.b, Const):
+                return &quot;dec&quot; if expr.b.val &gt; 0 else (&quot;inc&quot; if expr.b.val &lt; 0 else &quot;same&quot;)
+    return &quot;nonmono&quot;
+
+
+def _reachable(blocks: dict[str, Block], start: str) -&gt; set:
+    seen, stack = set(), [start]
+    while stack:
+        n = stack.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        for s in successors(blocks[n]):
+            if s not in seen:
+                stack.append(s)
+    return seen
+
+
+def _can_reach(blocks: dict[str, Block], target: str) -&gt; set:
+    rev: dict[str, list] = {lbl: [] for lbl in blocks}
+    for lbl in blocks:
+        for s in successors(blocks[lbl]):
+            rev[s].append(lbl)
+    seen, stack = set(), [target]
+    while stack:
+        n = stack.pop()
+        if n in seen:
+            continue
+        seen.add(n)
+        stack.extend(rev[n])
+    return seen
+
+
+def detect_destabilizing_widening(blocks: dict[str, Block], widened_state: dict) -&gt; list:
+    diagnostics: list = []
+    for lbl, block in blocks.items():
+        if not isinstance(block.term, Branch) or widened_state[lbl] is None:
+            continue
+        cond = block.term.cond
+        loop_nodes = _reachable(blocks, block.term.true_label) &amp; _can_reach(blocks, lbl)
+        for side in (cond.a, cond.b):
+            if not isinstance(side, Var):
+                continue
+            var = side.name
+            a = eval_expr(cond.a, widened_state[lbl])
+            b = eval_expr(cond.b, widened_state[lbl])
+            prov = None
+            if cond.op == &quot;&lt;&quot; and isinstance(cond.a, Var) and cond.a.name == var:
+                prov = (&quot;hi&quot;, b)
+            elif cond.op == &quot;&lt;=&quot; and isinstance(cond.a, Var) and cond.a.name == var:
+                prov = (&quot;hi&quot;, b)
+            elif cond.op == &quot;&gt;&quot; and isinstance(cond.a, Var) and cond.a.name == var:
+                prov = (&quot;lo&quot;, b)
+            elif cond.op == &quot;&gt;=&quot; and isinstance(cond.a, Var) and cond.a.name == var:
+                prov = (&quot;lo&quot;, b)
+            elif cond.op == &quot;&lt;&quot; and isinstance(cond.b, Var) and cond.b.name == var:
+                prov = (&quot;lo&quot;, a)
+            elif cond.op == &quot;&gt;&quot; and isinstance(cond.b, Var) and cond.b.name == var:
+                prov = (&quot;hi&quot;, a)
+            if prov is None:
+                continue
+
+            updates = [st.expr for n in loop_nodes for st in blocks[n].stmts
+                       if isinstance(st, Assign) and st.var == var]
+            if not updates:
+                continue
+            kinds = {_classify_expr(var, u) for u in updates}
+            if kinds &lt;= {&quot;inc&quot;, &quot;same&quot;}:
+                kind = &quot;inc&quot;
+            elif kinds &lt;= {&quot;dec&quot;, &quot;same&quot;}:
+                kind = &quot;dec&quot;
+            else:
+                kind = &quot;nonmono&quot;
+            if kind != &quot;nonmono&quot;:
+                continue
+
+            cur = widened_state[lbl].get(var, TOP)
+            bound_iv = prov[1]
+            escaped = (prov[0] == &quot;hi&quot; and cur.hi == POS and bound_iv.hi != POS) or \
+                      (prov[0] == &quot;lo&quot; and cur.lo == NEG and bound_iv.lo != NEG)
+            if escaped:
+                diagnostics.append(Diagnostic(
+                    loop=lbl, var=var, provenance=f&quot;{var} {cond.op} {prov[1]}&quot;,
+                    widened=cur, update_kind=kind,
+                    message=(f&quot;destabilizing widening at loop '{lbl}': counter '{var}' &quot;
+                             f&quot;has non-monotone update and widened to {cur}, &quot;
+                             f&quot;escaping provenance bound {prov[0]}={prov[1]}&quot;)))
+    return diagnostics
+
+
+# --------------------------------------------------------------------------- #
+# Top-level driver
+# --------------------------------------------------------------------------- #
+def analyze(stmts, initial_env=None, entry=&quot;entry&quot;, exit_=&quot;exit&quot;) -&gt; Report:
+    cfg = CFGBuilder()
+    entry = cfg.build(stmts, entry=entry, exit_=exit_)
+    result = solve(cfg.blocks, entry, initial_env=initial_env)
+    checks = collect_checks(cfg.blocks, result[&quot;in_state&quot;])
+    diagnostics = detect_destabilizing_widening(cfg.blocks, result[&quot;widened_state&quot;])
+    return Report(entry=entry, widening_points=result[&quot;widening_points&quot;],
+                  in_state=result[&quot;in_state&quot;], out_state=result[&quot;out_state&quot;],
+                  checks=checks, diagnostics=diagnostics)
+</code></pre>
+<hr />
+<h2>3. Verification</h2>
+<p>A compact harness that asserts every requirement:</p>
+<pre><code class="language-python">import math
+from ia import *
+
+def C(n): return Const(n)
+def V(n): return Var(n)
+def add(a, b): return Bin(&quot;+&quot;, a, b)
+def div(a, b): return Bin(&quot;/&quot;, a, b)
+def lt(a, b): return Cmp(&quot;&lt;&quot;, a, b)
+
+# --- safe counting loop: prove div + bounds, recover finite bound by narrowing
+counting = [Assign(&quot;i&quot;, C(0)), Assign(&quot;s&quot;, C(0)),
+    While(lt(V(&quot;i&quot;), C(10)), [
+        Assign(&quot;s&quot;, add(V(&quot;s&quot;), div(C(100), add(V(&quot;i&quot;), C(1))))),
+        CheckBounds(V(&quot;i&quot;), 10, point=&quot;loop&quot;),
+        CheckDiv(add(V(&quot;i&quot;), C(1)), point=&quot;loop&quot;),
+        Assign(&quot;i&quot;, add(V(&quot;i&quot;), C(1))),
+    ])]
+r = analyze(counting)
+assert r.checks and all(c.proven for c in r.checks), r.checks
+hdr = next(iter(r.widening_points))
+assert r.in_state[hdr][&quot;i&quot;].hi != math.inf          # narrowing recovered [0,10]
+
+# --- non-monotone counter -&gt; destabilizing-widening diagnostic
+nonmono = [Assign(&quot;i&quot;, C(0)),
+    While(lt(V(&quot;i&quot;), C(100)), [Assign(&quot;i&quot;, add(Bin(&quot;*&quot;, V(&quot;i&quot;), C(2)), C(1)))])]
+assert len(analyze(nonmono).diagnostics) == 1
+
+# --- monotone counter -&gt; no diagnostic
+mono = [Assign(&quot;i&quot;, C(0)),
+    While(lt(V(&quot;i&quot;), C(100)), [Assign(&quot;i&quot;, add(V(&quot;i&quot;), C(1)))])]
+assert analyze(mono).diagnostics == []
+
+# --- divergent loop still terminates via widening
+divergent = [Assign(&quot;i&quot;, C(0)),
+    While(Cmp(&quot;==&quot;, C(1), C(1)), [Assign(&quot;i&quot;, add(V(&quot;i&quot;), C(1)))])]
+r = analyze(divergent)
+print(&quot;divergent loop terminated; header i =&quot;,
+      r.in_state[next(iter(r.widening_points))][&quot;i&quot;])
+print(&quot;ALL CHECKS PASSED&quot;)
+</code></pre>
+<p>Observed results:</p>
+<pre><code>$ python3 test_ia.py
+ok  test_counting_loop
+ok  test_divergent_terminates
+ok  test_guarded_div
+ok  test_monotone_no_diagnostic
+ok  test_nonmonotone_diagnostic
+ok  test_raw_goto
+ok  test_straightline_div
+ok  test_wide_bound
+8 tests passed
+
+$ python3 verify.py
+Interval report for the counting-loop benchmark
+         B2  in={'i': '[0,9]',  's': '[0,+inf]'}  out={'i': '[1,10]', 's': '[10,+inf]'}
+    WhileH1  in={'i': '[0,10]', 's': '[0,+inf]'}  out={'i': '[0,10]', 's': '[0,+inf]'}
+      exit  in={'i': '[10,10]','s': '[0,+inf]'}  out={'i': '[10,10]','s': '[0,+inf]'}
+  widening points: {'WhileH1'}
+
+Safety checks
+  [PROVEN] bounds at loop  index/divisor=[0,9]  length=10
+  [PROVEN] div    at loop  index/divisor=[1,10]
+
+Top-only comparison
+  straightline_div   interval proved 1/1   top-only 0/1
+  guarded_div        interval proved 1/1   top-only 0/1
+  counting_loop      interval proved 2/2   top-only 0/2
+  wide_bound         interval proved 1/1   top-only 0/1
+  -&gt; interval analysis proves 5 additional checks
+
+Diagnostics
+  nonmonotone  diagnostics=1
+    destabilizing widening at loop 'WhileH1': counter 'i' has non-monotone update
+    and widened to [0,+inf], escaping provenance bound hi=[100,100]
+  monotone     diagnostics=0
+
+Termination fuzzing: 400 random structured programs analyzed; all terminated
+Divergent program terminated; header i = [0,+inf]
+ALL VERIFICATION CHECKS PASSED
+</code></pre>
+<h3>Requirement → evidence</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Interval at every program point</td>
+<td><code>in_state</code>/<code>out_state</code> per block, printed by <code>verify.py</code></td>
+</tr>
+<tr>
+<td>Chaotic worklist fixpoint</td>
+<td><code>solve()</code> phase 1 (<code>run(widen=True)</code>)</td>
+</tr>
+<tr>
+<td>Widening guarantees termination</td>
+<td>divergent loop reaches <code>i ∈ [0,+∞]</code> and stops; 400 fuzz programs terminate</td>
+</tr>
+<tr>
+<td>Narrowing recovers precision</td>
+<td>header is <code>[0,10]</code>, not <code>[0,+∞]</code></td>
+</tr>
+<tr>
+<td>Zero false alarms on benchmark</td>
+<td>every check in the 4 safe programs is <code>PROVEN</code></td>
+</tr>
+<tr>
+<td>Beats a Top-only lattice</td>
+<td>proves 5 checks that Top-only proves 0 of</td>
+</tr>
+<tr>
+<td>Destabilizing-widening diagnostic</td>
+<td>fires on <code>i := i*2+1</code>, silent on <code>i := i+1</code></td>
+</tr>
+<tr>
+<td><code>assign/guard/if/while/goto</code></td>
+<td>structured front-end + raw <code>Goto</code>/<code>Branch</code> CFG test</td>
+</tr>
+</tbody>
+</table>
+<h3>Why it terminates on <em>every</em> input</h3>
+<p>Every CFG cycle has a back-edge target registered as a widening point; there the transfer is composed with <code>∇</code>, whose ascending chain over {program constants, ±∞} is finite. The narrowing pass is a descending chain over the same finite set. A global <code>max_iters</code> guard converts any residual bug into an explicit <code>RuntimeError</code> instead of a hang.</p>
+<h3>Notes</h3>
+<ul>
+<li>Interval arithmetic is non-relational; variable correlations are only exploited transiently by guard refinement.</li>
+<li>Division by a divisor that may be <code>0</code> yields <code>⊤</code> for the result <strong>and</strong> an alarm — never silently assumed safe.</li>
+<li><code>_mul</code> uses the <code>0·±∞ = 0</code> convention for endpoint products.</li>
+</ul>
+<p><strong>Files:</strong> <code>/home/kara/interval_analysis/ia.py</code> (analyzer), <code>test_ia.py</code> (benchmarks/tests), <code>verify.py</code> (extended verification), <code>SOLUTION.md</code> (the full generated report). I extracted the three embedded Python blocks from <code>SOLUTION.md</code> into a fresh directory and re-ran both suites — they reproduce the full verification exactly.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: python-abstract-interpretation-widening-narrowing-fixpoint
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-16T04:16:19.817Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement an interval abstract-interpretation analyzer in Python over a small imperative IR (assign, guard, if, while, goto) that computes a fixpoint with chaotic iteration on a worklist, widening at loop headers so termination is guaranteed for divergent programs, and a narrowing pass that recovers precision lost to widening. Report the interval at every program point, use them to prove division-by-zero and array-bounds safety, and emit a destabilizing-widening diagnostic whenever a loop counter&#x27;s update is non-monotone and escapes its provenance bound. The analyzer must terminate on every input, produce zero false alarms on the supplied benchmark suite, and still prove at least the expected set of checks that a naive Top-only lattice cannot.&quot;, &quot;environment&quot;: &quot;python3&quot;, &quot;language&quot;: &quot;python&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;python-abstract-interpretation-widening-narrowing-fixpoint&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-16T04:16:19.817Z&quot;, &quot;version&quot;: &quot;3.11&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
