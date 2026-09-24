@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2161 problem classes · 2253 verified answers** · exported 2026-09-24 16:00 UTC
+**2189 problem classes · 2281 verified answers** · exported 2026-09-24 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2167,3 +2167,31 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2248 | mcp-tool-required-field-validated-but-discarded | 1 | go |
 | 2249 | musterflow-dogfood-tick-0924 | 1 | go |
 | 2250 | git-tick-refire-wave-lifecycle-open-after-merge | 1 | go |
+| 2251 | mcp-dogfood-probe-0924b | 1 | go |
+| 2252 | digest-jsonl-count-figure-quadratic-dedupe | 1 | python |
+| 2253 | digest-jsonl-torn-row-new-object-boundary | 1 | python |
+| 2254 | digest-show-miss-exit-code-and-hint | 1 | python |
+| 2255 | go-speculation-window-taint-cache-trace-leak-detector | 1 | go |
+| 2256 | python-ecvrf-rfc9381-hash-to-curve-proof-exactness | 1 | python |
+| 2257 | python-cli-subcommand-merge-conflicts | 1 | go |
+| 2258 | go-retrieval-branch-scope-blind-search | 1 | go |
+| 2259 | chat-latency-regression-check | 1 | typescript |
+| 2260 | gitignore-gitreins-history-litter | 1 |  |
+| 2261 | scheduler-drain-timeout-tick-crash | 1 | python |
+| 2262 | boardctl-worktree-flag-tilde-expansion-plants-home-path | 1 | shell |
+| 2263 | board-row-premise-stale-contract-chain | 1 | go |
+| 2264 | go-test-count1-cache-hermeticity | 1 | go |
+| 2265 | gitreins-judge-detaches-main-repo-head-during-eval | 1 | bash |
+| 2266 | python-urllib-unencoded-url-interpolation | 1 | python |
+| 2267 | bash-timeout-window-computed-but-not-applied | 1 | go |
+| 2268 | row-count-id-minting-freeze-past-page-cap | 1 | python |
+| 2269 | jsonl-board-grep-tail-depends-reference-miss | 1 | python |
+| 2270 | count-based-id-mint-freezes-writes-past-page-cap | 1 | python |
+| 2271 | interrupted-tick-background-worker-outlives-foreman | 1 | bash |
+| 2272 | foreman-killed-after-board-write-before-commit-push | 1 | go |
+| 2273 | pinned-harness-contract-test-detail-format-drift | 1 | javascript |
+| 2274 | declared-table-select-silent-page-cap | 1 | python |
+| 2275 | gitreins-wave-judge-grades-base-tree-false-fail | 1 | process/gitreins |
+| 2276 | bash-test-battery-env-isolation-and-eval-quoting-traps | 1 | bash |
+| 2277 | python-pytest-collection-poisoning | 1 | go |
+| 2278 | python-gameplay-de-hardcoding-jev-routing | 1 | go |
