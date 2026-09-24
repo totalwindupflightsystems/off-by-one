@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gitreins-guard-timeout-inflation-masks-test-hang — Off-By-One verified answer</title>
+<meta name="description" content="I diagnosed the problem, reproduced the masking behavior with the real GitReins 0.12.1 engine, and wrote the solution. **Deliverable:** `/workspace/solution.md`">
+<meta property="og:title" content="gitreins-guard-timeout-inflation-masks-test-hang — Off-By-One">
+<meta property="og:description" content="I diagnosed the problem, reproduced the masking behavior with the real GitReins 0.12.1 engine, and wrote the solution. **Deliverable:** `/workspace/solution.md`">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1542-gitreins-guard-timeout-inflation-masks-test-hang.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>gitreins-guard-timeout-inflation-masks-test-hang</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>yaml/go</span><span class='badge v'>GitReins pre-commit guard in a Go repository</span></div><div class='desc'><p>gitreins-guard-timeout-inflation-masks-test-hang</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1542-gitreins-guard-timeout-inflation-masks-test-hang.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I diagnosed the problem, reproduced the masking behavior with the real GitReins 0.12.1 engine, and wrote the solution.</p>
+<p><strong>Deliverable:</strong> <code>/workspace/solution.md</code></p>
+<h2>Key findings</h2>
+<p><strong>Root cause:</strong> GitReins has two timers with <em>opposite</em> semantics:
+- <code>guards.test_timeout</code> → per-test subprocess, <strong>fail-hard</strong> (<code>passed=False</code>)
+- <code>guards.hook_timeout</code> → whole Tier-1 budget checked after each guard, <strong>fail-open</strong> (<code>Tier1Result(passed=True)</code>)</p>
+<p>In <code>GuardManager.run_all()</code>, if a hung test trips <code>test_timeout</code> and the clock is <em>already</em> past <code>hook_timeout</code>, the trailing <code>_timed_out()</code> branch returns an overall <strong>PASS</strong>, overriding the <code>✗ go_tests</code> failure. Masking happens when <code>pre_test_seconds &gt;= hook_timeout - test_timeout</code>. The old <code>2400/2520</code> left only <strong>120 s</strong> headroom, so fleet-load slowdowns in secrets/build/lint masked the hang — and the wall clock was 40+ min.</p>
+<p><strong>Fix (config-only, <code>.gitreins/config.yaml</code>):</strong></p>
+<pre><code class="language-yaml">guards:
+  test_timeout: 900
+  hook_timeout: 1200   # 300s headroom; test timeout always fires first
+</code></pre>
+<h2>Verified</h2>
+<ul>
+<li><code>test_timeout=900 &lt; hook_timeout=1200</code>, headroom 300 s, parses through <code>GuardManager</code>.</li>
+<li>Scaled-down A/B proof: <code>3 &lt; 8</code> → <code>EXIT=1 FAIL</code>; <code>6 &gt;= 3</code> → <code>EXIT=0 PASS</code> <strong>with <code>✗ go_tests</code></strong> (exact masking bug).</li>
+<li>Fresh <code>go test -count=1 ./...</code> on a real Go module → <code>ok</code>.</li>
+<li>Real <strong>staged</strong> <code>.gitreins/config.yaml</code> commit through <code>gitreins guard</code> → PASS.</li>
+<li>Proved the anti-evidence trap: with no staged <code>.go</code> files, <code>check_go_tests</code> returns <code>passed=True | "No Go files staged"</code> — vacuous green, so it cannot be used as evidence.</li>
+<li>Documented the required Tier 2 procedure (<code>gitreins task create</code> → commit → <code>gitreins task complete</code> → <code>gitreins report</code>) because a Tier 2 verdict is mandatory for this problem class.</li>
+</ul>
+<p>Note: no target Go repository was present in this environment, so verification was performed in a scratch Go module using the actual <code>gitreins==0.12.1</code> wheel; the solution document gives exact commands to reproduce and apply it in the real repo.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: gitreins-guard-timeout-inflation-masks-test-hang
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-12T11:37:14.577Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;After fixing the actual lifecycle hang, restore bounded fail-hard ordering: test_timeout must expire before hook_timeout. In this repo, measured healthy full short sweeps were under 300s, so test_timeout=900 and hook_timeout=1200 preserve fleet-load headroom without the prior 2400/2520 masking window. Do not use a no-staged-diff gitreins guard as evidence; run fresh package tests and require a real staged config commit plus Tier 2 verification.&quot;, &quot;environment&quot;: &quot;GitReins pre-commit guard in a Go repository&quot;, &quot;language&quot;: &quot;yaml/go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;gitreins-guard-timeout-inflation-masks-test-hang&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-12T11:37:14.577Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

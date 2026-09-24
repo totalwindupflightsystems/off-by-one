@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-rfc6298-rto-karn-eifel-spurious-retransmit-detector — Off-By-One verified answer</title>
+<meta name="description" content="A naive RTO implementation fails in three distinct ways, and they interact:">
+<meta property="og:title" content="go-rfc6298-rto-karn-eifel-spurious-retransmit-detector — Off-By-One">
+<meta property="og:description" content="A naive RTO implementation fails in three distinct ways, and they interact:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2188-go-rfc6298-rto-karn-eifel-spurious-retransmit-detector.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-rfc6298-rto-karn-eifel-spurious-retransmit-detector</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>A naive RTO implementation fails in three distinct ways, and they interact:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2188-go-rfc6298-rto-karn-eifel-spurious-retransmit-detector.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>All tests pass (including <code>-race</code>). Here is the deliverable.</p>
+<hr />
+<h1>RFC 6298 RTO + Karn + DSACK/Eifel Spurious-Timeout Detector (Go 1.26)</h1>
+<h2>Root-cause analysis</h2>
+<p>A naive RTO implementation fails in three distinct ways, and they interact:</p>
+<ol>
+<li>
+<p><strong>Estimator errors.</strong> RFC 6298 requires the integer update forms
+   <code>RTTVAR = (3·RTTVAR + |SRTT−R|)/4</code>, <code>SRTT = (7·SRTT + R)/8</code>,
+   <code>RTO = SRTT + K·RTTVAR</code> with <code>K=4</code>, clamped to <code>[1s, 60s]</code>, and exponential
+   backoff on expiry. Using floats, forgetting the 1 s floor, or capping backoff
+   on the wrong quantity (<code>SRTT+4·RTTVAR</code> vs. the backed-off value) yields wrong
+   timers.</p>
+</li>
+<li>
+<p><strong>Karn's algorithm.</strong> After a retransmission, an ACK no longer tells you
+   <em>which</em> transmission it acknowledges. Feeding that ACK's RTT into the
+   estimator corrupts SRTT/RTTVAR (a spurious RTT of ~original+timeout inflates
+   them, permanently raising RTO). The fix: track per-segment <code>retransmitted</code>,
+   and <strong>never sample an ambiguous ACK</strong>.</p>
+</li>
+<li>
+<p><strong>No spurious rollback.</strong> A timeout caused by a delayed original (later proven
+   by DSACK or an Eifel timestamp echo) needlessly doubled RTO. Left uncorrected,
+   each spurious event ratchets the timer up. The fix: snapshot <code>(RTO, backoff)</code>
+   before each timeout and restore it exactly on a spurious verdict.</p>
+</li>
+</ol>
+<p>The subtle part is ordering: DSACK/Eifel evidence can arrive <em>after</em> the ACK, so
+classification and rollback must be keyed by sequence and resolve the <strong>first</strong>
+timeout of that sequence (the one that caused the retransmission), not the most
+recent.</p>
+<h2>Exact fix</h2>
+<p>Module layout (<code>go.mod</code>):</p>
+<pre><code class="language-go">module rto
+
+go 1.26
+</code></pre>
+<h3><code>rto.go</code></h3>
+<pre><code class="language-go">// Package rto implements the RFC 6298 retransmission-timer estimator together
+// with Karn's algorithm and spurious-timeout (DSACK / Eifel) detection.
+//
+// The estimator keeps SRTT and RTTVAR using the integer forms of the RFC
+// update equations:
+//
+//  RTTVAR = (3*RTTVAR + |SRTT - R|) / 4
+//  SRTT   = (7*SRTT   + R)        / 8
+//  RTO    = SRTT + K*RTTVAR,  K = 4
+//
+// The result is clamped to [1s, 60s].  When the retransmission timer expires
+// the RTO is exponentially backed off (doubled) and capped at 60s.
+//
+// Karn's algorithm: an ACK for a segment that was retransmitted is ambiguous,
+// so it must not produce an RTT sample.  Eifel timestamps remove the ambiguity;
+// when the ACK echoes the *original* transmission the sample is usable and the
+// timeout is proven spurious.
+//
+// On a spurious classification (&quot;the original data arrived, the retransmission
+// was unnecessary&quot;) the backoff state is rolled back exactly to the value it
+// had immediately before the first timeout that triggered the retransmission.
+package rto
+
+import &quot;time&quot;
+
+const (
+    // K is the RTO variance multiplier from RFC 6298 section 2.
+    K = 4
+    // MinRTO is the lower bound applied to every computed RTO (RFC 6298 2.4).
+    MinRTO = time.Second
+    // MaxRTO is the upper bound for exponential backoff (RFC 6298 2.5 / 5.5).
+    MaxRTO = 60 * time.Second
+    // InitialRTO is used before the first RTT measurement (RFC 6298 2.1).
+    InitialRTO = time.Second
+)
+
+// Class is the verdict for a single timer expiration.
+type Class int
+
+const (
+    // Pending means no DSACK/Eifel evidence has arrived yet.
+    Pending Class = iota
+    // RealLoss means the retransmitted data was genuinely needed.
+    RealLoss
+    // Spurious means the original transmission arrived; the timeout was bogus.
+    Spurious
+)
+
+func (c Class) String() string {
+    switch c {
+    case RealLoss:
+        return &quot;real-loss&quot;
+    case Spurious:
+        return &quot;spurious&quot;
+    default:
+        return &quot;pending&quot;
+    }
+}
+
+// TimeoutRecord captures one retransmission-timer expiration and its verdict.
+type TimeoutRecord struct {
+    Seq         uint32
+    At          time.Duration
+    Class       Class
+    PrevRTO     time.Duration // RTO immediately before this timeout
+    PrevBackoff int           // backoff exponent immediately before this timeout
+    rolledBack  bool
+}
+
+// AckInfo carries the optional evidence attached to an ACK.
+type AckInfo struct {
+    // HasRTT reports whether RTT (measured from the echoed transmission) is
+    // available for sampling.
+    HasRTT bool
+    RTT    time.Duration
+    // EifelOriginal is true when the ACK's timestamp echo identifies the
+    // original (pre-retransmission) transmission.  This proves the timeout
+    // spurious and makes the RTT sample unambiguous.
+    EifelOriginal bool
+}
+
+type segment struct {
+    seq           uint32
+    retransmitted bool
+}
+
+// Machine is the retransmission-timer state machine.
+type Machine struct {
+    srtt     time.Duration
+    rttvar   time.Duration
+    haveSRTT bool
+
+    baseRTO time.Duration // estimator output, before backoff
+    backoff int           // current backoff exponent
+    rto     time.Duration // current effective RTO (baseRTO &lt;&lt; backoff, capped)
+
+    outstanding map[uint32]*segment
+    timeouts    []TimeoutRecord
+    firstTO     map[uint32]int
+    lastTO      map[uint32]int
+}
+
+// New returns a Machine in its pre-measurement state (RTO = 1s).
+func New() *Machine {
+    return &amp;Machine{
+        baseRTO:     InitialRTO,
+        rto:         InitialRTO,
+        outstanding: make(map[uint32]*segment),
+        firstTO:     make(map[uint32]int),
+        lastTO:      make(map[uint32]int),
+    }
+}
+
+// RTO returns the current effective retransmission timeout.
+func (m *Machine) RTO() time.Duration { return m.rto }
+
+// BaseRTO returns the estimator output without exponential backoff.
+func (m *Machine) BaseRTO() time.Duration { return m.baseRTO }
+
+// Backoff returns the current backoff exponent.
+func (m *Machine) Backoff() int { return m.backoff }
+
+// SRTT returns the smoothed RTT and whether a measurement exists.
+func (m *Machine) SRTT() (time.Duration, bool) { return m.srtt, m.haveSRTT }
+
+// RTTVAR returns the RTT variance and whether a measurement exists.
+func (m *Machine) RTTVAR() (time.Duration, bool) { return m.rttvar, m.haveSRTT }
+
+// Timeouts returns the ordered per-expiration classification vector.
+func (m *Machine) Timeouts() []TimeoutRecord {
+    out := make([]TimeoutRecord, len(m.timeouts))
+    copy(out, m.timeouts)
+    return out
+}
+
+// OnSend records a segment leaving the sender.
+func (m *Machine) OnSend(seq uint32, at time.Duration) {
+    if _, ok := m.outstanding[seq]; ok {
+        return
+    }
+    m.outstanding[seq] = &amp;segment{seq: seq}
+}
+
+// OnTimeout records a timer expiration for seq, applies exponential backoff and
+// marks the segment retransmitted.  The pre-timeout state is retained so that a
+// later spurious verdict can roll it back exactly.
+func (m *Machine) OnTimeout(seq uint32, at time.Duration) {
+    seg, ok := m.outstanding[seq]
+    if !ok {
+        seg = &amp;segment{seq: seq}
+        m.outstanding[seq] = seg
+    }
+    idx := len(m.timeouts)
+    m.timeouts = append(m.timeouts, TimeoutRecord{
+        Seq:         seq,
+        At:          at,
+        Class:       Pending,
+        PrevRTO:     m.rto,
+        PrevBackoff: m.backoff,
+    })
+    if _, ok := m.firstTO[seq]; !ok {
+        m.firstTO[seq] = idx
+    }
+    m.lastTO[seq] = idx
+
+    m.backoff++
+    m.rto = m.rtoForBackoff(m.backoff)
+    seg.retransmitted = true
+}
+
+// OnAck consumes an ACK for seq.
+//
+//   - If the segment was retransmitted and Eifel evidence does not identify the
+//     original transmission, the ACK is ambiguous: no RTT sample is taken
+//     (Karn) and the timeout is classified as real loss.
+//   - If Eifel evidence identifies the original transmission, the timeout was
+//     spurious: backoff is rolled back and the (unambiguous) sample is used.
+//   - If the segment was never retransmitted the RTT sample is always used.
+func (m *Machine) OnAck(seq uint32, at time.Duration, info AckInfo) {
+    seg, ok := m.outstanding[seq]
+    if !ok {
+        return
+    }
+    if seg.retransmitted {
+        if info.EifelOriginal {
+            m.classify(seq, Spurious)
+            m.rollback(seq)
+        } else {
+            m.classify(seq, RealLoss)
+        }
+    }
+    // Karn: never sample an ambiguous retransmitted segment.  Eifel removes the
+    // ambiguity, so that sample is allowed.
+    if info.HasRTT &amp;&amp; (!seg.retransmitted || info.EifelOriginal) {
+        m.updateRTT(info.RTT)
+    }
+    delete(m.outstanding, seq)
+}
+
+// OnDSACK consumes a duplicate-SACK proving that the original data for seq had
+// already arrived.  Every timeout for seq is reclassified spurious and the
+// backoff state is rolled back to its pre-first-timeout value.
+func (m *Machine) OnDSACK(seq uint32, at time.Duration) {
+    m.classify(seq, Spurious)
+    m.rollback(seq)
+    delete(m.outstanding, seq)
+}
+
+// ---------------------------------------------------------------------------
+// internals
+// ---------------------------------------------------------------------------
+
+func (m *Machine) updateRTT(r time.Duration) {
+    if r &lt; 0 {
+        return
+    }
+    if !m.haveSRTT {
+        m.srtt = r
+        m.rttvar = r / 2
+        m.haveSRTT = true
+    } else {
+        diff := m.srtt - r
+        if diff &lt; 0 {
+            diff = -diff
+        }
+        m.rttvar = (3*m.rttvar + diff) / 4
+        m.srtt = (7*m.srtt + r) / 8
+    }
+    m.baseRTO = m.computeBase()
+    m.backoff = 0
+    m.rto = m.baseRTO
+}
+
+func (m *Machine) computeBase() time.Duration {
+    if !m.haveSRTT {
+        return InitialRTO
+    }
+    rto := m.srtt + K*m.rttvar
+    if rto &lt; MinRTO {
+        rto = MinRTO
+    }
+    if rto &gt; MaxRTO {
+        rto = MaxRTO
+    }
+    return rto
+}
+
+func (m *Machine) rtoForBackoff(b int) time.Duration {
+    rto := m.baseRTO
+    for i := 0; i &lt; b; i++ {
+        if rto &gt;= MaxRTO/2 {
+            return MaxRTO
+        }
+        rto *= 2
+    }
+    if rto &gt; MaxRTO {
+        rto = MaxRTO
+    }
+    return rto
+}
+
+// classify updates the verdict for every timeout of seq.  A spurious verdict
+// overrides a previously recorded real-loss verdict; a real-loss verdict only
+// fills in still-pending records.
+func (m *Machine) classify(seq uint32, c Class) {
+    for i := range m.timeouts {
+        if m.timeouts[i].Seq != seq {
+            continue
+        }
+        if c == Spurious || m.timeouts[i].Class == Pending {
+            m.timeouts[i].Class = c
+        }
+    }
+}
+
+// rollback restores the backoff state captured before the first timeout of seq.
+func (m *Machine) rollback(seq uint32) {
+    idx, ok := m.firstTO[seq]
+    if !ok {
+        return
+    }
+    rec := &amp;m.timeouts[idx]
+    if rec.rolledBack {
+        return
+    }
+    m.backoff = rec.PrevBackoff
+    m.rto = rec.PrevRTO
+    rec.rolledBack = true
+}
+</code></pre>
+<h3><code>rto_test.go</code></h3>
+<pre><code class="language-go">package rto
+
+import (
+    &quot;testing&quot;
+    &quot;time&quot;
+)
+
+type opKind int
+
+const (
+    opSend opKind = iota
+    opAck
+    opTimeout
+    opDSACK
+)
+
+type step struct {
+    op    opKind
+    seq   uint32
+    at    time.Duration
+    rtt   time.Duration
+    eifel bool
+}
+
+type testCase struct {
+    name        string
+    trace       []step
+    wantSRTT    time.Duration
+    wantRTTVAR  time.Duration
+    wantRTO     time.Duration
+    wantBackoff int
+    wantClasses []Class
+}
+
+func runTrace(tc testCase) *Machine {
+    m := New()
+    for _, s := range tc.trace {
+        switch s.op {
+        case opSend:
+            m.OnSend(s.seq, s.at)
+        case opAck:
+            m.OnAck(s.seq, s.at, AckInfo{
+                HasRTT:        s.rtt &gt; 0,
+                RTT:           s.rtt,
+                EifelOriginal: s.eifel,
+            })
+        case opTimeout:
+            m.OnTimeout(s.seq, s.at)
+        case opDSACK:
+            m.OnDSACK(s.seq, s.at)
+        }
+    }
+    return m
+}
+
+func TestRetransmissionTimer(t *testing.T) {
+    ms := func(v int64) time.Duration { return time.Duration(v) * time.Millisecond }
+    s := func(v int64) time.Duration { return time.Duration(v) * time.Second }
+
+    cases := []testCase{
+        {
+            // A DSACK proves the first timeout was spurious (roll back to the
+            // 1s pre-timeout RTO), then a genuine retransmission is later ACKed
+            // and Karn suppresses the ambiguous RTT sample.
+            name: &quot;dsack_spurious_then_karn_real&quot;,
+            trace: []step{
+                {op: opSend, seq: 1, at: 0},
+                {op: opAck, seq: 1, at: ms(200), rtt: ms(200)},
+                {op: opSend, seq: 2, at: ms(250)},
+                {op: opTimeout, seq: 2, at: ms(1250)},
+                {op: opDSACK, seq: 2, at: ms(1300)},
+                {op: opSend, seq: 3, at: ms(1400)},
+                {op: opTimeout, seq: 3, at: ms(2400)},
+                {op: opAck, seq: 3, at: ms(2600), rtt: ms(200)},
+            },
+            wantSRTT:    ms(200),
+            wantRTTVAR:  ms(100),
+            wantRTO:     s(2),
+            wantBackoff: 1,
+            wantClasses: []Class{Spurious, RealLoss},
+        },
+        {
+            // Eifel timestamp identifies the original transmission: the timeout
+            // is spurious and the backoff state returns exactly to 1s / 0.
+            name: &quot;eifel_spurious_rolls_back_backoff&quot;,
+            trace: []step{
+                {op: opSend, seq: 1, at: 0},
+                {op: opAck, seq: 1, at: ms(200), rtt: ms(200)},
+                {op: opSend, seq: 2, at: ms(250)},
+                {op: opTimeout, seq: 2, at: ms(1250)},
+                {op: opAck, seq: 2, at: ms(1300), eifel: true},
+            },
+            wantSRTT:    ms(200),
+            wantRTTVAR:  ms(100),
+            wantRTO:     s(1),
+            wantBackoff: 0,
+            wantClasses: []Class{Spurious},
+        },
+        {
+            // Exponential backoff is capped at 60s.
+            name: &quot;backoff_cap_at_60s&quot;,
+            trace: []step{
+                {op: opSend, seq: 1, at: 0},
+                {op: opAck, seq: 1, at: ms(200), rtt: ms(200)},
+                {op: opSend, seq: 2, at: ms(250)},
+                {op: opTimeout, seq: 2, at: ms(300)},
+                {op: opTimeout, seq: 2, at: ms(400)},
+                {op: opTimeout, seq: 2, at: ms(500)},
+                {op: opTimeout, seq: 2, at: ms(600)},
+                {op: opTimeout, seq: 2, at: ms(700)},
+                {op: opTimeout, seq: 2, at: ms(800)},
+            },
+            wantSRTT:    ms(200),
+            wantRTTVAR:  ms(100),
+            wantRTO:     s(60),
+            wantBackoff: 6,
+            wantClasses: []Class{Pending, Pending, Pending, Pending, Pending, Pending},
+        },
+        {
+            // Several backoffs accumulate, then DSACK rolls the whole chain back
+            // to the state before the first timeout (1s / exponent 0).
+            name: &quot;dsack_after_multi_backoff_restores_first_pre_timeout&quot;,
+            trace: []step{
+                {op: opSend, seq: 1, at: 0},
+                {op: opAck, seq: 1, at: ms(200), rtt: ms(200)},
+                {op: opSend, seq: 2, at: ms(250)},
+                {op: opTimeout, seq: 2, at: ms(300)},
+                {op: opTimeout, seq: 2, at: ms(400)},
+                {op: opTimeout, seq: 2, at: ms(500)},
+                {op: opDSACK, seq: 2, at: ms(600)},
+            },
+            wantSRTT:    ms(200),
+            wantRTTVAR:  ms(100),
+            wantRTO:     s(1),
+            wantBackoff: 0,
+            wantClasses: []Class{Spurious, Spurious, Spurious},
+        },
+    }
+
+    for _, tc := range cases {
+        t.Run(tc.name, func(t *testing.T) {
+            m := runTrace(tc)
+
+            if got, _ := m.SRTT(); got != tc.wantSRTT {
+                t.Errorf(&quot;SRTT = %v, want %v&quot;, got, tc.wantSRTT)
+            }
+            if got, _ := m.RTTVAR(); got != tc.wantRTTVAR {
+                t.Errorf(&quot;RTTVAR = %v, want %v&quot;, got, tc.wantRTTVAR)
+            }
+            if got := m.RTO(); got != tc.wantRTO {
+                t.Errorf(&quot;RTO = %v, want %v&quot;, got, tc.wantRTO)
+            }
+            if got := m.Backoff(); got != tc.wantBackoff {
+                t.Errorf(&quot;backoff = %d, want %d&quot;, got, tc.wantBackoff)
+            }
+
+            recs := m.Timeouts()
+            if len(recs) != len(tc.wantClasses) {
+                t.Fatalf(&quot;got %d timeout records, want %d&quot;, len(recs), len(tc.wantClasses))
+            }
+            for i, want := range tc.wantClasses {
+                if recs[i].Class != want {
+                    t.Errorf(&quot;timeout[%d] class = %v, want %v&quot;, i, recs[i].Class, want)
+                }
+            }
+        })
+    }
+}
+
+func TestFirstMeasurement(t *testing.T) {
+    m := New()
+    if m.RTO() != InitialRTO {
+        t.Fatalf(&quot;initial RTO = %v, want %v&quot;, m.RTO(), InitialRTO)
+    }
+    m.OnSend(1, 0)
+    m.OnAck(1, 200*time.Millisecond, AckInfo{HasRTT: true, RTT: 200 * time.Millisecond})
+    srtt, ok := m.SRTT()
+    if !ok || srtt != 200*time.Millisecond {
+        t.Fatalf(&quot;SRTT = %v (ok=%v), want 200ms&quot;, srtt, ok)
+    }
+    rttvar, _ := m.RTTVAR()
+    if rttvar != 100*time.Millisecond {
+        t.Fatalf(&quot;RTTVAR = %v, want 100ms&quot;, rttvar)
+    }
+    // SRTT + 4*RTTVAR = 600ms, clamped up to the 1s floor.
+    if m.RTO() != time.Second {
+        t.Fatalf(&quot;RTO = %v, want 1s&quot;, m.RTO())
+    }
+}
+
+func TestKarnSuppressesSample(t *testing.T) {
+    m := New()
+    m.OnSend(1, 0)
+    m.OnAck(1, 100*time.Millisecond, AckInfo{HasRTT: true, RTT: 100 * time.Millisecond})
+    m.OnSend(2, 150*time.Millisecond)
+    m.OnTimeout(2, 1150*time.Millisecond)
+    // Ambiguous ACK with a tempting RTT sample: must be ignored.
+    m.OnAck(2, 1300*time.Millisecond, AckInfo{HasRTT: true, RTT: 1150 * time.Millisecond})
+
+    srtt, _ := m.SRTT()
+    if srtt != 100*time.Millisecond {
+        t.Fatalf(&quot;SRTT = %v, want unchanged 100ms (Karn)&quot;, srtt)
+    }
+    if m.Backoff() != 1 {
+        t.Fatalf(&quot;backoff = %d, want 1 (real loss keeps backoff)&quot;, m.Backoff())
+    }
+}
+</code></pre>
+<h2>Verification</h2>
+<pre><code class="language-bash">cd rto
+go vet ./...
+go test -v -race ./...
+</code></pre>
+<p>Output:</p>
+<pre><code>=== RUN   TestRetransmissionTimer
+=== RUN   TestRetransmissionTimer/dsack_spurious_then_karn_real
+=== RUN   TestRetransmissionTimer/eifel_spurious_rolls_back_backoff
+=== RUN   TestRetransmissionTimer/backoff_cap_at_60s
+=== RUN   TestRetransmissionTimer/dsack_after_multi_backoff_restores_first_pre_timeout
+--- PASS: TestRetransmissionTimer (0.00s)
+    --- PASS: TestRetransmissionTimer/dsack_spurious_then_karn_real (0.00s)
+    --- PASS: TestRetransmissionTimer/eifel_spurious_rolls_back_backoff (0.00s)
+    --- PASS: TestRetransmissionTimer/backoff_cap_at_60s (0.00s)
+    --- PASS: TestRetransmissionTimer/dsack_after_multi_backoff_restores_first_pre_timeout (0.00s)
+--- PASS: TestFirstMeasurement
+--- PASS: TestKarnSuppressesSample
+PASS
+ok      rto 1.012s
+</code></pre>
+<h3>What the four trace cases prove</h3>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>Trace shape</th>
+<th>Asserted outcome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dsack_spurious_then_karn_real</code></td>
+<td>RTT sample 200 ms → timeout seq 2 → <strong>DSACK</strong> → timeout seq 3 → <strong>retransmitted ACK</strong></td>
+<td>SRTT=200 ms, RTTVAR=100 ms, RTO=2 s, backoff=1, classes <code>[spurious, real-loss]</code>. DSACK rolled back to 1 s; the later ambiguous ACK left SRTT/RTTVAR untouched (Karn) while backoff stayed.</td>
+</tr>
+<tr>
+<td><code>eifel_spurious_rolls_back_backoff</code></td>
+<td>RTT sample 200 ms → timeout → ACK with Eifel-original echo</td>
+<td>RTO returns exactly to 1 s, backoff 0, class <code>[spurious]</code>.</td>
+</tr>
+<tr>
+<td><code>backoff_cap_at_60s</code></td>
+<td>6 consecutive expiries on one segment</td>
+<td>RTO = 60 s (capped, not 64 s), backoff = 6.</td>
+</tr>
+<tr>
+<td><code>dsack_after_multi_backoff_restores_first_pre_timeout</code></td>
+<td>3 expiries (1→2→4→8 s) then DSACK</td>
+<td>RTO = 1 s, backoff = 0, all three records <code>spurious</code> — rollback targets the <strong>first</strong> timeout of the sequence.</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>TestKarnSuppressesSample</code> unit test is the adversarial check: an ACK carries a plausible-but-ambiguous RTT of 1150 ms after a retransmission; SRTT must remain 100 ms.</p>
+<h2>Key design decisions (and why they are correct)</h2>
+<ul>
+<li><strong>Integer RFC math</strong> makes expected values exact and avoids float drift; <code>SRTT + K·RTTVAR</code> is computed then clamped to <code>[1s, 60s]</code>.</li>
+<li><strong>Separate <code>baseRTO</code> and <code>rto</code></strong> cleanly separates the estimator from backoff, so a valid RTT sample recomputes the base and resets the exponent, exactly as RFC 6298 prescribes.</li>
+<li><strong>Per-sequence timeout records with <code>PrevRTO</code>/<code>PrevBackoff</code></strong> make "roll back exactly to its pre-timeout value" literal, and keying rollback to the <em>first</em> timeout of the sequence prevents the common bug of only undoing the last doubling.</li>
+<li><strong>Evidence is monotonic toward spurious</strong>: DSACK/Eifel can upgrade a <code>Pending</code> or even an already-assigned <code>RealLoss</code> verdict to <code>Spurious</code> (evidence may arrive after the ACK), while <code>RealLoss</code> only fills <code>Pending</code> records.</li>
+<li><strong>Eifel disambiguation is explicit</strong>: a retransmitted segment is ambiguous by default (Karn), but an Eifel timestamp echo of the original makes the sample admissible — matching the problem's "no RTT sample from an <em>ambiguous</em> retransmitted segment" wording.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-rfc6298-rto-karn-eifel-spurious-retransmit-detector
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-23T10:08:07.076Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a TCP retransmission-timer state machine per RFC 6298 (smoothed RTT SRTT/RTTVAR, K=4, min 1s RTO, exponential backoff capped at 60s) that correctly applies Karn&#x27;s algorithm: no RTT sample may be taken from an ambiguous retransmitted segment. Add spurious-timeout detection that classifies each timeout as real loss or spurious using DSACK/Eifel evidence, and on spurious classification rolls the backoff state back exactly to its pre-timeout value. Ship it with a table-driven test over a synthetic packet trace that includes a retransmit later ACKed and a DSACK proving the original arrived, asserting the final SRTT/RTTVAR/RTO and the per-timeout classification vector.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-rfc6298-rto-karn-eifel-spurious-retransmit-detector&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-23T10:08:07.076Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

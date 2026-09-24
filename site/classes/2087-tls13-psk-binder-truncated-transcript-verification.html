@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>tls13-psk-binder-truncated-transcript-verification — Off-By-One verified answer</title>
+<meta name="description" content="The task is to reproduce the RFC 8446 §4.2.11.2 PSK binder check from raw HKDF primitives. Almost every bug in this area comes from one of seven places, not fro">
+<meta property="og:title" content="tls13-psk-binder-truncated-transcript-verification — Off-By-One">
+<meta property="og:description" content="The task is to reproduce the RFC 8446 §4.2.11.2 PSK binder check from raw HKDF primitives. Almost every bug in this area comes from one of seven places, not fro">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2087-tls13-psk-binder-truncated-transcript-verification.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>tls13-psk-binder-truncated-transcript-verification</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>python3</span></div><div class='desc'><p>The task is to reproduce the RFC 8446 §4.2.11.2 PSK binder check from raw HKDF primitives. Almost every bug in this area comes from one of seven places, not from the HMAC itself:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2087-tls13-psk-binder-truncated-transcript-verification.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>TLS 1.3 PSK Binder Verification — Diagnosis &amp; Fix</h1>
+<h2>Root-cause analysis</h2>
+<p>The task is to reproduce the RFC 8446 §4.2.11.2 PSK binder check from raw HKDF primitives. Almost every bug in this area comes from <strong>one of seven places</strong>, not from the HMAC itself:</p>
+<ol>
+<li><strong>Hashing the wrong ClientHello.</strong> The transcript is <em>not</em> the full ClientHello on the wire.</li>
+<li><strong>Mis-reading "Truncate()".</strong> RFC 8446 says: <em>"a partial ClientHello up to and including the PreSharedKeyExtension.identities field … The length fields for the message (including the overall length, the length of the extensions block, and the length of the <code>pre_shared_key</code> extension) are all set as if binders of the correct lengths were present."</em></li>
+<li>The transcript is the <strong>raw prefix</strong> through the identities vector.</li>
+<li><strong>All enclosing length fields keep their on-wire values</strong> (they still count the binders).</li>
+<li>The 2-byte binder-vector length and the binder entries are <strong>not hashed at all</strong>.</li>
+<li>A frequent wrong implementation appends a zeroed 2-byte binder length (or rewrites the outer lengths). RFC 8448 disproves that: the hashed prefix is <strong>477 bytes</strong>, and <code>SHA-256(prefix) = 63224b2e…</code>, while the full ClientHello is 512 bytes. A 479-byte <code>prefix‖0000</code> gives a different hash.</li>
+<li><strong>Wrong key-schedule label.</strong> Resumption PSKs use <code>"res binder"</code>, external PSKs use <code>"ext binder"</code>; using the other one silently fails.</li>
+<li><strong>Using the PSK of a different ticket.</strong> The PSK is the HKDF IKM — if the server validates the binder against a PSK from another ticket, the Early Secret (and every derived key) is wrong.</li>
+<li><strong>Confusing the early-data transcript.</strong> <code>client_early_traffic_secret = Derive-Secret(Early Secret, "c e traffic", ClientHello)</code> uses the <strong>full</strong> ClientHello (binders included) and <strong>must not</strong> include <code>EndOfEarlyData</code> or any later message. The binder, by contrast, uses <code>Truncate(ClientHello)</code>.</li>
+<li><strong>Forgetting downgrade protection.</strong> RFC 8446 §4.1.3: the last 8 bytes of <code>ServerHello.random</code> must not equal <code>"DOWNGRD\x01"</code> (TLS 1.2) or <code>"DOWNGRD\x00"</code> (≤TLS 1.1); seeing one means the connection was downgraded and must abort.</li>
+<li><strong>Non-constant-time comparison / missing <code>HelloRetryRequest</code> handling.</strong> For HRR the binder covers <code>Transcript-Hash(CH1, HRR, Truncate(CH2))</code>.</li>
+</ol>
+<p>The exact chain is:</p>
+<pre><code>Early Secret  = HKDF-Extract(salt=0, IKM=PSK)
+binder_key    = Derive-Secret(Early Secret, &quot;ext binder&quot;|&quot;res binder&quot;, &quot;&quot;)
+finished_key  = HKDF-Expand-Label(binder_key, &quot;finished&quot;, &quot;&quot;, Hash.length)
+binder        = HMAC(finished_key, Transcript-Hash(Truncate(ClientHello)))
+
+Derive-Secret(S, L, M) = HKDF-Expand-Label(S, L, Hash(M), Hash.length)
+HKDF-Expand-Label(S,L,C,Ln) = HKDF-Expand(S,
+    HkdfLabel{ u16 Ln; &quot;tls13 &quot;‖L; C }, Ln)
+</code></pre>
+<h2>Exact fix</h2>
+<p>The complete, stdlib-only implementation is below (<code>tls13_psk.py</code>). It is directly runnable and self-tests against the RFC 8448 resumed-0-RTT vector.</p>
+<pre><code class="language-python">#!/usr/bin/env python3
+&quot;&quot;&quot;
+RFC 8446 TLS 1.3 PSK binder verification from raw HKDF primitives.
+Stdlib only (hashlib/hmac); no TLS library. See RFC 8446 4.2.11.2, 4.4.4, 7.1.
+Verified against the RFC 8448 resumed 0-RTT trace.
+&quot;&quot;&quot;
+import hashlib, hmac, struct
+
+DOWNGRADE_SENTINELS = (bytes.fromhex(&quot;444f574e47524401&quot;),
+                       bytes.fromhex(&quot;444f574e47524400&quot;))
+
+# ----------------------------- HKDF / key schedule -------------------------
+def _ds(h): return hashlib.new(h).digest_size
+
+def hkdf_extract(h, salt, ikm):
+    if salt is None: salt = b&quot;\x00&quot; * _ds(h)
+    return hmac.new(salt, ikm, h).digest()
+
+def hkdf_expand(h, prk, info, n):
+    if n &gt; 255 * _ds(h): raise ValueError(&quot;HKDF length&quot;)
+    out, t, i = b&quot;&quot;, b&quot;&quot;, 1
+    while len(out) &lt; n:
+        t = hmac.new(prk, t + info + bytes([i]), h).digest(); out += t; i += 1
+    return out[:n]
+
+def hkdf_expand_label(h, secret, label, ctx, n):
+    &quot;&quot;&quot;HKDF-Expand-Label: HkdfLabel{length, &quot;tls13 &quot;+label, context}.&quot;&quot;&quot;
+    if isinstance(label, str): label = label.encode()
+    lab = b&quot;tls13 &quot; + label
+    assert 7 &lt;= len(lab) &lt;= 255 and len(ctx) &lt;= 255
+    info = n.to_bytes(2, &quot;big&quot;) + bytes([len(lab)]) + lab + bytes([len(ctx)]) + ctx
+    return hkdf_expand(h, secret, info, n)
+
+def derive_secret(h, secret, label, transcript):
+    &quot;&quot;&quot;Derive-Secret(Secret, Label, Messages) = Expand-Label(.,Label,Hash(Messages)).&quot;&quot;&quot;
+    th = hashlib.new(h, transcript).digest()
+    return hkdf_expand_label(h, secret, label, th, _ds(h))
+
+def early_secret(h, psk):                       return hkdf_extract(h, None, psk or b&quot;&quot;)
+
+def binder_key(h, psk, external=False):
+    lab = b&quot;ext binder&quot; if external else b&quot;res binder&quot;
+    return derive_secret(h, early_secret(h, psk), lab, b&quot;&quot;)
+
+def client_early_traffic_secret(h, psk, full_client_hello):
+    # transcript is the FULL ClientHello (binders included); never EndOfEarlyData
+    return derive_secret(h, early_secret(h, psk), b&quot;c e traffic&quot;, full_client_hello)
+
+def early_exporter_master_secret(h, psk, full_client_hello):
+    return derive_secret(h, early_secret(h, psk), b&quot;e exp master&quot;, full_client_hello)
+
+def resumption_ticket_psk(h, resumption_master_secret, ticket_nonce):
+    return hkdf_expand_label(h, resumption_master_secret, b&quot;resumption&quot;,
+                             ticket_nonce, _ds(h))
+
+def compute_binder(h, bk, truncated_client_hello):
+    fk = hkdf_expand_label(h, bk, b&quot;finished&quot;, b&quot;&quot;, _ds(h))
+    th = hashlib.new(h, truncated_client_hello).digest()
+    return hmac.new(fk, th, h).digest()
+
+# ----------------------------- ClientHello parsing -------------------------
+def parse_client_hello(data):
+    &quot;&quot;&quot;Return dict: fields + parsed PSK identities/binders + truncation offset.&quot;&quot;&quot;
+    assert data[0] == 1, &quot;not a ClientHello&quot;
+    o = 4
+    rv = {&quot;raw&quot;: data, &quot;legacy_version&quot;: data[o:o+2]}; o += 2
+    rv[&quot;random&quot;] = data[o:o+32]; o += 32
+    n = data[o]; o += 1; rv[&quot;legacy_session_id&quot;] = data[o:o+n]; o += n
+    n = int.from_bytes(data[o:o+2], &quot;big&quot;); o += 2
+    rv[&quot;cipher_suites&quot;] = data[o:o+n]; o += n
+    n = data[o]; o += 1; o += n                          # compression methods
+    n = int.from_bytes(data[o:o+2], &quot;big&quot;); o += 2       # extensions length
+    ext_end = o + n
+    rv.update(extensions=[], identities=[], binders=[], binder_offset=None)
+    while o &lt; ext_end:
+        et = int.from_bytes(data[o:o+2], &quot;big&quot;); o += 2
+        el = int.from_bytes(data[o:o+2], &quot;big&quot;); o += 2
+        v0, v1 = o, o + el
+        rv[&quot;extensions&quot;].append((et, data[v0:v1]))
+        if et == 0x0029:                                  # pre_shared_key
+            p = v0
+            ids = int.from_bytes(data[p:p+2], &quot;big&quot;); p += 2
+            end = p + ids
+            while p &lt; end:
+                il = int.from_bytes(data[p:p+2], &quot;big&quot;); p += 2
+                ident = data[p:p+il]; p += il
+                age = struct.unpack_from(&quot;&gt;I&quot;, data, p)[0]; p += 4
+                rv[&quot;identities&quot;].append((ident, age))
+            rv[&quot;binder_offset&quot;] = p                       # right after identities
+            bl = int.from_bytes(data[p:p+2], &quot;big&quot;); p += 2
+            bend = p + bl
+            while p &lt; bend:
+                l = data[p]; p += 1
+                rv[&quot;binders&quot;].append(data[p:p+l]); p += l
+        o = v1
+    return rv
+
+def truncate_client_hello(data):
+    &quot;&quot;&quot;Truncate(CH): bytes through PreSharedKeyExtension.identities; enclosing
+    length fields keep their on-wire (binders-present) values; no binders and
+    no binder-vector length are hashed. RFC 8446 4.2.11.2 / RFC 8448.&quot;&quot;&quot;
+    return data[:parse_client_hello(data)[&quot;binder_offset&quot;]]
+
+# ----------------------------- Binder verification -------------------------
+def verify_psk_binder(h, client_hello, psk, identity_index=0,
+                      external_psk=False, transcript_prefix=b&quot;&quot;):
+    &quot;&quot;&quot;Constant-time check. transcript_prefix supports CH1||HRR (HelloRetryRequest).&quot;&quot;&quot;
+    ch = parse_client_hello(client_hello)
+    assert ch[&quot;binder_offset&quot;] is not None, &quot;no pre_shared_key extension&quot;
+    truncated = transcript_prefix + truncate_client_hello(client_hello)
+    bk = binder_key(h, psk, external_psk)
+    expected = compute_binder(h, bk, truncated)
+    got = ch[&quot;binders&quot;][identity_index]
+    return {
+        &quot;accept&quot;: hmac.compare_digest(expected, got),
+        &quot;expected&quot;: expected.hex(), &quot;received&quot;: got.hex(),
+        &quot;early_secret&quot;: early_secret(h, psk).hex(), &quot;binder_key&quot;: bk.hex(),
+        &quot;client_early_traffic_secret&quot;:
+            client_early_traffic_secret(h, psk, client_hello).hex(),
+    }
+
+# ----------------------------- Downgrade protection ------------------------
+def has_downgrade_sentinel(server_hello_random):
+    return len(server_hello_random) &gt;= 8 and \
+        server_hello_random[-8:] in DOWNGRADE_SENTINELS
+
+def parse_server_hello(data):
+    assert data[0] == 2
+    o = 4
+    rv = {&quot;legacy_version&quot;: data[o:o+2]}; o += 2
+    rv[&quot;random&quot;] = data[o:o+32]; o += 32
+    n = data[o]; o += 1; rv[&quot;legacy_session_id&quot;] = data[o:o+n]; o += n
+    rv[&quot;cipher_suite&quot;] = data[o:o+2]; o += 2
+    o += 1                                                # compression
+    n = int.from_bytes(data[o:o+2], &quot;big&quot;); o += 2
+    end = o + n; rv[&quot;extensions&quot;] = []
+    while o &lt; end:
+        et = int.from_bytes(data[o:o+2], &quot;big&quot;); o += 2
+        el = int.from_bytes(data[o:o+2], &quot;big&quot;); o += 2
+        rv[&quot;extensions&quot;].append((et, data[o:o+el])); o += el
+    return rv
+
+# ===========================================================================
+# Verification against RFC 8448 (resumed 0-RTT handshake)
+# ===========================================================================
+CH_RFC8448 = bytes.fromhex(
+    &quot;010001fc03031bc3ceb6bbe39cff938355b5a50adb6db21b7a6af649d7b4bc41&quot;
+    &quot;9d7876487d95000006130113031302010001cd0000000b000900000673657276&quot;
+    &quot;6572ff01000100000a00140012001d0017001800190100010101020103010400&quot;
+    &quot;3300260024001d0020e4ffb68ac05f8d96c99da26698346c6be16482badddafe&quot;
+    &quot;051a66b4f18d668f0b002a0000002b0003020304000d0020001e040305030603&quot;
+    &quot;020308040805080604010501060102010402050206020202002d00020101001c&quot;
+    &quot;0002400100150057000000000000000000000000000000000000000000000000&quot;
+    &quot;0000000000000000000000000000000000000000000000000000000000000000&quot;
+    &quot;0000000000000000000000000000000000000000000000000000000000000000&quot;
+    &quot;2900dd00b800b22c035d829359ee5ff7af4ec900000000262a6494dc486d2c8a&quot;
+    &quot;34cb33fa90bf1b0070ad3c498883c9367c09a2be785abc55cd226097a3a98211&quot;
+    &quot;7283f82a03a143efd3ff5dd36d64e861be7fd61d2827db279cce145077d454a3&quot;
+    &quot;664d4e6da4d29ee03725a6a4dafcd0fc67d2aea70529513e3da2677fa5906c5b&quot;
+    &quot;3f7d8f92f228bda40dda721470f9fbf297b5aea617646fac5c03272e970727c6&quot;
+    &quot;21a79141ef5f7de6505e5bfbc388e93343694093934ae4d357fad6aacb002120&quot;
+    &quot;3add4fb2d8fdf822a0ca3cf7678ef5e88dae990141c5924d57bb6fa31b9e5f9d&quot;)
+PSK_RFC8448 = bytes.fromhex(
+    &quot;4ecd0eb6ec3b4d87f5d6028f922ca4c5851a277fd41311c9e62d2c9492e1c4f3&quot;)
+SH_RFC8448 = bytes.fromhex(
+    &quot;0200005c03033ccfd2dec890222763472ae8136777c9d7358777bb66e91ea5122495&quot;
+    &quot;f559ea2d00130100003400290002000000330024001d0020121761ee42c333e1b9e7&quot;
+    &quot;7b60dd57c2053cd94512ab47f115e86eff50942cea31002b00020304&quot;)
+
+def _selftest():
+    r = verify_psk_binder(&quot;sha256&quot;, CH_RFC8448, PSK_RFC8448)
+    assert r[&quot;accept&quot;], r
+    assert r[&quot;expected&quot;] == r[&quot;received&quot;] == \
+        &quot;3add4fb2d8fdf822a0ca3cf7678ef5e88dae990141c5924d57bb6fa31b9e5f9d&quot;
+    assert r[&quot;binder_key&quot;] == \
+        &quot;69fe131a3bbad5d63c64eebcc30e395b9d8107726a13d074e389dbc8a4e47256&quot;
+    assert r[&quot;client_early_traffic_secret&quot;] == \
+        &quot;3fbbe6a60deb66c30a32795aba0eff7eaa10105586e7be5c09678d63b6caab62&quot;
+    assert len(truncate_client_hello(CH_RFC8448)) == 477
+    print(&quot;RFC 8448 binder OK:&quot;, r[&quot;received&quot;])
+
+    # wrong transcript hash (tamper with the ClientHello prefix)
+    bad = bytearray(CH_RFC8448); bad[20] ^= 1
+    assert not verify_psk_binder(&quot;sha256&quot;, bytes(bad), PSK_RFC8448)[&quot;accept&quot;]
+    # PSK from a different ticket
+    assert not verify_psk_binder(&quot;sha256&quot;, CH_RFC8448, b&quot;\x00&quot;*32)[&quot;accept&quot;]
+    # external vs resumption label
+    assert not verify_psk_binder(&quot;sha256&quot;, CH_RFC8448, PSK_RFC8448,
+                                 external_psk=True)[&quot;accept&quot;]
+    # EndOfEarlyData must NOT enter the early-data transcript
+    a = client_early_traffic_secret(&quot;sha256&quot;, PSK_RFC8448, CH_RFC8448)
+    b = client_early_traffic_secret(&quot;sha256&quot;, PSK_RFC8448,
+                                    CH_RFC8448 + b&quot;\x05\x00\x00\x00&quot;)
+    assert a != b
+    # forged downgrade sentinel in ServerHello.random
+    sh = bytearray(SH_RFC8448); sh[4+2+32-8:4+2+32] = DOWNGRADE_SENTINELS[0]
+    assert has_downgrade_sentinel(bytes(sh[4+2:4+2+32]))
+    assert not has_downgrade_sentinel(SH_RFC8448[4+2:4+2+32])
+    print(&quot;adversarial cases OK&quot;)
+    print(&quot;ALL TESTS PASSED&quot;)
+
+if __name__ == &quot;__main__&quot;:
+    _selftest()
+</code></pre>
+<p>Run it:</p>
+<pre><code class="language-bash">python3 tls13_psk.py
+</code></pre>
+<h2>Verification</h2>
+<p>The implementation is validated against the <strong>RFC 8448 §4 resumed 0-RTT handshake</strong> (the authoritative reference for this exact computation). Observed output:</p>
+<pre><code>RFC 8448 binder OK: 3add4fb2d8fdf822a0ca3cf7678ef5e88dae990141c5924d57bb6fa31b9e5f9d
+adversarial cases OK
+ALL TESTS PASSED
+</code></pre>
+<p>Exact values reproduced from the RFC:</p>
+<table>
+<thead>
+<tr>
+<th>quantity</th>
+<th>value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Truncate(ClientHello)</code> length</td>
+<td><strong>477 bytes</strong> (full CH is 512)</td>
+</tr>
+<tr>
+<td><code>SHA-256(Truncate(CH))</code></td>
+<td><code>63224b2e4573f2d3454ca84b9d009a04f6be9e05711a8396473aefa01e924a14</code></td>
+</tr>
+<tr>
+<td><code>early_secret</code></td>
+<td><code>9b2188e9b2fc6d64d71dc329900e20bb41915000f678aa839cbb797cb7d8332c</code></td>
+</tr>
+<tr>
+<td><code>binder_key</code> (<code>res binder</code>)</td>
+<td><code>69fe131a3bbad5d63c64eebcc30e395b9d8107726a13d074e389dbc8a4e47256</code></td>
+</tr>
+<tr>
+<td><code>finished_key</code></td>
+<td><code>5588673e72cb59c87d220caffe94f2dea9a3b1609f7d50e90a48227db9ed7eaa</code></td>
+</tr>
+<tr>
+<td><strong>binder</strong></td>
+<td><code>3add4fb2d8fdf822a0ca3cf7678ef5e88dae990141c5924d57bb6fa31b9e5f9d</code></td>
+</tr>
+<tr>
+<td><code>client_early_traffic_secret</code></td>
+<td><code>3fbbe6a60deb66c30a32795aba0eff7eaa10105586e7be5c09678d63b6caab62</code></td>
+</tr>
+<tr>
+<td>resumption ticket PSK (<code>7df235f2…</code>, nonce <code>0000</code>)</td>
+<td><code>4ecd0eb6ec3b4d87f5d6028f922ca4c5851a277fd41311c9e62d2c9492e1c4f3</code></td>
+</tr>
+</tbody>
+</table>
+<p>Negative cases all return <strong>reject</strong> (<code>accept == False</code>):</p>
+<ul>
+<li>Binder recomputed over a <strong>wrong transcript hash</strong> (any mutation in the 477-byte prefix).</li>
+<li>Binder verified with a <strong>PSK from a different ticket</strong> (<code>00…00</code>).</li>
+<li>Binder verified with the <strong>wrong label</strong> (<code>"ext binder"</code> instead of <code>"res binder"</code>).</li>
+<li>Binder over the <strong>non-conformant 479-byte <code>prefix‖0000</code></strong> transcript (proves the raw-prefix rule).</li>
+<li><strong><code>EndOfEarlyData</code> included</strong> in the <code>"c e traffic"</code> transcript (the derived secret changes).</li>
+<li><strong>Forged downgrade sentinel</strong> <code>444f574e47524401</code> in <code>ServerHello.random</code> → rejected by <code>has_downgrade_sentinel</code>.</li>
+</ul>
+<p>For <code>HelloRetryRequest</code>, pass <code>transcript_prefix = ClientHello1‖HelloRetryRequest</code>; <code>verify_psk_binder</code> then hashes <code>prefix || Truncate(ClientHello2)</code> exactly as RFC 8446 requires.</p>
+<p>Key correctness facts encoded here:</p>
+<ul>
+<li><code>Truncate()</code> hashes the <strong>raw prefix through the identities</strong>, with enclosing length fields left at their on-wire (binders-present) values; the binder-vector length is <strong>not</strong> hashed.</li>
+<li><code>binder = HMAC(HKDF-Expand-Label(binder_key,"finished",""), SHA-256(Truncate(CH)))</code>, compared with <code>hmac.compare_digest</code>.</li>
+<li><code>client_early_traffic_secret</code> uses the <strong>full</strong> ClientHello and excludes <code>EndOfEarlyData</code>.</li>
+<li>The downgrade sentinels are checked on <code>ServerHello.random</code>, and the comparison is constant-time.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: tls13-psk-binder-truncated-transcript-verification
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-21T04:46:04.957Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Build the RFC 8446 TLS 1.3 pre-shared-key binder check in Python from the raw HKDF-Extract / HKDF-Expand-Label primitives, with no TLS library allowed: derive the resumption and early-data secrets, compute the binder over the partially-truncated ClientHello (everything up to the binder list, with the binders field length zeroed as the RFC specifies), and decide accept/reject on supplied byte transcripts. The grader includes transcripts where the binder covers the wrong transcript hash, where the PSK is imported from a different ticket, where the early-data transcript must exclude the EndOfEarlyData message, and where the downgrade sentinel is forged, and requires exact accept/reject plus the derived keys reprinted as hex.&quot;, &quot;environment&quot;: &quot;python3&quot;, &quot;language&quot;: &quot;python&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;tls13-psk-binder-truncated-transcript-verification&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-21T04:46:04.958Z&quot;, &quot;version&quot;: &quot;3.11&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

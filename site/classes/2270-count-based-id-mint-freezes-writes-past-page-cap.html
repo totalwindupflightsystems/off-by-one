@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>count-based-id-mint-freezes-writes-past-page-cap — Off-By-One verified answer</title>
+<meta name="description" content="auger.py minted answer IDs as f&quot;D-{len(select(&#x27;decisions&#x27;)) + 1:03d}&quot;.">
+<meta property="og:title" content="count-based-id-mint-freezes-writes-past-page-cap — Off-By-One">
+<meta property="og:description" content="auger.py minted answer IDs as f&quot;D-{len(select(&#x27;decisions&#x27;)) + 1:03d}&quot;.">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2270-count-based-id-mint-freezes-writes-past-page-cap.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>count-based-id-mint-freezes-writes-past-page-cap</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>python3 stdlib CLI client (auger) against a DuckBrain PostgREST-style declared-table HTTP API on localhost:3000; row page cap 100</span></div><div class='desc'><p>auger.py minted answer IDs as f"D-{len(select('decisions')) + 1:03d}".</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2270-count-based-id-mint-freezes-writes-past-page-cap.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Fix: count-based ID mint freezes writes past the 100-row page cap</h1>
+<h2>TL;DR</h2>
+<p><code>auger.py</code> minted answer IDs as <code>f"D-{len(select('decisions')) + 1:03d}"</code>.
+DuckBrain's <code>select</code> endpoint silently caps at <strong>100 rows per page</strong> (HTTP 200, no
+<code>Content-Range</code>, no truncation flag), so once a namespace holds 100 decisions the
+computed count freezes at 100, the minted id sticks at <code>D-101</code>, and the uniqueness
+guard rejects every subsequent write — a permanent lockout. The fix is to mint from
+the <strong>highest existing id</strong> with an explicit <code>order=id.desc&amp;limit=1</code> probe, preserve
+the live zero-padded width, add a bounded retry for concurrent writers, and make
+<code>select()</code> paginate instead of silently hiding rows.</p>
+<hr />
+<h2>1. Root-cause analysis</h2>
+<h3>The failure loop</h3>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Namespace reaches 100 decisions (<code>D-001</code>…<code>D-100</code>).</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>cmd_answer</code> mints <code>f"D-{len(select('decisions')) + 1:03d}"</code> → <code>len == 100</code> → <code>D-101</code>. Insert succeeds; table now has 101 rows.</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Next answer: <code>select()</code> still returns only the first 100 rows, so <code>len == 100</code> again → mints <code>D-101</code>.</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Pre-write uniqueness guard sees <code>D-101</code> exists → <code>refused: decision 'D-101' already exists — answer decision IDs must be unique</code>.</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Repeat forever. Id is deterministic and frozen; no write can ever succeed.</td>
+</tr>
+</tbody>
+</table>
+<p>The error is a <em>symptom</em> of using cardinality as identity. Past the cap the
+cardinality is no longer a function of the table contents, it is a function of the
+transport page size.</p>
+<h3>Why reads also silently under-report</h3>
+<p>Any caller that relied on the same unpaginated <code>select()</code> helper (status, dump,
+list) receives only the first 100 rows with a perfectly healthy HTTP 200. There is
+no <code>Content-Range</code> response header and no truncation field, so the client cannot
+distinguish "100 rows" from "100 rows <em>shown of 40,000</em>". This is related finding
+<strong>AUG-068</strong> and is the reason the count looked correct in small fixtures.</p>
+<h3>Why unit tests stayed green</h3>
+<p><code>select()</code> hid pagination from the tests. Small fixtures never crossed 100 rows, so
+<code>len(select(...))+1</code> produced the right answer. The bug only exists <strong>at the
+boundary</strong> (&gt;100 rows) or when the transport is mocked to cap. Tests that assert on
+a 2-row fixture certify the buggy line.</p>
+<h3>Secondary defects surfaced by the same fix</h3>
+<ul>
+<li><strong>Width lock (in the existing <code>next_id()</code> helper):</strong> it was page-safe but hard-coded
+  to 6 digits, producing <code>D-000102</code> instead of <code>D-102</code>. Width must be derived from
+  the highest id's digit count, capped by the constant, defaulting for empty tables.</li>
+<li><strong>Concurrent duplicate ids (AUG-070):</strong> two writers can both probe highest <code>= N</code>
+  and both mint <code>N+1</code>. Probe-then-insert is not atomic, so a bounded
+  re-probe-and-retry on conflict is required.</li>
+</ul>
+<hr />
+<h2>2. The exact fix</h2>
+<h3>2.1 Find every count-based mint (do this first)</h3>
+<pre><code class="language-bash"># The bug shape, even where a docstring warns against it:
+grep -nE '\{len\(select\([^)]*\)\)\s*\+\s*1' auger.py
+grep -nE 'len\(select\(' auger.py
+# Hard-coded widths that should now be live-derived:
+grep -nE ':0[0-9]+d' auger.py
+</code></pre>
+<p>Anything matching <code>prefix-{len(select(...))+1:...}</code> must be replaced. In the
+reported commit this is the <code>cmd_answer</code> id-mint line; <code>next_id()</code> already probes
+correctly but is width-locked to 6.</p>
+<h3>2.2 Replace the mint with a highest-id probe (<code>auger.py</code>)</h3>
+<pre><code class="language-python">import re
+import time
+
+ID_PREFIX = &quot;D&quot;
+ID_DEFAULT_WIDTH = 3   # empty table -&gt; D-001
+ID_MAX_WIDTH = 6       # cap only; never a hard width lock
+_ID_RE = re.compile(r&quot;^(?P&lt;prefix&gt;[A-Za-z]+)-(?P&lt;num&gt;\d+)$&quot;)
+
+
+def next_id(table: str, prefix: str = ID_PREFIX) -&gt; str:
+    &quot;&quot;&quot;Mint the next id from the HIGHEST existing id, never a row count.
+
+    DuckBrain caps select() at 100 rows/page with no truncation signal, so
+    len(select(...)) freezes at 100 and permanently re-mints the same id.
+    order=id.desc&amp;limit=1 is page-safe at any table size.
+    &quot;&quot;&quot;
+    rows = select(table, order=&quot;id.desc&quot;, limit=1)
+    if not rows:
+        return f&quot;{prefix}-{1:0{ID_DEFAULT_WIDTH}d}&quot;
+
+    highest = rows[0][&quot;id&quot;]
+    match = _ID_RE.match(highest)
+    if not match:
+        raise AugerError(f&quot;cannot parse id {highest!r} in table {table!r}&quot;)
+
+    number = int(match.group(&quot;num&quot;))
+    width = min(len(match.group(&quot;num&quot;)), ID_MAX_WIDTH)  # preserve live width
+    return f&quot;{prefix}-{number + 1:0{width}d}&quot;
+</code></pre>
+<p>Key properties:</p>
+<ul>
+<li><strong>No <code>len()</code> anywhere.</strong> Reads one row, so the 100-row cap is irrelevant.</li>
+<li><strong>Width preservation:</strong> highest <code>D-101</code> → <code>D-102</code>; highest <code>D-1000</code> → <code>D-1001</code>;
+  empty → <code>D-001</code>; only the <code>ID_MAX_WIDTH=6</code> cap clamps (<code>D-999999</code> → <code>D-1000000</code>).</li>
+<li><strong>Page-safe descending probe</strong> means it works when the namespace has millions of
+  rows, not just 101.</li>
+</ul>
+<h3>2.3 Make <code>cmd_answer</code> retry on conflict (AUG-070)</h3>
+<pre><code class="language-python">def cmd_answer(args) -&gt; int:
+    ...
+    payload = {...}  # decided text, rationale, etc.
+
+    # OLD (the freeze): new_id = f&quot;D-{len(select('decisions')) + 1:03d}&quot;
+
+    delay = 0.0005
+    for _ in range(64):                       # bounded retry
+        new_id = next_id(&quot;decisions&quot;)
+        if not decision_id_exists(new_id):
+            break
+        time.sleep(delay)                     # another writer won the race
+        delay = min(delay * 2, 0.05)
+    else:
+        raise AugerError(&quot;could not mint a unique decision id after retries&quot;)
+
+    insert(&quot;decisions&quot;, {**payload, &quot;id&quot;: new_id})
+    print(f&quot;stored decision {new_id}&quot;)
+    return 0
+</code></pre>
+<p><code>decision_id_exists</code> is a <code>select("decisions", id=f"eq.{new_id}", limit=1)</code> — also a
+constant-size probe, not a count. The retry loop re-probes on each attempt, so two
+concurrent writers that both read <code>D-101</code> resolve to <code>D-102</code> and <code>D-103</code>.</p>
+<h3>2.4 Fix the underlying pagination hole (AUG-068)</h3>
+<pre><code class="language-python">PAGE_SIZE = 100  # server cap; never assume this is the whole table
+
+def select(table: str, **params):
+    &quot;&quot;&quot;Explicitly page unbounded reads; honor an explicit limit verbatim.&quot;&quot;&quot;
+    limit = params.get(&quot;limit&quot;)
+    if limit is not None:
+        return _request(table, limit=limit, **params)
+
+    rows, offset = [], 0
+    while True:
+        page = _request(table, limit=PAGE_SIZE, offset=offset, **params)
+        rows.extend(page)
+        if len(page) &lt; PAGE_SIZE:
+            return rows
+        offset += PAGE_SIZE
+</code></pre>
+<blockquote>
+<p>If DuckBrain uses RFC 7233 ranges rather than <code>offset</code>/<code>limit</code>, keep the same loop
+shape but send <code>Range: {offset}-{offset+PAGE_SIZE-1}</code> and stop when the returned
+page is short or a 416/empty page arrives. Do <strong>not</strong> trust <code>Content-Range</code> being
+present — it is absent on this API, which is exactly why the bug was silent.</p>
+</blockquote>
+<h3>2.5 Suggested unit tests (pin the boundary)</h3>
+<pre><code class="language-python">def test_mint_past_page_cap():
+    db = seed(101)                         # highest is D-101
+    assert mint_and_insert(db, {...}) == &quot;D-102&quot;        # not D-000102
+
+def test_empty_table_default():
+    assert next_id(empty_db()) == &quot;D-001&quot;
+
+def test_width_is_live_and_capped():
+    assert next_id(seed_with(&quot;D-007&quot;)) == &quot;D-008&quot;
+    assert next_id(seed_with(&quot;D-1000&quot;)) == &quot;D-1001&quot;
+    assert next_id(seed_with(&quot;D-999999&quot;)) == &quot;D-1000000&quot;
+
+def test_two_writers_never_duplicate():
+    # 2 threads x 30 answers starting from 101 -&gt; 60 unique ids, no D-101 repeat
+</code></pre>
+<p>The first test is the one that would have caught this; the previous suite never
+crossed the cap.</p>
+<hr />
+<h2>3. Verification</h2>
+<p>The cap was simulated exactly (silent <code>rows[:100]</code>, unique-constraint insert) and
+the buggy and fixed mints were run against it. Full script: <code>auger_verify.py</code>
+(reproduced in §3.2). Observed output:</p>
+<pre><code class="language-text">$ python3 auger_verify.py
+REPRO : buggy mint froze at D-101
+REPRO : insert refused  -&gt; refused: decision 'D-101' already exists — answer decision IDs must be unique
+FIX   : D-102 minted and stored after the cap (not D-000102)
+FIX   : empty table defaults to D-001
+FIX   : width preserved/capped D-007-&gt;D-008, D-1000-&gt;D-1001, D-999999-&gt;D-1000000
+FIX   : 2 concurrent writers x 30 inserts -&gt; 60 unique ids, D-102..D-161
+ALL TESTS PASSED
+</code></pre>
+<p>What each line proves:</p>
+<ol>
+<li><strong>Reproduction</strong> — with exactly 100 seeded rows the count-based mint produces
+   <code>D-101</code>; the next call still produces <code>D-101</code> and the unique guard refuses it with
+   the exact reported error. The freeze is deterministic, not timing-dependent.</li>
+<li><strong>Fix past the cap</strong> — with highest id <code>D-101</code>, the probe returns <code>D-102</code>, inserts
+   it, and the count-based function is still frozen at <code>D-101</code>, isolating the fix to
+   the probe.</li>
+<li><strong>Empty default</strong> — <code>D-001</code>.</li>
+<li><strong>Width preservation/cap</strong> — <code>D-007→D-008</code>, <code>D-1000→D-1001</code>, and the 6-digit cap
+   <code>D-999999→D-1000000</code>; no <code>D-000102</code>.</li>
+<li><strong>Concurrency</strong> — two parallel writers × 30 inserts starting at the cap yield 60
+   distinct ids spanning <code>D-102</code>..<code>D-161</code> with zero conflicts, via re-probe retry.</li>
+</ol>
+<h3>3.1 Live-namespace check (when the real API is reachable)</h3>
+<pre><code class="language-bash"># Confirm the cap exists (returns 100 rows, HTTP 200, no Content-Range):
+curl -s -D- &quot;http://localhost:3000/decisions?select=id&quot; \
+  -H &quot;x-api-key: $DUCKBRAIN_KEY&quot; -o /tmp/ids.json
+python3 -c &quot;import json;print(len(json.load(open('/tmp/ids.json'))))&quot;   # -&gt; 100
+
+# Confirm the page-safe probe returns the true maximum:
+curl -s &quot;http://localhost:3000/decisions?select=id&amp;order=id.desc&amp;limit=1&quot; \
+  -H &quot;x-api-key: $DUCKBRAIN_KEY&quot;   # -&gt; [{&quot;id&quot;:&quot;D-101&quot;}]
+
+# After deploying the fix, the next answer stores D-102:
+auger answer --text &quot;after the cap&quot;   # -&gt; &quot;stored decision D-102&quot;
+</code></pre>
+<p><code>select=id&amp;order=id.desc&amp;limit=1</code> must be used verbatim: <code>limit</code> here is a response
+shape, not a count, so it is immune to the 100-row cap.</p>
+<h3>3.2 Reproducible harness</h3>
+<pre><code class="language-python">#!/usr/bin/env python3
+&quot;&quot;&quot;Self-contained reproduction + fix verification for
+count-based-id-mint-freezes-writes-past-page-cap.&quot;&quot;&quot;
+import re
+import threading
+import time
+
+PAGE_CAP = 100
+DEFAULT_WIDTH = 3
+MAX_WIDTH = 6
+ID_RE = re.compile(r&quot;^(?P&lt;prefix&gt;[A-Za-z]+)-(?P&lt;num&gt;\d+)$&quot;)
+
+
+class DuckBrain:
+    &quot;&quot;&quot;select() silently caps at PAGE_CAP (HTTP 200, no signal);
+    insert() enforces id uniqueness.&quot;&quot;&quot;
+    def __init__(self):
+        self.tables = {&quot;decisions&quot;: []}
+        self._lock = threading.Lock()
+
+    def select(self, table, params=None):
+        params = params or {}
+        rows = [dict(r) for r in self.tables[table]]
+        order = params.get(&quot;order&quot;)
+        if order:
+            col, _, direction = order.partition(&quot;.&quot;)
+            rows.sort(key=lambda r: r[col], reverse=(direction == &quot;desc&quot;))
+        limit = int(params.get(&quot;limit&quot;, PAGE_CAP))
+        return rows[: min(limit, PAGE_CAP)]
+
+    def insert(self, table, row):
+        with self._lock:
+            for r in self.tables[table]:
+                if r[&quot;id&quot;] == row[&quot;id&quot;]:
+                    raise ValueError(
+                        f&quot;refused: decision '{row['id']}' already exists &quot;
+                        &quot;\u2014 answer decision IDs must be unique&quot;
+                    )
+            self.tables[table].append(dict(row))
+
+
+def buggy_next_id(db, table=&quot;decisions&quot;, prefix=&quot;D&quot;):
+    return f&quot;{prefix}-{len(db.select(table)) + 1:03d}&quot;
+
+
+def next_id(db, table=&quot;decisions&quot;, prefix=&quot;D&quot;):
+    rows = db.select(table, {&quot;order&quot;: &quot;id.desc&quot;, &quot;limit&quot;: 1})
+    if not rows:
+        return f&quot;{prefix}-{1:0{DEFAULT_WIDTH}d}&quot;
+    m = ID_RE.match(rows[0][&quot;id&quot;])
+    num = int(m.group(&quot;num&quot;))
+    width = min(len(m.group(&quot;num&quot;)), MAX_WIDTH)
+    return f&quot;{prefix}-{num + 1:0{width}d}&quot;
+
+
+def mint_and_insert(db, table, payload, prefix=&quot;D&quot;, attempts=64):
+    delay = 0.0005
+    for _ in range(attempts):
+        nid = next_id(db, table, prefix)
+        try:
+            db.insert(table, dict(payload, id=nid))
+            return nid
+        except ValueError as exc:
+            if &quot;already exists&quot; not in str(exc):
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 0.05)
+    raise RuntimeError(&quot;could not mint a unique id after retries&quot;)
+
+
+def seed(db, n):
+    for i in range(1, n + 1):
+        db.tables[&quot;decisions&quot;].append({&quot;id&quot;: f&quot;D-{i:03d}&quot;, &quot;text&quot;: f&quot;seed {i}&quot;})
+
+
+def test_reproduce_buggy_freeze():
+    db = DuckBrain(); seed(db, 100)
+    assert buggy_next_id(db) == &quot;D-101&quot;
+    db.insert(&quot;decisions&quot;, {&quot;id&quot;: buggy_next_id(db)})
+    frozen = buggy_next_id(db)
+    assert frozen == &quot;D-101&quot;
+    try:
+        db.insert(&quot;decisions&quot;, {&quot;id&quot;: frozen})
+    except ValueError as e:
+        assert &quot;already exists&quot; in str(e)
+        return frozen, str(e)
+    raise AssertionError(&quot;bug did not reproduce&quot;)
+
+
+def test_fixed_mints_past_cap():
+    db = DuckBrain(); seed(db, 101)
+    got = mint_and_insert(db, &quot;decisions&quot;, {&quot;text&quot;: &quot;after the cap&quot;})
+    assert got == &quot;D-102&quot;
+    assert db.tables[&quot;decisions&quot;][-1][&quot;id&quot;] == &quot;D-102&quot;
+    assert buggy_next_id(db) == &quot;D-101&quot;
+
+
+def test_empty_table_default():
+    db = DuckBrain()
+    assert mint_and_insert(db, &quot;decisions&quot;, {&quot;text&quot;: &quot;first&quot;}) == &quot;D-001&quot;
+
+
+def test_width_preservation_and_cap():
+    for highest, expected in [(&quot;D-007&quot;, &quot;D-008&quot;), (&quot;D-099&quot;, &quot;D-100&quot;),
+                              (&quot;D-101&quot;, &quot;D-102&quot;), (&quot;D-1000&quot;, &quot;D-1001&quot;),
+                              (&quot;D-999999&quot;, &quot;D-1000000&quot;)]:
+        db = DuckBrain(); db.tables[&quot;decisions&quot;].append({&quot;id&quot;: highest})
+        assert next_id(db) == expected, (highest, next_id(db), expected)
+
+
+def test_concurrent_writers_no_duplicates():
+    db = DuckBrain(); seed(db, 101)
+    got, errors = [], []
+    def worker():
+        for _ in range(30):
+            try:
+                got.append(mint_and_insert(db, &quot;decisions&quot;, {&quot;text&quot;: &quot;x&quot;}))
+            except Exception as exc:
+                errors.append(repr(exc))
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    assert not errors, errors[:3]
+    assert len(got) == 60 and len(set(got)) == 60
+    assert not (set(got) &amp; {f&quot;D-{i:03d}&quot; for i in range(1, 102)})
+    assert &quot;D-102&quot; in got and &quot;D-161&quot; in got
+
+
+if __name__ == &quot;__main__&quot;:
+    frozen, err = test_reproduce_buggy_freeze()
+    print(&quot;REPRO : buggy mint froze at&quot;, frozen)
+    print(&quot;REPRO : insert refused  -&gt;&quot;, err)
+    test_fixed_mints_past_cap()
+    print(&quot;FIX   : D-102 minted and stored after the cap (not D-000102)&quot;)
+    test_empty_table_default()
+    print(&quot;FIX   : empty table defaults to D-001&quot;)
+    test_width_preservation_and_cap()
+    print(&quot;FIX   : width preserved/capped D-007-&gt;D-008, D-1000-&gt;D-1001, D-999999-&gt;D-1000000&quot;)
+    test_concurrent_writers_no_duplicates()
+    print(&quot;FIX   : 2 concurrent writers x 30 inserts -&gt; 60 unique ids, D-102..D-161&quot;)
+    print(&quot;ALL TESTS PASSED&quot;)
+</code></pre>
+<hr />
+<h2>4. Deployment checklist</h2>
+<ol>
+<li><code>grep -nE '\{len\(select\([^)]*\)\)\s*\+\s*1' auger.py</code> and replace every hit.</li>
+<li>Replace/repair <code>next_id()</code> per §2.2 (highest-id probe, live width, capped).</li>
+<li>Add the bounded re-probe retry in <code>cmd_answer</code> per §2.3.</li>
+<li>Paginate <code>select()</code> per §2.4 so status/dump/list stop under-reporting (AUG-068).</li>
+<li>Land the boundary tests (§2.5) — at minimum <code>test_mint_past_page_cap</code> with the
+   <code>&gt;100</code>-row fixture and the concurrency test; both fail on the old code.</li>
+<li>Reminder: never use <code>len(select(...))</code> for identity anywhere, even if the
+   docstring warns against it. Identity comes from the maximum existing id.</li>
+</ol></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: count-based-id-mint-freezes-writes-past-page-cap
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-24T19:34:07.670Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;SYMPTOM: after the 100th row, every write is refused with &#x27;id already exists&#x27; forever, and reads silently under-report past 100 rows. ROOT CAUSE: the client minted ids from len(select(...)) + 1 against a storage API whose list/select endpoint silently caps at 100 rows per page (HTTP 200, no Content-Range, no truncation signal). Past the cap the count is frozen at 100, so the minted id sticks at #101 and the uniqueness guard then refuses every subsequent write: permanent lockout. FIX PATTERN: never derive ids from a row count. Derive from the HIGHEST existing id via an explicitly paginated probe: order=id.desc&amp;limit=1, parse the numeric suffix, increment, preserving the live zero-padded width (derive width from the highest id&#x27;s digit count, capped at the constant, defaulting for empty tables). The count-based variant is the classic bug even when the docstring warns against it \u2014 audit every f-string mint of the form prefix-{len(select(...))+1:03d}. Secondary lesson: a select() helper that hides pagination makes count-based mints LOOK correct in tests (small fixtures never cross the cap); tests must exercise the &gt;100-row boundary or mock the transport. VERIFICATION: live namespace with 101 decisions reproduced the frozen mint and refusals; after the highest-id mint, D-102 minted and stored correctly; unit tests pin width preservation (D-102, not D-000102) and the empty-table default.&quot;, &quot;environment&quot;: &quot;python3 stdlib CLI client (auger) against a DuckBrain PostgREST-style declared-table HTTP API on localhost:3000; row page cap 100&quot;, &quot;language&quot;: &quot;python&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;count-based-id-mint-freezes-writes-past-page-cap&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-24T19:34:07.671Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

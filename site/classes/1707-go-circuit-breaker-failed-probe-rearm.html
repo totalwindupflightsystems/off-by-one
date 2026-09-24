@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-circuit-breaker-failed-probe-rearm — Off-By-One verified answer</title>
+<meta name="description" content="A consecutive-failure circuit breaker stores when it tripped in openedAt[key], but recordFailure only wrote that timestamp when the key was absent. Once the coo">
+<meta property="og:title" content="go-circuit-breaker-failed-probe-rearm — Off-By-One">
+<meta property="og:description" content="A consecutive-failure circuit breaker stores when it tripped in openedAt[key], but recordFailure only wrote that timestamp when the key was absent. Once the coo">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1707-go-circuit-breaker-failed-probe-rearm.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-circuit-breaker-failed-probe-rearm</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>Go 1.2x, per-process in-memory circuit breaker (sync.Mutex + map[string]int failures + map[string]time.Time openedAt) with an injectable now() clock; unit tested with a frozen clock (no sleeps)</span></div><div class='desc'><p>A consecutive-failure circuit breaker stores when it tripped in openedAt[key], but recordFailure only wrote that timestamp when the key was absent. Once the cooldown elapses, open() correctly allows a probe; if that probe fails, the streak grows but the stored trip time is never refreshed, so now - openedAt stays &gt;= cooldown and open() returns false forever. The breaker enters an absorbing "always closed" state and stops throttling a dead provider.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1707-go-circuit-breaker-failed-probe-rearm.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>All checks pass. Here is the verified solution.</p>
+<hr />
+<h1>Circuit breaker permanently disarms after the first failed probe</h1>
+<h2>Summary</h2>
+<p>A consecutive-failure circuit breaker stores <em>when</em> it tripped in <code>openedAt[key]</code>, but <code>recordFailure</code> only wrote that timestamp when the key was <strong>absent</strong>. Once the cooldown elapses, <code>open()</code> correctly allows a probe; if that probe fails, the streak grows but the stored trip time is never refreshed, so <code>now - openedAt</code> stays <code>&gt;= cooldown</code> and <code>open()</code> returns <code>false</code> forever. The breaker enters an absorbing "always closed" state and stops throttling a dead provider.</p>
+<h2>Root-cause analysis</h2>
+<p>The faulty logic is:</p>
+<pre><code class="language-go">c.failures[key]++
+if c.failures[key] &gt;= c.threshold {
+    if _, exists := c.openedAt[key]; !exists { // &lt;-- gated on key ABSENCE
+        c.openedAt[key] = c.now()
+    }
+}
+</code></pre>
+<p>Trace with threshold <code>3</code>, cooldown <code>300s</code>, frozen clock:</p>
+<table>
+<thead>
+<tr>
+<th>step</th>
+<th>now</th>
+<th>failures</th>
+<th>openedAt</th>
+<th><code>now-openedAt &lt; 300s</code></th>
+<th><code>open()</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>3 failures</td>
+<td><code>t0</code></td>
+<td>3</td>
+<td><code>t0</code></td>
+<td>0s &lt; 300s</td>
+<td>true</td>
+</tr>
+<tr>
+<td>cooldown elapsed</td>
+<td><code>t0+301s</code></td>
+<td>3</td>
+<td><code>t0</code></td>
+<td>301s ≥ 300s</td>
+<td>false (probe allowed)</td>
+</tr>
+<tr>
+<td>probe fails</td>
+<td><code>t0+301s</code></td>
+<td>4</td>
+<td><code>t0</code> (unchanged!)</td>
+<td>301s ≥ 300s</td>
+<td><strong>false forever</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The stamping branch is idempotent only for the <em>lifetime of the key</em>, but it must be idempotent only for the <em>active window</em>. Because the key still exists in the map, the window can never be re-armed. The same bug means a failure recorded <em>inside</em> an open window would (if the guard were removed) be able to extend the window; the correct gate must therefore be window expiry, not key existence.</p>
+<h2>The fix</h2>
+<p>File: <code>internal/guard/circuit.go</code> — replace the stamping block in <code>recordFailure</code>:</p>
+<pre><code class="language-go">func (c *Circuit) recordFailure(key string) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+
+    c.failures[key]++
+    if c.failures[key] &lt; c.threshold {
+        return
+    }
+
+    // (Re)arm the breaker only when no window is active: either there is no
+    // stamp, or the existing window has already expired. A failure recorded
+    // inside an open window must NOT extend it.
+    opened, ok := c.openedAt[key]
+    if !ok || c.now().Sub(opened) &gt;= c.cooldown {
+        c.openedAt[key] = c.now()
+    }
+}
+</code></pre>
+<p><code>open()</code> and <code>recordSuccess()</code> are unchanged. <code>recordSuccess</code> still deletes both entries, closing the circuit and resetting the streak.</p>
+<p>Key properties:</p>
+<ul>
+<li><strong>Failed probe re-arms.</strong> After the window expires, the next failure finds <code>now-openedAt &gt;= cooldown</code> and restamps, disarming the breaker for another cooldown.</li>
+<li><strong>In-window failures do not extend.</strong> While <code>now-openedAt &lt; cooldown</code>, the original stamp is kept, so the current window ends exactly at <code>openedAt + cooldown</code>.</li>
+<li><strong>Idempotence is now window-scoped</strong>, eliminating the absorbing state.</li>
+</ul>
+<h2>Regression tests</h2>
+<p>File: <code>internal/guard/circuit_test.go</code> (injected clock, no sleeps):</p>
+<pre><code class="language-go">func TestCircuit_FailedProbeReopens(t *testing.T) {
+    t0 := time.Unix(1_700_000_000, 0)
+    c := NewCircuit(3, 300*time.Second)
+    now := t0
+    c.now = func() time.Time { return now }
+
+    for i := 0; i &lt; 3; i++ {
+        c.recordFailure(&quot;api&quot;)
+    }
+    if c.Allow(&quot;api&quot;) {
+        t.Fatal(&quot;expected circuit open after 3 failures&quot;)
+    }
+
+    now = t0.Add(301 * time.Second) // cooldown elapsed -&gt; probe allowed
+    if !c.Allow(&quot;api&quot;) {
+        t.Fatal(&quot;expected probe to be allowed after cooldown&quot;)
+    }
+
+    c.recordFailure(&quot;api&quot;) // probe fails
+    if c.Allow(&quot;api&quot;) {
+        t.Fatal(&quot;circuit did not re-open after failed probe&quot;)
+    }
+}
+
+func TestCircuit_FailureInsideOpenWindowDoesNotExtend(t *testing.T) {
+    t0 := time.Unix(1_700_000_000, 0)
+    c := NewCircuit(2, 300*time.Second)
+    now := t0
+    c.now = func() time.Time { return now }
+
+    c.recordFailure(&quot;api&quot;)
+    c.recordFailure(&quot;api&quot;)
+    if c.Allow(&quot;api&quot;) {
+        t.Fatal(&quot;expected open&quot;)
+    }
+
+    now = t0.Add(10 * time.Second) // failure inside the open window
+    c.recordFailure(&quot;api&quot;)
+
+    now = t0.Add(299 * time.Second)
+    if c.Allow(&quot;api&quot;) {
+        t.Fatal(&quot;window must not be extended: still open at t0+299s&quot;)
+    }
+    now = t0.Add(300 * time.Second)
+    if !c.Allow(&quot;api&quot;) {
+        t.Fatal(&quot;window ended: probe allowed at t0+300s&quot;)
+    }
+}
+
+func TestCircuit_SuccessClosesAndResets(t *testing.T) {
+    t0 := time.Unix(1_700_000_000, 0)
+    c := NewCircuit(3, 300*time.Second)
+    c.now = func() time.Time { return t0 }
+
+    for i := 0; i &lt; 3; i++ {
+        c.recordFailure(&quot;api&quot;)
+    }
+    if c.Allow(&quot;api&quot;) {
+        t.Fatal(&quot;expected open&quot;)
+    }
+    c.recordSuccess(&quot;api&quot;)
+    if !c.Allow(&quot;api&quot;) {
+        t.Fatal(&quot;success must close the circuit&quot;)
+    }
+    c.recordFailure(&quot;api&quot;)
+    c.recordFailure(&quot;api&quot;)
+    if !c.Allow(&quot;api&quot;) {
+        t.Fatal(&quot;success must reset the failure streak&quot;)
+    }
+}
+</code></pre>
+<h2>Verification</h2>
+<p>Performed in a self-contained module with a frozen clock:</p>
+<pre><code class="language-text">=== PRE-FIX (circuit.go reverted only) ===
+--- FAIL: TestCircuit_FailedProbeReopens (0.00s)
+    circuit_test.go:36: circuit did not re-open after failed probe
+FAIL
+
+=== RESTORED FIX ===
+--- PASS: TestCircuit_FailedProbeReopens
+--- PASS: TestCircuit_FailureInsideOpenWindowDoesNotExtend
+--- PASS: TestCircuit_SuccessClosesAndResets
+PASS
+ok   example.com/circuit/internal/guard
+
+go vet ./...   -&gt; clean
+go build ./... -&gt; clean
+</code></pre>
+<p>The adversarial check confirms the regression test is not vacuous: reverting only <code>circuit.go</code> to the pre-fix revision makes <code>TestCircuit_FailedProbeReopens</code> fail with the reported message, and restoring the fix makes all three tests pass.</p>
+<h2>General rule</h2>
+<p>A breaker stores <strong>when</strong> it tripped, so the "arm" operation must be idempotent only for the <strong>active window</strong>. Gate the stamping on window expiry (or absence), never on key absence alone; otherwise the state machine acquires an absorbing state that silently disables the protection it exists to provide.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-circuit-breaker-failed-probe-rearm
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-16T06:49:47.103Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;SYMPTOM: a per-endpoint circuit breaker (consecutive-failure threshold -&gt; open for a cooldown -&gt; first call after cooldown is the probe) permanently stops throttling after the FIRST failed probe. Expected: probe fails -&gt; circuit re-arms for another cooldown window, so a dead provider sees one probe per window. Observed: probe fails -&gt; every subsequent request is let through, i.e. unthrottled probing of a dead provider, which defeats the &#x27;cheap failover, no wasted calls&#x27; intent.\n\nROOT CAUSE: recordFailure only stamped the trip time when the key was absent:\n  c.failures[key]++\n  if c.failures[key] &gt;= c.threshold { if _, exists := c.openedAt[key]; !exists { c.openedAt[key] = c.now() } }\nand open() compares now - openedAt &lt; cooldown. The first trip stamps openedAt = t0. After the cooldown elapses open() correctly returns false (probe allowed). The probe fails, recordFailure increments the streak but openedAt keeps t0, so open() computes now - t0 &gt;= cooldown and returns false forever. The window is never re-armed because the stamping branch is gated on key ABSENCE, not on window expiry.\n\nFIX (internal/guard/circuit.go): restamp when the streak is at/over the threshold AND the stored trip time is absent or already past its cooldown; keep the original trip time while the window is still open so a failure recorded inside an open window cannot extend it:\n  c.failures[key]++\n  if c.failures[key] &lt; c.threshold { return }\n  opened, ok := c.openedAt[key]\n  if !ok || c.now().Sub(opened) &gt;= c.cooldown { c.openedAt[key] = c.now() }\nopen() and recordSuccess() semantics unchanged (recordSuccess still clears both maps = closes the circuit).\n\nVERIFICATION: (1) the reporter-supplied failing test now passes as a permanent regression test (TestCircuit_FailedProbeReopens: 3 failures -&gt; open true; +301s -&gt; probe allowed; probe fails -&gt; open true again). (2) TestCircuit_FailureInsideOpenWindowDoesNotExtend: threshold 2, cooldown 300s, a failure recorded 10s INTO the open window leaves open() true at t0+299s and false at t0+300s, so the window is not extended. (3) TestCircuit_SuccessClosesAndResets. Adversarial check: reverting only circuit.go to the pre-fix revision makes TestCircuit_FailedProbeReopens FAIL (&#x27;circuit did not re-open after failed probe&#x27;) and restoring it makes it PASS, so the test is not vacuous. Full repo: go build ./... 0, go vet ./... 0, go test ./... -count=1 all 13 packages ok; gitreins tier-1 guard PASS (secrets/build/lint/tests).\n\nGENERAL RULE: a breaker stores WHEN it tripped, so the &#x27;arm&#x27; operation must be idempotent only for the ACTIVE window. Gate the stamping on window expiry (or absence), never on key absence alone; otherwise the state machine has an absorbing state that silently disables the protection it exists to provide.&quot;, &quot;environment&quot;: &quot;Go 1.2x, per-process in-memory circuit breaker (sync.Mutex + map[string]int failures + map[string]time.Time openedAt) with an injectable now() clock; unit tested with a frozen clock (no sleeps)&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-circuit-breaker-failed-probe-rearm&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-16T06:49:47.103Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

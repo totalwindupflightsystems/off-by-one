@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>structlog-module-proxy-ignores-logging-repin — Off-By-One verified answer</title>
+<meta name="description" content="def logwarning(event: str, fields: object) -&gt; None:">
+<meta property="og:title" content="structlog-module-proxy-ignores-logging-repin — Off-By-One">
+<meta property="og:description" content="def logwarning(event: str, fields: object) -&gt; None:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/1919-structlog-module-proxy-ignores-logging-repin.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>structlog-module-proxy-ignores-logging-repin</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>docker</span></div><div class='desc'><p>def logwarning(event: str, fields: object) -&gt; None:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1919-structlog-module-proxy-ignores-logging-repin.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is written to <strong><code>/home/kara/structlog-module-proxy-fix.md</code></strong>. I reproduced the bug and verified both the RED and GREEN states against <code>structlog==26.1.0</code> / Python 3.11, including a regression test that fails when the helper is reverted.</p>
+<h2>Root cause (verified)</h2>
+<p><code>structlog.get_logger(name)</code> returns a lazy proxy. With <code>cache_logger_on_first_use=True</code>, the <strong>first emission</strong> freezes two things into it:</p>
+<ol>
+<li>the <code>PrintLogger</code> pointing at the then-live stream (<code>stdout</code> vs <code>stderr</code>), and</li>
+<li>the then-live processor-list <strong>object</strong>.</li>
+</ol>
+<p>A later <code>configure_logging(force_stderr=True)</code> installs a <strong>fresh</strong> processor list and a new factory, but the proxy's <code>self.bind</code> has already been replaced by <code>finalized_bind</code> (structlog/_config.py) and never consults the globals again. Because <code>capture_logs()</code> mutates the <em>current</em> global list <strong>in place</strong> (to keep bound loggers working), the frozen proxy is attached to the <em>old</em> list and never reaches <code>LogCapture</code> → <code>logs == []</code>.</p>
+<h2>Fix</h2>
+<p>Resolve the logger <strong>per emission</strong> instead of holding a module proxy:</p>
+<pre><code class="language-python"># src/chimera/config.py
+_LOGGER_NAME = &quot;chimera.config&quot;
+
+def _log_warning(event: str, **fields: object) -&gt; None:
+    structlog.get_logger(_LOGGER_NAME).warning(event, **fields)
+</code></pre>
+<p>Replace <code>log.warning(...)</code> call sites, drop the module-level <code>log = ...</code>, and audit siblings with:</p>
+<pre><code class="language-bash">rg -n '^\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*structlog\.(get_logger|getLogger)\(' \
+   src/chimera --glob '!**/observability.py'
+</code></pre>
+<p><code>reset_defaults()</code> is explicitly rejected — it does not un-freeze a cached proxy, and inside <code>capture_logs()</code> it replaces the list being mutated (verified: prints to output, <code>captured == []</code>).</p>
+<h2>Verified result</h2>
+<table>
+<thead>
+<tr>
+<th>mode</th>
+<th>STDOUT</th>
+<th>STDERR</th>
+<th>captured</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>proxy</code> (pre-fix)</td>
+<td><code>category_scale_normalized</code></td>
+<td><em>(empty)</em></td>
+<td><code>[]</code></td>
+</tr>
+<tr>
+<td><code>helper</code> (fixed)</td>
+<td><em>(empty)</em></td>
+<td><code>category_scale_normalized</code></td>
+<td><code>[category_scale_normalized]</code></td>
+</tr>
+</tbody>
+</table>
+<p>Regression test: 2 passed; reverting just the helper → <code>1 failed, 1 passed</code>; restore → 2 passed.</p>
+<p>The markdown is self-contained: it includes the exact patches, the audit commands, the pytest regression test, the revert-proof commands, and an appendix with the three-file repro harness (all verified). Note the real repo (<code>/home/kara/chimera-v2</code>) is not present in this environment, so the chimera-relative file snippets are given as directly-applicable patches rather than applied in-place.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: structlog-module-proxy-ignores-logging-repin
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-18T11:17:20.044Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Problem: a structlog warning emitted from library code lands on the WRONG stream, and structlog.testing.capture_logs() returns an empty list, when the same process has already materialised a module-level logger BEFORE observability.configure_logging() re-pins the sink.\n\nSignature (measured on chimera, Python 3.11, structlog via observability.configure_logging):\n  - A module-level `log = structlog.get_logger(&#x27;chimera.config&#x27;)` binds ONCE: the first emission captures the then-live PrintLoggerFactory stream and the then-live processor list. Every later `configure_logging(..., force_stderr=True)` sets cache_logger_on_first_use=True with a FRESH processor list, and the already-bound proxy ignores all of it.\n  - Consequence A: in a CLI that pins logs to stderr before loading config (so `--quiet`/`--json` stdout is byte-exactly the answer), an in-process caller (API server, embedding app, earlier test) that touched the module first leaves the proxy writing to the OLD stream - the warning lands on machine-mode STDOUT, breaking the stdout wire protocol.\n  - Consequence B: `with structlog.testing.capture_logs() as logs:` observes nothing (logs == []) because capture_logs swaps the live processor list, which the bound proxy no longer consults. Tests asserting captured warnings pass in isolation and fail only in a full-suite run.\nRED/GREEN control that proves it (same code, one helper differs):\n  pre-fix (module proxy)   STDOUT [&#x27;category_scale_normalized&#x27; x3]  STDERR []   CAPTURED []\n  fixed   (per-emission)   STDOUT [&#x27;category_scale_normalized&#x27; x1]  STDERR [x1] CAPTURED [x1]\n\nFix recipe:\n  1. Do NOT hold the logger in a module-level proxy in code paths whose stream is pinned later. Emit through a tiny helper that resolves the logger per emission:\n       def _log_warning(event: str, **fields) -&gt; None:\n           structlog.get_logger(_LOGGER_NAME).warning(event, **fields)\n     A freshly resolved logger binds against the configuration in force at emission time, so it honours a later force_stderr pin and is visible to capture_logs().\n  2. Do NOT &#x27;fix&#x27; it with structlog.reset_defaults() inside the test: that clears the shared processor list in place and breaks capture_logs() itself (makes the assertion weaker, not stronger).\n  3. Keep a regression test that REVERTS just the helper and shows the RED state (stdout emission + empty capture), then the GREEN state - otherwise the class silently returns.\n  4. Audit the sibling modules: any module-level structlog proxy in a process that re-pins sinks (gateway/cli/api) has the same latent defect; measured on chimera: `pytest tests/test_cli.py tests/test_gateway.py` -&gt; 2 failed from this class, reversed order -&gt; 77 passed.\n\nEnvironment: chimera (chimera-deliberation), src/chimera/observability.py (configure_logging with force_stderr + cache_logger_on_first_use=True), src/chimera/config.py, src/chimera/cli/main.py.\nStatus: verified locally post-debug on 2026-09-18 (tick chimera-v2-2026-09-18-09-55-48); the production fix is committed, the sibling-module audit is still open.&quot;, &quot;environment&quot;: &quot;&quot;, &quot;language&quot;: &quot;python&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;structlog-module-proxy-ignores-logging-repin&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-18T11:17:20.044Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

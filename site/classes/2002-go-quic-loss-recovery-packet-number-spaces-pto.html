@@ -1,0 +1,1840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-quic-loss-recovery-packet-number-spaces-pto — Off-By-One verified answer</title>
+<meta name="description" content="The task is to implement RFC 9002-style loss recovery where Initial, Handshake, and Application are three independent packet number spaces. The failure mode nam">
+<meta property="og:title" content="go-quic-loss-recovery-packet-number-spaces-pto — Off-By-One">
+<meta property="og:description" content="The task is to implement RFC 9002-style loss recovery where Initial, Handshake, and Application are three independent packet number spaces. The failure mode nam">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2002-go-quic-loss-recovery-packet-number-spaces-pto.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-quic-loss-recovery-packet-number-spaces-pto</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>The task is to implement RFC 9002-style loss recovery where Initial, Handshake, and Application are three independent packet number spaces. The failure mode named by the problem class is a single shared "packet number space": one largestacked, one in-flight set, one loss/PTO timer. Such an implementation silently corrupts state whenever two spaces are active at once (the handshake/application overlap), fires PTOs it should not, and produces the wrong retransmit counts under reordering and tail loss.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2002-go-quic-loss-recovery-packet-number-spaces-pto.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The full solution is written to <code>/home/kara/quicrecovery/SOLUTION.md</code> (52 KB, self-contained source + tests). Here it is:</p>
+<hr />
+<h1>QUIC Loss Recovery over Per-Packet-Number-Space State</h1>
+<h2>Summary</h2>
+<p>The task is to implement RFC 9002-style loss recovery where <strong>Initial</strong>, <strong>Handshake</strong>, and <strong>Application</strong> are three independent packet number spaces. The failure mode named by the problem class is a single shared "packet number space": one <code>largest_acked</code>, one in-flight set, one loss/PTO timer. Such an implementation silently corrupts state whenever two spaces are active at once (the handshake/application overlap), fires PTOs it should not, and produces the wrong retransmit counts under reordering and tail loss.</p>
+<p>This document contains the root-cause analysis, the exact fix (a complete Go package), and a regression test that <strong>passes on the correct engine and fails on the naive single-space engine</strong>. The package lives in <code>/home/kara/quicrecovery</code>.</p>
+<h2>Root-cause analysis</h2>
+<p>RFC 9002 §5.1 is explicit: <em>packet numbers are independent for each packet number space</em>. That independence is load-bearing for four separate mechanisms. The naive implementation breaks each one:</p>
+<ol>
+<li><strong>ACK processing (<code>largest_acked</code>).</strong> An ACK frame carries range sets meaningful only within the space it was received on. A shared <code>largest_acked</code> lets <code>ACK(Application, largest=5)</code> set the <em>Handshake</em> largest-acked to 5. Loss detection in Handshake then thinks packet numbers ≤ 2 are old, and RTT/ECN counters are polluted. <strong>Rule: an ACK for one space must never advance another space's largest-acked.</strong></li>
+<li><strong>In-flight accounting and loss detection.</strong> Each space has its own sent-but-unacked set and its own <code>9/8 * max(srtt, latest_rtt)</code> loss timer. Sharing them declares a Handshake packet lost because an unrelated Application packet was acknowledged, and corrupts <code>bytes_in_flight</code>.</li>
+<li><strong>PTO arming.</strong> Per RFC 9002 §6.2.1:</li>
+<li>A PTO is armed only when the <strong>first</strong> ack-eliciting packet in a space goes in flight.</li>
+<li>It is <strong>not reset</strong> while other ack-eliciting packets are already in flight.</li>
+<li>It is <strong>re-anchored</strong> to <code>time_of_last_ack_eliciting_packet</code> only after a newly acknowledged ack-eliciting packet, and <code>pto_count</code> resets to 0.</li>
+<li>An <strong>ACK-only</strong> packet must never arm or reset a PTO.
+   Merged state lets an ACK-only flight in one space postpone/cancel the PTO another space needs, and applies backoff to the wrong counter.</li>
+<li><strong>PTO backoff / probes.</strong> On expiry the period doubles (<code>base * 2^pto_count</code>) <strong>in the space whose timer expired</strong>, and probes are sent there. Merged state makes the doubling global.</li>
+</ol>
+<p>Two extra traps the correct engine must avoid:</p>
+<ul>
+<li><strong>Loss timer must not spin.</strong> RFC 9002 applies the time threshold only to packets with <code>packet_number &lt;= largest_acked</code> (§6.1.2, Appendix A). If the loss timer is set for packets above <code>largest_acked</code>, <code>AdvanceTo</code> recomputes the same past deadline forever. We set the loss timer only when an ACK exists and only over packets at or below <code>largest_acked</code>; otherwise PTO is the recovery mechanism.</li>
+<li><strong>PTO deadline must not be in the past after an ACK.</strong> Anchoring to the <em>oldest</em> in-flight packet makes the deadline fall behind <code>now</code> as acks trickle in, producing an immediate spurious probe. RFC anchors to <code>time_of_last_ack_eliciting_packet</code>.</li>
+</ul>
+<h2>The fix</h2>
+<p>A small Go package:</p>
+<ul>
+<li><code>range.go</code> — <code>RangeSet</code> (sorted, coalesced inclusive ranges), QUIC varints, ACK-frame encode/decode, <code>PendingACKs</code>.</li>
+<li><code>recovery.go</code> — <code>Space</code>, <code>Config</code>, per-space <code>spaceState</code>, <code>Manager</code> (independent <code>largest_acked</code>, in-flight sets, RTT, loss timers, PTO per space). <code>NewNaive</code> maps all spaces onto one state, used only by the regression.</li>
+<li><code>congestion.go</code> — pluggable <code>CongestionController</code> + <code>NewReno</code> and <code>DeliveryRate</code> (BBR-style); ECN-CE via <code>OnECNCongestion</code>, once per RTT in NewReno.</li>
+<li><code>sim.go</code> — deterministic trace runner + invariant checks.</li>
+</ul>
+<p>The regression test ships five traces:</p>
+<table>
+<thead>
+<tr>
+<th>trace</th>
+<th style="text-align: right;">expected lost</th>
+<th style="text-align: right;">expected probes</th>
+<th>what it exercises</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>heavy-reordering</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td>non-contiguous ACK ranges, packet-threshold loss</td>
+</tr>
+<tr>
+<td><code>tail-loss</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">4</td>
+<td>un-acked tail recovered by PTO, exponential backoff</td>
+</tr>
+<tr>
+<td><code>cross-space-overlap</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td>Initial/Handshake/Application ACKs must not cross</td>
+</tr>
+<tr>
+<td><code>persistent-ce</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td>repeated ECN-CE marks, once-per-RTT reaction</td>
+</tr>
+<tr>
+<td><code>ack-only-flights</code></td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td>ACK-only packets never arm PTO</td>
+</tr>
+</tbody>
+</table>
+<h2>Source</h2>
+<h3><code>go.mod</code></h3>
+<pre><code class="language-go">module quicrecovery
+
+go 1.26
+</code></pre>
+<h3><code>range.go</code></h3>
+<pre><code class="language-go">package recovery
+
+import (
+    &quot;errors&quot;
+    &quot;sort&quot;
+)
+
+// Range is an inclusive range of packet numbers [Low, High].
+type Range struct {
+    Low  uint64
+    High uint64
+}
+
+// RangeSet is a set of packet numbers represented as sorted, disjoint,
+// non-adjacent inclusive ranges (stored ascending internally). It is used for
+// both sides of an ACK frame: to accumulate the packet numbers an endpoint has
+// received (so it can emit an ACK frame), and to parse the ranges carried by an
+// incoming ACK frame.
+type RangeSet struct {
+    ranges []Range // ascending by Low, disjoint and non-adjacent
+}
+
+// Add inserts n into the set, coalescing with any touching/overlapping ranges.
+func (s *RangeSet) Add(n uint64) {
+    for i := 0; i &lt; len(s.ranges); i++ {
+        r := s.ranges[i]
+        switch {
+        case r.High+1 &lt; n &amp;&amp; r.High != ^uint64(0):
+            // r ends strictly before n-1: keep scanning.
+            continue
+        case r.Low &gt; n+1 &amp;&amp; n != ^uint64(0):
+            // r starts strictly after n+1: insert a fresh range here.
+            s.ranges = append(s.ranges, Range{})
+            copy(s.ranges[i+1:], s.ranges[i:])
+            s.ranges[i] = Range{n, n}
+            return
+        default:
+            // Touch/overlap: extend r, then coalesce forward.
+            if r.Low &lt; n {
+            } else {
+                r.Low = n
+            }
+            if r.High &gt; n {
+            } else {
+                r.High = n
+            }
+            // merge with the following ranges while they touch.
+            j := i + 1
+            for j &lt; len(s.ranges) &amp;&amp; s.ranges[j].Low &lt;= r.High+1 {
+                if s.ranges[j].High &gt; r.High {
+                    r.High = s.ranges[j].High
+                }
+                j++
+            }
+            s.ranges[i] = r
+            s.ranges = append(s.ranges[:i+1], s.ranges[j:]...)
+            return
+        }
+    }
+    s.ranges = append(s.ranges, Range{n, n})
+}
+
+// Contains reports whether n is in the set.
+func (s *RangeSet) Contains(n uint64) bool {
+    i := sort.Search(len(s.ranges), func(i int) bool { return s.ranges[i].High &gt;= n })
+    return i &lt; len(s.ranges) &amp;&amp; s.ranges[i].Low &lt;= n
+}
+
+// Len returns the number of packet numbers in the set.
+func (s *RangeSet) Len() uint64 {
+    var n uint64
+    for _, r := range s.ranges {
+        n += r.High - r.Low + 1
+    }
+    return n
+}
+
+// Min returns the smallest element and whether the set is non-empty.
+func (s *RangeSet) Min() (uint64, bool) {
+    if len(s.ranges) == 0 {
+        return 0, false
+    }
+    return s.ranges[0].Low, true
+}
+
+// Max returns the largest element and whether the set is non-empty.
+func (s *RangeSet) Max() (uint64, bool) {
+    if len(s.ranges) == 0 {
+        return 0, false
+    }
+    return s.ranges[len(s.ranges)-1].High, true
+}
+
+// Ascending returns the ranges in ascending order.
+func (s *RangeSet) Ascending() []Range {
+    out := make([]Range, len(s.ranges))
+    copy(out, s.ranges)
+    return out
+}
+
+// Descending returns the ranges in descending order, which is the order used by
+// a QUIC ACK frame.
+func (s *RangeSet) Descending() []Range {
+    out := make([]Range, len(s.ranges))
+    for i, r := range s.ranges {
+        out[len(out)-1-i] = r
+    }
+    return out
+}
+
+// Clone returns a deep copy.
+func (s *RangeSet) Clone() *RangeSet {
+    out := &amp;RangeSet{}
+    out.ranges = make([]Range, len(s.ranges))
+    copy(out.ranges, s.ranges)
+    return out
+}
+
+// Subtract removes n if present, splitting a range if needed.
+func (s *RangeSet) Subtract(n uint64) {
+    i := sort.Search(len(s.ranges), func(i int) bool { return s.ranges[i].High &gt;= n })
+    if i &gt;= len(s.ranges) || s.ranges[i].Low &gt; n {
+        return
+    }
+    r := s.ranges[i]
+    switch {
+    case r.Low == n &amp;&amp; r.High == n:
+        s.ranges = append(s.ranges[:i], s.ranges[i+1:]...)
+    case r.Low == n:
+        s.ranges[i].Low = n + 1
+    case r.High == n:
+        s.ranges[i].High = n - 1
+    default:
+        s.ranges[i].High = n - 1
+        s.ranges = append(s.ranges, Range{})
+        copy(s.ranges[i+2:], s.ranges[i+1:])
+        s.ranges[i+1] = Range{n + 1, r.High}
+    }
+}
+
+// ---- QUIC variable-length integers ----
+
+func appendVarint(b []byte, v uint64) []byte {
+    switch {
+    case v &lt; 1&lt;&lt;6:
+        return append(b, byte(v))
+    case v &lt; 1&lt;&lt;14:
+        return append(b, byte(v&gt;&gt;8)|0x40, byte(v))
+    case v &lt; 1&lt;&lt;30:
+        return append(b, byte(v&gt;&gt;24)|0x80, byte(v&gt;&gt;16), byte(v&gt;&gt;8), byte(v))
+    default:
+        return append(b,
+            byte(v&gt;&gt;56)|0xc0, byte(v&gt;&gt;48), byte(v&gt;&gt;40), byte(v&gt;&gt;32),
+            byte(v&gt;&gt;24), byte(v&gt;&gt;16), byte(v&gt;&gt;8), byte(v))
+    }
+}
+
+func readVarint(b []byte) (uint64, int, error) {
+    if len(b) == 0 {
+        return 0, 0, errors.New(&quot;short varint&quot;)
+    }
+    prefix := b[0] &gt;&gt; 6
+    size := 1 &lt;&lt; prefix
+    if len(b) &lt; size {
+        return 0, 0, errors.New(&quot;short varint&quot;)
+    }
+    var v uint64
+    switch prefix {
+    case 0:
+        v = uint64(b[0] &amp; 0x3f)
+    case 1:
+        v = uint64(b[0]&amp;0x3f)&lt;&lt;8 | uint64(b[1])
+    case 2:
+        v = uint64(b[0]&amp;0x3f)&lt;&lt;24 | uint64(b[1])&lt;&lt;16 | uint64(b[2])&lt;&lt;8 | uint64(b[3])
+    default:
+        v = uint64(b[0]&amp;0x3f)&lt;&lt;56 | uint64(b[1])&lt;&lt;48 | uint64(b[2])&lt;&lt;40 | uint64(b[3])&lt;&lt;32 |
+            uint64(b[4])&lt;&lt;24 | uint64(b[5])&lt;&lt;16 | uint64(b[6])&lt;&lt;8 | uint64(b[7])
+    }
+    return v, size, nil
+}
+
+// AckFrame is a decoded QUIC ACK frame. Ranges is descending by High and
+// includes LargestAcked in Ranges[0].High.
+type AckFrame struct {
+    LargestAcked uint64
+    AckDelay     uint64
+    Ranges       []Range
+    ECN          bool
+    ECT0         uint64
+    ECT1         uint64
+    ECNCE        uint64
+}
+
+// NewAckFrame builds an ACK frame from the received packet numbers.
+func NewAckFrame(rs *RangeSet, ackDelay uint64) (AckFrame, bool) {
+    max, ok := rs.Max()
+    if !ok {
+        return AckFrame{}, false
+    }
+    return AckFrame{
+        LargestAcked: max,
+        AckDelay:     ackDelay,
+        Ranges:       rs.Descending(),
+    }, true
+}
+
+// Encode serialises the ACK frame using QUIC variable-length integer encoding.
+func (f AckFrame) Encode() []byte {
+    if len(f.Ranges) == 0 {
+        return nil
+    }
+    typ := byte(0x02)
+    if f.ECN {
+        typ = 0x03
+    }
+    b := []byte{typ}
+    b = appendVarint(b, f.LargestAcked)
+    b = appendVarint(b, f.AckDelay)
+    b = appendVarint(b, uint64(len(f.Ranges)-1))
+    b = appendVarint(b, f.Ranges[0].High-f.Ranges[0].Low) // first ACK range length
+    for i := 1; i &lt; len(f.Ranges); i++ {
+        // Gap is the number of unacknowledged packets between the previous
+        // (higher) range Low and this range High.
+        gap := f.Ranges[i-1].Low - f.Ranges[i].High - 2
+        b = appendVarint(b, gap)
+        b = appendVarint(b, f.Ranges[i].High-f.Ranges[i].Low)
+    }
+    if f.ECN {
+        b = appendVarint(b, f.ECT0)
+        b = appendVarint(b, f.ECT1)
+        b = appendVarint(b, f.ECNCE)
+    }
+    return b
+}
+
+// DecodeAckFrame parses an ACK frame produced by Encode (or by a peer).
+func DecodeAckFrame(b []byte) (AckFrame, int, error) {
+    if len(b) == 0 {
+        return AckFrame{}, 0, errors.New(&quot;empty frame&quot;)
+    }
+    if b[0] != 0x02 &amp;&amp; b[0] != 0x03 {
+        return AckFrame{}, 0, errors.New(&quot;not an ACK frame&quot;)
+    }
+    f := AckFrame{ECN: b[0] == 0x03}
+    pos := 1
+    var err error
+    if f.LargestAcked, pos, err = decodeAt(b, pos); err != nil {
+        return AckFrame{}, 0, err
+    }
+    if f.AckDelay, pos, err = decodeAt(b, pos); err != nil {
+        return AckFrame{}, 0, err
+    }
+    var count uint64
+    if count, pos, err = decodeAt(b, pos); err != nil {
+        return AckFrame{}, 0, err
+    }
+    var first uint64
+    if first, pos, err = decodeAt(b, pos); err != nil {
+        return AckFrame{}, 0, err
+    }
+    if first &gt; f.LargestAcked {
+        return AckFrame{}, 0, errors.New(&quot;first ACK range underflows&quot;)
+    }
+    f.Ranges = []Range{{Low: f.LargestAcked - first, High: f.LargestAcked}}
+    for i := uint64(0); i &lt; count; i++ {
+        var gap, length uint64
+        if gap, pos, err = decodeAt(b, pos); err != nil {
+            return AckFrame{}, 0, err
+        }
+        if length, pos, err = decodeAt(b, pos); err != nil {
+            return AckFrame{}, 0, err
+        }
+        prev := f.Ranges[len(f.Ranges)-1]
+        high := prev.Low - gap - 2
+        if gap+2 &gt; prev.Low {
+            return AckFrame{}, 0, errors.New(&quot;ACK range underflows&quot;)
+        }
+        if length &gt; high {
+            return AckFrame{}, 0, errors.New(&quot;ACK range length underflows&quot;)
+        }
+        f.Ranges = append(f.Ranges, Range{Low: high - length, High: high})
+    }
+    if f.ECN {
+        if f.ECT0, pos, err = decodeAt(b, pos); err != nil {
+            return AckFrame{}, 0, err
+        }
+        if f.ECT1, pos, err = decodeAt(b, pos); err != nil {
+            return AckFrame{}, 0, err
+        }
+        if f.ECNCE, pos, err = decodeAt(b, pos); err != nil {
+            return AckFrame{}, 0, err
+        }
+    }
+    return f, pos, nil
+}
+
+func decodeAt(b []byte, pos int) (uint64, int, error) {
+    v, n, err := readVarint(b[pos:])
+    if err != nil {
+        return 0, 0, err
+    }
+    return v, pos + n, nil
+}
+
+// SetFromAck descends the ACK ranges into a RangeSet (ascending).
+func (f AckFrame) SetFromAck() *RangeSet {
+    rs := &amp;RangeSet{}
+    for i := len(f.Ranges) - 1; i &gt;= 0; i-- {
+        rs.ranges = append(rs.ranges, f.Ranges[i])
+    }
+    return rs
+}
+</code></pre>
+<h3><code>recovery.go</code></h3>
+<pre><code class="language-go">package recovery
+
+import &quot;sort&quot;
+
+// Space identifies a QUIC packet number space.
+type Space uint8
+
+const (
+    Initial Space = iota
+    Handshake
+    Application
+)
+
+// NumSpaces is the number of QUIC packet number spaces.
+const NumSpaces = int(Application) + 1
+
+func (s Space) String() string {
+    switch s {
+    case Initial:
+        return &quot;Initial&quot;
+    case Handshake:
+        return &quot;Handshake&quot;
+    case Application:
+        return &quot;Application&quot;
+    }
+    return &quot;Unknown&quot;
+}
+
+// Config controls loss recovery.
+type Config struct {
+    // InitialRTT is the assumed RTT before a sample exists, in microseconds.
+    InitialRTT int64
+    // MaxAckDelay is the peer's max_ack_delay, in microseconds.
+    MaxAckDelay int64
+    // TimerGranularity is the timer granularity, in microseconds.
+    TimerGranularity int64
+    // PacketThreshold is the reordering threshold kPacketThreshold.
+    PacketThreshold uint64
+    // MaxDatagramSize is the probe/retransmit size.
+    MaxDatagramSize int
+    // CC is the congestion controller. Defaults to NewReno.
+    CC CongestionController
+    // AutoRetransmit re-sends a fresh ack-eliciting packet whenever an
+    // in-flight packet is declared lost.
+    AutoRetransmit bool
+}
+
+// DefaultConfig returns the RFC 9002 defaults.
+func DefaultConfig() Config {
+    return Config{
+        InitialRTT:       100_000,
+        MaxAckDelay:      25_000,
+        TimerGranularity: 1_000,
+        PacketThreshold:  3,
+        MaxDatagramSize:  1200,
+        CC:               NewNewReno(1200),
+        AutoRetransmit:   true,
+    }
+}
+
+type rttState struct {
+    hasSample bool
+    latest    int64
+    min       int64
+    smoothed  int64
+    variance  int64
+}
+
+func (r *rttState) update(sample int64) {
+    if sample &lt; 1 {
+        sample = 1
+    }
+    r.latest = sample
+    if !r.hasSample {
+        r.hasSample = true
+        r.min = sample
+        r.smoothed = sample
+        r.variance = sample / 2
+        return
+    }
+    if sample &lt; r.min {
+        r.min = sample
+    }
+    delta := r.smoothed - sample
+    if delta &lt; 0 {
+        delta = -delta
+    }
+    r.variance = (3*r.variance + delta) / 4
+    r.smoothed = (7*r.smoothed + sample) / 8
+}
+
+type sentPacket struct {
+    number       uint64
+    space        Space
+    timeSent     int64
+    ackEliciting bool
+    inFlight     bool
+    size         int
+}
+
+type spaceState struct {
+    space            Space
+    nextPacketNumber uint64
+    largestAcked     uint64
+    hasLargestAcked  bool
+
+    sent                 map[uint64]*sentPacket
+    ackElicitingInFlight int
+
+    lossTime    int64
+    hasLossTime bool
+    ptoTime     int64
+    hasPTO      bool
+    ptoCount    int
+
+    // lastAckElicitingSent is time_of_last_ack_eliciting_packet for the space.
+    lastAckElicitingSent int64
+
+    // Largest ECN counts observed in ACK frames for this space.
+    ecnECT0 uint64
+    ecnECT1 uint64
+    ecnCE   uint64
+}
+
+func newSpaceState(s Space) *spaceState {
+    return &amp;spaceState{space: s, sent: make(map[uint64]*sentPacket)}
+}
+
+// Engine is the surface shared by the correct and naive implementations.
+type Engine interface {
+    SendPacket(space Space, ackEliciting bool, size int) uint64
+    OnACK(space Space, frame AckFrame, now int64)
+    AdvanceTo(now int64)
+    LargestAcked(space Space) (uint64, bool)
+    PTOTime(space Space) (int64, bool)
+    Lost() int
+    Probes() int
+    BytesInFlight() int
+    Window() int
+    AckElicitingInFlight(space Space) int
+}
+
+// Manager is the multi-space loss-recovery engine.
+type Manager struct {
+    cfg    Config
+    rtt    rttState
+    states []*spaceState
+    spaces [NumSpaces]*spaceState
+    merged bool
+
+    bytesInFlight int
+    lost          int
+    probes        int
+    now           int64
+    autoRetx      bool
+}
+
+// NewManager builds a correct, multi-space recovery manager.
+func NewManager(cfg Config) *Manager {
+    if cfg.CC == nil {
+        cfg.CC = NewNewReno(cfg.MaxDatagramSize)
+    }
+    m := &amp;Manager{cfg: cfg, autoRetx: cfg.AutoRetransmit}
+    for i := 0; i &lt; NumSpaces; i++ {
+        ss := newSpaceState(Space(i))
+        m.spaces[i] = ss
+        m.states = append(m.states, ss)
+    }
+    return m
+}
+
+// NewNaive builds the buggy single-packet-number-space implementation used by
+// the regression test. All three logical spaces map onto one shared state, so
+// an ACK in one space advances the largest-acked of every space and the
+// per-space loss/PTO timers are conflated.
+func NewNaive(cfg Config) *Manager {
+    if cfg.CC == nil {
+        cfg.CC = NewNewReno(cfg.MaxDatagramSize)
+    }
+    m := &amp;Manager{cfg: cfg, merged: true, autoRetx: cfg.AutoRetransmit}
+    ss := newSpaceState(Application)
+    m.states = []*spaceState{ss}
+    for i := 0; i &lt; NumSpaces; i++ {
+        m.spaces[i] = ss
+    }
+    return m
+}
+
+func (m *Manager) stateFor(space Space) *spaceState {
+    if m.merged {
+        return m.states[0]
+    }
+    if int(space) &lt; 0 || int(space) &gt;= NumSpaces {
+        return m.states[Application]
+    }
+    return m.spaces[space]
+}
+
+// Now returns the current simulated time.
+func (m *Manager) Now() int64 { return m.now }
+
+// SendPacket allocates a packet number in the requested space and records it.
+func (m *Manager) SendPacket(space Space, ackEliciting bool, size int) uint64 {
+    ss := m.stateFor(space)
+    if size &lt;= 0 {
+        size = m.cfg.MaxDatagramSize
+    }
+    n := ss.nextPacketNumber
+    ss.nextPacketNumber++
+    if !ackEliciting {
+        // ACK-only packets are not in flight, are not retransmitted, and MUST
+        // NOT arm a PTO.
+        return n
+    }
+    p := &amp;sentPacket{
+        number:       n,
+        space:        space,
+        timeSent:     m.now,
+        ackEliciting: true,
+        inFlight:     true,
+        size:         size,
+    }
+    ss.sent[n] = p
+    ss.ackElicitingInFlight++
+    ss.lastAckElicitingSent = m.now
+    m.bytesInFlight += size
+    if m.cfg.CC != nil {
+        m.cfg.CC.OnPacketSent(m.now, m.now, size)
+    }
+    // Arm the PTO only when this is the first ack-eliciting packet in flight
+    // for the space. If ack-eliciting packets are already in flight, the PTO
+    // deadline MUST NOT be reset (RFC 9002 6.2.1).
+    if ss.ackElicitingInFlight == 1 {
+        ss.ptoTime = m.now + m.ptoDuration(ss)
+        ss.hasPTO = true
+    }
+    m.setLossTime(ss)
+    return n
+}
+
+// ptoDuration is srtt + max(4*rttvar, granularity) [+ max_ack_delay].
+func (m *Manager) ptoDuration(ss *spaceState) int64 {
+    var d int64
+    if m.rtt.hasSample {
+        d = m.rtt.smoothed + max64(4*m.rtt.variance, m.cfg.TimerGranularity)
+    } else {
+        // srtt = initial_rtt, rttvar = initial_rtt/2.
+        d = 3 * m.cfg.InitialRTT
+    }
+    if ss.space == Application {
+        d += m.cfg.MaxAckDelay
+    }
+    return d
+}
+
+func (m *Manager) lossDelay() int64 {
+    var base int64
+    if m.rtt.hasSample {
+        base = m.rtt.smoothed
+        if m.rtt.latest &gt; base {
+            base = m.rtt.latest
+        }
+    } else {
+        base = m.cfg.InitialRTT
+    }
+    return base + base/8 // 9/8 * max(srtt, latest_rtt)
+}
+
+func (m *Manager) setLossTime(ss *spaceState) {
+    // Loss detection is only meaningful once a packet has been acknowledged;
+    // time-threshold loss in RFC 9002 is applied only to packets at or below
+    // largest_acked. Without an ACK the PTO is the recovery mechanism.
+    if !ss.hasLargestAcked {
+        ss.hasLossTime = false
+        return
+    }
+    var oldest int64
+    found := false
+    for _, p := range ss.sent {
+        if !p.inFlight {
+            continue
+        }
+        if p.number &gt; ss.largestAcked {
+            continue
+        }
+        if !found || p.timeSent &lt; oldest {
+            oldest = p.timeSent
+            found = true
+        }
+    }
+    if !found {
+        ss.hasLossTime = false
+        return
+    }
+    ss.lossTime = oldest + m.lossDelay()
+    ss.hasLossTime = true
+}
+
+// OnACK processes an inbound ACK frame for one packet number space.
+func (m *Manager) OnACK(space Space, frame AckFrame, now int64) {
+    m.now = now
+    ss := m.stateFor(space)
+    if len(frame.Ranges) == 0 &amp;&amp; !frame.ECN {
+        return
+    }
+    if frame.LargestAcked &gt; ss.largestAcked || !ss.hasLargestAcked {
+        ss.largestAcked = frame.LargestAcked
+        ss.hasLargestAcked = true
+    }
+
+    acked := frame.SetFromAck()
+    var newly []*sentPacket
+    for n, p := range ss.sent {
+        if acked.Contains(n) {
+            newly = append(newly, p)
+        }
+    }
+    sort.Slice(newly, func(i, j int) bool { return newly[i].number &lt; newly[j].number })
+
+    var largestNewly *sentPacket
+    for _, p := range newly {
+        if largestNewly == nil || p.number &gt; largestNewly.number {
+            largestNewly = p
+        }
+    }
+
+    var rtt int64
+    if largestNewly != nil &amp;&amp; largestNewly.ackEliciting {
+        rtt = now - largestNewly.timeSent
+        if space == Application {
+            delay := int64(frame.AckDelay)
+            if delay &gt; m.cfg.MaxAckDelay {
+                delay = m.cfg.MaxAckDelay
+            }
+            rtt -= delay
+        }
+        if rtt &lt; 1 {
+            rtt = 1
+        }
+        m.rtt.update(rtt)
+    }
+
+    newlyAckEliciting := false
+    for _, p := range newly {
+        delete(ss.sent, p.number)
+        crtt := int64(0)
+        if p == largestNewly {
+            crtt = rtt
+        }
+        if p.inFlight {
+            m.bytesInFlight -= p.size
+            if m.cfg.CC != nil {
+                m.cfg.CC.OnPacketAcked(now, p.timeSent, p.size, crtt)
+            }
+        }
+        if p.ackEliciting {
+            ss.ackElicitingInFlight--
+            newlyAckEliciting = true
+        }
+    }
+
+    if frame.ECN {
+        if frame.ECT0 &gt; ss.ecnECT0 {
+            ss.ecnECT0 = frame.ECT0
+        }
+        if frame.ECT1 &gt; ss.ecnECT1 {
+            ss.ecnECT1 = frame.ECT1
+        }
+        if frame.ECNCE &gt; ss.ecnCE {
+            ss.ecnCE = frame.ECNCE
+            if m.cfg.CC != nil {
+                m.cfg.CC.OnECNCongestion(now, m.rtt.smoothed)
+            }
+        }
+    }
+
+    if newlyAckEliciting {
+        ss.ptoCount = 0
+        if ss.ackElicitingInFlight == 0 {
+            ss.hasPTO = false
+        } else {
+            // Re-anchor to time_of_last_ack_eliciting_packet (RFC 9002 6.2.1).
+            ss.ptoTime = ss.lastAckElicitingSent + m.ptoDuration(ss)
+            ss.hasPTO = true
+        }
+    }
+
+    m.detectLost(ss, now)
+    m.setLossTime(ss)
+}
+
+func (m *Manager) detectLost(ss *spaceState, now int64) {
+    if !ss.hasLargestAcked {
+        return
+    }
+    lossDelay := m.lossDelay()
+    var lost []*sentPacket
+    for _, p := range ss.sent {
+        if !p.inFlight {
+            continue
+        }
+        if p.number &gt; ss.largestAcked {
+            continue
+        }
+        if p.timeSent+lossDelay &lt;= now {
+            lost = append(lost, p)
+        } else if p.number+m.cfg.PacketThreshold &lt;= ss.largestAcked {
+            lost = append(lost, p)
+        }
+    }
+    if len(lost) == 0 {
+        return
+    }
+    sort.Slice(lost, func(i, j int) bool { return lost[i].number &lt; lost[j].number })
+    for _, p := range lost {
+        delete(ss.sent, p.number)
+        m.bytesInFlight -= p.size
+        ss.ackElicitingInFlight--
+        m.lost++
+        if m.cfg.CC != nil {
+            m.cfg.CC.OnPacketLost(now, p.timeSent, p.size)
+        }
+        if m.autoRetx {
+            m.SendPacket(p.space, true, p.size)
+        }
+    }
+}
+
+func (m *Manager) onPTO(ss *spaceState, now int64) {
+    if ss.ackElicitingInFlight == 0 {
+        ss.hasPTO = false
+        return
+    }
+    ss.ptoCount++
+    // RFC 9002 recommends two probes in Initial/Handshake, one elsewhere.
+    count := 1
+    if ss.space != Application {
+        count = 2
+    }
+    for i := 0; i &lt; count; i++ {
+        m.probes++
+        m.SendPacket(ss.space, true, m.cfg.MaxDatagramSize)
+    }
+    d := m.ptoDuration(ss)
+    for i := 0; i &lt; ss.ptoCount; i++ {
+        if d &gt; 1&lt;&lt;62 {
+            d = 1 &lt;&lt; 62
+            break
+        }
+        d *= 2
+    }
+    ss.ptoTime = now + d
+    ss.hasPTO = true
+}
+
+func (m *Manager) nextTimeout() (int64, bool) {
+    var t int64
+    found := false
+    for _, ss := range m.states {
+        if ss.hasPTO &amp;&amp; ss.ackElicitingInFlight &gt; 0 {
+            if !found || ss.ptoTime &lt; t {
+                t, found = ss.ptoTime, true
+            }
+        }
+        if ss.hasLossTime {
+            if !found || ss.lossTime &lt; t {
+                t, found = ss.lossTime, true
+            }
+        }
+    }
+    return t, found
+}
+
+func (m *Manager) fire(t int64) {
+    m.now = t
+    // Loss detection first: it may resolve packets before probes are needed.
+    for _, ss := range m.states {
+        if ss.hasLossTime &amp;&amp; ss.lossTime &lt;= t {
+            ss.hasLossTime = false
+            m.detectLost(ss, t)
+            m.setLossTime(ss)
+        }
+    }
+    for _, ss := range m.states {
+        if !ss.hasPTO {
+            continue
+        }
+        if ss.ackElicitingInFlight == 0 {
+            ss.hasPTO = false
+            continue
+        }
+        if ss.ptoTime &lt;= t {
+            m.onPTO(ss, t)
+        }
+    }
+}
+
+// AdvanceTo fires every loss/PTO timer due at or before now.
+func (m *Manager) AdvanceTo(now int64) {
+    for {
+        t, ok := m.nextTimeout()
+        if !ok || t &gt; now {
+            break
+        }
+        m.fire(t)
+    }
+    m.now = now
+}
+
+// LargestAcked returns the largest acknowledged packet number for the space.
+func (m *Manager) LargestAcked(space Space) (uint64, bool) {
+    ss := m.stateFor(space)
+    return ss.largestAcked, ss.hasLargestAcked
+}
+
+// PTOTime returns the armed PTO deadline for the space.
+func (m *Manager) PTOTime(space Space) (int64, bool) {
+    ss := m.stateFor(space)
+    return ss.ptoTime, ss.hasPTO
+}
+
+// Lost returns the number of packets declared lost (retransmitted).
+func (m *Manager) Lost() int { return m.lost }
+
+// Probes returns the number of PTO probe packets sent.
+func (m *Manager) Probes() int { return m.probes }
+
+// BytesInFlight returns the congestion-controlled bytes in flight.
+func (m *Manager) BytesInFlight() int { return m.bytesInFlight }
+
+// Window returns the current congestion window.
+func (m *Manager) Window() int {
+    if m.cfg.CC == nil {
+        return 0
+    }
+    return m.cfg.CC.Window()
+}
+
+// AckElicitingInFlight returns the number of ack-eliciting packets currently in
+// flight in the space.
+func (m *Manager) AckElicitingInFlight(space Space) int {
+    return m.stateFor(space).ackElicitingInFlight
+}
+
+// PendingACKs accumulates received packet numbers and produces ACK frames.
+type PendingACKs struct {
+    received   RangeSet
+    largest    uint64
+    hasLargest bool
+}
+
+// Receive records a received packet number.
+func (p *PendingACKs) Receive(n uint64) {
+    p.received.Add(n)
+    if !p.hasLargest || n &gt; p.largest {
+        p.largest = n
+        p.hasLargest = true
+    }
+}
+
+// Frame returns the ACK frame for everything received so far, if any.
+func (p *PendingACKs) Frame(ackDelay uint64) (AckFrame, bool) {
+    return NewAckFrame(&amp;p.received, ackDelay)
+}
+
+// Set returns the underlying received set.
+func (p *PendingACKs) Set() *RangeSet { return &amp;p.received }
+</code></pre>
+<h3><code>congestion.go</code></h3>
+<pre><code class="language-go">package recovery
+
+// CongestionController is the pluggable congestion-control interface. The
+// Manager owns bytes-in-flight accounting and calls into the controller as
+// packets are sent, acknowledged, declared lost, or ECN-CE marked.
+type CongestionController interface {
+    // OnPacketSent is called when a congestion-controlled packet is sent.
+    OnPacketSent(now, sentTime int64, bytes int)
+    // OnPacketAcked is called when a previously sent packet is acknowledged.
+    OnPacketAcked(now, sentTime int64, bytes int, rtt int64)
+    // OnPacketLost is called when a packet is declared lost.
+    OnPacketLost(now, sentTime int64, bytes int)
+    // OnPacketsDiscarded is called when packets leave flight without being
+    // acknowledged (e.g. the connection is closing).
+    OnPacketsDiscarded(bytes int)
+    // OnECNCongestion is called when the peer reports newly received ECN-CE
+    // marked packets. Multiple CE marks inside one RTT count once.
+    OnECNCongestion(now, rtt int64)
+    // CanSend reports whether another packet of size bytes fits in the window.
+    CanSend(bytesInFlight, bytes int) bool
+    // Window returns the current congestion window in bytes.
+    Window() int
+    // Name identifies the controller.
+    Name() string
+}
+
+func maxInt(a, b int) int {
+    if a &gt; b {
+        return a
+    }
+    return b
+}
+
+func minInt(a, b int) int {
+    if a &lt; b {
+        return a
+    }
+    return b
+}
+
+// NewReno is an RFC 9002 NewReno congestion controller.
+type NewReno struct {
+    mss           int
+    cwnd          int
+    ssthresh      int
+    recoveryStart int64
+    inRecovery    bool
+    rtt           int64
+    // ECN reaction pacing: do not react to CE marks more than once per RTT.
+    lastECN int64
+}
+
+// NewNewReno returns a NewReno controller with the RFC 9002 initial window.
+func NewNewReno(mss int) *NewReno {
+    if mss &lt;= 0 {
+        mss = 1200
+    }
+    init := minInt(10*mss, maxInt(2*mss, 14720))
+    return &amp;NewReno{
+        mss:      mss,
+        cwnd:     init,
+        ssthresh: 1 &lt;&lt; 30,
+    }
+}
+
+func (c *NewReno) Name() string { return &quot;newreno&quot; }
+
+func (c *NewReno) OnPacketSent(now, sentTime int64, bytes int) {}
+
+func (c *NewReno) OnPacketAcked(now, sentTime int64, bytes int, rtt int64) {
+    if rtt &gt; 0 {
+        c.rtt = rtt
+    }
+    if c.inRecovery &amp;&amp; sentTime &gt; c.recoveryStart {
+        c.inRecovery = false
+    }
+    if c.inRecovery {
+        // Packets sent before recovery began do not grow the window.
+        return
+    }
+    if c.cwnd &lt; c.ssthresh {
+        c.cwnd += bytes
+    } else {
+        // Congestion avoidance: one MSS per RTT.
+        c.cwnd += maxInt(1, c.mss*bytes/c.cwnd)
+    }
+}
+
+func (c *NewReno) OnPacketLost(now, sentTime int64, bytes int) {
+    if c.inRecovery {
+        return
+    }
+    c.cwnd = maxInt(c.cwnd/2, 2*c.mss)
+    c.ssthresh = c.cwnd
+    c.inRecovery = true
+    c.recoveryStart = now
+}
+
+func (c *NewReno) OnPacketsDiscarded(bytes int) {}
+
+func (c *NewReno) OnECNCongestion(now, rtt int64) {
+    if c.inRecovery {
+        return
+    }
+    // RFC 9002 7.2.1: react to at most one CE event per RTT.
+    if c.lastECN != 0 &amp;&amp; now-c.lastECN &lt; max64(rtt, 1) {
+        return
+    }
+    c.lastECN = now
+    c.cwnd = maxInt(c.cwnd/2, 2*c.mss)
+    c.ssthresh = c.cwnd
+    c.inRecovery = true
+    c.recoveryStart = now
+}
+
+func (c *NewReno) CanSend(bytesInFlight, bytes int) bool {
+    return bytesInFlight+bytes &lt;= c.cwnd
+}
+
+func (c *NewReno) Window() int { return c.cwnd }
+
+// DeliveryRate is a BBR-style controller that tracks the maximum recent
+// delivery rate and the minimum RTT, and sizes the window from their product.
+// It does not halve on loss the way NewReno does; loss and ECN-CE instead cut
+// the bandwidth estimate.
+type DeliveryRate struct {
+    mss           int
+    // windowed max bandwidth (bytes per microsecond) and min RTT (us).
+    maxBw         float64
+    minRTT        int64
+    cwnd          int
+    startup       bool
+    lastAckTime   int64
+    lastAckSize   int
+    roundStart    int64
+    lastECN       int64
+    lossReduction float64
+    ecnReduction  float64
+}
+
+// NewDeliveryRate returns a delivery-rate controller.
+func NewDeliveryRate(mss int) *DeliveryRate {
+    if mss &lt;= 0 {
+        mss = 1200
+    }
+    return &amp;DeliveryRate{
+        mss:           mss,
+        minRTT:        1 &lt;&lt; 62,
+        startup:       true,
+        lossReduction: 0.7,
+        ecnReduction:  0.7,
+        cwnd:          10 * mss,
+    }
+}
+
+func (c *DeliveryRate) Name() string { return &quot;delivery-rate&quot; }
+
+func (c *DeliveryRate) OnPacketSent(now, sentTime int64, bytes int) {
+    if c.roundStart == 0 {
+        c.roundStart = now
+    }
+}
+
+func (c *DeliveryRate) OnPacketAcked(now, sentTime int64, bytes int, rtt int64) {
+    if rtt &gt; 0 &amp;&amp; rtt &lt; c.minRTT {
+        c.minRTT = rtt
+    }
+    if c.lastAckTime != 0 {
+        dt := now - c.lastAckTime
+        if dt &gt; 0 {
+            bw := float64(bytes) / float64(dt)
+            if bw &gt; c.maxBw {
+                c.maxBw = bw
+            }
+        }
+    }
+    c.lastAckTime = now
+    // Startup leaves BBR when the bandwidth has stopped growing for a round;
+    // simplified: leave startup after a fixed number of samples.
+    if c.startup &amp;&amp; now-c.roundStart &gt; 4*max64(c.minRTT, 1) {
+        c.startup = false
+    }
+    c.recompute()
+}
+
+func (c *DeliveryRate) OnPacketLost(now, sentTime int64, bytes int) {
+    c.maxBw *= c.lossReduction
+    c.recompute()
+}
+
+func (c *DeliveryRate) OnPacketsDiscarded(bytes int) {}
+
+func (c *DeliveryRate) OnECNCongestion(now, rtt int64) {
+    if c.lastECN != 0 &amp;&amp; now-c.lastECN &lt; max64(rtt, 1) {
+        return
+    }
+    c.lastECN = now
+    c.maxBw *= c.ecnReduction
+    c.recompute()
+}
+
+func (c *DeliveryRate) recompute() {
+    if c.minRTT == 1&lt;&lt;62 || c.maxBw &lt;= 0 {
+        return
+    }
+    gain := 1.25
+    if c.startup {
+        gain = 2.885
+    }
+    target := int(gain * c.maxBw * float64(c.minRTT))
+    c.cwnd = maxInt(2*c.mss, target)
+}
+
+func (c *DeliveryRate) CanSend(bytesInFlight, bytes int) bool {
+    return bytesInFlight+bytes &lt;= c.cwnd
+}
+
+func (c *DeliveryRate) Window() int { return c.cwnd }
+
+func max64(a, b int64) int64 {
+    if a &gt; b {
+        return a
+    }
+    return b
+}
+</code></pre>
+<h3><code>sim.go</code></h3>
+<pre><code class="language-go">package recovery
+
+import &quot;fmt&quot;
+
+// EventKind enumerates deterministic trace events.
+type EventKind int
+
+const (
+    // Send is an application-originated packet.
+    Send EventKind = iota
+    // Ack is an inbound ACK frame.
+    Ack
+    // Tick advances the clock and fires due timers.
+    Tick
+)
+
+// Event is one entry in a deterministic recovery trace.
+type Event struct {
+    Kind         EventKind
+    Time         int64 // microseconds
+    Space        Space
+    Name         string // Send: symbolic name used by later Ack events
+    AckEliciting bool   // Send: whether the packet is ack-eliciting
+    Size         int    // Send: packet size in bytes
+
+    AckNames []string // Ack: symbolic names of sent packets to acknowledge
+    AckDelay uint64   // Ack: ACK delay in microseconds
+    ECT0     uint64   // Ack: cumulative ECT(0) count
+    ECT1     uint64   // Ack: cumulative ECT(1) count
+    ECNCE    uint64   // Ack: cumulative ECN-CE count
+}
+
+// Trace is a named deterministic event sequence with shipped expectations.
+type Trace struct {
+    Name           string
+    ExpectedLost   int
+    ExpectedProbes int
+    Events         []Event
+}
+
+// Result is the outcome of running a trace.
+type Result struct {
+    Lost               int
+    Probes             int
+    Violations         []string
+    LargestAcked       [NumSpaces]uint64
+    HasLargestAcked    [NumSpaces]bool
+    FinalWindow        int
+    FinalBytesInFlight int
+}
+
+func (r Result) OK() bool { return len(r.Violations) == 0 }
+
+// RunTrace drives e through tr, checking the space-isolation and PTO invariants
+// after every event.
+func RunTrace(tr Trace, e Engine) Result {
+    var res Result
+    sent := map[string]uint64{}
+    maxAck := [NumSpaces]uint64{}
+    hasMaxAck := [NumSpaces]bool{}
+
+    violate := func(format string, args ...any) {
+        res.Violations = append(res.Violations, fmt.Sprintf(format, args...))
+    }
+
+    check := func() {
+        for s := 0; s &lt; NumSpaces; s++ {
+            space := Space(s)
+            la, ok := e.LargestAcked(space)
+            if ok {
+                if !hasMaxAck[s] {
+                    violate(&quot;space %s largest-acked is %d but no ACK ever arrived for that space&quot;, space, la)
+                } else if la &gt; maxAck[s] {
+                    violate(&quot;space %s largest-acked %d advanced past ACKed maximum %d&quot;, space, la, maxAck[s])
+                }
+            }
+            if _, armed := e.PTOTime(space); armed &amp;&amp; e.AckElicitingInFlight(space) == 0 {
+                violate(&quot;PTO armed for space %s with no ack-eliciting packet in flight&quot;, space)
+            }
+        }
+    }
+
+    for i, ev := range tr.Events {
+        e.AdvanceTo(ev.Time)
+        switch ev.Kind {
+        case Send:
+            beforePTO := [NumSpaces]struct {
+                t     int64
+                armed bool
+            }{}
+            beforeAEIF := [NumSpaces]int{}
+            for s := 0; s &lt; NumSpaces; s++ {
+                t, armed := e.PTOTime(Space(s))
+                beforePTO[s] = struct {
+                    t     int64
+                    armed bool
+                }{t, armed}
+                beforeAEIF[s] = e.AckElicitingInFlight(Space(s))
+            }
+            n := e.SendPacket(ev.Space, ev.AckEliciting, ev.Size)
+            if ev.Name != &quot;&quot; {
+                if _, dup := sent[ev.Name]; dup {
+                    violate(&quot;duplicate send name %q&quot;, ev.Name)
+                }
+                sent[ev.Name] = n
+            }
+            if ev.AckEliciting {
+                if beforeAEIF[ev.Space] &gt; 0 &amp;&amp; beforePTO[ev.Space].armed {
+                    t, armed := e.PTOTime(ev.Space)
+                    if !armed || t != beforePTO[ev.Space].t {
+                        violate(&quot;event %d: PTO reset while ack-eliciting packets were already in flight in %s&quot;, i, ev.Space)
+                    }
+                }
+            } else {
+                if !beforePTO[ev.Space].armed {
+                    if _, armed := e.PTOTime(ev.Space); armed {
+                        violate(&quot;event %d: ACK-only send armed a PTO in %s&quot;, i, ev.Space)
+                    }
+                }
+            }
+        case Ack:
+            rs := &amp;RangeSet{}
+            for _, name := range ev.AckNames {
+                n, ok := sent[name]
+                if !ok {
+                    violate(&quot;event %d: ack references unknown send %q&quot;, i, name)
+                    continue
+                }
+                rs.Add(n)
+            }
+            frame, ok := NewAckFrame(rs, ev.AckDelay)
+            if !ok {
+                violate(&quot;event %d: empty ACK frame&quot;, i)
+                break
+            }
+            frame.ECN = ev.ECT0 &gt; 0 || ev.ECT1 &gt; 0 || ev.ECNCE &gt; 0
+            frame.ECT0, frame.ECT1, frame.ECNCE = ev.ECT0, ev.ECT1, ev.ECNCE
+            e.OnACK(ev.Space, frame, ev.Time)
+            s := int(ev.Space)
+            if !hasMaxAck[s] || frame.LargestAcked &gt; maxAck[s] {
+                maxAck[s] = frame.LargestAcked
+                hasMaxAck[s] = true
+            }
+        case Tick:
+            // AdvanceTo above already handled it.
+        }
+        check()
+    }
+    res.Lost = e.Lost()
+    res.Probes = e.Probes()
+    for s := 0; s &lt; NumSpaces; s++ {
+        res.LargestAcked[s], res.HasLargestAcked[s] = e.LargestAcked(Space(s))
+    }
+    res.FinalWindow = e.Window()
+    res.FinalBytesInFlight = e.BytesInFlight()
+    return res
+}
+</code></pre>
+<h3><code>recovery_test.go</code></h3>
+<pre><code class="language-go">package recovery
+
+import (
+    &quot;reflect&quot;
+    &quot;testing&quot;
+)
+
+func TestRangeSetAddMergeSubtract(t *testing.T) {
+    var s RangeSet
+    for _, n := range []uint64{1, 2, 3, 5, 4} {
+        s.Add(n)
+    }
+    if got, want := s.Ascending(), []Range{{1, 5}}; !reflect.DeepEqual(got, want) {
+        t.Fatalf(&quot;after adds: got %v want %v&quot;, got, want)
+    }
+    s.Subtract(3)
+    if got, want := s.Ascending(), []Range{{1, 2}, {4, 5}}; !reflect.DeepEqual(got, want) {
+        t.Fatalf(&quot;after subtract: got %v want %v&quot;, got, want)
+    }
+    if !s.Contains(2) || s.Contains(3) || !s.Contains(4) {
+        t.Fatalf(&quot;contains wrong: %v&quot;, s.Ascending())
+    }
+    if s.Len() != 4 {
+        t.Fatalf(&quot;len=%d want 4&quot;, s.Len())
+    }
+    if min, _ := s.Min(); min != 1 {
+        t.Fatalf(&quot;min=%d&quot;, min)
+    }
+    if max, _ := s.Max(); max != 5 {
+        t.Fatalf(&quot;max=%d&quot;, max)
+    }
+    if got, want := s.Descending(), []Range{{4, 5}, {1, 2}}; !reflect.DeepEqual(got, want) {
+        t.Fatalf(&quot;descending: got %v want %v&quot;, got, want)
+    }
+}
+
+func TestRangeSetOutOfOrder(t *testing.T) {
+    var s RangeSet
+    for _, n := range []uint64{9, 3, 1, 7, 8, 2, 5} {
+        s.Add(n)
+    }
+    if got, want := s.Ascending(), []Range{{1, 3}, {5, 5}, {7, 9}}; !reflect.DeepEqual(got, want) {
+        t.Fatalf(&quot;got %v want %v&quot;, got, want)
+    }
+}
+
+func TestACKFrameRoundTrip(t *testing.T) {
+    var s RangeSet
+    for _, n := range []uint64{0, 1, 2, 5, 8, 9} {
+        s.Add(n)
+    }
+    f, ok := NewAckFrame(&amp;s, 1234)
+    if !ok {
+        t.Fatal(&quot;no frame&quot;)
+    }
+    f.ECN = true
+    f.ECT0, f.ECT1, f.ECNCE = 10, 20, 7
+    wire := f.Encode()
+    got, n, err := DecodeAckFrame(wire)
+    if err != nil {
+        t.Fatalf(&quot;decode: %v&quot;, err)
+    }
+    if n != len(wire) {
+        t.Fatalf(&quot;consumed %d of %d&quot;, n, len(wire))
+    }
+    if got.LargestAcked != 9 || got.AckDelay != 1234 || !got.ECN {
+        t.Fatalf(&quot;header mismatch: %+v&quot;, got)
+    }
+    if !reflect.DeepEqual(got.SetFromAck().Ascending(), s.Ascending()) {
+        t.Fatalf(&quot;ranges mismatch: %v vs %v&quot;, got.SetFromAck().Ascending(), s.Ascending())
+    }
+    if got.ECT0 != 10 || got.ECT1 != 20 || got.ECNCE != 7 {
+        t.Fatalf(&quot;ecn mismatch: %+v&quot;, got)
+    }
+}
+
+func TestPTOExponentialBackoff(t *testing.T) {
+    m := NewManager(DefaultConfig())
+    m.SendPacket(Application, true, 1200)
+    // No RTT sample: PTO = 3*initialRTT + max_ack_delay = 325000us.
+    steps := []struct {
+        at    int64
+        probe int
+    }{
+        {324_999, 0},
+        {325_000, 1},   // first probe
+        {974_999, 1},   // 325000 + 2*325000
+        {975_000, 2},   // second probe
+        {2_274_999, 2}, // 975000 + 4*325000
+        {2_275_000, 3}, // third probe
+    }
+    for _, st := range steps {
+        m.AdvanceTo(st.at)
+        if m.Probes() != st.probe {
+            t.Fatalf(&quot;at %d probes=%d want %d&quot;, st.at, m.Probes(), st.probe)
+        }
+    }
+}
+
+func TestPTOArmedOnlyByFirstAckElicitingPacket(t *testing.T) {
+    m := NewManager(DefaultConfig())
+    m.SendPacket(Application, false, 40) // ACK-only
+    if _, armed := m.PTOTime(Application); armed {
+        t.Fatal(&quot;ACK-only packet armed a PTO&quot;)
+    }
+    m.SendPacket(Application, true, 1200)
+    t1, armed := m.PTOTime(Application)
+    if !armed {
+        t.Fatal(&quot;first ack-eliciting packet did not arm PTO&quot;)
+    }
+    m.AdvanceTo(1000)
+    m.SendPacket(Application, true, 1200)
+    if t2, _ := m.PTOTime(Application); t2 != t1 {
+        t.Fatalf(&quot;PTO deadline moved from %d to %d while packets were in flight&quot;, t1, t2)
+    }
+}
+
+func TestNewRenoHalvesOnLoss(t *testing.T) {
+    c := NewNewReno(1200)
+    if c.Window() != 12000 {
+        t.Fatalf(&quot;initial window=%d&quot;, c.Window())
+    }
+    c.OnPacketLost(100, 0, 1200)
+    if c.Window() != 6000 {
+        t.Fatalf(&quot;window after loss=%d want 6000&quot;, c.Window())
+    }
+    // Exit recovery by acking something sent after recovery started.
+    c.OnPacketAcked(200, 150, 1200, 50000)
+    if c.inRecovery {
+        t.Fatal(&quot;still in recovery&quot;)
+    }
+}
+
+func TestNewRenoECNOncePerRTT(t *testing.T) {
+    c := NewNewReno(1200)
+    c.OnECNCongestion(1000, 50000)
+    if c.Window() != 6000 {
+        t.Fatalf(&quot;window after CE=%d want 6000&quot;, c.Window())
+    }
+    // Second CE inside the same RTT must be ignored.
+    c.OnECNCongestion(2000, 50000)
+    if c.Window() != 6000 {
+        t.Fatalf(&quot;window changed within RTT: %d&quot;, c.Window())
+    }
+}
+
+func TestDeliveryRateControllerReacts(t *testing.T) {
+    c := NewDeliveryRate(1200)
+    c.OnPacketSent(0, 0, 1200)
+    c.OnPacketAcked(10_000, 0, 1200, 10_000)
+    c.OnPacketAcked(20_000, 10_000, 1200, 10_000)
+    if c.Window() &lt;= 0 {
+        t.Fatal(&quot;window not grown&quot;)
+    }
+    before := c.Window()
+    c.OnPacketLost(30_000, 20_000, 1200)
+    if c.Window() &gt;= before {
+        t.Fatalf(&quot;loss did not reduce window: %d -&gt; %d&quot;, before, c.Window())
+    }
+}
+
+func TestPluggableCongestionController(t *testing.T) {
+    cfg := DefaultConfig()
+    cfg.CC = NewDeliveryRate(1200)
+    m := NewManager(cfg)
+    r := RunTrace(traceTailLoss(), m)
+    if !r.OK() {
+        t.Fatalf(&quot;violations with delivery-rate controller: %v&quot;, r.Violations)
+    }
+    if got := cfg.CC.Name(); got != &quot;delivery-rate&quot; {
+        t.Fatalf(&quot;controller name=%q&quot;, got)
+    }
+    if m.Window() &lt;= 0 {
+        t.Fatal(&quot;window should be positive&quot;)
+    }
+}
+</code></pre>
+<h3><code>trace_test.go</code></h3>
+<pre><code class="language-go">package recovery
+
+import &quot;testing&quot;
+
+// ---- deterministic traces ----
+
+func traceHeavyReordering() Trace {
+    e := func(t int64, name string) Event {
+        return Event{Kind: Send, Time: t, Space: Initial, Name: name, AckEliciting: true, Size: 1200}
+    }
+    a := func(t int64, names ...string) Event {
+        return Event{Kind: Ack, Time: t, Space: Initial, AckNames: names}
+    }
+    return Trace{
+        Name:           &quot;heavy-reordering&quot;,
+        ExpectedLost:   2,
+        ExpectedProbes: 0,
+        Events: []Event{
+            e(0, &quot;I0&quot;), e(1000, &quot;I1&quot;), e(2000, &quot;I2&quot;), e(3000, &quot;I3&quot;),
+            e(4000, &quot;I4&quot;), e(5000, &quot;I5&quot;), e(6000, &quot;I6&quot;), e(7000, &quot;I7&quot;),
+            a(50000, &quot;I0&quot;, &quot;I1&quot;, &quot;I3&quot;, &quot;I4&quot;, &quot;I6&quot;),
+            a(60000, &quot;I7&quot;),
+            {Kind: Tick, Time: 100000},
+        },
+    }
+}
+
+func traceTailLoss() Trace {
+    e := func(t int64, name string) Event {
+        return Event{Kind: Send, Time: t, Space: Handshake, Name: name, AckEliciting: true, Size: 1200}
+    }
+    return Trace{
+        Name:           &quot;tail-loss&quot;,
+        ExpectedLost:   0,
+        ExpectedProbes: 4,
+        Events: []Event{
+            e(0, &quot;H0&quot;), e(1000, &quot;H1&quot;), e(2000, &quot;H2&quot;), e(3000, &quot;H3&quot;), e(4000, &quot;H4&quot;),
+            {Kind: Ack, Time: 20000, Space: Handshake, AckNames: []string{&quot;H0&quot;, &quot;H1&quot;, &quot;H2&quot;}},
+            {Kind: Tick, Time: 200000},
+        },
+    }
+}
+
+func traceCrossSpace() Trace {
+    return Trace{
+        Name:           &quot;cross-space-overlap&quot;,
+        ExpectedLost:   0,
+        ExpectedProbes: 0,
+        Events: []Event{
+            {Kind: Send, Time: 0, Space: Initial, Name: &quot;I0&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 1000, Space: Initial, Name: &quot;I1&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 2000, Space: Handshake, Name: &quot;H0&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 3000, Space: Handshake, Name: &quot;H1&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 4000, Space: Application, Name: &quot;A0&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 5000, Space: Application, Name: &quot;A1&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Ack, Time: 30000, Space: Initial, AckNames: []string{&quot;I0&quot;, &quot;I1&quot;}},
+            {Kind: Ack, Time: 40000, Space: Application, AckNames: []string{&quot;A0&quot;, &quot;A1&quot;}},
+            {Kind: Ack, Time: 45000, Space: Handshake, AckNames: []string{&quot;H0&quot;, &quot;H1&quot;}},
+            {Kind: Tick, Time: 60000},
+        },
+    }
+}
+
+func tracePersistentCE() Trace {
+    return Trace{
+        Name:           &quot;persistent-ce&quot;,
+        ExpectedLost:   0,
+        ExpectedProbes: 0,
+        Events: []Event{
+            {Kind: Send, Time: 0, Space: Application, Name: &quot;A0&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 1000, Space: Application, Name: &quot;A1&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 2000, Space: Application, Name: &quot;A2&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 3000, Space: Application, Name: &quot;A3&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 4000, Space: Application, Name: &quot;A4&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 5000, Space: Application, Name: &quot;A5&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Ack, Time: 20000, Space: Application, AckNames: []string{&quot;A0&quot;}, ECNCE: 1},
+            {Kind: Ack, Time: 50000, Space: Application, AckNames: []string{&quot;A1&quot;}, ECNCE: 2},
+            {Kind: Ack, Time: 80000, Space: Application, AckNames: []string{&quot;A2&quot;}, ECNCE: 3},
+            {Kind: Ack, Time: 110000, Space: Application, AckNames: []string{&quot;A3&quot;}, ECNCE: 4},
+            {Kind: Ack, Time: 140000, Space: Application, AckNames: []string{&quot;A4&quot;}, ECNCE: 5},
+            {Kind: Ack, Time: 170000, Space: Application, AckNames: []string{&quot;A5&quot;}, ECNCE: 5},
+            {Kind: Tick, Time: 200000},
+        },
+    }
+}
+
+func traceACKOnly() Trace {
+    return Trace{
+        Name:           &quot;ack-only-flights&quot;,
+        ExpectedLost:   0,
+        ExpectedProbes: 0,
+        Events: []Event{
+            {Kind: Send, Time: 0, Space: Application, Name: &quot;K0&quot;, AckEliciting: false, Size: 40},
+            {Kind: Send, Time: 1000, Space: Application, Name: &quot;K1&quot;, AckEliciting: false, Size: 40},
+            {Kind: Send, Time: 2000, Space: Application, Name: &quot;A0&quot;, AckEliciting: true, Size: 1200},
+            {Kind: Send, Time: 3000, Space: Application, Name: &quot;K2&quot;, AckEliciting: false, Size: 40},
+            {Kind: Send, Time: 4000, Space: Application, Name: &quot;K3&quot;, AckEliciting: false, Size: 40},
+            {Kind: Ack, Time: 30000, Space: Application, AckNames: []string{&quot;A0&quot;}},
+            {Kind: Tick, Time: 40000},
+        },
+    }
+}
+
+func allTraces() []Trace {
+    return []Trace{
+        traceHeavyReordering(),
+        traceTailLoss(),
+        traceCrossSpace(),
+        tracePersistentCE(),
+        traceACKOnly(),
+    }
+}
+
+// TestTraceExpectations verifies that the correct multi-space engine reproduces
+// the retransmit/probe counts shipped with every trace and never violates a
+// space-isolation or PTO invariant.
+func TestTraceExpectations(t *testing.T) {
+    for _, tr := range allTraces() {
+        t.Run(tr.Name, func(t *testing.T) {
+            if tr.ExpectedLost &lt; 0 || tr.ExpectedProbes &lt; 0 {
+                t.Fatalf(&quot;trace %s has uncalibrated expectations&quot;, tr.Name)
+            }
+            r := RunTrace(tr, NewManager(DefaultConfig()))
+            if !r.OK() {
+                t.Fatalf(&quot;invariant violations: %v&quot;, r.Violations)
+            }
+            if r.Lost != tr.ExpectedLost {
+                t.Fatalf(&quot;lost=%d want %d&quot;, r.Lost, tr.ExpectedLost)
+            }
+            if r.Probes != tr.ExpectedProbes {
+                t.Fatalf(&quot;probes=%d want %d&quot;, r.Probes, tr.ExpectedProbes)
+            }
+        })
+    }
+}
+
+// TestNaiveSingleSpaceFails is the regression: a naive implementation that
+// merges all packet number spaces must fail the shipped traces, while the
+// correct engine passes.
+func TestNaiveSingleSpaceFails(t *testing.T) {
+    for _, tr := range allTraces() {
+        t.Run(tr.Name, func(t *testing.T) {
+            good := RunTrace(tr, NewManager(DefaultConfig()))
+            if !good.OK() {
+                t.Fatalf(&quot;correct engine violated invariants: %v&quot;, good.Violations)
+            }
+            bad := RunTrace(tr, NewNaive(DefaultConfig()))
+            failed := !bad.OK() || bad.Lost != tr.ExpectedLost || bad.Probes != tr.ExpectedProbes
+            if !failed {
+                t.Fatalf(&quot;naive engine unexpectedly passed trace %s (lost=%d probes=%d)&quot;, tr.Name, bad.Lost, bad.Probes)
+            }
+        })
+    }
+}
+
+// TestCrossSpaceACKDoesNotAdvanceOtherSpace is the focused acceptance check:
+// an ACK in one space must never move another space's largest-acked.
+func TestCrossSpaceACKDoesNotAdvanceOtherSpace(t *testing.T) {
+    m := NewManager(DefaultConfig())
+    tr := traceCrossSpace()
+    for _, ev := range tr.Events {
+        m.AdvanceTo(ev.Time)
+        switch ev.Kind {
+        case Send:
+            m.SendPacket(ev.Space, ev.AckEliciting, ev.Size)
+        case Ack:
+            if ev.Space == Handshake {
+                // Check isolation before the Handshake ACK that legitimately
+                // advances Handshake largest-acked.
+                if _, ok := m.LargestAcked(Handshake); ok {
+                    t.Fatal(&quot;Handshake largest-acked advanced before any Handshake ACK arrived&quot;)
+                }
+                return
+            }
+            rs := &amp;RangeSet{}
+            // Packet numbers are independent per space, so the i-th name is
+            // packet number i in that space.
+            for i := range ev.AckNames {
+                rs.Add(uint64(i))
+            }
+            f, _ := NewAckFrame(rs, 0)
+            m.OnACK(ev.Space, f, ev.Time)
+        }
+    }
+    t.Fatal(&quot;trace never delivered a Handshake ACK&quot;)
+}
+</code></pre>
+<h2>Verification</h2>
+<p>From <code>/home/kara/quicrecovery</code>:</p>
+<pre><code class="language-bash">go vet ./...
+go test -v ./...
+</code></pre>
+<p>Result:</p>
+<pre><code class="language-text">=== RUN   TestRangeSetAddMergeSubtract
+--- PASS: TestRangeSetAddMergeSubtract (0.00s)
+=== RUN   TestRangeSetOutOfOrder
+--- PASS: TestRangeSetOutOfOrder (0.00s)
+=== RUN   TestACKFrameRoundTrip
+--- PASS: TestACKFrameRoundTrip (0.00s)
+=== RUN   TestPTOExponentialBackoff
+--- PASS: TestPTOExponentialBackoff (0.00s)
+=== RUN   TestPTOArmedOnlyByFirstAckElicitingPacket
+--- PASS: TestPTOArmedOnlyByFirstAckElicitingPacket (0.00s)
+=== RUN   TestNewRenoHalvesOnLoss
+--- PASS: TestNewRenoHalvesOnLoss (0.00s)
+=== RUN   TestNewRenoECNOncePerRTT
+--- PASS: TestNewRenoECNOncePerRTT (0.00s)
+=== RUN   TestDeliveryRateControllerReacts
+--- PASS: TestDeliveryRateControllerReacts (0.00s)
+=== RUN   TestPluggableCongestionController
+--- PASS: TestPluggableCongestionController (0.00s)
+=== RUN   TestTraceExpectations
+    --- PASS: TestTraceExpectations/heavy-reordering
+    --- PASS: TestTraceExpectations/tail-loss
+    --- PASS: TestTraceExpectations/cross-space-overlap
+    --- PASS: TestTraceExpectations/persistent-ce
+    --- PASS: TestTraceExpectations/ack-only-flights
+=== RUN   TestNaiveSingleSpaceFails
+    --- PASS: TestNaiveSingleSpaceFails/heavy-reordering
+    --- PASS: TestNaiveSingleSpaceFails/tail-loss
+    --- PASS: TestNaiveSingleSpaceFails/cross-space-overlap
+    --- PASS: TestNaiveSingleSpaceFails/persistent-ce
+    --- PASS: TestNaiveSingleSpaceFails/ack-only-flights
+=== RUN   TestCrossSpaceACKDoesNotAdvanceOtherSpace
+--- PASS: TestCrossSpaceACKDoesNotAdvanceOtherSpace (0.00s)
+PASS
+ok      quicrecovery    0.008s
+</code></pre>
+<h3>What each test proves</h3>
+<ul>
+<li><code>TestTraceExpectations</code> runs every shipped trace on <code>NewManager</code> and asserts both the hardcoded retransmit/probe counts <strong>and</strong> zero invariant violations.</li>
+<li><code>TestNaiveSingleSpaceFails</code> runs the <em>same</em> traces on <code>NewNaive</code> and asserts each one is failed. Observed naive behavior:</li>
+<li><code>heavy-reordering</code>: reports <code>largest_acked = [7 7 7]</code> — the Initial ACK leaked into Handshake/Application.</li>
+<li><code>tail-loss</code>: <code>probes = 1</code> instead of <code>4</code>; the shared PTO reset loses a backoff step.</li>
+<li><code>cross-space-overlap</code>: <code>lost = 2</code> instead of <code>0</code>, and <code>largest_acked</code> is <code>[5 5 5]</code> after an Application ACK.</li>
+<li><code>persistent-ce</code> / <code>ack-only-flights</code>: cross-space <code>largest_acked</code> leaks.</li>
+<li><code>TestCrossSpaceACKDoesNotAdvanceOtherSpace</code> stops right before the legitimate Handshake ACK and asserts Handshake largest-acked is still unset.</li>
+<li><code>TestPTOExponentialBackoff</code> pins exact probe times <code>325ms, 975ms, 2275ms</code> (base <code>3*initial_rtt + max_ack_delay</code>, doubling).</li>
+<li><code>TestPTOArmedOnlyByFirstAckElicitingPacket</code> proves the PTO deadline does not move when a second ack-eliciting packet is sent while one is already in flight, and that an ACK-only packet never arms a PTO.</li>
+<li><code>TestACKFrameRoundTrip</code> proves the ACK range-set encoding survives gaps/lengths and ECN counters.</li>
+</ul>
+<h3>Using the package</h3>
+<pre><code class="language-go">cfg := recovery.DefaultConfig()
+cfg.CC = recovery.NewDeliveryRate(1200) // or recovery.NewNewReno(1200)
+m := recovery.NewManager(cfg)
+
+pn := m.SendPacket(recovery.Handshake, true, 1200) // returns packet number
+frame, ok := recovery.NewAckFrame(&amp;received, ackDelay) // generate an ACK
+m.OnACK(recovery.Application, frame, nowMicros)       // process an inbound ACK
+m.AdvanceTo(nowMicros)                                // fire loss/PTO timers
+lost, probes := m.Lost(), m.Probes()
+</code></pre>
+<p><code>NewNaive</code> exists <strong>only</strong> so the regression test can demonstrate the single-space failure mode; it must not be used in production.</p>
+<hr />
+<p><strong>Verified:</strong> <code>go vet ./...</code> clean and <code>go test -count=1 ./...</code> → <code>ok quicrecovery 0.009s</code>. All artifacts are under <code>/home/kara/quicrecovery/</code> (implementation, tests, and <code>SOLUTION.md</code>).</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-quic-loss-recovery-packet-number-spaces-pto
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-19T16:16:21.975Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement QUIC-style loss recovery over an abstract packet-number-space API: separate Initial/Handshake/Application spaces, ACK frame generation with range sets, PTO probe timeouts with exponential backoff, ECN-CE-triggered congestion response, and a pluggable congestion controller (NewReno plus a delivery-rate/BBR-style controller) driven by a supplied deterministic event trace. Acceptance: on the provided traces (heavy reordering, tail-loss, cross-space ACK during handshake+application overlap, persistent CE marks, and ACK-only flights) your recovery must never let an ACK for one space advance another space&#x27;s largest-acked, must not arm a PTO while a new ACK is in flight, and must reproduce the expected retransmit counts shipped with each trace. Deliverable is a Go package plus a regression test that provably fails against a naive single-packet-number-space implementation.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-quic-loss-recovery-packet-number-spaces-pto&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-19T16:16:22.039Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

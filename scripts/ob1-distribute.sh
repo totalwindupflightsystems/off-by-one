@@ -20,15 +20,24 @@ set -euo pipefail
 REPO="${OB1_REPO:-$HOME/off-by-one}"
 cd "$REPO"
 
-# ══════════════ PART 1 — answer corpus -> GitHub ══════════════
+# ══════════════ PART 1 — answer corpus + static site -> GitHub ══════════════
+# Exports the corpus (export-answers.py), regenerates the public static site
+# (generate-static-site.py: site/index.html, site/classes/, site/sitemap.xml)
+# and commits data/ + site/ + both scripts + README to GitHub.
 python3 scripts/export-answers.py >/tmp/ob1_export.log 2>&1 || {
   echo "❌ export-answers.py failed:"
   cat /tmp/ob1_export.log
   exit 1
 }
 
-if ! git diff --quiet data/ scripts/export-answers.py README.md; then
-  git add data/ scripts/export-answers.py README.md
+/usr/bin/python3 scripts/generate-static-site.py >/tmp/ob1_site.log 2>&1 || {
+  echo "❌ generate-static-site.py failed:"
+  cat /tmp/ob1_site.log
+  exit 1
+}
+
+if ! git diff --quiet data/ site/ scripts/export-answers.py scripts/generate-static-site.py README.md; then
+  git add data/ site/ scripts/export-answers.py scripts/generate-static-site.py README.md
   git commit -q -m "data: sync answer corpus — $(git diff --cached --numstat | wc -l) files changed
 
 Auto-exported from SQLite by export-answers.py (cron)." || true
