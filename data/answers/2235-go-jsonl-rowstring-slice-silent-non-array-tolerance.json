@@ -1,0 +1,28 @@
+{
+  "class_id": 2235,
+  "title": "go-jsonl-rowstring-slice-silent-non-array-tolerance",
+  "description": "go-jsonl-rowstring-slice-silent-non-array-tolerance",
+  "created_at": "2026-09-24 12:22:17",
+  "answers": [
+    {
+      "answer_id": 2429,
+      "language": "go",
+      "environment": "boardctl Go board validator over JSONL foreman boards (tasks.jsonl)",
+      "version": "main e50aea4",
+      "solution": "I diagnosed the bug against the real `coding-hermes/boardctl` repo, reproduced it (RED), applied the ground-truth fix, and verified it end-to-end. The full self-contained write-up is at **`/workspace/SOLUTION.md`**.\n\n# Fix: `validate` silently tolerates a non-array `depends_on`\n\n## Root cause\n\n`rowStringSlice` (`internal/board/validate.go`) is deliberately tolerant: any non-array/malformed `depends_on` decodes to `nil`, which is indistinguishable from \"no dependencies\". The BT-007 dangling-reference cross-check is fed **only** from that helper, so a real reference stored as a string (`\"BT-019\"`) never enters the cross-check. `validate` therefore exits `0` with zero findings on data the write path (`[]string`) can never emit.\n\n## The fix (WARN-only, tolerance preserved)\n\nAdd a shape check in `validateTaskRow` before the cross-check collection, plus two helpers:\n\n```go\nif raw := row.Get(\"depends_on\"); raw != nil {\n    if kind := jsonKindName(raw); kind != \"\" && kind != \"array\" {\n        rep.Add(\"warn\", \"tasks.jsonl line %d (task %s): depends_on is not an array (%s) — treated as no dependencies\",\n            idx+1, id, kind)\n        if kind == \"string\" {\n            if s, ok := decodeJSONString(raw); ok && strings.TrimSpace(s) != \"\" {\n                rep.Add(\"warn\", \"tasks.jsonl line %d (task %s): depends_on value %q looks like a reference but is not an array element — it was not cross-checked against task ids\",\n                    idx+1, id, s)\n            }\n        }\n    }\n}\n```\n\n`jsonKindName` classifies array/string/number/boolean/object/null (with `UseNumber()`); `decodeJSONString` extracts the string content. `rowStringSlice` is left untouched. The exact `git apply`-able patch (verified to apply cleanly to the pre-fix commit `3363874`) and the full test file are embedded in `SOLUTION.md`.\n\n## Verification (all performed against the repo)\n\n- **RED:** removing only the fix block + helpers makes the battery report `got 0; findings: []` for every malformed shape and fails `TestBT055MalformedRefSkipsCrossCheck`.\n- **GREEN:** `go test ./internal/board/ -run TestBT055 -v` → all 3 pass (shape battery over array/absent/string/number/null/object/boolean, cross-check isolation, byte-preservation).\n- **No regressions:** `go test ./...` → all packages `ok`.\n- **End-to-end CLI:** `validate` on a 9-row board → `EXIT=0`, `RESULT: OK (10 warning(s))`, and `tasks.jsonl` sha256 byte-identical before/after. The dangerous row now reports:\n\n```\n[warn] tasks.jsonl line 4 (task BT055-REF): depends_on is not an array (string) — treated as no dependencies\n[warn] tasks.jsonl line 4 (task BT055-REF): depends_on value \"BT-019\" looks like a reference but is not an array element — it was not cross-checked against task ids\n```\n\nDesign guarantees: no new errors, exit codes unchanged, read-only, and the malformed shape (being impossible from `write.go`) is correctly treated as legacy/hand-written drift.\n",
+      "evidence": "# Evidence\n- Problem class: go-jsonl-rowstring-slice-silent-non-array-tolerance\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-24T12:22:16.530Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "PROBLEM: a board validator that extracts a row field with a tolerant rowStringSlice helper (documented: non-array/malformed values yield nil) silently treats a malformed shape as 'no dependencies' - the dangling-reference cross-check has nothing to test, so validate reports OK on data a writer can never emit (write side types the field as []string; the shape only exists on legacy/hand-written rows). The dangerous case: a REAL reference expressed as a string is never cross-checked. FIX: keep the read tolerance (do not error, do not change exit codes) but add a WARN-level finding when a row carries the key with a non-array value, naming file+line+task id and the JSON kind (string/number/boolean/object/null), plus a second warn when the string's decoded content is non-empty saying the reference was not cross-checked. Table tests over all shapes; assert validate never rewrites the file (byte-identical) and exit stays 0 with warnings.",
+        "environment": "boardctl Go board validator over JSONL foreman boards (tasks.jsonl)",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-jsonl-rowstring-slice-silent-non-array-tolerance",
+        "provider": "openrouter",
+        "solved_at": "2026-09-24T12:22:16.531Z",
+        "version": "main e50aea4"
+      },
+      "status": "verified",
+      "created_at": "2026-09-24 12:22:17"
+    }
+  ]
+}

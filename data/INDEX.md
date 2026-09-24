@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2138 problem classes · 2229 verified answers** · exported 2026-09-24 10:00 UTC
+**2161 problem classes · 2253 verified answers** · exported 2026-09-24 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -42,6 +42,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1648 | deepseek-v4-flash-alias-still-serves | 2 | shell |
 | 1691 | go-cli-release-published-binary-drift | 2 | go |
 | 1948 | gitreins-guard-go-lanes-staged-only-empty-index-noop | 2 | go, python |
+| 2012 | gitreins-tier2-iteration-cap-exceeded | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -1928,7 +1929,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2009 | go-sse-server-writetimeout | 1 | go |
 | 2010 | go-race-suite-load-contention-flake | 1 | go |
 | 2011 | go-chi-global-timeout-sse-stream-exemption | 1 | go |
-| 2012 | gitreins-tier2-iteration-cap-exceeded | 1 | go |
 | 2013 | go-mesh-silent-drop-to-error-frame | 1 | go |
 | 2014 | board-hygiene-operator-decision-rows | 1 | go |
 | 2015 | mock-seed-hardcoded-start-date-stale-schedule | 1 | go |
@@ -2144,3 +2144,26 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2225 | consensus-upstream-opencode-ts-compatibility | 1 | go, shell, javascript |
 | 2226 | typescript-vitest-live-server-integration-skip-guard | 1 | typescript |
 | 2227 | mcp-tool-silent-empty-result | 1 | rust |
+| 2228 | python-chandy-lamport-consistent-cut-channel-state-replay-exactness | 1 | python |
+| 2229 | js-aries-wal-redo-undo-clr-recovery-idempotence | 1 | js |
+| 2230 | shell-drat-proof-checker-rup-rat-deletion-unsat-refutation-exactness | 1 | shell |
+| 2231 | gitreins-async-judge-printed-poll-id-diverges-from-log-path-id | 1 | go |
+| 2232 | mutation-script-writes-provenance-skips-value-reassignment | 1 | python |
+| 2233 | go-cli-subcommand-help-exit-code-contract | 1 | go |
+| 2234 | ci-reusable-workflow-floating-ref-and-platform-list-drift | 1 | go |
+| 2235 | go-jsonl-rowstring-slice-silent-non-array-tolerance | 1 | go |
+| 2236 | go-cli-create-schema-inherits-board-drift | 1 | go |
+| 2237 | foreman-interrupted-wave-closeout-recovery | 1 | go |
+| 2238 | board-close-missing-disposition-register-regen | 1 | python |
+| 2239 | rust-graph-stats-pseudo-node-filtering-component-roster | 1 | go |
+| 2240 | uniffi-cdylib-filename-docs-rename-step | 1 | go |
+| 2241 | gitreins-tier1-pnpm-not-found-login-shell-path | 1 | bash |
+| 2242 | gitreins-tier1-degraded-pass-graded-fail-merge-judging | 1 | go |
+| 2243 | pytest-collection-untracked-scratch-module-network | 1 | go |
+| 2244 | github-actions-dependency-checkout-nonexistent-repo | 1 | go |
+| 2245 | worktree-reap-merged-branches-with-residue | 1 | go |
+| 2246 | toolsd-usage-recorder-verb-self-record-read-only-violation | 1 | go |
+| 2247 | go-cli-json-flag-prints-prose-on-degraded-path | 1 | go |
+| 2248 | mcp-tool-required-field-validated-but-discarded | 1 | go |
+| 2249 | musterflow-dogfood-tick-0924 | 1 | go |
+| 2250 | git-tick-refire-wave-lifecycle-open-after-merge | 1 | go |
