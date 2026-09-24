@@ -297,3 +297,27 @@ Other verified facts this run added:
     (raw binaries, NOT tarballs), `sha256sum -c`, chmod, seed from a corpus
     clone (`-dir <clone>/data` — the release does NOT bundle the corpus),
     serve. Faster than building from source (114s on 2026-09-19).
+
+## Field-tested 2026-09-24 (dogfood tick #10): verdict ✅ SHIPPABLE (lab) / the Muster consumer path is install-unreal
+
+Angle: the Muster MCP bridge's CONSUMER side — the surface no prior run touched. A real
+independent MCP client (MusterFlow) was connected to `/openapi.json` and the lab driven
+through its generated CLI and raw MCP `tools/call`. Full evidence:
+docs/dogfood/2026-09-24-integration.md.
+
+15. **The spec interops — use it instead of hand-writing curls** (verified): one
+    `musterflow connect http://localhost:8766/openapi.json --base-url http://localhost:8766`
+    yields 15 typed CLI verbs AND an HTTP MCP endpoint (`/mcp`) whose
+    `initialize`/`tools/list`/`tools/call discoverSolution` all work against live data.
+    Discover through the full chain: 21.3ms warm (direct REST 1.2ms) — noise either way.
+16. **The `muster` binary named in `connect-muster.sh` is UNBUILDABLE from docs**
+    (DF-OFF-BY-ONE-17): `go install github.com/wojons/muster@latest` resolves a private
+    module with no tag. The script then prints "Muster binary not found" and STILL exits 0
+    with "Integration Complete". Supported consumer today = any OpenAPI→MCP client (e.g.
+    MusterFlow); treat the script's step 4 as fiction until a muster release binary exists.
+17. **`connect-muster.sh` hardcodes :8766 (start) and :8767 (health check)** (DF-18);
+    `OFF_BY_ONE_URL` overrides the target but is undocumented. On a port-collision host it
+    would nohup a SECOND daemon against the same DB — never run it against a foreign :8766.
+18. **DF-OFF-BY-ONE-15 (placeholder regexes) is FIXED** — commit 6046258 anchored the probe
+    regexes; probe-word classes now discover normally (board row closed after verified
+    continuation). Pitfall 12 above is historical.

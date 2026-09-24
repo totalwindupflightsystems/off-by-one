@@ -570,3 +570,42 @@ see the 2026-09-07 CWD finding). Total 58s to a serving lab with discover green.
 dedicated `-db`, `--load-threshold -1` (idle gate off), `--cron-interval 20s`
 (fast pickup), `--solve-timeout 300s`. Never point a scratch instance at the
 live off-by-one.db — the seed is idempotent but solves write real rows.
+
+## §11 — 2026-09-24 dogfood run (HEAD 474a86e) — the Muster consumer side, first exercise
+
+Prior runs proved the lab from the REST/curl side and the operator side (seed, solve, export,
+catalog). This run took the README's core-loop step 1 literally — "Agents push problems via
+Muster API/MCP/CLI" — and tried to become that agent. The wire protocol held; the distribution
+did not.
+
+**What is real (proven, not claimed):** `pkg/api/openapi.yaml` is a genuine machine contract.
+A fresh MusterFlow instance consumed it with zero project-specific code: one `connect` command
+produced 15 typed CLI verbs AND a working HTTP MCP endpoint; MCP `initialize` / `tools/list` /
+`tools/call discoverSolution` all returned live data; submissions through both surfaces landed
+in the same queue the REST API serves. This is the strongest integration evidence the repo
+has produced — the spec is not decorative, it interoperates with an independent implementation.
+
+**What is fiction (DF-OFF-BY-ONE-17):** the "muster" binary the Quick Start's own ecosystem
+points at is `github.com/wojons/muster` — private module, no tag, no binary — so the bridge's
+consumer half cannot be installed by anyone, ever, from the docs. `connect-muster.sh` papers
+over this by printing "Muster binary not found", then `exit 0` with "=== Integration
+Complete ===". The right way: publish a muster release binary (the project already has a
+release-binary lane for off-by-one itself — same recipe), or document MusterFlow as the
+supported consumer and drop the dead `go install` line from the script output.
+
+**Port drift trap (DF-OFF-BY-ONE-18):** the script's step-4 health check probes :8767 while
+`muster-config.yaml` transports stdio and pins no HTTP port — two hardcoded ports that agree
+with no config file. On any port-collision host (the README's own documented scenario) the
+script would nohup-start a *second* off-by-one against the foreign daemon's DB. Rule: scripts
+that manage daemons must derive ports from the same config they pass to the daemon.
+
+**Chain economics (the value question):** through the full generated chain, discover costs
+21ms where direct REST costs 1.2ms — ~18x overhead, entirely irrelevant (both are noise). The
+chain's value is not latency, it is that an agent that speaks only MCP gets the lab's entire
+answer graph for one `connect`. That value was demonstrated this run with real calls.
+
+**Install leg this run:** clone 3s → make build 71s → seed 33s (2138/2229/9020) → health 200
+→ discover found:true 10ms, all on a bare Debian bunker agent with a manual Go tarball. The
+Go-toolchain gap (DF-OFF-BY-ONE-11) is now the single remaining install friction across three
+consecutive runs; a bootstrap line in the Quick Start (`curl go tarball || apt install golang`)
+would close it permanently.
