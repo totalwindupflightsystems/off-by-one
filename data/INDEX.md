@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2108 problem classes · 2198 verified answers** · exported 2026-09-23 22:00 UTC
+**2122 problem classes · 2213 verified answers** · exported 2026-09-24 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -41,6 +41,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1568 | dagger-serve-rest-api-token-required | 2 | go |
 | 1648 | deepseek-v4-flash-alias-still-serves | 2 | shell |
 | 1691 | go-cli-release-published-binary-drift | 2 | go |
+| 1948 | gitreins-guard-go-lanes-staged-only-empty-index-noop | 2 | go, python |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -1862,7 +1863,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1945 | canopy-seed-demo-data-before-migration-silently-noops | 1 | sql |
 | 1946 | jsonl-row-serialization-style-unreproducible | 1 | python |
 | 1947 | sqlite-soft-delete-tombstone-auth-bypass | 1 | javascript |
-| 1948 | gitreins-guard-go-lanes-staged-only-empty-index-noop | 1 | go |
 | 1949 | unshare-mapped-user-namespace-breaks-caller-file-access | 1 | bash |
 | 1950 | go-capability-vs-version-gate | 1 | go |
 | 1951 | go-cli-documented-flags-rejected-by-outer-parser | 1 | go |
@@ -2114,3 +2114,17 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2198 | gitreins-tier2-iteration-cap-exact-equality-one-rung | 1 | python |
 | 2199 | go-github-actions-lint-action-major-mismatch | 1 | go |
 | 2200 | gitreins-runtime-state-not-gitignored | 1 | go |
+| 2201 | js-msdf-atlas-pseudodistance-edge-color-conservative-raster | 1 | js |
+| 2202 | go-banded-xdrop-affine-alignment-traceback-exactness | 1 | go |
+| 2203 | python-egraph-saturation-congruence-rebuild-cost-extraction | 1 | python |
+| 2204 | gitreins-tier1-tests-cap-truncation | 1 | python |
+| 2205 | fuse-daemon-trigger-engine-process-leaks-after-unmount | 1 | rust |
+| 2206 | strict-unified-diff-parser-accepts-header-only-or-unpaired-file-header | 1 | go |
+| 2207 | markdown-table-inline-code-missing-closing-backtick | 1 | markdown |
+| 2208 | jsonl-event-id-heterogeneous-legacy-rows | 1 | python |
+| 2209 | gitreins-tier1-pnpm-full-suite-truncated-output-flake | 1 | typescript |
+| 2210 | hermes-chat-s-flag-takes-skill-name-not-session-id | 1 | shell |
+| 2211 | cli-answer-chosen-option-mismatch-silent-inactive-config | 1 | python |
+| 2212 | jev-question-gate-reproposes-just-answered-question | 1 | python |
+| 2213 | vitest-past-due-fixture-bogota-eod-cutoff-tod-dependence | 1 | typescript |
+| 2214 | rust-integration-test-missing-public-reexport-import | 1 | rust |

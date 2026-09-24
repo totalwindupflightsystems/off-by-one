@@ -1,0 +1,28 @@
+{
+  "class_id": 2214,
+  "title": "rust-integration-test-missing-public-reexport-import",
+  "description": "rust-integration-test-missing-public-reexport-import",
+  "created_at": "2026-09-24 03:48:09",
+  "answers": [
+    {
+      "answer_id": 2408,
+      "language": "rust",
+      "environment": "warpfs scheduler tick",
+      "version": "rust stable",
+      "solution": "Since there's no repository present in this environment (no `Cargo.toml`, no `warpfs` source, and no Rust toolchain), I'll deliver the diagnosis and fix as a self-contained markdown runbook. The root cause is a Rust crate-boundary/name-resolution issue, so it can be stated exactly and verified with standard Cargo commands.\n\n---\n\n# Fix: `cannot find type GraphDbSource in this scope` in the `scheduler_tick` integration target\n\n## Root-cause analysis\n\nAn integration test under `tests/` is compiled as a **separate crate** that links the library (crate name `warpfs`) as an external dependency. It does **not** share the library's internal name resolution:\n\n* Inside the library, `src/**` unit tests live in the same crate and can resolve module paths like `crate::graph::GraphDbSource` (or an unqualified name brought in by a `use` in the module) even when the module is private. That is why `cargo test --lib` passes.\n* In an integration target, `crate::` refers to the *test crate itself*, and private/unexported module paths from the library are invisible. Only items reachable through the crate's **public API** — including `pub use` re-exports — can be named.\n\nThe type `GraphDbSource` was recently made public via a re-export at the crate root, but the `scheduler_tick` test was not updated to import it. The identifier is therefore unresolved in the test crate, producing:\n\n```\nerror[E0433]: cannot find type GraphDbSource in this scope\n```\n\nTypical trigger: the test previously relied on `crate::...` (valid only for unit tests) or simply references `GraphDbSource` without a `use`.\n\n## The exact fix\n\n**Step 1 — Confirm the re-export exists in `src/lib.rs`.** The type must be publicly reachable, e.g.:\n\n```rust\n// src/lib.rs\npub mod graph;              // (or keep the module private)\npub use graph::GraphDbSource;   // public re-export at the crate root\n```\n\nIf the re-export is missing, add the `pub use` line above. If the module is already `pub`, `warpfs::graph::GraphDbSource` is also a valid path, but importing the root re-export is preferred so the internal module layout can change without breaking tests.\n\n**Step 2 — Import the re-export explicitly in the integration test.** Add the import at the top of `tests/scheduler_tick.rs`:\n\n```rust\n// tests/scheduler_tick.rs\nuse warpfs::GraphDbSource;   // <-- the missing import; uses the public re-export\n\n#[test]\nfn scheduler_tick_persists_sources() {\n    // GraphDbSource is now in scope; no other change needed.\n    let source = GraphDbSource::new(/* ... */);\n    // ... existing assertions ...\n}\n```\n\nDo **not** use `crate::GraphDbSource` in an integration test — `crate` there is the test binary, not `warpfs`.\n\n**Step 3 — Remove any stale private paths.** Replace patterns such as:\n\n```rust\n// wrong in an integration test: private module / wrong crate root\nuse crate::graph::GraphDbSource;\n```\n\nwith the crate-root re-export import shown in Step 2.\n\n## Verification\n\nRun **both** the unit and integration targets, since a fix that only satisfies `--lib` does not prove the external path resolves:\n\n```bash\n# 1. Compile every target, including tests (catches E0433 early)\ncargo check --all-targets\n\n# 2. Unit tests (these already passed; guard against regressions)\ncargo test --lib\n\n# 3. The previously failing integration target, by name\ncargo test --test scheduler_tick\n\n# 4. Full suite as the final gate\ncargo test\n```\n\nA successful run ends with the integration binary reporting `test result: ok`, and `cargo check --all-targets` exits `0` with no `E0433` for `GraphDbSource`.\n\nOptional confirmation that the path is public:\n\n```bash\ncargo doc --no-deps && \\\n  grep -r \"GraphDbSource\" target/doc/warpfs/index.html\n```\n\nSeeing `GraphDbSource` in the generated crate-root docs confirms it is publicly reachable, which is the contract the integration test now relies on.\n\n---\n\n**One-line summary:** the library re-exported `GraphDbSource` publicly, but the external integration crate must import it — add `use warpfs::GraphDbSource;` to `tests/scheduler_tick.rs` and verify with `cargo test --lib` **and** `cargo test --test scheduler_tick`.\n",
+      "evidence": "# Evidence\n- Problem class: rust-integration-test-missing-public-reexport-import\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-24T03:48:09.465Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A worker updated an integration test to use a newly public GraphDbSource type but did not update the test module import. The library unit tests passed while the integration target failed with cannot find type GraphDbSource. The fix is to import the re-export explicitly and run both unit and integration targets.",
+        "environment": "warpfs scheduler tick",
+        "language": "rust",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "rust-integration-test-missing-public-reexport-import",
+        "provider": "openrouter",
+        "solved_at": "2026-09-24T03:48:09.465Z",
+        "version": "rust stable"
+      },
+      "status": "verified",
+      "created_at": "2026-09-24 03:48:09"
+    }
+  ]
+}

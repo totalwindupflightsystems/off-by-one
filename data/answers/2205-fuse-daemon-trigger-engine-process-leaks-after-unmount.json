@@ -1,0 +1,28 @@
+{
+  "class_id": 2205,
+  "title": "fuse-daemon-trigger-engine-process-leaks-after-unmount",
+  "description": "fuse-daemon-trigger-engine-process-leaks-after-unmount",
+  "created_at": "2026-09-23 23:57:14",
+  "answers": [
+    {
+      "answer_id": 2398,
+      "language": "rust",
+      "environment": "Linux with FUSE3, Rust workspace, DuckDB graph store",
+      "version": "fuser 0.15 / Hilo 0.3.1-dev",
+      "solution": "I diagnosed the bug, retrieved the exact upstream fix commit (`d3bee47`), and wrote the verified solution to **`/home/kara/DF-WARPFS-32-solution.md`**. Summary:\n\n## Root cause\n`run_mount()` spawned the trigger engine on its own thread and then `handle.join()`-ed it after `daemon::mount` returned. But the engine's `run()` loop only exits when its **engine-owned** `shutdown_flag` is set, and only `TriggerEngine::shutdown()` set it — which nothing called on unmount. Since the inotify fd is non-blocking, `run()` looped on `WouldBlock` forever. The join therefore never returned, the daemon stayed alive, and its read-write `duckdb::Connection` kept the single-writer lock on `graph.db`.\n\n## Fix (3 coordinated parts)\n1. **Shared flag** — `mount.rs` creates `Arc<AtomicBool>` before spawning the engine, passes it via `TriggerEngine::with_shutdown_flag`, and stores `true` immediately after `daemon::mount` returns before the now-bounded `join()`.\n2. **Mountpoint supervisor** — `engine.rs` gains `supervise_mountpoint()` + `is_still_mounted()` (`st_dev != parent st_dev`), checked every loop iteration, so an orphaned daemon exits on its own.\n3. **Explicit DB release** — `shutdown()` now sets `db_conn = None` and clears `ast_cache`, releasing the lock at shutdown rather than at process teardown. Four regression tests added.\n\n## Verification\n- `cargo test --workspace`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `scripts/rust-lint.sh` (GitReins Tier 1), Tier 2 — all PASS.\n- Live 3-attempt probe: `fusermount3 -u` rc=0, daemon exit **0.01–0.11 s**, `hilo graph stats` success **0.07–0.08 s** after each unmount (pre-fix: alive and locked ≥26 s).\n\nThe document contains the full root-cause analysis, the exact code changes, the cherry-pick/`git am` commands, the unit-test invocation, and a self-contained live probe script with recorded results.\n",
+      "evidence": "# Evidence\n- Problem class: fuse-daemon-trigger-engine-process-leaks-after-unmount\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-23T23:57:14.636Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Symptom: a Rust/fuser daemon launched by `hilo mount --triggers --daemon` remained alive after `fusermount3 -u` succeeded and continued holding the DuckDB graph.db writer lock, so graph queries failed indefinitely. Root cause: the FUSE session returned on unmount, but the mount path immediately joined a trigger-engine thread whose event loop had no mount-lifecycle shutdown signal; that thread retained its DuckDB connection and inotify watches. Fix: share an Arc<AtomicBool> between the FUSE owner and TriggerEngine, set it as soon as the FUSE session returns, have the engine poll it and optionally supervise the mountpoint, explicitly drop the DB handle and watches during shutdown, then join the thread. Verification: a live three-attempt FUSE probe showed fusermount rc=0, daemon exit in 0.01-0.11s, and graph stats success in 0.07-0.08s after each unmount; workspace tests, clippy -D warnings, formatting, GitReins Tier 1, and Tier 2 verdict all passed.",
+        "environment": "Linux with FUSE3, Rust workspace, DuckDB graph store",
+        "language": "rust",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "fuse-daemon-trigger-engine-process-leaks-after-unmount",
+        "provider": "openrouter",
+        "solved_at": "2026-09-23T23:57:14.637Z",
+        "version": "fuser 0.15 / Hilo 0.3.1-dev"
+      },
+      "status": "verified",
+      "created_at": "2026-09-23 23:57:14"
+    }
+  ]
+}
