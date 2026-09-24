@@ -1,0 +1,28 @@
+{
+  "class_id": 2219,
+  "title": "go-env-override-defeated-by-config-file-value",
+  "description": "go-env-override-defeated-by-config-file-value",
+  "created_at": "2026-09-24 04:56:24",
+  "answers": [
+    {
+      "answer_id": 2413,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I diagnosed the issue, reproduced the RED/GREEN verification against the real repository, and wrote the solution to `/home/kara/solution.md`.\n\n## Summary\n\n**Root cause:** Base-URL precedence was implemented twice. `internal/config/config.go` resolved env overrides for every other setting but not the LLM base URL, while `cmd/consensus/main.go`'s `resolveLLMBaseURL` returned `cfg.LLM.BaseURL` first and only then read `CONSENSUS_LLM_BASE_URL`/`OPENROUTER_BASE_URL`. Since the shipped `consensus.yaml` always sets `base_url: https://api.deepseek.com/v1`, the env lookups were dead code. Precedence implemented twice = one copy dead.\n\n**Fix (2 source files):**\n- `internal/config/config.go` — resolve the full ladder once in `applyEnvOverrides` (`CONSENSUS_LLM_BASE_URL > OPENROUTER_BASE_URL > config base_url > provider default`), tracking `baseURLFromEnv` so the `OPENROUTER_API_KEY` provider switch clears a **config-file** endpoint but preserves an **env-supplied** one.\n- `cmd/consensus/main.go` — reduce `resolveLLMBaseURL` to a pure accessor (no `os.Getenv`), add `embeddingBaseURL` with a provider-aware fallback (the embedding client otherwise defaults to OpenAI regardless of provider), and rewire the embedding/summarizer config.\n\n**Verified locally:**\n- **RED proof** (`git checkout 409e626^ --` the two source files): exactly the 5 config test failures + `undefined: embeddingBaseURL` compile failure, then restored.\n- **GREEN:** `gofmt` clean, `go build ./...` ok, `go vet ./...` ok, full `go test -short -count=1 ./...` all green when run env-clean (the harness's exported `OPENROUTER_API_KEY` otherwise makes `demo` hit the live network).\n- Tests assert wiring end-to-end (`config.Load → resolveLLMBaseURL → llm.Config`), not just the resolver unit.\n\nOne environment caveat captured in the doc: the test host exported `OPENROUTER_API_KEY`, which contaminates `demo`; run with `env -u OPENROUTER_API_KEY -u LLM_API_KEY ...` to match CI.\n",
+      "evidence": "# Evidence\n- Problem class: go-env-override-defeated-by-config-file-value\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-24T04:56:24.983Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SYMPTOM: a Go service ships a default config file that pins a provider-specific value (llm.base_url = https://api.deepseek.com/v1). Two documented environment overrides existed (CONSENSUS_LLM_BASE_URL, OPENROUTER_BASE_URL) but were silently ignored: the resolver function returned cfg.LLM.BaseURL FIRST and only then consulted the env vars, so the env lookups were dead code whenever the shipped config carried the field. A user setting OPENROUTER_API_KEY got the provider switched (internal/config set provider=openrouter) while calls still went to api.deepseek.com and 401'd, contradicting the README claim that no separate base-URL variable was required. ROOT CAUSE: precedence split across two layers. The config loader resolved env overrides for every other setting, but this one value had a second, contradictory resolver in main() that re-read the environment (and never ran). Precedence implemented twice = one copy is dead. FIX (generalizable): resolve precedence EXACTLY ONCE, in the config layer, and make downstream accessors pure (no os.Getenv outside config). Ladder: explicit generic override env > provider-specific override env > config-file value > provider default. When a provider switch (here OPENROUTER_API_KEY selecting openrouter) follows, distinguish where the current base URL CAME FROM: a value read from the config FILE is provider-specific and must be CLEARED on the switch so the new provider's default applies; a value supplied via environment is an explicit operator choice and must SURVIVE the switch. Track that with a bool set at the env-application site rather than re-deriving it. VERIFICATION: RED-proof by reverting only the two source files and re-running the NEW tests (5 failures + a compile failure for the removed helper) before restoring; then gofmt/build/vet/full short suite green and the repo guard PASS. Assert the wiring end-to-end (config.Load -> accessor -> client config), not just the unit: a test that only exercises the resolver can pass while the provider default still never applies. PITFALL: the embedding/summarization client defaults to api.openai.com regardless of provider, so it needs its own provider-aware default fallback (embeddingBaseURL) rather than sharing the LLM client's internal default. RESIDUAL left honest: the shipped config file still pins the old provider/endpoint, so a run with only the OLD provider's key keeps the old endpoint (intended); the README env table still lists the old URL as the default value (cosmetic once the override actually works).",
+        "environment": "",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-env-override-defeated-by-config-file-value",
+        "provider": "openrouter",
+        "solved_at": "2026-09-24T04:56:24.983Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-24 04:56:25"
+    }
+  ]
+}

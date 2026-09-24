@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2122 problem classes · 2213 verified answers** · exported 2026-09-24 04:00 UTC
+**2138 problem classes · 2229 verified answers** · exported 2026-09-24 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1012,6 +1012,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1084 | typescript-express-dead-route-implementation | 1 | go |
 | 1085 | static-html-docs-metadata-fix | 1 | go |
 | 1086 | python-sha256-length-extension-mac-forgery | 1 | python |
+| 1087 | python-canary-staleness-probe | 1 | go |
 | 1088 | rust-cli-error-message-prefix-doubling | 1 | rust |
 | 1089 | rust-cli-stats-dedup-note-conditional | 1 | rust |
 | 1090 | typescript-express-postgres-fk-leak-404 | 1 | go |
@@ -1113,6 +1114,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1186 | github-push-401-readonly-token | 1 | shell |
 | 1187 | go-sqlite-timestamp-column-swap | 1 | go |
 | 1188 | bunker-agent-home-0700-bind-mount-permissionerror-redeploy | 1 | bash |
+| 1189 | canary-deliver-failure-recurrence | 1 | go |
 | 1190 | totalstack-auto-wired-provider-dispatch-500 | 1 | python |
 | 1191 | godot-save-load-format-mismatch | 1 | gdscript |
 | 1192 | godot-warroom-keyboard-focus | 1 | gdscript |
@@ -2080,6 +2082,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2163 | test-runner-sync-spawned-child-termd-by-external-watchdog | 1 | go |
 | 2164 | board-jsonl-torn-append-no-trailing-newline | 1 | python |
 | 2165 | eduos-foreman-ops-keepers-bake-stale-host-path | 1 | python |
+| 2166 | dogfood-stale-premise-filing | 1 | process |
 | 2167 | node-cli-writes-to-caller-cwd | 1 | typescript |
 | 2168 | shell-ext4-jbd2-journal-replay-idempotent-torn-commit | 1 | shell |
 | 2169 | go-euler-hllc-riemann-sod-exact-convergence-order | 1 | go |
@@ -2128,3 +2131,16 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2212 | jev-question-gate-reproposes-just-answered-question | 1 | python |
 | 2213 | vitest-past-due-fixture-bogota-eod-cutoff-tod-dependence | 1 | typescript |
 | 2214 | rust-integration-test-missing-public-reexport-import | 1 | rust |
+| 2215 | go-refactor-behaviour-preserving-registry-golden-proof | 1 | go |
+| 2216 | go-foreman-red-proof-when-head-already-has-fix | 1 | go |
+| 2217 | bash-tcp-sack-scoreboard-reneging-dsack-exact-bytes-in-flight | 1 | bash |
+| 2218 | go-chu-liu-edmonds-min-arborescence-dual-certificate-exactness | 1 | go |
+| 2219 | go-env-override-defeated-by-config-file-value | 1 | go |
+| 2220 | go-wiring-injection-tests-bypass-production-path | 1 | go |
+| 2221 | coding-agent-worker-died-uncommitted | 1 | go |
+| 2222 | gitreins-foreman-resets-head-during-verify | 1 | typescript |
+| 2223 | container-registry-image-path-drift-after-repository-owner-change | 1 | yaml-markdown |
+| 2224 | git-commit-index-wipe-mass-deletion-recovery | 1 | git |
+| 2225 | consensus-upstream-opencode-ts-compatibility | 1 | go, shell, javascript |
+| 2226 | typescript-vitest-live-server-integration-skip-guard | 1 | typescript |
+| 2227 | mcp-tool-silent-empty-result | 1 | rust |

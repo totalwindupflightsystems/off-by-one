@@ -31,29 +31,37 @@ DATA_DIR = os.path.join(REPO_ROOT, "data")
 ANSWERS_DIR = os.path.join(DATA_DIR, "answers")
 
 # Self-test / canary / probe classes that must never reach the public export.
-# Matched (case-insensitive regex search) against the raw class title,
-# lowercased. Keep these specific: real engineering classes whose titles
-# merely contain "test" (e.g. "test-mocking-http-requests",
-# "test-property-based-shrinking") must NOT be excluded.
+# ANCHORED matching (DF-OFF-BY-ONE-15): probe families are prefix families,
+# so patterns pin ^ prefixes, exact ^...$ titles, or separator-delimited
+# tokens — the same anchored strings as placeholderClassPatterns in
+# internal/graph/placeholder.go (keep the two lists in sync). A bare
+# substring search 404ed real engineering classes whose titles merely
+# CONTAIN a protected word mid-slug (e.g. "ob1-dogfood-fib-off-by-one-index",
+# "ob1-ctx-canary-deploy-oom"). Keep these specific: real engineering
+# classes whose titles merely contain "test" (e.g.
+# "test-mocking-http-requests", "test-property-based-shrinking") must NOT be
+# excluded.
 EXCLUDED_CLASS_PATTERNS = [
-    r"self-test",             # off-by-one-self-test family, bare "self-test"
-    r"self[-_]dogfood",       # self-dogfood probes
-    r"dogfood",               # test-self-dogfood, dogfood-field-test-*
-    r"canary",                # docs-canary-*
-    r"field-test",            # dogfood-field-test-*
-    r"^test$",                # bare "test" placeholder class
-    r"test-gap-sweep",
-    r"test-foreman-",
-    r"e2e-tick",              # e2e-tickNN probe classes
-    r"tick\d+-e2e",           # reversed-form probes: foreman-tick82-e2e, tick89-e2e, tick90-e2e
-    r"shell-script-e2e",      # 0001-0017-era probe class
-    r"e2e-verification-pipeline",  # foreman-e2e-verification-pipeline probe
-    r"foreman-audit",         # tick88-foreman-audit probe
-    r"ds-007",                # DS-007 probe family (ds-007, ds-007-tick-106)
-    r"shell-say-hello-test",
-    r"shell-echo-hello-fix",
-    r"tick\d+-self-test",     # tickN-self-test variants of the self-test family
-    r"docs-canary",
+    r"^off-by-one-self-test",                # off-by-one-self-test-* family
+    r"(?:^|[-_])self[-_]test(?:[-_]|$)",     # self-test token (fused "selftest" is a real word)
+    r"^self[-_]dogfood",                     # self-dogfood probes
+    r"^test-self-dogfood",                   # test-self-dogfood
+    r"^dogfood-field-test",                  # dogfood-field-test-* probe prefix
+    r"^dogfood$",                            # bare placeholder row (exact)
+    r"^docs-canary",                         # docs-canary-* probe prefix
+    r"^canary$",                             # bare placeholder row (exact)
+    r"^test$",                               # bare "test" placeholder class
+    r"^test-gap-sweep",
+    r"^test-foreman-",
+    r"^e2e-tick",                            # e2e-tickNN probe classes
+    r"tick\d+-e2e\b",                        # reversed-form probes: foreman-tick82-e2e, tick89-e2e, tick90-e2e
+    r"^shell-script-e2e$",                   # 0001-0017-era probe class (exact)
+    r"^e2e-verification-pipeline$",          # e2e-verification-pipeline probe (exact)
+    r"^foreman-e2e-verification-pipeline$",  # foreman-e2e-verification-pipeline probe (exact)
+    r"(?:^|[-_])foreman[-_]audit(?:[-_]|$)", # tick88-foreman-audit probe (token mid-slug)
+    r"^ds-007",                              # DS-007 probe family (ds-007, ds-007-tick-106)
+    r"^shell-say-hello-test$",
+    r"^shell-echo-hello-fix$",
 ]
 _EXCLUDED_RES = [re.compile(p, re.IGNORECASE) for p in EXCLUDED_CLASS_PATTERNS]
 

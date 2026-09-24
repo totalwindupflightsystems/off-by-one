@@ -1,0 +1,28 @@
+{
+  "class_id": 2221,
+  "title": "coding-agent-worker-died-uncommitted",
+  "description": "coding-agent-worker-died-uncommitted",
+  "created_at": "2026-09-24 05:50:32",
+  "answers": [
+    {
+      "answer_id": 2415,
+      "language": "go",
+      "environment": "hermes-agent foreman tick, coding-hermes fleet, dexdat-memory",
+      "version": "",
+      "solution": "Solution written to `/home/kara/SOLUTION-worker-died-uncommitted.md` (290 lines, 8 sections).\n\n## What it contains\n\n**Root cause:** External SIGTERM, not a worker bug. The discriminator is 2+ workers ending `cli_close` within <1s of each other (here `1790225132.5569465` / `.5862417`, Δ = **0.0293 s**) while `oom_kill 0` and the reaper logged `clean (loops=0 ...)`. A per-worker bug cannot synchronize two different processes to 30 ms. The kill landed in the post-verify/pre-commit window, so the diff was complete but uncommitted.\n\n**Key correctness catch I verified by execution:** the obvious `GROUP BY end_reason, ended_at` **misses** the pair because the fractional seconds differ. I built a synthetic `sessions` table with the real values and proved:\n- exact-equality group → **0 rows**\n- sub-second window self-join → returns `w1/w2, delta_s 0.0293` ✓\n- single aggregate `BETWEEN 1790225132.0 AND 1790225133.0` → `COUNT=2` ✓\n\nSo the runbook gives the windowed query, not the naive one.\n\n**Exact fixes included:**\n1. Triage SQL (state.db first, before re-dispatch) with the working window query.\n2. Host rule-out commands (`free -g`, `dmesg`, cgroup `memory.events`, reaper `clean` line).\n3. Recovery: foreman-direct commit through the repo's own pre-commit guard (preserves verification evidence, ~1 min vs 30–90 min re-dispatch), then Tier-2 judge on the new commit.\n4. Empty-tree path: re-dispatch into the same clean worktree, no reap.\n5. Liveness via state.db counts + `/proc/<pid>/stat` utime deltas; explicit warning that a 0-byte output log is normal.\n6. The CLI trap: `fuser -k <port>/tcp` before boot, explicit `--api-url`, parse `.data.memory_ids[0]`, nested `{memory_payload,scope_context}` body — plus a wrapper enforcing all three.\n\nVerification section includes acceptance criteria and a one-line replay, with this instance's expected values (`1a5c14fe`, guard 4/4, judge PASS).\n\nNote: the repo/worktrees referenced in the problem aren't present in this sandbox, so the runbook uses parameterized paths (`$WT`, `$STATE_DB`). The detection logic itself was executed and confirmed.\n",
+      "evidence": "# Evidence\n- Problem class: coding-agent-worker-died-uncommitted\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-24T05:50:32.276Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "PROBLEM: a coding-agent worker process dies mid-run leaving its fix complete but uncommitted. Distinguish an external kill from a worker bug, and recover without re-running the whole task.\n\nANSWER (triage order):\n1) state.db FIRST, before any re-dispatch: SELECT id, cwd, end_reason, ended_at, message_count, tool_call_count FROM sessions WHERE cwd LIKE '%<project>-%' ORDER BY started_at DESC. end_reason='cli_close' on TWO OR MORE workers sharing the SAME ended_at (fractional seconds) means external termination, not a worker bug.\n2) Rule out the host: free -g (headroom), dmesg -T | grep -i oom, a mem-monitor snapshot showing oom_kill 0, and the reaper's own 'clean (loops=0 ...)' log line. No OOM + no reaper hit + simultaneous timestamps => external SIGTERM.\n3) git -C <worktree> status --short decides recovery. Killed at the END (post-verify, pre-commit) => COMPLETE diff. Killed early => empty tree.\n4) Complete diff: commit it foreman-direct through the repo's OWN pre-commit guard, then run the Tier-2 judge on that commit. Preserves the worker's verification evidence; costs ~1 minute instead of a 30-90 minute re-dispatch.\n5) Empty tree: re-dispatch into the SAME worktree (clean at base, no reap needed).\n6) Liveness signals: state.db message/tool-call counts and /proc/<pid>/stat utime deltas. A 0-byte agent output log is NORMAL for the whole run and proves nothing.\n\nRELATED TRAP: a CLI whose default api-url is localhost:<port> will silently probe a FOREIGN service and return '404 page not found', which reads exactly like a product defect. Always point the harness at the scratch port explicitly, and kill the port before booting (fuser -k <port>/tcp) so an orphaned server cannot answer your curls.",
+        "environment": "hermes-agent foreman tick, coding-hermes fleet, dexdat-memory",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "coding-agent-worker-died-uncommitted",
+        "provider": "openrouter",
+        "solved_at": "2026-09-24T05:50:32.276Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-24 05:50:33"
+    }
+  ]
+}
