@@ -13,6 +13,20 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 SERVER_URL="${OFF_BY_ONE_URL:-http://localhost:8766}"
 MUSTER_CONFIG="$PROJECT_DIR/muster-config.yaml"
+# Derive the Off-by-One port from SERVER_URL (default 8766; an explicit
+# :<port> in the URL wins) so a locally started server matches the URL.
+PORT=8766
+if [[ "$SERVER_URL" =~ :([0-9]+)(/|$) ]]; then
+    PORT="${BASH_REMATCH[1]}"
+fi
+# A local server start is only correct when SERVER_URL points at this host —
+# a remote OFF_BY_ONE_URL (shared/collision host) must never spawn a daemon.
+case "${SERVER_URL#*://}" in
+    localhost|localhost:*|127.0.0.1|127.0.0.1:*|::1|::1:*) IS_LOCAL=true ;;
+    *) IS_LOCAL=false ;;
+esac
+# Muster health probe; override when the Muster deployment listens elsewhere.
+MUSTER_HEALTH_URL="${MUSTER_HEALTH_URL:-http://localhost:8767}"
 DRY_RUN=false
 CHECK_ONLY=false
 
@@ -37,19 +51,26 @@ if [ -z "$HEALTH_RESPONSE" ]; then
         echo "  ✗ Off-by-One server is NOT running"
         exit 1
     fi
-    echo "  → Starting Off-by-One server ..."
-    if [ "$DRY_RUN" = true ]; then
-        echo "  (dry-run: would run: off-by-one --db $PROJECT_DIR/off-by-one.db)"
+    if [ "$IS_LOCAL" = true ]; then
+        echo "  → Starting Off-by-One server ..."
+        if [ "$DRY_RUN" = true ]; then
+            echo "  (dry-run: would run: off-by-one --db $PROJECT_DIR/off-by-one.db --port $PORT)"
+        else
+            cd "$PROJECT_DIR"
+            nohup off-by-one --db "$PROJECT_DIR/off-by-one.db" --port "$PORT" \
+                > /tmp/off-by-one.log 2>&1 &
+            echo $! > /tmp/off-by-one.pid
+            echo "  ✓ Started (PID $(cat /tmp/off-by-one.pid))"
+            sleep 2
+        fi
     else
-        cd "$PROJECT_DIR"
-        nohup off-by-one --db "$PROJECT_DIR/off-by-one.db" \
-            > /tmp/off-by-one.log 2>&1 &
-        echo $! > /tmp/off-by-one.pid
-        echo "  ✓ Started (PID $(cat /tmp/off-by-one.pid))"
-        sleep 2
+        echo "  → $SERVER_URL is a remote host — not starting a local server; continuing with health/spec checks only"
     fi
 else
     echo "  ✓ Off-by-One server is running"
+    if [ "$DRY_RUN" = true ] && [ "$IS_LOCAL" = true ]; then
+        echo "  (dry-run: a cold start would run: off-by-one --db $PROJECT_DIR/off-by-one.db --port $PORT)"
+    fi
 fi
 
 if [ "$CHECK_ONLY" = true ]; then
@@ -85,7 +106,9 @@ done
 # --- Step 4: Start Muster ---
 echo ""
 echo "[4/4] Starting Muster MCP server ..."
-if ! command -v muster &>/dev/null; then
+if [ "$IS_LOCAL" = false ]; then
+    echo "  → Off-by-One is remote ($SERVER_URL) — skipping local Muster start (health/spec checks only)"
+elif ! command -v muster &>/dev/null; then
     if [ "$DRY_RUN" = true ]; then
         echo "  (dry-run: muster not installed — would need 'go install github.com/wojons/muster@latest')"
     else
@@ -108,10 +131,10 @@ else
         sleep 2
 
         # Verify Muster is up.
-        if curl -sf -m 3 "http://localhost:8767/health" >/dev/null 2>&1; then
-            echo "  ✓ Muster health check passed"
+        if curl -sf -m 3 "$MUSTER_HEALTH_URL/health" >/dev/null 2>&1; then
+            echo "  ✓ Muster health check passed ($MUSTER_HEALTH_URL/health)"
         else
-            echo "  ⚠ Muster health check failed (may still be starting up)"
+            echo "  ⚠ Muster health check failed at $MUSTER_HEALTH_URL/health (may still be starting up)"
         fi
     fi
 fi

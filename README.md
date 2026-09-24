@@ -304,8 +304,9 @@ ln -s "$(pwd)/scripts/pi-agent" ~/.local/bin/pi-agent   # or: cp scripts/pi-agen
 (use `linux-amd64`) or `aarch64`/`arm64` (use `linux-arm64`):
 
 ```bash
-curl -fsSL https://go.dev/dl/go1.26.8.linux-amd64.tar.gz -o /tmp/go.tgz
-mkdir -p ~/toolchain && tar -C ~/toolchain -xzf /tmp/go.tgz
+GO_TGZ="$(mktemp)"
+curl -fsSL https://go.dev/dl/go1.26.8.linux-amd64.tar.gz -o "$GO_TGZ"
+mkdir -p ~/toolchain && tar -C ~/toolchain -xzf "$GO_TGZ"
 export PATH="$HOME/toolchain/go/bin:$PATH"   # append the same line to ~/.profile to persist
 go version
 ```
