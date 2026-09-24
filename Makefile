@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -212,6 +212,12 @@ transport-retry-selftest:
 # no contact with the real /tmp/pi install.
 pi-agent-watchdog-selftest:
 	bash scripts/tests/pi-agent-watchdog-selftest.sh
+
+# Regression self-test for the export-corpus probe-class exclusions
+# (scripts/export-answers.py EXCLUDED_CLASS_PATTERNS, DF-OFF-BY-ONE-15).
+# Pure in-process unittest: no network, no DB, no credentials.
+export-exclusions-selftest:
+	python3 scripts/tests/export_answers_exclusions_test.py
 
 lint:
 	go vet ./...

@@ -299,16 +299,22 @@ func TestPlaceholderSQL_GoOracleOverTableRows(t *testing.T) {
 
 	titles := []string{
 		"off-by-one-self-test", "self-test", "tick12-self-test", "Self-Test",
-		"test-self-dogfood", "dogfood-field-test-alpha", "docs-canary-001",
+		"self-dogfood-tick23", "test-self-dogfood", "dogfood-field-test-alpha",
+		"docs-canary-001",
 		"test", "test-gap-sweep", "test-foreman-tick", "e2e-tick42",
 		"foreman-tick82-e2e", "shell-script-e2e",
 		"foreman-e2e-verification-pipeline", "tick88-foreman-audit",
 		"ds-007", "ds-007-tick-106", "shell-say-hello-test",
 		"shell-echo-hello-fix",
-		// real classes, including the "test"-substring counter-examples
+		// real classes, including the "test"-substring counter-examples and
+		// the contains-word victims the unanchored patterns used to 404
+		// (DF-OFF-BY-ONE-15)
 		"docker-perms", "file-ownership",
 		"test-mocking-http-requests", "test-property-based-shrinking",
 		"protest-signatures",
+		"ob1-dogfood-fib-off-by-one-index", "ob1-ctx-canary-deploy-oom",
+		"dogfood-stale-premise-filing", "canary-deliver-failure-recurrence",
+		"python-canary-staleness-probe",
 	}
 	wantKept := 0
 	for i, title := range titles {

@@ -33,10 +33,13 @@ func TestPlaceholderClassSQLFunc_MatchesGoPredicate(t *testing.T) {
 	cases := []string{
 		// Go-list families.
 		"off-by-one-self-test",
+		"off-by-one-self-test-2026-07-29-tick199",
 		"self-test",
 		"tick12-self-test",
+		"foreman-tick-132-self-test",
 		"Self-Test",
 		"SELF-TEST",
+		"self-dogfood-tick23",
 		"test-self-dogfood",
 		"self_dogfood",
 		"dogfood-field-test-alpha",
@@ -49,6 +52,7 @@ func TestPlaceholderClassSQLFunc_MatchesGoPredicate(t *testing.T) {
 		"test-gap-sweep",
 		"test-foreman-tick",
 		"e2e-tick42",
+		"e2e-tick-109",
 		"foreman-tick82-e2e",
 		"tick89-e2e",
 		"TICK89-E2E",
@@ -60,7 +64,9 @@ func TestPlaceholderClassSQLFunc_MatchesGoPredicate(t *testing.T) {
 		"shell-say-hello-test",
 		"shell-echo-hello-fix",
 		// Real engineering classes — must NOT be excluded, including the
-		// "test" substring counter-examples the Go list documents.
+		// "test" substring counter-examples the Go list documents and the
+		// contains-word victims the unanchored patterns used to 404
+		// (DF-OFF-BY-ONE-15).
 		"docker-perms",
 		"file-ownership-after-container-transfer",
 		"test-mocking-http-requests",
@@ -68,6 +74,13 @@ func TestPlaceholderClassSQLFunc_MatchesGoPredicate(t *testing.T) {
 		"protest-signatures",
 		"latest-tag-pinning",
 		"docker_perms",
+		"ob1-dogfood-fib-off-by-one-index",
+		"ob1-ctx-canary-deploy-oom",
+		"dogfood-stale-premise-filing",
+		"canary-deliver-failure-recurrence",
+		"python-canary-staleness-probe",
+		"how-to-test-a-canary-deployment-strategy",
+		"bash-gate-selftest-asserts-repo-state-nonhermetic",
 		"",
 	}
 
