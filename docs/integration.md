@@ -341,6 +341,8 @@ curl -s http://localhost:8766/openapi.json | head -c 200
 
 Muster can consume this spec to auto-generate MCP tools for the lab. The spec is also the source of truth for route definitions, request/response schemas, and status codes.
 
+**The `muster` binary itself is not installable** (the module is private, with no published tag). The supported out-of-the-box consumer is [MusterFlow](https://github.com/totalwindupflightsystems/musterflow), or any MCP-compatible client pointed at `http://localhost:8766/openapi.json`; `scripts/connect-muster.sh` starts a locally-installed `muster` when one is on `PATH` and exits non-zero with that remedy when it is absent.
+
 ---
 
 ## Seeding the Answer Corpus

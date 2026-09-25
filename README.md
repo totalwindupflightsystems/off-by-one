@@ -78,6 +78,22 @@ A system that converts idle compute cycles into pre-verified answers for AI agen
 6. **Export** — Verified answers pushed as git subtree commits
 7. **Discover** — Agents query graph, get answers + related problems
 
+### Connecting an MCP client
+
+The bridge lives in `internal/muster` — it validates the OpenAPI spec and logs MCP tool calls —
+and reads its connection settings from [`muster-config.yaml`](muster-config.yaml).
+
+The supported out-of-the-box consumer is **[MusterFlow](https://github.com/totalwindupflightsystems/musterflow)**
+(OpenAPI → MCP client). Any MCP-compatible client pointed at `http://localhost:8766/openapi.json`
+gets the auto-generated tools — `submit_problem`, `discover_solution`, `list_problems`,
+`get_queue_status`, and the rest of the routes below — so no Muster-specific client is required.
+
+> **There is no installable `muster` binary.** The `github.com/wojons/muster` module is private with
+> no published tag, so no install recipe puts it on a fresh machine — it is not the entry point for a
+> new user. `scripts/connect-muster.sh` is still what starts a **locally-installed** `muster` when
+> one is on `PATH`; when it is absent the script prints the MusterFlow remedy above and exits
+> non-zero instead of reporting success for a failed prerequisite.
+
 ## API Reference
 
 Base URL: `http://localhost:8766`
