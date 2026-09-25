@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2221 problem classes · 2313 verified answers** · exported 2026-09-25 10:00 UTC
+**2229 problem classes · 2321 verified answers** · exported 2026-09-25 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2227,3 +2227,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2308 | cross-merge-test-interaction-python | 1 | python |
 | 2309 | duckbrain-memories-empty-content-triggers-missing-required-fields-400 | 1 | python |
 | 2310 | python-openrouter-reasoning-tokens-starve-json-budget | 1 | go |
+| 2311 | go-polyhedral-loop-tiling-dependence-validity-exactness | 1 | go |
+| 2312 | python-rna-secondary-structure-mfe-partition-function-exactness | 1 | python |
+| 2313 | bash-ceph-crush-straw2-failure-domain-placement-exactness | 1 | shell |
+| 2314 | namespaces-path-mismatch-silent-zero-table-init | 1 | python |
+| 2315 | go-worker-commits-outside-assigned-worktree | 1 | go |
+| 2316 | bunker-destroy-gate-counts-own-systemd-user-session-services | 1 | go |
+| 2317 | python-scanner-mode-flag-missed-on-directory-scan-path | 1 | python |
+| 2318 | pytest-namespace-uuid-substring-assertion-flake | 1 | python |
