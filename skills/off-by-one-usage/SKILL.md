@@ -315,9 +315,11 @@ docs/dogfood/2026-09-24-integration.md.
     Discover through the full chain: 21.3ms warm (direct REST 1.2ms) — noise either way.
 16. **The `muster` binary named in `connect-muster.sh` is UNBUILDABLE from docs**
     (DF-OFF-BY-ONE-17): `go install github.com/wojons/muster@latest` resolves a private
-    module with no tag. The script then prints "Muster binary not found" and STILL exits 0
-    with "Integration Complete". Supported consumer today = any OpenAPI→MCP client (e.g.
-    MusterFlow); treat the script's step 4 as fiction until a muster release binary exists.
+    module with no tag. **FIXED 09-25** (commit a852304): the script no longer pretends
+    success — when muster is absent it prints a named remedy (MusterFlow, or any MCP
+    client reading `/openapi.json`) and exits 2, and README's "Connecting an MCP client"
+    names MusterFlow as the supported out-of-the-box consumer. The module remains
+    private/unbuildable, so do not hand a fresh user a go-install line.
 17. **`connect-muster.sh` port handling — FIXED 09-24, live-verified 09-25** (DF-18):
     the script now derives PORT from `OFF_BY_ONE_URL`/`SERVER_URL` (explicit `:<port>`
     wins), refuses to spawn a daemon when the URL points at a remote host, and

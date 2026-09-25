@@ -109,16 +109,25 @@ echo "[4/4] Starting Muster MCP server ..."
 if [ "$IS_LOCAL" = false ]; then
     echo "  → Off-by-One is remote ($SERVER_URL) — skipping local Muster start (health/spec checks only)"
 elif ! command -v muster &>/dev/null; then
+    # No installable muster exists: the module is private with no published tag,
+    # so a fresh user cannot obtain the binary by any documented recipe. Name the
+    # supported consumer instead, and never report success for a failed
+    # prerequisite (this branch used to fall through to "Integration Complete").
     if [ "$DRY_RUN" = true ]; then
-        echo "  (dry-run: muster not installed — would need 'go install github.com/wojons/muster@latest')"
+        echo "  (dry-run: no 'muster' binary — there is no installable muster; supported consumer is MusterFlow, or any MCP client reading $SERVER_URL/openapi.json)"
     else
-        echo "  ⚠ Muster binary not found in PATH"
-        echo "    Install with: go install github.com/wojons/muster@latest"
-        echo "    Or use an existing Muster deployment pointing at: $SERVER_URL"
+        echo "  ✗ Muster binary not found in PATH — and there is no installable 'muster' binary"
+        echo "    (the muster module is private with no published tag, so no install recipe works)"
         echo ""
-        echo "  The Off-by-One server is running and its OpenAPI spec is valid."
-        echo "  Any MCP-compatible client can connect to it."
-        exit 0
+        echo "  Remedy — use the supported out-of-the-box consumer, MusterFlow:"
+        echo "    https://github.com/totalwindupflightsystems/musterflow"
+        echo "  Any MCP-compatible client can also consume $SERVER_URL/openapi.json"
+        echo "  directly for the auto-generated tools (submit_problem,"
+        echo "  discover_solution, list_problems, get_queue_status, ...)."
+        echo ""
+        echo "  Steps 1-3 passed: the Off-by-One server is running and its OpenAPI"
+        echo "  spec is valid — but this script's Muster start step cannot succeed."
+        exit 2
     fi
 else
     if [ "$DRY_RUN" = true ]; then
