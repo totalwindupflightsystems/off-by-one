@@ -609,3 +609,45 @@ answer graph for one `connect`. That value was demonstrated this run with real c
 Go-toolchain gap (DF-OFF-BY-ONE-11) is now the single remaining install friction across three
 consecutive runs; a bootstrap line in the Quick Start (`curl go tarball || apt install golang`)
 would close it permanently.
+
+## §12 — 2026-09-25 dogfood run (HEAD 3722faa→273604c) — the public deployment as the consumer endpoint
+
+Every prior run started a local server. This one used what an outside agent actually uses:
+ob1.it.com through the Cloudflare Worker's bot/browser split, public REST reads, and the
+SPA's deep-linkable problem pages (the `7501497` feature). It also live-verified the two
+fixes from 09-24 (DF-12 site regen, DF-18 connect-muster ports).
+
+**The bot/browser split is real and correct on both sides.** Bot UA → static site from
+raw.githubusercontent master: fresh numbers (2189 == git tree == sitemap, generated the day
+before), robots/sitemap served, extension-less class URLs mapped to `.html`. Browser UA →
+SPA shell + proxied readonly API. The trap this run avoided: a 200 on the SPA shell proves
+nothing — headless Chrome `--dump-dom` confirmed the answer body and its syntax-highlighted
+code blocks actually render client-side. **Rule: for SPAs, verify the DOM, never the status
+code.** The one unreproducible wrinkle: a batch of raw.githubusercontent requests 404'd once
+and never again (transient CDN behavior); the worker does not retry a failed origin fetch —
+a missed static page renders as a 404 to a crawler until the next bot request. Not filed
+(one observation, no repro); worth remembering if ob1.it.com ever shows phantom 404s in
+search console.
+
+**The one defect (DF-OFF-BY-ONE-21, P2):** `GET /api/v1/taxonomy` silently caps at 1000
+classes — `handlers.go:681` hardcodes `ListProblemClassesWithCounts(ctx, 1000, 0)` with no
+pagination, no total, no doc note. A consumer walking the public catalog sees 1000/2189
+classes (1011/2281 answers) with nothing signalling truncation; reproduced identically on a
+local instance, so it is the handler, not the deployment. The endpoint is also 8MB / ~1.3s
+public (one ListAnswers query per class). **Lesson: any `limit` hardcoded in a handler is a
+silent data cliff the moment the dataset outgrows it — the site advertises 2189 while its
+own discovery endpoint returns 1000, and nothing disagreed loudly.**
+
+**Live-verified fixes:** DF-12 — site/ regenerated in-repo 09-24 17:48, pushed, and the
+public worker serves it; the frozen-since-08-18 catalog is fixed in production. DF-18 —
+connect-muster.sh now derives PORT from SERVER_URL (explicit `:<port>` wins), refuses to
+spawn a daemon for remote URLs, exposes MUSTER_HEALTH_URL; `--check-only` green. Rule from
+both: a dogfood fix is not done when it merges — it is done when a later run proves it on
+the live surface it affects.
+
+**Install leg (release-binary path, verbatim README):** clone 20.7s → download+sha256 8.6s
+→ seed 36s (2189/2281/9280) → serve → health 200 → discover found:true 10ms ×3 → destroy
+exit 0. Zero toolchain, zero sudo, no docs deviation — the DF-11-era "manual Go tarball"
+friction is gone from the documented path because the release-binary recipe now leads.
+Bunker-host quirk: `/tmp` is shared across agents on that box (a stale sibling file caused
+EACCES on a log redirect) — use `$HOME` for scratch on bunker agents.

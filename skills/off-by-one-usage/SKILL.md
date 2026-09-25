@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.4.0
+version: 1.6.0
 category: software-development
 ---
 
@@ -22,9 +22,11 @@ Field-tested 2026-08-10 (dogfood #1) 🟡 PROMISING-BUT-ROUGH; 2026-08-20 (#2)
 with one open P1 — this run proved the **no-server corpus path** end-to-end
 (solved a live PEP 668 problem on the host from a shallow clone, no server)
 and the fresh-box install leg green verbatim from README, but found the
-**public catalog ob1.it.com frozen at 2026-08-18** (DF-OFF-BY-ONE-12). Pitfalls
-below reflect the CURRENT state; if a pitfall mentions a fixed OB-GAP id, it
-is stale — check the board.
+Field-tested 11 times, 2026-08-10 → 2026-09-25. **The 2026-09-25 run verified the
+PUBLIC deployment end-to-end** (bot/browser split, public reads, deep-link render);
+the last known-stale surface (public catalog frozen, DF-OFF-BY-ONE-12) is FIXED and
+live-verified fresh. Pitfalls below reflect the CURRENT state; if a pitfall mentions
+a fixed OB-GAP id, it is stale — check the board.
 
 ## Is the public catalog fresh? (10-second probe)
 
@@ -33,9 +35,10 @@ curl -s https://ob1.it.com/ | grep -o '<title>[^<]*'   # advertises class count
 curl -s http://localhost:8766/api/v1/stats | jq .total_problems
 ```
 
-If the title's number lags the live stats by more than one sync cycle, the
-`site/` leg is orphaned again — do not treat catalog pages as current, use the
-repo corpus (`data/`) or the live API instead.
+Fresh as of 2026-09-25 (title 2189 == git tree == sitemap == stats −1 sync cycle;
+DF-12 regenerator restored 09-24). If the title's number lags the live stats by
+more than one sync cycle, the `site/` leg is orphaned again — do not treat catalog
+pages as current, use the repo corpus (`data/`) or the live API instead.
 
 ## Entry points
 
@@ -315,9 +318,33 @@ docs/dogfood/2026-09-24-integration.md.
     module with no tag. The script then prints "Muster binary not found" and STILL exits 0
     with "Integration Complete". Supported consumer today = any OpenAPI→MCP client (e.g.
     MusterFlow); treat the script's step 4 as fiction until a muster release binary exists.
-17. **`connect-muster.sh` hardcodes :8766 (start) and :8767 (health check)** (DF-18);
-    `OFF_BY_ONE_URL` overrides the target but is undocumented. On a port-collision host it
-    would nohup a SECOND daemon against the same DB — never run it against a foreign :8766.
+17. **`connect-muster.sh` port handling — FIXED 09-24, live-verified 09-25** (DF-18):
+    the script now derives PORT from `OFF_BY_ONE_URL`/`SERVER_URL` (explicit `:<port>`
+    wins), refuses to spawn a daemon when the URL points at a remote host, and
+    honors `MUSTER_HEALTH_URL` for the probe. `--check-only` green against the live
+    server.
 18. **DF-OFF-BY-ONE-15 (placeholder regexes) is FIXED** — commit 6046258 anchored the probe
     regexes; probe-word classes now discover normally (board row closed after verified
     continuation). Pitfall 12 above is historical.
+
+## Field-tested 2026-09-25 (dogfood tick #11): verdict ✅ SHIPPABLE — the public deployment is a usable consumer endpoint
+
+First run to use ob1.it.com itself instead of a local server. Full evidence:
+docs/dogfood/2026-09-25-integration.md.
+
+19. **The public endpoint works as an agent consumer surface** (verified): read the
+    spec at `https://ob1.it.com/openapi.json`, discover over public HTTPS
+    (`found:true`, 0.51s, answer body intact), search via `GET /api/v1/problems?q=`,
+    pull a class's answers — all without running anything locally. One natural-guess
+    trap: discover rejects `{"title": ...}` with `unknown field "title"` — the
+    schema field is `problem_class` (the 400 does not say so).
+20. **`GET /api/v1/taxonomy` silently caps at 1000 of 2189 classes** (DF-OFF-BY-ONE-21,
+    P2): `handlers.go:681` hardcodes `ListProblemClassesWithCounts(ctx, 1000, 0)` —
+    no pagination, no total, no docs; a catalog walker sees 55% of the corpus with
+    nothing signalling truncation. Do NOT treat taxonomy as the complete class list;
+    enumerate from `data/INDEX.md` or page `/api/v1/problems` until fixed.
+21. **Bot vs browser on ob1.it.com**: bot UA gets static pages from raw.githubusercontent
+    master (extension-less class URLs mapped to `.html`); browser UA passes through to
+    the live SPA, whose deep-linked problem pages fully render client-side (verified
+    via headless DOM dump — a 200 on the SPA shell alone proves nothing). Crawlers
+    that present no bot UA string fall through to the SPA and get empty shells.
