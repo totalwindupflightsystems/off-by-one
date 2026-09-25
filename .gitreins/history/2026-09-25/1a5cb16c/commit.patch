@@ -1,0 +1,35 @@
+commit ba4d637bb14646818753d5f7c12cea2b4e34f7bb
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Fri Sep 25 13:15:40 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Fri Sep 25 13:15:40 2026 -0500
+
+    docs(api): q= is a single FTS5 phrase; document /ws/chat frame protocol and ping cadence (DF-OFF-BY-ONE-20, DF-16 closure)
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ docs/api-reference.md | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 95d2997..b6d42ad 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -132,6 +132,8 @@ List or search problem classes. Supports full-text search via `q` and filtering
+ 
+ `env` and `lang` are exact matches (`a.env = ?`, `a.lang = ?`) against the value stored on the class's answer rows — not substring, case-insensitive, or alias matches — and a class is filtered out unless one of its answers carries that exact value. A filter copied from the [README submit example](../README.md#example-submit-a-problem) (`environment: "linux"`, `language: "go"`) can therefore legitimately return 0 rows: the stored values are whatever the corpus recorded, and they are not normalized (observed live: `GET /api/v1/problems?q=raft&env=linux` → `{"problems":[],"total":0}`, while `q=raft` alone returns the matching classes, whose answers carry `env` values such as `go1.26`). Check the stored values first — `GET /api/v1/problems/{class}/answers` returns `env` and `lang` for every answer. The same exact-match rule governs `POST /api/v1/problems/discover`'s `environment` / `language` filters — see [Discover Cached Solutions](integration.md#discover-cached-solutions).
+ 
++`q` token semantics: the whole value is wrapped as a **single FTS5 phrase** (`internal/graph/search.go`, quote-escaping at the top of `Store.Search`), so the query matches one adjacent run of whole tokens — there is no automatic token ANDing, no left truncation, and no suffix wildcard: `q=pep668` returns exactly the classes whose indexed text contains that token, `q=pep 668` only widens the result where the two tokens appear *adjacently* (typically answer-body prose such as "PEP 668"), and `q=pep66` / `q=pep66*` return 0 even though `pep668` exists. A leading or trailing `*` is treated as literal text, not a wildcard operator.
++
+ **Response `200 OK`**
+ 
+ ```json
+@@ -650,6 +652,8 @@ When the server is started with `--readonly` (or `OFF_BY_ONE_READONLY=1`), these
+ 
+ The WebSocket chat endpoint (`/ws/chat`) is also disabled (it would spawn a solve).
+ 
++On a writable server, `/ws/chat` speaks a small JSON frame protocol (`internal/web/chat.go`): a `system` greeting on connect, then per user message an **immediate `status` frame**, a `status` frame (`"Still working… Ns"`, elapsed seconds) every 10 seconds until the first `agent` frame arrives, the `agent` frame(s) carrying the answer, and `error` frames on failure. The server also sends a WebSocket ping every 15s (half the 30s idle read timeout; the interval tracks `readTimeout/2` with a 1s floor, see `pingLoop` in `internal/web/chat.go`). A client that never answers pings is disconnected as soon as a ping fails — non-browser clients must rely on their WebSocket library's automatic pong handling (most do), or expect the disconnect after roughly a read-timeout of silence.
++
+ `POST /api/v1/problems/discover` is deliberately exempt: discovery is a pure read (cached-answer lookup that mutates nothing), so agents can still discover pre-verified answers from a read-only catalog — the same rule `readOnlyAllowedPost` implements in `internal/api/server.go`. `GET` endpoints for problems, taxonomy, stats, answers, and discovery remain available.
+ 
+ ---
