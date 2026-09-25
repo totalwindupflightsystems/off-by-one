@@ -1,0 +1,28 @@
+{
+  "class_id": 2304,
+  "title": "gitreins-tier1-live-smoke-fails-under-parallel-judges",
+  "description": "gitreins-tier1-live-smoke-fails-under-parallel-judges",
+  "created_at": "2026-09-25 07:09:44",
+  "answers": [
+    {
+      "answer_id": 2499,
+      "language": "python",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. I diagnosed the flake against the actual repo (cloned to `/tmp/grrepo`) and implemented + verified a fix. The deliverable is at **`/workspace/solution.md`** (also copied to `/home/kara/solution.md` and `/tmp/grrepo/SOLUTION-POC-61.md`).\n\n## Root cause\n\n`tests/test_resolution.py::test_live_smoke_jev_resolution` makes a real OpenRouter call and is placed in the suite that judge **tier-1** runs:\n\n- `engine/pipeline.py::tier1_plan()` uses `guards.test_command` verbatim and **ignores `test_mode: diff`**, so every judge runs the full suite. The env has `GITREINS_OPENROUTER_KEY` (tier-2 needs it), so the live test executes.\n- Each `gitreins task complete` is its own process; `addopts = \"-n 4\"` only serializes within one pytest process. N concurrent judges → N simultaneous live calls → rate-limit/5xx → `pytest -x` exits non-zero.\n- A tier-1 failure short-circuits tier-2. That's the FAIL/re-run cost.\n\nThe defect is a **category error**: a non-deterministic, host-global egress smoke inside the deterministic gate.\n\n## Fix (5 files)\n\n1. `tests/test_resolution.py` — add `@pytest.mark.live`.\n2. `pyproject.toml` — register the `live` marker.\n3. `engine/pipeline.py`:\n   - `_run_script_step` now merges per-step `env` over the sanitized env;\n   - `tier1_plan()` stamps the tests step with `env={\"GITREINS_TIER1\": \"1\"}`.\n4. `tests/conftest.py` — when `GITREINS_TIER1=1`, skip `live`-marked tests (`pytest_collection_modifyitems`); for any live test that does run, take a per-repo `flock` and skip if another process holds it (`pytest_runtest_setup`/`teardown`).\n5. `tests/test_v081_fixes.py` — regression assertion on the tier-1 tests step env (no new test functions, so the docs-drift count stays green).\n\nRejected retry-only fix (c): it doubles cost, can mask real regressions, and adds more state than the deterministic exclusion.\n\n## Verification performed\n\n- `pytest::test_live_smoke` collected normally without the env var; **skipped** with reason `live/egress test excluded from judge tier-1 (DF-GITREINS-POC-61)` when `GITREINS_TIER1=1`, even with a key present.\n- Whole `tests/test_resolution.py` under tier-1: **127 passed, 1 skipped**.\n- `tier1_plan()` emits `env={'GITREINS_TIER1': '1'}` and the runner injects it into the child (`TIER1=1`).\n- Two concurrent live processes: first passes, second **SKIPs** on the lock.\n- `tests/test_v081_fixes.py` + `tests/test_pipeline.py`: 122 passed; docs-drift check green (2436 tests / 68 files); `ruff format --check` and `ruff check` clean.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-tier1-live-smoke-fails-under-parallel-judges\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-25T07:09:44.823Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "gitreins repo (~/gitreins): tier-1 inside `gitreins task complete` FAILED on tests/test_resolution.py::test_live_smoke_jev_resolution while two gitreins task complete judges and a full pytest run executed CONCURRENTLY on the same host; the test passes in isolation and passed in the same minutes full suite. Non-deterministic live OpenRouter smoke (skipif-guarded on GITREINS_OPENROUTER_KEY) is contention-sensitive and poisons tier1 even when tier2 passes all criteria, forcing a costly full judge re-run. Candidate fixes: (a) mark the live smoke serial/exclusive (file-level pytest marker like serial, excluded when another gitreins evaluator process holds a lock), (b) make .gitreins/config.yaml test_mode/pytest invocation exclude the live-smoke marker during judge tier1 since tier2 does its own live verification, (c) retry tier1 once on failure where the failing test is live/marked live and not in the diff. Repro: run 2-3 gitreins task complete judges concurrently plus pytest -m \"not slow\"; tier1 fails on test_live_smoke_jev_resolution intermittently. Confirmed 2026-09-25 tick 336 (judge run 581a25b5 FAIL, rerun ce1fe6d3 PASS on identical tree).",
+        "environment": "",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-tier1-live-smoke-fails-under-parallel-judges",
+        "provider": "openrouter",
+        "solved_at": "2026-09-25T07:09:44.824Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-25 07:09:44"
+    }
+  ]
+}

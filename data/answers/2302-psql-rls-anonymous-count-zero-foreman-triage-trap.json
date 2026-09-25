@@ -1,0 +1,28 @@
+{
+  "class_id": 2302,
+  "title": "psql-rls-anonymous-count-zero-foreman-triage-trap",
+  "description": "psql-rls-anonymous-count-zero-foreman-triage-trap",
+  "created_at": "2026-09-25 06:09:54",
+  "answers": [
+    {
+      "answer_id": 2497,
+      "language": "sql",
+      "environment": "docker compose stack eduos (postgres 16, PostgREST-style app role eduos_app, superuser eduos), tick 789",
+      "version": "",
+      "solution": "I diagnosed the problem by reproducing the exact RLS shape on a local PostgreSQL cluster (the compose stack wasn't reachable from this sandbox), confirmed every claim empirically, then wrote the solution to **`/home/kara/SOLUTION.md`**.\n\n## What I verified (reproduced)\n\nWith `enrollments` RLS-enabled and policies keyed on `current_setting('app.current_user_id', true)`:\n\n| Test | Result |\n|------|--------|\n| Superuser/owner `count(*)` | **5** (data intact) |\n| `eduos_app` no context `count(*)` | **0** — predicate is `teacher_id = NULL` → no rows |\n| `eduos_app` + `set_config(...)` context | **2** — correct teacher-scoped count |\n| Plain `INSERT` as `eduos_app`, no context | `ERROR: new row violates row-level security policy` |\n| `INSERT ... SELECT ... ON CONFLICT DO NOTHING`, no context | **`INSERT 0 0`, silent** — the source `SELECT` is RLS-filtered first |\n| `BEGIN; INSERT 0 1; ROLLBACK;` | misread trap reproduced |\n\n## Key finding\n\nThe silent `INSERT 0 0` is **not** `ON CONFLICT` hiding an error — it's that the `INSERT ... SELECT`'s **source `SELECT`** runs under the same RLS policy, returns zero rows, so the target `WITH CHECK` is never evaluated. Once context is set, a mismatched row correctly raises a loud error.\n\n## Solution contents\n\n1. **Triage as owner/superuser** (`docker compose exec -T db psql -U eduos ...`).\n2. **Set context first** for app-role counts, in the *same session/transaction* (`set_config` / `SET LOCAL`), with the session-scoping caveat.\n3. **Fix `INSERT ... SELECT ... ON CONFLICT DO NOTHING`** by setting context and filtering the source on `current_setting(...)`.\n4. **PostgREST hardening** — set the GUCs per request; never let `eduos_app` run anonymous.\n5. **Verification matrix (V1–V6)** plus a fully self-contained repro SQL script.\n\nOne-line rule: *a `0` from `eduos_app` means missing session context, not missing data; only trust superuser counts and only trust `INSERT 0 N` after `COMMIT`.*\n",
+      "evidence": "# Evidence\n- Problem class: psql-rls-anonymous-count-zero-foreman-triage-trap\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-25T06:09:54.066Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Foreman triage on the eduos demo DB: bare `psql -U eduos_app -c 'SELECT count(*) FROM enrollments'` returns 0 on a table that actually holds 5 rows, and a superuser INSERT ... SELECT ... ON CONFLICT DO NOTHING reports 'INSERT 0 0' for rows that DO NOT yet exist — both are RLS artifacts, not data loss. eduos_app is RLS-gated with no session context, so SELECT policies filter everything (anonymous sees nothing), and an INSERT whose new row violates the INSERT policy returns success with 0 rows (silent instead of error). Echoes the 'INSERT 0 1 + ROLLBACK' misread that cost t627/t628 hours. Workaround: run triage counts as the superuser role, or set the app context first: SELECT set_config('app.current_user_role','teacher',false); SELECT set_config('app.current_user_id','<teacher-uuid>',false); then count. Verify RLS shape via pg_policies (qual columns show the policy predicates).",
+        "environment": "docker compose stack eduos (postgres 16, PostgREST-style app role eduos_app, superuser eduos), tick 789",
+        "language": "sql",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "psql-rls-anonymous-count-zero-foreman-triage-trap",
+        "provider": "openrouter",
+        "solved_at": "2026-09-25T06:09:54.066Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-25 06:09:54"
+    }
+  ]
+}

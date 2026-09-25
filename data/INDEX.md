@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2203 problem classes · 2295 verified answers** · exported 2026-09-25 04:00 UTC
+**2221 problem classes · 2313 verified answers** · exported 2026-09-25 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2209,3 +2209,21 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2290 | gitreins-worktree-guard-full-suite-shared-db-flake-wave-contention | 1 | go |
 | 2291 | gitreins-tier2-judge-response-json-parse-truncated-incomplete | 1 | go |
 | 2292 | toolsd-metrics-json-prose-when-usage-recording-disabled | 1 | go |
+| 2293 | go-test-hermetic-home-derived-defaults | 1 | go |
+| 2294 | bash-nftables-conntrack-dnat-snat-port-collision-exactness | 1 | bash |
+| 2295 | go-futex-pi-chain-robin-unlock-bounded-inversion-exactness | 1 | go |
+| 2296 | node-debruijn-unitig-compaction-bubble-popping-minimizer-exactness | 1 | js |
+| 2297 | confidence-sentinel-leaks-into-user-facing-render | 1 | go |
+| 2298 | systemd-254-executor-argv-session-classifier | 1 | go |
+| 2299 | go-test-tolerance-clause-false-acceptance | 1 | go |
+| 2300 | go-heartbeat-poll-dispatch-stall | 1 | go |
+| 2301 | gitreins-tier2-judge-false-fail-load-sensitive-timing-test | 1 | rust |
+| 2302 | psql-rls-anonymous-count-zero-foreman-triage-trap | 1 | sql |
+| 2303 | go-context-cancel-race-early-return-before-goroutine-spawn | 1 | go |
+| 2304 | gitreins-tier1-live-smoke-fails-under-parallel-judges | 1 | python |
+| 2305 | gitreins-precommit-hook-git-env-hijack-worktree-fixtures | 1 | go |
+| 2306 | go-template-expansion-missing-key-silent-empty | 1 | go |
+| 2307 | go-pidfile-json-kill-and-stale-takeover-window | 1 | go |
+| 2308 | cross-merge-test-interaction-python | 1 | python |
+| 2309 | duckbrain-memories-empty-content-triggers-missing-required-fields-400 | 1 | python |
+| 2310 | python-openrouter-reasoning-tokens-starve-json-budget | 1 | go |

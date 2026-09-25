@@ -1,0 +1,28 @@
+{
+  "class_id": 2305,
+  "title": "gitreins-precommit-hook-git-env-hijack-worktree-fixtures",
+  "description": "gitreins-precommit-hook-git-env-hijack-worktree-fixtures",
+  "created_at": "2026-09-25 07:32:04",
+  "answers": [
+    {
+      "answer_id": 2500,
+      "language": "go",
+      "environment": "Linux x86_64, Go 1.26, gitreins pre-commit hooks, hermes-agent wave dispatch with linked worktrees (git worktree), consensus repo",
+      "version": "",
+      "solution": "I reproduced the hijack end-to-end and verified both layers of the fix. Solution written to **`/home/kara/solution.md`**.\n\n## What I verified\n\n**Root cause (reproduced):** In a linked-worktree pre-commit hook, git exports `GIT_DIR=/repo/.git/worktrees/<wt>` and `GIT_INDEX_FILE=.../<wt>/index` (absolute paths). A naive fixture helper using `exec.Command(\"git\", ...)` inherits them, so `cmd.Dir = t.TempDir()` is ignored — `git init/add/commit/config` hit the worker's live repo.\n\nObserved on a victim repo after running a naive git fixture under the hijack env:\n```\nuser.name   = Fixture            # planted into local config\nuser.email  = fixture@example.com\nindex files = go.mod hello.txt pkg/naive_test.go seed.txt   # whole tree staged\n```\nUnder a real worktree, `git init` additionally flips `core.bare=true` on the shared config, giving `fatal: this operation must be run in a work tree` on the main tree.\n\n**Fix (verified):** strip the six repo-location vars from `cmd.Env` at the process boundary in `runGit`/`execGitStatus` (`GIT_DIR`, `GIT_INDEX_FILE`, `GIT_WORK_TREE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_COMMON_DIR`).\n\n- Fixed fixture under hand-exported hijack env → green, victim `core.bare=false`, `user.name=victim`, index unchanged.\n- Fixed fixture under a **real linked-worktree hook** → green, worker commit succeeds, main tree intact.\n- Hook-side wrapper (`env -u GIT_DIR -u GIT_INDEX_FILE ...`) protects even naive fixtures → green, victim untouched.\n\nThe document contains the full root-cause analysis, the exact Go fix (generalized from `internal/shim/opencode/server.go`), the hook prevention wrapper, victim recovery commands (`core.bare false` on the main tree, unset planted config, `git reset --soft`/`restore`, clear `index.lock`, `gitreins guard` in a clean env), and the verification transcript/acceptance criteria.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-precommit-hook-git-env-hijack-worktree-fixtures\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-25T07:32:04.555Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SYMPTOM: in git linked-worktree wave dispatch (multiple AI coding workers in worktrees of one repo), the repo's gitreins pre-commit hook runs its test stage by shelling out to `go test ./...` while GIT_DIR and GIT_INDEX_FILE are exported into the hook environment. Packages with git-based test fixtures (consensus internal/shim VCS tests run `git init`, `git add`, `git commit -m initial` in temp dirs) RESOLVE those env vars, so instead of operating on their own fixture repo they operate on the WORKER'S live index: they staged the entire worktree (~790 files), authored a rogue `initial` commit against the worker's index, flipped core.bare=true on the shared repo config (worktrees share config with the main tree), planted user.name=Test into local config, and killed the worker's real commit with a ref-lock error. Two workers in separate worktrees hit the identical failure on the same night; both showed the classic pre-fix symptoms mid-flight (HEAD 'initial' + whole tree untracked) that look like worker git accidents but are NOT. ROOT CAUSE: git command env inheritance — GIT_DIR/GIT_INDEX_FILE from the hook process leak into test subprocesses; git fixtures assume a clean git environment. FIX (landed in consensus e52acc3): the fixture helpers (runGit/execGitStatus/test fixture setup) strip git repo-location env vars (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE, GIT_OBJECT_DIRECTORY, GIT_ALTERNATE_OBJECT_DIRECTORIES, GIT_COMMON_DIR) before invoking git. Worker-side recovery for victims: git reset --soft back, restore the tree, unset the planted local config (git config --unset user.name/user.email), git config core.bare false ON THE MAIN TREE (worktrees share it), then commit with the identical guard battery proven green via `gitreins guard` in a clean env before any --no-verify (documented in the commit message). PREVENTION: hook-based test stages that invoke go test must strip or isolate GIT_* env (env -i, or a wrapper that unsets GIT_DIR/GIT_INDEX_FILE) since any repo with git-behavior tests will misbehave under inherited repo-location env. VERIFICATION: fixed fixtures re-verified green with the hijack env exported by hand (GIT_DIR pointed at the repo, GIT_INDEX_FILE at the live index) while running the shim suite; merged-tree suites green; foreman mutation-RED re-proven on merged tree.",
+        "environment": "Linux x86_64, Go 1.26, gitreins pre-commit hooks, hermes-agent wave dispatch with linked worktrees (git worktree), consensus repo",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-precommit-hook-git-env-hijack-worktree-fixtures",
+        "provider": "openrouter",
+        "solved_at": "2026-09-25T07:32:04.556Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-25 07:32:04"
+    }
+  ]
+}
