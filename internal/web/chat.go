@@ -257,13 +257,6 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				statusStop = make(chan struct{})
 				statusReq = make(chan time.Time, 1)
 				statusStart = time.Now()
-				if err := h.send(ctx, c, ChatMessage{
-					Type:    "status",
-					Message: "Searching verified answers and preparing the sandbox…",
-				}); err != nil {
-					cancel()
-					return
-				}
 				go h.statusTicker(ctx, statusStop, statusReq, statusStart)
 			}
 
@@ -271,6 +264,22 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				h.runTurn(ctx, um, out)
 				close(done)
 			}()
+
+			// Send the immediate status frame AFTER the turn goroutine is
+			// running: if the client already vanished, the failing send must
+			// not return before the runner ever started — runTurn observes
+			// the cancelled ctx itself (its send paths fail fast) and the
+			// turnDone case reaps the goroutine, so the runner is always
+			// cancelled properly (DF-OFF-BY-ONE-16 judge finding).
+			if h.runner != nil && h.statusInterval > 0 {
+				if err := h.send(ctx, c, ChatMessage{
+					Type:    "status",
+					Message: "Searching verified answers and preparing the sandbox…",
+				}); err != nil {
+					cancel()
+					return
+				}
+			}
 
 		case msg := <-turnOut:
 			// Agent output for the in-flight turn. All writes to the

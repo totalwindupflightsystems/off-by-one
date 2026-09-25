@@ -442,11 +442,11 @@ func (c *cancellingAgent) Run(ctx context.Context, _ string, _ chan<- ChatMessag
 	return ctx.Err()
 }
 
-// TestChatHandler_StatusFrameBeforeAgentFrame is the DF-OFF-BY-ONE-16
+// TestChat_StatusFrameBeforeAgentFrame is the DF-OFF-BY-ONE-16
 // regression test: the client must receive an immediate "status" frame
 // when a turn starts, BEFORE any "agent" frame — a silent multi-minute
 // wait is indistinguishable from a dead connection.
-func TestChatHandler_StatusFrameBeforeAgentFrame(t *testing.T) {
+func TestChat_StatusFrameBeforeAgentFrame(t *testing.T) {
 	agent := &mockAgent{
 		responses: []ChatMessage{{Type: "agent", Message: "eventual answer"}},
 		delay:     300 * time.Millisecond,
@@ -487,11 +487,11 @@ func TestChatHandler_StatusFrameBeforeAgentFrame(t *testing.T) {
 	}
 }
 
-// TestChatHandler_PeriodicStatusUntilAgentFrame asserts the periodic
+// TestChat_PeriodicStatusUntilAgentFrame asserts the periodic
 // progress frames arrive while the agent is silent, and that NO status
 // frame arrives after the first agent frame (the ticker is stopped at
 // the first agent output, not left running into the next turn).
-func TestChatHandler_PeriodicStatusUntilAgentFrame(t *testing.T) {
+func TestChat_PeriodicStatusUntilAgentFrame(t *testing.T) {
 	agent := &mockAgent{
 		responses: []ChatMessage{{Type: "agent", Message: "finally"}},
 		// Long enough for several periodic ticks; short enough to keep
