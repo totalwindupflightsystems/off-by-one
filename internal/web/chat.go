@@ -112,15 +112,21 @@ type ChatHandler struct {
 	readTimeout time.Duration
 	// writeTimeout caps how long we wait to send a message.
 	writeTimeout time.Duration
+	// statusInterval is how often a "Still working…" progress frame is
+	// sent while a turn is in flight and the agent has not produced any
+	// output yet (DF-OFF-BY-ONE-16: a ~74s silent gap is indistinguishable
+	// from a dead connection for a human).
+	statusInterval time.Duration
 }
 
 // NewChatHandler builds a ChatHandler with the given runner. Pass nil
 // to disable the chat (messages will get an "offline" response).
 func NewChatHandler(runner AgentRunner) *ChatHandler {
 	return &ChatHandler{
-		runner:       runner,
-		readTimeout:  30 * time.Second,
-		writeTimeout: 10 * time.Second,
+		runner:         runner,
+		readTimeout:    30 * time.Second,
+		writeTimeout:   10 * time.Second,
+		statusInterval: 10 * time.Second,
 	}
 }
 
@@ -189,6 +195,17 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var turnOut chan ChatMessage
 	var turnDone chan struct{}
 
+	// Progress-frame state (DF-OFF-BY-ONE-16). statusStop is non-nil
+	// only while a turn is in flight with a live runner; statusReq is
+	// that turn's request channel (buffered, owned by the turn) through
+	// which the ticker goroutine asks the single writer to send a
+	// progress frame; statusStart anchors the elapsed-time counter. All
+	// are reset when the turn ends — a request stranded in an abandoned
+	// channel is simply never read.
+	var statusReq chan time.Time
+	var statusStop chan struct{}
+	var statusStart time.Time
+
 	for {
 		var idleCh <-chan time.Time
 		if turnDone == nil {
@@ -229,6 +246,27 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			turnOut = make(chan ChatMessage)
 			turnDone = make(chan struct{})
 			um, out, done := userMsg, turnOut, turnDone
+
+			// DF-OFF-BY-ONE-16: give the human immediate feedback. The
+			// first status frame goes out right away, and a ticker keeps
+			// sending elapsed-time updates until the agent produces its
+			// first frame (statuses stop; see the turnOut case) or the
+			// turn ends. Nil runner means the turn will answer instantly
+			// with the offline message — no progress to report.
+			if h.runner != nil && h.statusInterval > 0 {
+				statusStop = make(chan struct{})
+				statusReq = make(chan time.Time, 1)
+				statusStart = time.Now()
+				if err := h.send(ctx, c, ChatMessage{
+					Type:    "status",
+					Message: "Searching verified answers and preparing the sandbox…",
+				}); err != nil {
+					cancel()
+					return
+				}
+				go h.statusTicker(ctx, statusStop, statusReq, statusStart)
+			}
+
 			go func() {
 				h.runTurn(ctx, um, out)
 				close(done)
@@ -243,9 +281,37 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				cancel()
 				return
 			}
+			// The agent produced output: the progress ticker is no
+			// longer needed (statuses before the first agent frame only).
+			if statusStop != nil {
+				close(statusStop)
+				statusStop = nil
+				statusReq = nil
+			}
+
+		case start := <-statusReq:
+			// Periodic progress frame requested by the ticker while the
+			// agent is still silent. Elapsed is measured from turn
+			// start; the counter pauses at the last tick before the
+			// first agent frame, which is fine — the next agent frame
+			// supersedes it.
+			elapsed := int(time.Since(start).Seconds())
+			if err := h.send(ctx, c, ChatMessage{
+				Type:    "status",
+				Message: fmt.Sprintf("Still working… %ds", elapsed),
+			}); err != nil {
+				cancel()
+				return
+			}
 
 		case <-turnDone:
-			// Turn finished; back to the idle state.
+			// Turn finished; back to the idle state. Stop the ticker in
+			// case the turn ended without any agent frame (error path).
+			if statusStop != nil {
+				close(statusStop)
+				statusStop = nil
+				statusReq = nil
+			}
 			turnOut = nil
 			turnDone = nil
 			resetTimer(idle, h.readTimeout)
@@ -329,6 +395,33 @@ func (h *ChatHandler) pingLoop(ctx context.Context, cancel context.CancelFunc, c
 					log.Printf("chat: client not responding to ping: %v", err)
 				}
 				cancel()
+				return
+			}
+		}
+	}
+}
+
+// statusTicker sends periodic "Still working…" progress frames while a
+// turn is in flight and the agent has not produced any output yet. It
+// owns NO writes to the WebSocket on its own goroutine: every frame is
+// requested through requestCh, and the ServeHTTP main loop (the single
+// writer) performs the send. The ticker exits when the stop channel is
+// closed (first agent frame, turn end) or ctx is cancelled.
+func (h *ChatHandler) statusTicker(ctx context.Context, stop <-chan struct{}, requestCh chan<- time.Time, start time.Time) {
+	ticker := time.NewTicker(h.statusInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-stop:
+			return
+		case <-ticker.C:
+			select {
+			case requestCh <- start:
+			case <-ctx.Done():
+				return
+			case <-stop:
 				return
 			}
 		}

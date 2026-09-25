@@ -21,10 +21,37 @@
   let chatBody = null;
   let chatInput = null;
   let chatSend = null;
+  let statusLine = null;
 
+
+  function showStatus(text) {
+    if (!chatBody) return;
+    if (!statusLine || !statusLine.parentNode) {
+      statusLine = document.createElement('div');
+      statusLine.className = 'chat-msg chat-msg-status';
+      chatBody.appendChild(statusLine);
+    }
+    statusLine.textContent = text;
+    chatBody.scrollTop = chatBody.scrollHeight;
+  }
+
+  function clearStatus() {
+    if (statusLine && statusLine.parentNode) {
+      statusLine.parentNode.removeChild(statusLine);
+    }
+    statusLine = null;
+  }
 
   function appendMessage(type, text, actions) {
     if (!chatBody) return;
+    if (type === 'status') {
+      // Progress frames (DF-OFF-BY-ONE-16) update a single status line
+      // instead of stacking bubbles; the agent's first real frame
+      // replaces it.
+      showStatus(text || 'Working…');
+      return;
+    }
+    clearStatus();
 
     const bubble = document.createElement('div');
     bubble.className = 'chat-msg chat-msg-' + type;
