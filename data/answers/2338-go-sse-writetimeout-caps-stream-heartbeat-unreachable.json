@@ -1,0 +1,28 @@
+{
+  "class_id": 2338,
+  "title": "go-sse-writetimeout-caps-stream-heartbeat-unreachable",
+  "description": "go-sse-writetimeout-caps-stream-heartbeat-unreachable",
+  "created_at": "2026-09-25 20:26:44",
+  "answers": [
+    {
+      "answer_id": 2533,
+      "language": "go",
+      "environment": "hermes-canopy Go backend (canopyd), chi router, http.Server with ReadTimeout 10s / WriteTimeout 30s / IdleTimeout 120s, 7 SSE allowlist routes",
+      "version": "master 2d28655f",
+      "solution": "Solution written to `/workspace/solution.md`.\n\n## Summary\n\n**Root cause:** `http.Server.WriteTimeout` (30s) is an absolute deadline on the *entire* response write lifecycle, not a per-write timeout. An idle SSE stream waiting for its first 30s heartbeat is killed by the server at exactly 30s — the deadline expires at the same moment the heartbeat is due, so the client never sees a frame. It stays hidden because heartbeats (20–30s) sit under the same cap, tests override the interval to ~25ms, and clients silently reconnect with `Last-Event-ID` replay.\n\n**Key distinction confirmed:** chi's `middleware.Timeout` exemption only cancels the request context; it never touches the `net/http` connection write deadline.\n\n**Fix:** clear the deadline per SSE response with `http.NewResponseController(w).SetWriteDeadline(time.Time{})`, applied via a middleware to the 7-route SSE allowlist. This leaves `WriteTimeout` intact for all non-SSE handlers.\n\n**Verified empirically** with Go 1.26:\n- Buggy handler + 2s `WriteTimeout`/2s heartbeat → **0 heartbeats, closed at exactly 2s** (`unexpected EOF`).\n- Fixed handler → 3 heartbeats at 2s/4s/6s, survived the full 7s window.\n- Unit test asserting the deadline is cleared → PASS.\n- Integration test where the stream outlives `WriteTimeout` (`ticks=4, elapsed=600ms, WriteTimeout=300ms`) → PASS.\n\nThe write-up includes copy-paste middleware, chi mounting for the allowlist, per-handler fallback, the two regression tests, and a live >30s curl/Go probe for the GAP-100 acceptance check.\n",
+      "evidence": "# Evidence\n- Problem class: go-sse-writetimeout-caps-stream-heartbeat-unreachable\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-25T20:26:44.137Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Symptom: a spec-mandated 30s SSE heartbeat never reaches a client even though the handler code is correct and a unit test with an overridden 25ms heartbeat passes. Live probe on an isolated composition-root boot showed a 34s connection with ZERO heartbeat frames. Root cause: http.Server.WriteTimeout (30s here) applies to the WHOLE response write lifecycle including idle SSE streams, so every stream is killed by the server at exactly WriteTimeout - before the first heartbeat tick. It masks itself: the existing SSE endpoints had 20-30s heartbeats under the same cap, tests override the interval short, and clients reconnect via EventSource + Last-Event-ID replay so no one sees the failure except as periodic reconnect churn. Distinguish from the chi request-timeout: a requestTimeoutExemptSSE middleware (exempting SSE routes from chi middleware.Timeout) does NOT touch the http.Server write deadline. Fix direction: exempt SSE routes from WriteTimeout via http.ResponseController.SetWriteDeadline(time.Time{}) per stream (or disable WriteTimeout and bound non-SSE handlers individually), then live-prove a >30s connection receives a heartbeat frame and stays open; add a regression test asserting the write deadline is cleared on SSE routes.",
+        "environment": "hermes-canopy Go backend (canopyd), chi router, http.Server with ReadTimeout 10s / WriteTimeout 30s / IdleTimeout 120s, 7 SSE allowlist routes",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-sse-writetimeout-caps-stream-heartbeat-unreachable",
+        "provider": "openrouter",
+        "solved_at": "2026-09-25T20:26:44.137Z",
+        "version": "master 2d28655f"
+      },
+      "status": "verified",
+      "created_at": "2026-09-25 20:26:44"
+    }
+  ]
+}

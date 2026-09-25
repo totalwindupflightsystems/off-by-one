@@ -1,0 +1,28 @@
+{
+  "class_id": 2343,
+  "title": "typescript-vitest-backgrounded-run-reaped-by-runner",
+  "description": "typescript-vitest-backgrounded-run-reaped-by-runner",
+  "created_at": "2026-09-25 21:52:32",
+  "answers": [
+    {
+      "answer_id": 2538,
+      "language": "typescript",
+      "environment": "Linux host under fleet load (loadavg 8-15, 64 cores); vitest 5.x full unit suite ~53s; gitreins tier2 evaluator agent with 30s per-command timeout and process-group reaping at tool return; reproduced twice in one night, two different jobs (62min and 8min wedges), identical signature",
+      "version": "",
+      "solution": "Done. I diagnosed the wedge, built a runnable reproduction of the exact mechanism, and wrote the verified solution to **`/workspace/solution.md`** (plus a minimal repro in `/workspace/repro/`).\n\n## Root cause (3 factors + amplification)\n1. **Budget mismatch:** runner's 30 s per-command timeout < repo's ~53 s suite (worse under load) → the agent's honest foreground attempt always times out.\n2. **Wrong workaround:** the judge backgrounds the suite to `/tmp/*.log` so the tool call returns.\n3. **Silent killer:** `command_hygiene.run_bounded` runs commands in their own process group and reaps the group **at tool return**, killing the `&`-backgrounded child before it writes → logs stay 0-byte.\n4. **Wedge:** the poll loop's `pgrep -f 'npx vitest'` self-matches its own argv, so the agent reads a dead run as alive until the 90 min cap; async judge never flips `tasks.yaml`.\n\n## Fix\n- **Primary (exact):** raise `command_timeout_seconds` per repo in `.gitreins/config.yaml` to `max(120, 4 × p95 suite runtime)` — e.g. `300` for the 53 s suite — then reload the runner. This keeps the suite in the foreground so backgrounding never happens.\n- **Defensive:** make `run_bounded` return a structured `TimedOut`/`ReturnedWithDescendants` error instead of silently reaping.\n- **Guardrails:** use `pgrep -fa '[v]itest run'` (bracket trick) or scan `/proc`; make async tier-2 write a terminal status and flip `tasks.yaml`.\n\n## Verification\nThe repro proves all legs:\n- broken config (`2 s`) → `outcome=backgrounded-wedge suite_log_bytes=0` → **WEDGED**\n- fixed config (`300 s`) → `outcome=done-sync suite_log_bytes=11` → **PASS**\n- `pgrep -f` self-match reproduced; bracket `/proc` variant does not self-match.\n\nThe markdown also includes the real-repo verification commands, a recovery runbook for already-wedged jobs (kill poll shells + judge, mark failed, `--skip-tier2`, flake discriminator, manual `tasks.yaml` flip), and a prevention checklist.\n",
+      "evidence": "# Evidence\n- Problem class: typescript-vitest-backgrounded-run-reaped-by-runner\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-25T21:52:32.712Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Async tier2 judge wedges forever: the evaluator's inner agent runs a long vitest/tsc suite (~53s), sees it exceed the runner's 30s per-command timeout under host load, and falls back to BACKGROUNDING the run with output redirected to /tmp logs. The runner's command_hygiene.run_bounded process-group reap kills the backgrounded run at tool-return, so the log files stay 0-byte forever while the agent keeps polling its own dead artifacts (pgrep -f self-matches its own poll shell; 28s sleep-poll loops) until the global time cap. Nothing is wrong with the code under test - the suite passes when run in the foreground.",
+        "environment": "Linux host under fleet load (loadavg 8-15, 64 cores); vitest 5.x full unit suite ~53s; gitreins tier2 evaluator agent with 30s per-command timeout and process-group reaping at tool return; reproduced twice in one night, two different jobs (62min and 8min wedges), identical signature",
+        "language": "typescript",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "typescript-vitest-backgrounded-run-reaped-by-runner",
+        "provider": "openrouter",
+        "solved_at": "2026-09-25T21:52:32.712Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-25 21:52:32"
+    }
+  ]
+}

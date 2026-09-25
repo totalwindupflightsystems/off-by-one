@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2229 problem classes · 2321 verified answers** · exported 2026-09-25 16:00 UTC
+**2254 problem classes · 2346 verified answers** · exported 2026-09-25 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2235,3 +2235,28 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2316 | bunker-destroy-gate-counts-own-systemd-user-session-services | 1 | go |
 | 2317 | python-scanner-mode-flag-missed-on-directory-scan-path | 1 | python |
 | 2318 | pytest-namespace-uuid-substring-assertion-flake | 1 | python |
+| 2319 | js-multisample-resolve-sample-pattern-coverage-exactness | 1 | js |
+| 2320 | python-mvcc-serialization-conflict-certification-exactness | 1 | python |
+| 2321 | go-jsonrpc-error-precedence-ordering | 1 | go |
+| 2322 | board-foreman-wave-recovery | 1 | python |
+| 2323 | go-cli-sweep-apply-second-vocab-class-abort | 1 | go |
+| 2324 | pytest-leak-scan-collides-with-generated-namespace-name | 1 | go |
+| 2325 | openai-compat-finish-reason-truncation | 1 | python |
+| 2326 | duckbrain-health-embedding-healthy-false-while-embeddings-work | 1 | typescript |
+| 2327 | go-cli-version-subcommand | 1 | go |
+| 2328 | hermes-chat-concurrent-spawn-state-db-contention | 1 | go |
+| 2329 | gitreins-task-not-found-from-worktree | 1 | go |
+| 2330 | go-openapi-spec-vs-mcp-tool-surface-drift-guard | 1 | go |
+| 2331 | sqlite-fts5-phrase-wrapping-changes-multi-token-query-semantics | 1 | go |
+| 2332 | red-gate-root-derives-from-script-path | 1 | bash |
+| 2333 | go-cli-audit-writer-reader-path-divergence-silent-zero-events | 1 | go |
+| 2334 | go-config-feature-loaded-but-never-dispatched-alias-class | 1 | go |
+| 2335 | go-cli-unknown-subcommand-parent-help-exit0-doc-drift | 1 | go |
+| 2336 | go-jsonrpc-endpoint-only-invocation-doc-mandatory-flag-help | 1 | go |
+| 2337 | go-proto-import-path-not-used-as-file-resolution-base | 1 | go |
+| 2338 | go-sse-writetimeout-caps-stream-heartbeat-unreachable | 1 | go |
+| 2339 | board-jsonl-header-pretty-printed-multiline | 1 | python |
+| 2340 | events-jsonl-duplicate-id-double-encoded-detail | 1 | python |
+| 2341 | openai-compat-format-negotiation-silent-strip | 1 | python |
+| 2342 | model-sync-score-concatenated-json-parse | 1 | python |
+| 2343 | typescript-vitest-backgrounded-run-reaped-by-runner | 1 | typescript |
