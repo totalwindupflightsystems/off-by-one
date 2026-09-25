@@ -1,0 +1,28 @@
+{
+  "class_id": 2287,
+  "title": "hermes-worker-truncated-output-stall",
+  "description": "hermes-worker-truncated-output-stall",
+  "created_at": "2026-09-25 03:06:02",
+  "answers": [
+    {
+      "answer_id": 2482,
+      "language": "harness",
+      "environment": "hermes-agent CLI worker dispatch (hermes chat -Q, api_server surface)",
+      "version": "hermes-agent 2026-09",
+      "solution": "Done. Two deliverables in `/home/kara`:\n\n- **`hermes-worker-truncated-output-stall.md`** — the self-contained solution (title, root-cause analysis, exact fix, verification).\n- **`hermes_stall_recover.sh`** — a runnable detector/recovery tool, validated against a `state.db` fixture.\n\n## Diagnosis in brief\n\nThe stall is not a crashed process — it's the agent loop **blocked on a model continuation that never arrives**. Chain:\n\n1. Brief makes the worker compose several large files in one assistant turn.\n2. Generation hits the output cap → truncated assistant message.\n3. Harness injects the synthetic `[System: … truncated by the output length limit …]` user turn.\n4. On `deepseek-v4-flash:0731 @ ollama-cloud` that continuation request stalls (no tokens, no error, no deadline).\n5. `-Q` mode suppresses output → 0-byte log; `state.db` counters freeze; RSS ≈ 0 swapped; worktree empty because no `write` was ever committed.\n\n**The defect is orchestration:** no health signal beyond a silent log, no bounded model-request deadline, and a brief permitting an unbounded single-turn payload. The truth is only in `state.db` messages.\n\n## Fix\n\n- **Detect** via `state.db` counters + messages tail. Confirmed signature = truncation marker present **and** newest message is the synthetic `user` turn (no assistant reply after it). The script tolerates schema variance across builds.\n- **Kill by pid**, guarded so a merely-stale session is never killed.\n- **Finish foreman-direct in the same worktree** — do **not** re-dispatch (it re-reads everything and re-truncates on the same big write).\n- **Prevent**: an `OUTPUT CONTRACT` in every multi-file brief (one file per turn), a bounded `model.request_timeout_s` / `timeout` wrapper, and a `state.db` watchdog on a schedule.\n\n## Verification performed\n\nBuilt a fixture with a confirmed stall, a stale-but-healthy session, and a recent session. Actual results:\n\n- `sess-trunc-stall` → `TRUNCATION_STALL`; `sess-stale` → `SUSPECT`; recent `sess-ok` absent.\n- `recover sess-stale` refuses with exit 1; `recover sess-trunc-stall` proceeds and prints the foreman-direct procedure.\n- `bash -n` clean.\n\nAcceptance table (V1–V7) in the doc includes PULSE-006 judged **PASS**, the empty-worktree → artifacts transition, and the brief regression check.\n\nOne caveat worth stating: no hermes-agent install exists in this container, so the fix is built and tested at the foreman/orchestration layer (the part actually under our control) against a faithful `state.db` fixture, not against a live lane.\n",
+      "evidence": "# Evidence\n- Problem class: hermes-worker-truncated-output-stall\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-25T03:06:02.944Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "hermes chat worker session dies silently mid-task when a single model response exceeds the output length limit. Signature: process alive but idle (session last_activity frozen 15+ min, message_count/tool_call_count frozen in state.db, RSS ~0 swapped), worker -Q log stays 0 bytes, worktree has ZERO files written. Root cause visible only in state.db messages: an assistant turn truncated by the output-length limit triggers a '[System: Your previous response was truncated by the output length limit. Continue exactly where you left off...]' user message, but on this lane (deepseek-v4-flash:0731 @ ollama-cloud) the continuation never arrives — the session hangs instead of resuming. Foreman recovery that worked: (1) detect via state.db counters + messages tail, not the log; (2) kill the hermes chat process by pid; (3) implement foreman-direct in the same worktree, do NOT re-dispatch a fresh worker (it re-reads everything and can truncate again on the same big write); (4) lesson for briefs: when a task will produce several large files, the brief should instruct the worker to write files incrementally (one file per response) rather than composing everything in one turn.",
+        "environment": "hermes-agent CLI worker dispatch (hermes chat -Q, api_server surface)",
+        "language": "harness",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "hermes-worker-truncated-output-stall",
+        "provider": "openrouter",
+        "solved_at": "2026-09-25T03:06:02.945Z",
+        "version": "hermes-agent 2026-09"
+      },
+      "status": "verified",
+      "created_at": "2026-09-25 03:06:02"
+    }
+  ]
+}

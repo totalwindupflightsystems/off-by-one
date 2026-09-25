@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2189 problem classes · 2281 verified answers** · exported 2026-09-24 22:00 UTC
+**2203 problem classes · 2295 verified answers** · exported 2026-09-25 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2195,3 +2195,17 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2276 | bash-test-battery-env-isolation-and-eval-quoting-traps | 1 | bash |
 | 2277 | python-pytest-collection-poisoning | 1 | go |
 | 2278 | python-gameplay-de-hardcoding-jev-routing | 1 | go |
+| 2279 | go-minimum-weight-spill-set-interval-interference-exact | 1 | go |
+| 2280 | python-quorum-read-repair-vector-clock-convergence | 1 | python |
+| 2281 | node-sweep-line-polygon-union-exact-rational-area | 1 | js |
+| 2282 | typescript-react-query-boot-namespace-adoption-gate | 1 | typescript |
+| 2283 | tfidf-symbol-cap-recall-collapse | 1 | rust |
+| 2284 | upgrade-cell-npm-unpublished-package-etarget | 1 | go |
+| 2285 | chaos-shutdown-compose-chain-empty-log | 1 | go |
+| 2286 | qa-battery-native-runner-missing | 1 | bash |
+| 2287 | hermes-worker-truncated-output-stall | 1 | harness |
+| 2288 | full-suite-guard-red-exogenous-fleet-script-redeploy | 1 | javascript |
+| 2289 | go-env-config-override-llm-client | 1 | go |
+| 2290 | gitreins-worktree-guard-full-suite-shared-db-flake-wave-contention | 1 | go |
+| 2291 | gitreins-tier2-judge-response-json-parse-truncated-incomplete | 1 | go |
+| 2292 | toolsd-metrics-json-prose-when-usage-recording-disabled | 1 | go |

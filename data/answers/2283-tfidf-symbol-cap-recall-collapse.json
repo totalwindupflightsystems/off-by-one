@@ -1,0 +1,28 @@
+{
+  "class_id": 2283,
+  "title": "tfidf-symbol-cap-recall-collapse",
+  "description": "tfidf-symbol-cap-recall-collapse",
+  "created_at": "2026-09-24 22:47:06",
+  "answers": [
+    {
+      "answer_id": 2478,
+      "language": "rust",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I diagnosed the issue against the real repo and produced a verified fix. Here's a summary:\n\n## What I did\n\n1. **Cloned and inspected** `github.com/gethilo/hilo` at the diagnosis base `b478b05`, and examined `8832da0` (the GAP-100 rework that introduced `.take(8)` in `TfIdfIndex::build_with_symbols`).\n\n2. **Root-caused it:** the cap truncated the per-document **term map** (the index itself), not just the BM25 length input. Any symbol past AST position 8 was silently absent, so `helpers.py` (defines `url_for` 9th) never entered the fused list. The \"unsorted scores\" were the intentional GAP-100 `demote_test_files` stable partition — not a merge bug.\n\n3. **Implemented the fix** in `hilo-graph/src/semantic.rs`:\n   - All symbols still index into `term_freqs`/`doc_freq` (recall).\n   - A parallel `length_tokens` keeps only the first 8 symbols for `doc_len`/`avg_doc_len`.\n   - New `doc_lens: Vec<f64>` field; `bm25_search` uses it instead of re-deriving length from the full term map.\n   - Added regression test `search_indexes_symbols_beyond_bm25_length_cap`.\n\n4. **Verified:**\n   - `cargo test -p hilo_graph --lib` → 309 passed; `fmt`/`clippy` clean.\n   - The new test **fails** with the pre-fix code (`got: []`) and passes after.\n   - Built the CLI and reproduced the exact bug on real pinned corpora (`/tmp/bakeoff5/{flask,express}`): pre-fix `search url_for` returned 3 hits with `helpers.py` absent and `search flash` returned zero; fixed returns helpers.py and 10 hits. `search \"res json\" --limit 500` still ranks `lib/response.js` #1 (GAP-100 green).\n\nThe full solution write-up is at **`/home/kara/GAP-102-solution.md`**, containing the title, root-cause analysis, exact diff, regression test, and the pre/post verification transcript including the demotion-aware battery invariant that replaces the faulty monotonicity check.\n",
+      "evidence": "# Evidence\n- Problem class: tfidf-symbol-cap-recall-collapse\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-24T22:47:06.371Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SYMPTOM: `hilo graph search` on hilo 0.3.1-dev returned collapsed result sets (3 hits where dozens expected) and 'unsorted' scores (9/20 queries in a bake-off battery), and previously-closed exact-symbol queries (GAP-077, e.g. `search url_for` must name src/flask/helpers.py) regressed; `search flash` returned ZERO results despite flash() being defined in an indexed file. Framed on the board as a broken top-k merge (GAP-102).\n\nROOT CAUSE: NOT the merge. RRF (reciprocal_rank_fusion), tfidf_search and bm25_search all sort correctly by (score desc, path asc). Two separate things masqueraded as one regression: (1) REAL regression — the GAP-100 rework (commit 8832da0) capped symbol enrichment in TfIdfIndex::build_with_symbols at `.take(8)` symbols per file to bound BM25 doc-length penalty. Symbols beyond the first 8 AST-order symbols of a file are silently absent from the index entirely: helpers.py defines url_for 9th+, so the definition file never enters the fused list (silent-incompleteness class, same family as GAP-096/097). (2) FALSE regression — the 'unsorted scores' pattern is the intentional GAP-100 test-file demotion (demote_test_files, stable partition: implementation hits first, test hits after, order preserved within groups), which necessarily breaks global score monotonicity; the battery's monotonicity check predates the demotion and needs a demotion-aware invariant. The wave-7 vs wave-8 delta correlates exactly with 8832da0 landing between them.\n\nFIX: keep ALL symbol tokens in the per-document term map (recall must not truncate); cap only the document-LENGTH contribution to BM25 (path tokens full + symbol tokens up to the old 8-symbol equivalent), consistently for both per-doc doc_len and avg_doc_len. This preserves GAP-100's ranking (definition file still wins its own query) while restoring recall for symbols beyond the cap. Regression test: a file whose defining symbol sits beyond the first 8 AST-order symbols must be findable via search_with_symbols with the real default extractor.\n\nVERIFICATION: repro/fix checks on pinned corpora /tmp/bakeoff5/{flask,express} with the release binary; GAP-100 invariant (`search 'res json' --limit 500` ranks express lib/response.js #1) must stay green.",
+        "environment": "",
+        "language": "rust",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "tfidf-symbol-cap-recall-collapse",
+        "provider": "openrouter",
+        "solved_at": "2026-09-24T22:47:06.373Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-24 22:47:06"
+    }
+  ]
+}
