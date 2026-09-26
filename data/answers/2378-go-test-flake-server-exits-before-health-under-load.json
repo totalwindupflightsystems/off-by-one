@@ -1,0 +1,28 @@
+{
+  "class_id": 2378,
+  "title": "go-test-flake-server-exits-before-health-under-load",
+  "description": "go-test-flake-server-exits-before-health-under-load",
+  "created_at": "2026-09-26 12:46:01",
+  "answers": [
+    {
+      "answer_id": 2574,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Diagnosed and fixed. The full solution is written to **`/home/kara/CI-018-solution.md`**, and the verified patch is applied in the working tree at `/tmp/crier`.\n\n## Root cause (confirmed by reproduction)\n\nIt is **not** a pidfile, port-bind, or namespace-file race. It is a **process-wide SIGTERM leak in the in-process test harness**:\n\n- Every live test boots the server with `run(nil)` and tears it down by signalling the whole test process (`self.Signal(SIGTERM)`).\n- `TestCRFEAT029SingleNamespaceIsByteIdentical` boots **two** servers, so it registers **two** cleanups. The first SIGTERM already shuts down **both** (the handler is process-wide); the second is a **surplus** signal whose cleanup returns immediately because its `done` is already closed.\n- `kill(2)` is asynchronous — the Go runtime forwards signals from its own goroutine. The surplus SIGTERM is still in flight when the *next* test (`...NamespaceDocumentCanComeFromAFile`, immediately after it in source order) calls `run()` and registers a fresh signal channel.\n- The new server eats the stray signal during wiring. `run()`'s shutdown goroutine calls `srv.Shutdown` **before** `srv.Serve`, so `Serve` returns `http.ErrServerClosed`, `run()` returns `0`, and the test sees `done` closed → `server exited before answering /health`, no fatal logged.\n\nDirect evidence (`go test -short -cover -count=30 -run TestCRFEAT029 ./cmd/server`) reproduced it repeatedly at `0.03s`; a temporary diagnostic showed the failing port logging `signal=terminated` in its startup window.\n\n## Fix\n\nA synchronizing helper in `cmd/server/main_test.go`:\n\n```go\nfunc signalAndAwaitDelivery(self *os.Process, sig os.Signal) error {\n\tdelivered := make(chan os.Signal, 1)\n\tsignal.Notify(delivered, sig)\n\tdefer signal.Stop(delivered)\n\tif err := self.Signal(sig); err != nil {\n\t\treturn fmt.Errorf(\"signal self (%v): %w\", sig, err)\n\t}\n\tselect {\n\tcase <-delivered:\n\t\treturn nil\n\tcase <-time.After(5 * time.Second):\n\t\treturn fmt.Errorf(\"signal %v was never forwarded to the process\", sig)\n\t}\n}\n```\n\n`os/signal` holds one lock across both `Notify` and the forwarding loop (`os/signal.process`), so once the probe receives the signal, a future `Notify` cannot have joined the handler set — the surplus is spent inside the test that produced it. All in-process teardown sites (7 files) now call this instead of `self.Signal(...)`.\n\n**Important:** do *not* add `defer signal.Stop(sigCh)` to `run()` — it disarms the handler that QA-CRIER-17's `TestSigtermAfterEarlyBootFailureIsNotFatal` relies on.\n\n## Verification\n\n- Pre-fix: failed within 30–50 iterations of the CRFEAT029 ordering.\n- Post-fix: `go test -short -cover -count=40 -run TestCRFEAT029 ./cmd/server` × 10 runs → **0 failures in 400 iterations**.\n- `gofmt -l cmd/server/` clean, `go vet ./cmd/server/` clean.\n- `go test -short -count=1 ./cmd/server` → ok (includes QA-CRIER-17).\n- `go test -short -count=1 ./...` → all 22 packages ok.\n- ID-018 fix patch reverse- and forward-`git apply --check` both pass.\n",
+      "evidence": "# Evidence\n- Problem class: go-test-flake-server-exits-before-health-under-load\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-26T12:46:01.267Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Go test starts a real server binary and polls /health; under full-suite/coverage parallel load the server process exits right after its startup log lines (no fatal captured) and the test fails with: server exited before answering /health (last error: connection refused). Isolated run passes; plain full-suite passes; the instrumented coverage run reproduced once (crier cmd/server TestCRFEAT029NamespaceDocumentCanComeFromAFile, 2026-09-26). Debugging so far: raising startup waits (10s->20s) and adding run()-exited diagnostics did not remove the exit-at-boot mode; the captured server stderr shows only normal WARN/INFO startup lines. Open question: which boot-time resource race (pidfile, port bind, file load) kills the process.",
+        "environment": "",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-test-flake-server-exits-before-health-under-load",
+        "provider": "openrouter",
+        "solved_at": "2026-09-26T12:46:01.267Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-26 12:46:01"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2282 problem classes · 2375 verified answers** · exported 2026-09-26 10:00 UTC
+**2295 problem classes · 2388 verified answers** · exported 2026-09-26 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2288,3 +2288,16 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2369 | go-test-flake-fire-and-forget-spawn-goroutine-launch-window-returns-early-on-running-0-poll-rows-not-yet-inserted | 1 | go |
 | 2370 | self-deadlock-in-gated-writer-marker | 1 | go |
 | 2371 | jsonl-board-key-canon-undersanctioned | 1 | go |
+| 2372 | python-postgres-ssi-rw-antidependency-pivot-cycle-certificate | 1 | python3 |
+| 2373 | js-marching-cubes-33-ambiguity-manifold-decider | 1 | js |
+| 2374 | go-mccaskill-rna-partition-function-pair-probabilities-exactness | 1 | go |
+| 2375 | typescript-tsconfig-path-alias-baseurl-removal-typescript6-rootdir | 1 | go |
+| 2376 | gitreins-judge-repo-venv-shadows-pipx-cli-broken-entrypoint | 1 | python |
+| 2377 | typescript-monorepo-missing-workspace-dep-build-race | 1 | go |
+| 2378 | go-test-flake-server-exits-before-health-under-load | 1 | go |
+| 2379 | voice-sample-synthesis-wrong-engine-routing | 1 | go |
+| 2380 | go-json-polymorphic-health-response | 1 | go |
+| 2381 | go-test-flake-sse-eof-stop-status-race | 1 | go |
+| 2382 | gitreins-guard-timeout-fail-open-pass | 1 | bash |
+| 2383 | duckbrain-write-wedge-native-sync-lock | 1 | go |
+| 2384 | board-stale-row-stranded-lifecycle-recovery | 1 | go |

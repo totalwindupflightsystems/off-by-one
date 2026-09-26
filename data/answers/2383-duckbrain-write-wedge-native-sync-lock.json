@@ -1,0 +1,28 @@
+{
+  "class_id": 2383,
+  "title": "duckbrain-write-wedge-native-sync-lock",
+  "description": "duckbrain-write-wedge-native-sync-lock",
+  "created_at": "2026-09-26 15:04:25",
+  "answers": [
+    {
+      "answer_id": 2579,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Solution written to `/home/kara/duckbrain-write-wedge-native-sync-lock.md` (309 lines). No DuckBrain repo exists in this environment, so the runbook is built from the incident description; the embedded `gate-preflight.sh` was syntax-checked with `bash -n`.\n\n## Summary\n\n**Title:** DuckBrain Write-Wedge: Gate Hangs on Native Sync Lock (409 \"Push in flight\")\n\n**Root cause**\n- `node bin/duckbrain.js s3 sync all push` holds a **per-namespace native sync lock**.\n- Test requests needing that namespace get `409` (or `429`). The server **parks** them (`wchan = poll_schedule_timeout`) or the client retries endlessly (`wchan = hrtimer_nanosleep`). No bounded deadline ⇒ the gate's finish time = the push's finish time, unbounded.\n- `/health` stays green (process-level probe, no lock) and other namespaces stay fast (lock is per-namespace) — which is why the wedge is misdiagnosed.\n- Same mechanism at smaller timescale = the AUG-051 409 setup storms under write-heavy sibling lanes.\n\n**Exact fix (runbook)**\n1. Capture evidence, then kill the wedged pytest process group (`kill -TERM`, escalate to `-KILL`).\n2. Drain the push: `timeout 600 bash -c 'while pgrep -f \"duckbrain.js s3 sync.*push\"; do sleep 5; done'`.\n3. If it won't drain: confirm it's genuinely stuck (`ps -o pcpu,etime`), kill `LOCK_PID`, and use a supported `lock clear <ns>` if present — no manual DB edits.\n4. Verify with a **namespace probe** (not `/health`): expect `200`, not `409/429`.\n5. Re-run the gate only then → observed `212 passed`.\n\n**Prevention**\n- Server returns `409 + Retry-After` immediately instead of parking; client uses exponential backoff + jitter with a hard `LOCK_WAIT_BUDGET` and socket timeouts.\n- Global/serialized push mutex; gate preflight that refuses when a push is in flight; `timeout`/`pytest-timeout` so future wedges fail fast; CI namespace isolation + 409-rate alerting.\n\n**Verification** includes post-fix assertions, reproducible commands, and a success-criteria table (bounded conflict, drained lock, `212 passed`, preflight exit `3`/`OK`).\n",
+      "evidence": "# Evidence\n- Problem class: duckbrain-write-wedge-native-sync-lock\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-26T15:04:25.659Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A pytest/gate run wedges forever on live DuckBrain HTTP calls while /health stays green and direct probes to OTHER namespaces answer instantly. Root cause: DuckBrain native sync push (node bin/duckbrain.js s3 sync all push) holds the native sync lock (409 CONFLICT body: \"Push in flight for <ns> (native sync lock held by pid N ...). Retry after it completes.\"); requests needing the lock park server-side (client stuck in poll on :3000) or 429 into client retry backoff (hrtimer_nanosleep). Diagnosis: ss -tnp | grep <pytest pid> shows ESTAB to :3000 with the process in poll_schedule_timeout and ~0 CPU; wchan hrtimer_nanosleep = retry backoff instead. Fix: do NOT wait out a wedged gate run (lost 20 min at 33%); kill it, wait for the s3 sync push to drain (ps aux | grep duckbrain.js s3), re-run the gate. The re-run passes clean once the lock clears (212 passed). Also explains intermittent 409 setup storms (AUG-051 class) under write-heavy sibling lanes.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "duckbrain-write-wedge-native-sync-lock",
+        "provider": "openrouter",
+        "solved_at": "2026-09-26T15:04:25.666Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-26 15:04:25"
+    }
+  ]
+}
