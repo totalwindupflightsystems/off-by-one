@@ -1,0 +1,28 @@
+{
+  "class_id": 2364,
+  "title": "duckdb-graph-cache-stale-after-crash-warm-says-cached",
+  "description": "duckdb-graph-cache-stale-after-crash-warm-says-cached",
+  "created_at": "2026-09-26 04:23:51",
+  "answers": [
+    {
+      "answer_id": 2560,
+      "language": "rust",
+      "environment": "Linux x86_64, local corpus (gin, 99 Go files), .vfs/graph/{edges.jsonl,graph.db,.parse_cache.json}",
+      "version": "hilo 0.3.1-dev (v0.3.0-14-g2b26d3f)",
+      "solution": "Done. I diagnosed and fixed the bug, then verified it end-to-end.\n\n## What was wrong\n\nWarm's crash window writes `edges.jsonl` + `.parse_cache.json` **before** the DuckDB cache and the v3 row-claim stamp. A crash therefore leaves a valid-but-empty `graph.db` with either **no `.last_reconcile`** or a surviving **v2 / legacy** stamp. The guard `hilo_graph::cache_matches_edges()` treated a claim-less checkpoint as \"nothing to verify\" (`return true`), and `plan_reconcile()` trusted v2/legacy stamps blindly. Warm printed `[all cached, graph unchanged]`, never rebuilt the db, and `stats`/`impact` then served the empty cache silently.\n\nThe DF-WARPFS-61/64 self-heal only verified **v3** row claims, so the exact post-crash states slipped past it.\n\n## The fix (`hilo-graph/src/graph.rs`)\n\n- Added `distinct_edge_count_until()` — counts distinct `(from,to,rel,provenance)` edges in `edges.jsonl` (same key as `append_edges_deduped` / `idx_edges_unique`, so it's the correct expected row count despite DB dedup).\n- `cache_matches_edges()` no longer short-circuits on a missing stamp. When the checkpoint carries no row claim it compares the live db row count against the inventory, and refuses to certify a db it can't probe.\n- `plan_reconcile()` now verifies live rows for **v2 and legacy** stamps too — full inventory for the fresh path, consumed-prefix count for the delta path — so both `warm` and the `GraphDB::open*` path behind `stats`/`impact` heal.\n\nHealthy v3 workspaces still take the zero-work fast path; v2/legacy consistency checks preserve the existing delta behavior.\n\n## Verification\n\n- New hilo-graph tests: `df79_missing_stamp_…`, `df79_v2_stamp_…`, `df79_legacy_stamp_…`\n- New CLI tests: `warm_rebuilds_emptied_db_when_stamp_is_missing`, `warm_rebuilds_emptied_db_under_a_v2_stamp`\n- Full: `hilo_graph --lib` 330 passed, `hilo-cli --bin hilo` 108 passed, CLI integration warm/clean/stats 14 passed, clippy + fmt clean.\n- Live repro (120-edge corpus): control still says `[all cached]`; emptied db + missing stamp and emptied db + v2 stamp both now rebuild to 120 rows, upgrade the stamp to v3, and `stats`/`impact` return correct answers.\n\nThe full write-up with the code, reproduction commands, and verification transcript is at **`/home/kara/SOLUTION.md`**, and the fix is applied in `/tmp/hilo` (`hilo-graph/src/graph.rs`, tests in `hilo-cli/src/commands/graph.rs`).\n",
+      "evidence": "# Evidence\n- Problem class: duckdb-graph-cache-stale-after-crash-warm-says-cached\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-26T04:23:49.078Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Rust CLI (hilo 0.3.1-dev, warpfs/hilo) graph cache: DuckDB cache (graph.db) and the parse cache (.parse_cache.json) are separate artifacts with no consistency binding. A SIGKILL during `hilo graph warm` (mid-parse, ~0.9s into a 2.1s run) leaves edges.jsonl intact (879 lines) but graph.db freshly created and EMPTY (12KB header-only + wal). The OBVIOUS recovery `hilo graph warm` then hits the surviving parse cache, prints 'parse cache: 99/99 files skipped (unchanged)' and '[all cached, graph unchanged]', and EXITS WITHOUT REBUILDING the broken DuckDB. All subsequent queries read the empty DB and SILENTLY return wrong answers: `graph stats` reports 'Total edges: 5 distinct / 879 raw (edges.jsonl)' (the 5 are just what reconcile wrote before the kill), `graph impact tree.go` returns 'No dependents found' for a file that had 3 dependents minutes earlier. No warning, no error, exit 0. Only the UNDISCOVERABLE `hilo graph clean` + re-warm fully recovers. Root cause: warm's short-circuit checks parse-cache freshness but never validates that graph.db is populated/consistent with edges.jsonl (e.g. edge count or schema marker); graph clean deletes edges.jsonl + parse cache + db together, so after clean+warm everything rebuilds correctly. Fix direction: on warm, when the parse cache is fresh, verify graph.db row/edge count against edges.jsonl line count (or a last_warm stamp vs db marker); on mismatch, rebuild the DuckDB from edges.jsonl instead of printing 'graph unchanged'. Same family as the zero-byte graph.db self-heal gap (DF-WARPFS-79) but distinct trigger (empty-after-crash, not zero-byte) and distinct mechanism (warm short-circuit skips reconciliation entirely).",
+        "environment": "Linux x86_64, local corpus (gin, 99 Go files), .vfs/graph/{edges.jsonl,graph.db,.parse_cache.json}",
+        "language": "rust",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "duckdb-graph-cache-stale-after-crash-warm-says-cached",
+        "provider": "openrouter",
+        "solved_at": "2026-09-26T04:23:49.089Z",
+        "version": "hilo 0.3.1-dev (v0.3.0-14-g2b26d3f)"
+      },
+      "status": "verified",
+      "created_at": "2026-09-26 04:23:52"
+    }
+  ]
+}

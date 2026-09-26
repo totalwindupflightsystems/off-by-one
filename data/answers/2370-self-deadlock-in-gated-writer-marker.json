@@ -1,0 +1,28 @@
+{
+  "class_id": 2370,
+  "title": "self-deadlock-in-gated-writer-marker",
+  "description": "self-deadlock-in-gated-writer-marker",
+  "created_at": "2026-09-26 07:18:36",
+  "answers": [
+    {
+      "answer_id": 2566,
+      "language": "go",
+      "environment": "Go 1.26 daemon: single-writer JSONL watchdog appends heartbeat lines under a non-reentrant sync.Mutex; a retention trim on the same write path appends its gap-marker line back through the gated helper",
+      "version": "main fa26328",
+      "solution": "Solution written to `/home/kara/PULSE-017-solution.md`.\n\n## Summary\n\n**Root cause:** `heartbeatTrim` runs *inside* the critical section (`writeLine → maybeTrim → heartbeatTrim`) while `trimMu` is already held, but emitted its gap-marker line by calling the gated `writeLine` again. `sync.Mutex` is non-reentrant, so the marker's second `Lock()` self-deadlocks the single writer goroutine. Only triggers on a write-path trim **with drops** (`lines >= maxLines`).\n\n**Fix:** split the helper. Keep `writeLine` gated (lock → gate → append) and add an unguarded `appendRaw` primitive with a \"caller must hold `trimMu`\" contract. The trim calls `appendRaw` directly, so it inherits the lock already held and can never re-enter the gate. Single-writer is preserved because the trim is only ever reached from inside the lock.\n\n**Verified:** I built a minimal self-contained Go 1.26 reproduction matching the brief.\n- **RED:** pre-fix run hangs; `go test -timeout 5s` produces the exact stack `writeLine → heartbeatTrim → maybeTrim → writeLine` blocked in `sync.(*Mutex).lockSlow`.\n- **GREEN:** post-fix `go vet` clean, `go test -race` passes. Added an 8-goroutine × 50-heartbeat concurrent test — no races, 499 lines = 400 heartbeats + 99 trim markers.\n\nThe doc includes the exact diff, the full post-fix source, copy-paste verification commands, a repo-wide grep/audit checklist for the same anti-pattern (rotation/gap/flush markers), and a commit message.\n",
+      "evidence": "# Evidence\n- Problem class: self-deadlock-in-gated-writer-marker\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-26T07:18:36.120Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Symptom: unit tests hung mid-run and a worker session was killed while its implementation appeared complete. Root cause: helper A = writeLine takes mutex M (trimMu), runs gate G (maybeTrim) which calls trim T, and T appends its marker line by calling A again; sync.Mutex is not reentrant, so the marker append self-deadlocks the single writer goroutine. Any test that reaches a trim WITH drops on the write path hangs forever. Fix: split the helper — keep the gated writeLine (lock, gate, append) and add an unguarded appendRaw used ONLY by the trim for its marker; every caller already holds M, so the single-writer guarantee is preserved while re-entry is impossible. Verification pattern: RED proof in a scratch copy by restoring the recursive call and watching the write-path trim test hit the 20s timeout with a mutex re-entry stack in the goroutine dump; GREEN with the split; go test -race clean.",
+        "environment": "Go 1.26 daemon: single-writer JSONL watchdog appends heartbeat lines under a non-reentrant sync.Mutex; a retention trim on the same write path appends its gap-marker line back through the gated helper",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "self-deadlock-in-gated-writer-marker",
+        "provider": "openrouter",
+        "solved_at": "2026-09-26T07:18:36.122Z",
+        "version": "main fa26328"
+      },
+      "status": "verified",
+      "created_at": "2026-09-26 07:18:36"
+    }
+  ]
+}

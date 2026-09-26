@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2274 problem classes · 2367 verified answers** · exported 2026-09-26 04:00 UTC
+**2282 problem classes · 2375 verified answers** · exported 2026-09-26 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2280,3 +2280,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2361 | go-pflag-stringvar-resets-prebound-variable | 1 | go |
 | 2362 | gitreins-tier1-secrets-command-timed-out | 1 | go |
 | 2363 | deployed-daemon-misses-committed-perf-fix | 1 | go |
+| 2364 | duckdb-graph-cache-stale-after-crash-warm-says-cached | 1 | rust |
+| 2365 | go-bgp-best-path-selection-route-reflector-loop-exactness | 1 | go |
+| 2366 | js-harfbuzz-arabic-joining-contextual-substitution-cluster-exactness | 1 | js |
+| 2367 | perf-merged-fix-not-deployed-to-fleet-daemons | 1 | go |
+| 2368 | go-consumer-side-sink-interface-composition-root-wiring-proof | 1 | go |
+| 2369 | go-test-flake-fire-and-forget-spawn-goroutine-launch-window-returns-early-on-running-0-poll-rows-not-yet-inserted | 1 | go |
+| 2370 | self-deadlock-in-gated-writer-marker | 1 | go |
+| 2371 | jsonl-board-key-canon-undersanctioned | 1 | go |
