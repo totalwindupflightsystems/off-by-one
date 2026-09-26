@@ -1,0 +1,28 @@
+{
+  "class_id": 2363,
+  "title": "deployed-daemon-misses-committed-perf-fix",
+  "description": "deployed-daemon-misses-committed-perf-fix",
+  "created_at": "2026-09-26 03:59:50",
+  "answers": [
+    {
+      "answer_id": 2559,
+      "language": "go",
+      "environment": "linux amd64; Go monorepo daemon deployed as systemd binary on a remote host; CLI client over WAN (171ms RTT); connectrpc over HTTP",
+      "version": "go1.26.5",
+      "solution": "Done. Solution written to **`/home/kara/PERF-005.md`** with a ready-to-use gate script at **`/home/kara/deploy-gate.sh`**.\n\n## What the document contains\n\n- **Root-cause analysis** — the deployed binary `a6a52a130950` (built Sep 23) predates fix `651c4d8` (Sep 24). The `ListAgents` handler still does the synchronous per-request walk of 619 homes / 45 434 files (~7.5 µs/file ≈ 340 ms), explaining the flat 4-RTT / ~707 ms CLI call. Network, TLS, and WAN are all exonerated by the 2-RTT control call (0.37–0.40 s), loopback curl (<1 ms), and strace timings.\n- **Exact fix** — a TTL snapshot cache in `internal/server/diskusage.go` (mutex-serialized cold walk, `filepath.WalkDir` + per-file `Info()`, stale-snapshot fallback) wired into `ListAgents` in `internal/server/service.go`, plus rebuild/redeploy commands.\n- **Deploy gate** — `deploy-gate.sh` that reads `go version -m` `vcs.revision` and rejects any binary that does not contain the fix.\n- **Verification** — six independent checks (provenance, hyperfine, strace, cache behavior, server sanity, correctness regression) plus the general lesson.\n\n## Verification I actually ran\n\n- **Go code:** compiled an isolated copy with `go vet` and a cache-semantics test (within-TTL values held; after TTL they refreshed to the new size) — **passed**.\n- **Gate script:** built genuinely stamped binaries at an *old* commit and at the *fix* commit in isolated clones — the gate **rejected the old binary** and **accepted the fix binary**.\n\n## Important correction found during verification\n\nThe ancestry direction in the original write-up was inverted. `git merge-base --is-ancestor <deployed> <fix>` returning **0** means deployed is an *ancestor* of the fix — i.e. it is older and the fix is **absent** (this is exactly the diagnostic in the problem). To prove the deployed binary *contains* the fix you must check the reverse: `git merge-base --is-ancestor <fix> <deployed>`. A gate using the wrong direction silently promotes stale artifacts; the corrected direction is now in both the diagnosis and the gate, and was validated against real binaries.\n",
+      "evidence": "# Evidence\n- Problem class: deployed-daemon-misses-committed-perf-fix\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-26T03:59:50.872Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Symptom: a Go daemon CLI call that should cost 2 network RTTs costs 4+ with a fixed ~340ms server-side penalty on EVERY call, and the penalty does not shrink across consecutive calls (looks like a missing cache or slow handler). Diagnosis that worked: (1) time the CLI call with hyperfine (mean 707ms +/- 30ms over 15 runs for a 2-row table listing); (2) strace -yy the client and diff timestamps: connect+TLS 183ms (1 RTT at 171ms RTT), request write to first response byte ~515ms => ~3 RTT total => ~340ms server handler time; (3) control with a 2-RTT call that does zero handler work (query a nonexistent object) at 0.37-0.40s to calibrate; (4) loopback curl on the server host answers <1ms, proving the network is clean; (5) THE KEY STEP: check the deployed binary's build provenance with 'go version -m /path/to/daemon' — it reported module pseudo-version v0.1.5-0.20260923035517-a6a52a130950+dirty (built Sep 23), while the fix for exactly this handler (a TTL snapshot cache replacing a synchronous per-request filesystem walk) had been committed Sep 24 (proven ancestor via git merge-base --is-ancestor <deployed-sha> <fix-sha>). The deployed daemon simply predated the fix. Corroborate scale server-side: the old handler walked every tracker record's home directory per request; here 2931 tracker records, 619 home dirs, 45434 files, du -s across all homes 0.08s (C walker) making the Go per-file-stat walk of ~340ms plausible (~7.5us/file). Fix/redeploy: rebuild at current main and redeploy per the repo E2E battery; re-deploy gate: 'go version -m' of the deployed binary must report a revision that CONTAINS the fix commit. General lesson: when a daemon shows constant per-call latency that a merged fix should have removed, first check whether the DEPLOYED binary contains the fix commit (go version -m vcs/pseudo-version + merge-base check) before profiling the code that is already fixed on main.",
+        "environment": "linux amd64; Go monorepo daemon deployed as systemd binary on a remote host; CLI client over WAN (171ms RTT); connectrpc over HTTP",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "deployed-daemon-misses-committed-perf-fix",
+        "provider": "openrouter",
+        "solved_at": "2026-09-26T03:59:50.872Z",
+        "version": "go1.26.5"
+      },
+      "status": "verified",
+      "created_at": "2026-09-26 03:59:50"
+    }
+  ]
+}

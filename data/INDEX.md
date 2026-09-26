@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2254 problem classes · 2346 verified answers** · exported 2026-09-25 22:00 UTC
+**2274 problem classes · 2367 verified answers** · exported 2026-09-26 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -17,6 +17,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 457 | go-e2e-live-server-battery | 4 | go |
 | 550 | board-foreman-idle-audit | 4 | go, python |
 | 1540 | gitreins-tier2-input-token-cap-exceeded | 4 | go |
+| 419 | go-live-e2e-battery | 3 | go |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 78 | so-nil-pointer-deref | 2 | go |
@@ -28,7 +29,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 383 | go-websocket-e2e-live-battery | 2 | go |
 | 390 | typescript-barrel-split | 2 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 2 | go |
-| 419 | go-live-e2e-battery | 2 | go |
 | 428 | typescript-lockfile-npm-ci-desync | 2 | go |
 | 749 | docs-claims-vs-implementation-drift | 2 | go |
 | 780 | python-standing-block-watchdog-key-probe | 2 | go |
@@ -2260,3 +2260,23 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2341 | openai-compat-format-negotiation-silent-strip | 1 | python |
 | 2342 | model-sync-score-concatenated-json-parse | 1 | python |
 | 2343 | typescript-vitest-backgrounded-run-reaped-by-runner | 1 | typescript |
+| 2344 | js-catmull-clark-semi-sharp-crease-limit-surface-exactness | 1 | js |
+| 2345 | go-x509-path-validation-name-constraints-policy-mapping-differential | 1 | go |
+| 2346 | bash-sqlite-online-schema-backfill-exactly-once-cutover | 1 | shell |
+| 2347 | put-update-cache-invalidation | 1 | go |
+| 2348 | git-checkout-revert-uncommitted-foreman-edits | 1 | go |
+| 2349 | concurrent-foreman-board-append-events-jsonl-race-recovery | 1 | bash+python |
+| 2350 | go-ts-bound-fails-closed-silent-zero-rows | 1 | go |
+| 2351 | typescript-websocket-topic-subscription-mismatch | 1 | go |
+| 2352 | pytest-no-dev-extra-module-not-found | 1 | python |
+| 2353 | gitreins-wave-verdict-judged-at-pre-merge-base-commit | 1 | go |
+| 2354 | go-chi-route-outside-auth-group-unauthorized-stream | 1 | go |
+| 2355 | go-sse-writetimeout-heartbeat-regression-test-design | 1 | go |
+| 2356 | scheduler-refired-tick-recovery-unpushed-work | 1 | go |
+| 2357 | gitreins-tier2-iteration-starvation-after-repo-growth | 1 | go |
+| 2358 | go-test-fixed-startup-deadline-class | 1 | go |
+| 2359 | graph-stats-census-vs-warm-file-count-mismatch | 1 | go |
+| 2360 | spawn-uid-collision-precheck-refuses-leaked-residue-user | 1 | go |
+| 2361 | go-pflag-stringvar-resets-prebound-variable | 1 | go |
+| 2362 | gitreins-tier1-secrets-command-timed-out | 1 | go |
+| 2363 | deployed-daemon-misses-committed-perf-fix | 1 | go |
