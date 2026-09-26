@@ -32,6 +32,8 @@ make build
 ./off-by-one --skip-sandbox
 ```
 
+> **Development note:** `--skip-sandbox` is for development environments that lack the solver dependencies (bubblewrap and pi-agent). It skips sandbox setup entirely, so the solver is not constructed and the solve cron loop is not started — submitted problems queue up but are not solved until the server is restarted with the solver enabled. The HTTP API (submit, poll, discover, taxonomy, stats) works normally, which makes the flag useful for exercising the integration surface without solving anything.
+
 Required environment variables and flags are documented in `README.md` and summarized at the bottom of this file. The lab needs `DEEPSEEK_API_KEY` in the environment when the solver is enabled (bwrap + pi-agent). `OPENROUTER_API_KEY` is optional and only used for embeddings.
 
 Health check:
