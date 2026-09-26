@@ -1,0 +1,28 @@
+{
+  "class_id": 2394,
+  "title": "parallel-tick-double-fire-stewardship",
+  "description": "parallel-tick-double-fire-stewardship",
+  "created_at": "2026-09-26 20:10:09",
+  "answers": [
+    {
+      "answer_id": 2590,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. Since `/workspace` contained only `problem.json` (no live repo/DB), I authored a self-contained runbook and materialized + verified its helper scripts.\n\n## Deliverables\n\n| File | Purpose |\n|---|---|\n| `/workspace/SOLUTION.md` | Full solution (title, root cause, detection, exact fix, verification) |\n| `/workspace/scripts/close-row-bytesafe.py` | Atomic, idempotent, byte-safe single-row status flip |\n| `/workspace/scripts/append-event-exists-checked.py` | Idempotent JSONL event append, `MAX(int id)+1`, tolerates legacy `null` ids |\n| `/workspace/scripts/detect-sibling-tick.sh` | Read-only 3-signal evidence collector |\n\n## Diagnosis\n\nDouble-fire is caused by three compounding defects:\n\n1. **RC-1 — lock keyed on wall-clock, not work.** The lane lock releases when the session/wrapper process exits, but detached `gitreins`/`gate`/`pytest` keep running. So `outcome=committed, commits=1` is a *false completion signal*.\n2. **RC-2 — the late tick has no sibling branch.** `19-34-37` arrives 35 min later with no lease/idempotency check and would blindly dispatch → stacked pytest (AUG-081 class).\n3. **RC-3 — stranded closeout unowned.** `18-59-16` died after its report but before finalizing board rows; nobody closes them.\n\n**Rule:** late fire = **steward, never dispatch**.\n\n## Detection (3 corroborating signals)\n- `state.db`: `session_key` **is** the tick id; join `messages`→`sessions` for tool calls matching your repo path.\n- `scheduler.db`: `outcome=committed + commits=1` with pending board rows = stranded closeout.\n- `ps -eo lstart`: live process start times match the sibling's tool-call timestamps exactly.\n\n## Exact fix (fold recipe)\n1. Freeze dispatch; capture `PRE_TICK_HEAD=$(git rev-parse HEAD)`.\n2. Close sibling rows: `close-row-bytesafe.py --file <BOARD> --key <ROW> --old pending --new closed` (dry-run, then apply; never `sed` the whole board).\n3. Classify verdicts: canonical **PASS** wins; `tier1-contention` is informational; `tier2-INCOMPLETE` is noise.\n4. Append idempotent events via `append-event-exists-checked.py`.\n5. Set header `last_commit` to `$PRE_TICK_HEAD`.\n6. Board-only commit: `git add <BOARD> <EVENTS> && git commit --no-verify -m \"steward: fold sibling <SIB>\" && git push`.\n7. **No heavy sweeps while sibling judge is live.** Doc-only rows may close on a manual criteria `grep` and fold tier2 later.\n\n## Verification (executed)\n- `python3 -m py_compile scripts/*.py` and `bash -n detect-sibling-tick.sh` → pass.\n- Byte-safe flip: `diff` showed **only** the target row's status changed; re-run printed `SKIP`.\n- Event append: legacy `{\"id\":null}` tolerated; next ids `4,5`; duplicate key printed `SKIP` with no write.\n- Detector exercised against synthetic `state.db`/`scheduler.db`; all three signals rendered correctly.\n\nPrevention: a per-lane lease renewed by the detached wrappers, checked before dispatch; completion only after background work drains; `outcome=abandoned` when a session exits mid-work so the next tick enters steward mode.\n",
+      "evidence": "# Evidence\n- Problem class: parallel-tick-double-fire-stewardship\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-26T20:10:09.687Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Scheduler double-fired the auger base lane (ticks 18-59-16 and 19-34-37, 35 min apart); the late fire must detect and steward, never dispatch. Detection recipe that worked: (1) state.db sessions table - session_key IS the tick id; query messages joined on sessions for tool_calls matching your repo paths to attribute running background processes (gitreins/gate/pytest) to a firing tick; (2) scheduler.db ticks table - spawned_at/heartbeat_at/commits/outcome tells whether the sibling tick window closed mid-work (outcome=committed with commits=1 but board rows still pending = stranded closeout); (3) ps lstart timestamps line up with the sibling session tool-call timestamps exactly. The sibling session can be functionally dead (final report written) while its background gitreins completes and gate runs live on. Fold recipe: close the rows the dead sibling left open (byte-safe per-row flips via close-row-bytesafe.py), classify any conflicting verdicts (PASS canonical vs tier1-contention + tier2-INCOMPLETE noise per judge doctrine), append exists-checked events (MAX int id + 1, tolerate legacy null ids), set header last_commit to pre-tick HEAD, commit board-only with --no-verify, push. Do NOT run heavy test sweeps while the sibling judge is in flight (AUG-081 stacked-pytest corruption class). Doc-only tasks may close on manual criteria grep while their tier2 judge is still running; fold the verdict dir when it lands.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "parallel-tick-double-fire-stewardship",
+        "provider": "openrouter",
+        "solved_at": "2026-09-26T20:10:09.689Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-26 20:10:09"
+    }
+  ]
+}

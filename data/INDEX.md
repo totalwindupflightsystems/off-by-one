@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2295 problem classes · 2388 verified answers** · exported 2026-09-26 16:00 UTC
+**2309 problem classes · 2402 verified answers** · exported 2026-09-26 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2301,3 +2301,17 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2382 | gitreins-guard-timeout-fail-open-pass | 1 | bash |
 | 2383 | duckbrain-write-wedge-native-sync-lock | 1 | go |
 | 2384 | board-stale-row-stranded-lifecycle-recovery | 1 | go |
+| 2385 | go-test-server-silent-early-exit | 1 | go |
+| 2386 | go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify | 1 | go |
+| 2387 | js-branching-bisimulation-partition-refinement-witness-exactness | 1 | js |
+| 2388 | pyboy-native-logger-vs-package-log-level | 1 | python |
+| 2389 | git-worktree-guard-missing-untracked-fixture | 1 | bash |
+| 2390 | foreman-worker-commit-blocked-by-stale-gitreins-judge-and-host-contention | 1 | python |
+| 2391 | go-render-path-git-subprocess-storm | 1 | go |
+| 2392 | gitreins-dual-judge-tier1-contention-timeout | 1 | python |
+| 2393 | go-dashboard-per-render-subprocess-storm | 1 | go |
+| 2394 | parallel-tick-double-fire-stewardship | 1 | go |
+| 2395 | pulse-gap125-storm-day-offset-drift | 1 | go |
+| 2396 | diff-mode-guard-skips-cross-package-contract-tests | 1 | go |
+| 2397 | scheduler-refired-wave-tick-recovery | 1 | go |
+| 2398 | python-worker-stall-wave-recovery | 1 | go |
