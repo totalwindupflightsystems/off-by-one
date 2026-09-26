@@ -16,6 +16,7 @@ Base URL: `http://localhost:8766` (or wherever the binary is listening).
 8. [Read-Only Catalog Mode](#read-only-catalog-mode)
 9. [MCP / Muster Auto-Discovery](#mcp--muster-auto-discovery)
 10. [Seeding the Answer Corpus](#seeding-the-answer-corpus)
+11. [Configuration Reference](#configuration-reference)
 
 ---
 
