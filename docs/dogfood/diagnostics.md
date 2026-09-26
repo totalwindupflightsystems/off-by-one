@@ -651,3 +651,69 @@ exit 0. Zero toolchain, zero sudo, no docs deviation — the DF-11-era "manual G
 friction is gone from the documented path because the release-binary recipe now leads.
 Bunker-host quirk: `/tmp` is shared across agents on that box (a stale sibling file caused
 EACCES on a log redirect) — use `$HOME` for scratch on bunker agents.
+
+## §13 — 2026-09-25 (second run of the day) dogfood run — the community answer-sharing engine, first real exercise
+
+Eleven prior runs and the export/import pair had only ever been proven as a
+round-trip of UNCHANGED content (09-07, 09-19). This run asked the question the
+pair actually exists for: **what happens when content CHANGES between two
+independent labs sharing one repo?** The answer found real defects — which is
+exactly why the surface had never been safe to skip twice.
+
+### How the engine actually works (the 2-minute version)
+
+- `internal/export/git.go` — `POST /api/v1/export {target_repo, answer_ids,
+  branch, commit_message}` → handler forces `Push:true` (handlers.go:940) →
+  engine clones-or-reuses a clone under `-export-dir`, then for each answer
+  renders `formatSolutionMD` (a fixed template: header, `## Problem
+  Description`, `## Solution` with the stored text VERBATIM) + evidence.md +
+  signatures.json into `pre-solve-answers/{class}/{env}/{version}/`, skips a
+  file-set only when the freshly rendered bytes equal what's on disk, stages,
+  commits, pushes. There is NO upstream diff: a re-export overwrites whatever
+  is in the working tree.
+- `internal/import/git.go` — clones-or-fetches under `-import-dir`, walks the
+  subtree, `parseSolutionMD` → `extractSection(content, "## Solution")` which
+  cuts at the FIRST of `\n---\n`, `\n## `, `\n# ` inside the section; the
+  parsed triple is compared to the stored row and identical content is
+  skipped. `ActionConflict` exists as a constant but no code produces it, and
+  the API handler never forwards `conflict_strategy` to the engine.
+
+### The error I hit, and the right way to read it
+
+Import of a genuinely updated repo returned `{skipped:3, updated:0}` while the
+clone on disk provably contained the update (`git log` showed the community
+commit; `grep Update v2` hit). That combination is NOT a transport problem —
+the clone was right, so the loss had to be between clone and diff. A 20-line
+Python re-implementation of `parseSolutionMD` + `extractSection` against the
+real file, compared byte-wise with the stored row (830 == 830, equal:True),
+localized the cut to the first `\n---\n` in the body. The root cause chain:
+
+corpus answers END with a `---` rule inside their solution text (the stored
+text itself contains it — `SELECT length(solution)` = 830 ends with `---`) →
+`formatSolutionMD` writes it verbatim → a community editor appends BELOW the
+rule → `extractSection` cuts there → the parsed text equals the old stored
+text → import reports "identical content". The append is invisible to every
+layer, and the 409/500/parse-error paths never fire.
+
+The symmetric half is worse: the producer's re-export (handler-forced
+`Push:true`, no upstream diff in the engine) overwrote the community edit with
+commit 719cec8 — `grep -c "Update v2"` went 1 → 0 — with zero warnings, and
+because the edit never entered any database, the loss is unrecoverable. The
+README's promised "diff + conflict resolution" (component map,
+`internal/import`) does not exist for this case in either direction.
+
+Filed: DF-OFF-BY-ONE-22 (clobber/silent-loss, P1), DF-OFF-BY-ONE-23
+(extractSection cut, P1, with the byte-level repro), DF-OFF-BY-ONE-24
+(conflict_strategy dropped at the handler, P2). DF-OFF-BY-ONE-7 (09-07: stale
+clone, silent 200) is LIVE-VERIFIED FIXED: a nonexistent source_repo now 409s
+with `source_repo_mismatch` naming the existing origin.
+
+### What works, and is worth copying
+
+The empty-node bootstrap is the strongest integration result of any run: a
+node with a ZERO-row database that imports a community repo serves discoveries
+for exactly those classes in 156ms cold (clone included) / ~90ms warm, and
+404s cleanly for everything else. Export at scale is fine (200 answers = 600
+files = 933ms single request). Discover after import: 12-18ms. Nothing here is
+slow — the defects are semantic, not performance. (No PERF row; numbers
+recorded in the dogfood-log entry.)

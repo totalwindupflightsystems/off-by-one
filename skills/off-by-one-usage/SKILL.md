@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.6.0
+version: 1.7.0
 category: software-development
 ---
 
@@ -217,10 +217,10 @@ Full API on a throwaway DB, no sandbox/keys. Data survives restarts (SQLite WAL)
   `pre-solve-answers/{class-title}/{env}/{version}/{solution.md,evidence.md,signatures.json}`
   in a git repo → `POST /api/v1/import {source_repo, branch, conflict_strategy:"skip"}` →
   `added:1` → immediately discoverable. Re-import dedups (`skipped:1`).
-- **IMPORT pitfall**: after any successful import, a later import from a
-  nonexistent `source_repo` still returns `200 {"skipped":1}` — `prepareClone`
-  re-fetches the PREVIOUS origin and never validates the new URL. Use one
-  source repo per import dir; wipe the dir between sources (DF-OFF-BY-ONE-7).
+- **IMPORT pitfall (FIXED 2026-09-25, live-verified)**: the DF-OFF-BY-ONE-7
+  stale-clone bug is gone — a `source_repo` that disagrees with the existing
+  import clone now 409s with `source_repo_mismatch` naming the existing
+  origin. One source repo per import dir is still the sane hygiene.
 - **EXPORT is broken at the API layer** (as of `ad63507`):
   `POST /api/v1/export` 500s on EVERY request — handler drops `ClassID`
   (DF-OFF-BY-ONE-6). Skip it; the corpus ships as flat files under `data/answers/`
@@ -350,3 +350,31 @@ docs/dogfood/2026-09-25-integration.md.
     the live SPA, whose deep-linked problem pages fully render client-side (verified
     via headless DOM dump — a 200 on the SPA shell alone proves nothing). Crawlers
     that present no bot UA string fall through to the SPA and get empty shells.
+
+## Field-tested 2026-09-25b (dogfood tick): verdict 🟡 PROMISING-BUT-ROUGH for the sharing engine
+
+Angle: the export/import community-sharing pair under CONTENT CHANGE — the
+surface all 11 prior runs left untouched (they only round-tripped identical
+content). Full evidence: docs/dogfood/2026-09-25b-integration.md + diagnostics §13.
+
+22. **Re-export CLOBBERS community edits (DF-OFF-BY-ONE-22, P1)** — the export
+    engine has no upstream diff and the handler forces `Push:true`: a producer
+    re-export overwrites any external commit touching the subtree, silently.
+    Never treat the shared repo as community-editable while this is open;
+    producers and consumers must use DISJOINT branches/repos.
+23. **Import cannot see text appended below a `---` rule (DF-OFF-BY-ONE-23,
+    P1)** — `extractSection` cuts at the first `\n---\n` inside the solution
+    body and corpus answers commonly end with one, so community updates parse
+    down to the OLD text and import reports `skipped: identical content`.
+    A `skipped` count on import of a repo you KNOW changed is a parse cut,
+    not dedup — diff the clone on disk against your last-seen revision before
+    trusting the response.
+24. **`conflict_strategy` is decorative (DF-OFF-BY-ONE-24, P2)** — accepted by
+    the API, documented in OpenAPI, dropped at the handler (handlers.go:970);
+    the engine has no conflict/replace/manual code path. skip/replace/manual
+    behave identically today.
+25. **Empty-node bootstrap is the cheapest join (DF-OFF-BY-ONE-25, docs)** —
+    start the node with a fresh `-db` (no seed), set `-import-dir`, POST
+    /api/v1/import against the community repo, done: discover answers for
+    exactly the imported classes (156ms cold incl. clone, ~90ms warm).
+    Import is sufficient WITHOUT seed for the community-sharing deployment.
