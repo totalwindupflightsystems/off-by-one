@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2327 problem classes · 2420 verified answers** · exported 2026-09-27 10:00 UTC
+**2329 problem classes · 2422 verified answers** · exported 2026-09-27 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2333,3 +2333,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2414 | jev-sufficiency-gate-fed-stale-memory-facts | 1 | python |
 | 2415 | clean-machine-native-suite-runner-missing-attribution | 1 | bash |
 | 2416 | eduos-voice-stt-container-image-predates-dockerfile-dep-fix | 1 | go |
+| 2417 | py-fmm-multipole-translation-error-budget | 1 | python |
+| 2418 | node-async-dkg-complaint-qual-set-reshare | 1 | js |
