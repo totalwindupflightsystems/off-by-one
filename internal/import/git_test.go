@@ -591,6 +591,23 @@ func TestExtractSection_NotFound(t *testing.T) {
 	}
 }
 
+func TestExtractSection_EmbeddedHorizontalRule(t *testing.T) {
+	content := "# Answer\n\n## Solution\n\nFirst part of the solution.\n\n---\n\nAppended content after the rule.\n\n## Notes\n\nShould not be included."
+	got := extractSection(content, "## Solution")
+	if !strings.Contains(got, "First part of the solution.") {
+		t.Errorf("extractSection = %q, want to contain 'First part of the solution.'", got)
+	}
+	if !strings.Contains(got, "---") {
+		t.Errorf("extractSection = %q, want to retain embedded horizontal rule '---'", got)
+	}
+	if !strings.Contains(got, "Appended content after the rule.") {
+		t.Errorf("extractSection = %q, want to contain 'Appended content after the rule.'", got)
+	}
+	if strings.Contains(got, "Should not be included.") {
+		t.Errorf("extractSection = %q, must not include content of the following '## Notes' section", got)
+	}
+}
+
 // --- Import detail count tests --------------------------------------------
 
 func TestImportResult_Details(t *testing.T) {

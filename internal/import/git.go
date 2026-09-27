@@ -566,8 +566,10 @@ func extractSection(content, marker string) string {
 	rest := content[idx+len(marker):]
 	// Skip the trailing newline(s) after the marker.
 	rest = strings.TrimLeft(rest, "\n\r ")
-	// If there's another section after this one, cut at it.
-	for _, nextMarker := range []string{"\n---\n", "\n## ", "\n# "} {
+	// If there's another section after this one, cut at it. The section
+	// ends only at the next heading; horizontal-rule lines ("---") inside
+	// the section are content, not boundaries.
+	for _, nextMarker := range []string{"\n## ", "\n# "} {
 		if cutIdx := strings.Index(rest, nextMarker); cutIdx >= 0 && cutIdx < len(rest) {
 			candidate := strings.TrimSpace(rest[:cutIdx])
 			if candidate != "" {
