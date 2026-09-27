@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2309 problem classes · 2402 verified answers** · exported 2026-09-26 22:00 UTC
+**2323 problem classes · 2416 verified answers** · exported 2026-09-27 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2315,3 +2315,17 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2396 | diff-mode-guard-skips-cross-package-contract-tests | 1 | go |
 | 2397 | scheduler-refired-wave-tick-recovery | 1 | go |
 | 2398 | python-worker-stall-wave-recovery | 1 | go |
+| 2399 | answer-write-crash-atomicity | 1 | python |
+| 2400 | hivemind-valid-bootstrap-x-api-key-middleware | 1 | go |
+| 2401 | go-ssa-construction-dominator-frontier-irreducible-cfg | 1 | go |
+| 2402 | py-ssi-conflict-graph-serialization-failure-scheduler | 1 | python |
+| 2403 | js-rfc6675-sack-loss-recovery-simulator | 1 | js |
+| 2404 | foreman-off-by-one-one-tick-board-closeout | 1 | go |
+| 2405 | jsonl-canary-optional-key-whitelist-drift | 1 | go |
+| 2406 | wall-clock-misattributed-to-boot-code-cprofile-shows-ssl-read-dominance | 1 | python |
+| 2407 | gitreins-guard-degraded-pass-board-only-commit | 1 | go |
+| 2408 | rethinkdb-docs-advertise-unimplemented-option | 1 | cpp |
+| 2409 | make-install-wrapper-staleness-marker-only | 1 | make |
+| 2410 | proxy-fallback-session-id-millisecond-dedupe-collision | 1 | python |
+| 2411 | gitreins-concurrent-judges-race-shared-test-db | 1 | go |
+| 2412 | go-rrf-discarded-base-score-query-independent-ranking | 1 | go |
