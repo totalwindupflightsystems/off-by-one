@@ -1,0 +1,28 @@
+{
+  "class_id": 2416,
+  "title": "eduos-voice-stt-container-image-predates-dockerfile-dep-fix",
+  "description": "eduos-voice-stt-container-image-predates-dockerfile-dep-fix",
+  "created_at": "2026-09-27 05:23:13",
+  "answers": [
+    {
+      "answer_id": 2612,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Wrote the solution to `/home/kara/solution.md`. Here it is:\n\n---\n\n# Stale Image: ImportError for a Dependency the Dockerfile Already Installs\n\n**Problem class:** `eduos-voice-stt-container-image-predates-dockerfile-dep-fix`\n\n## Symptoms\n\n- `eduos-voice-stt-1` (image `eduos-voice-ml`) logs: `AutomaticSpeechRecognitionPipeline raised ImportError: torchaudio required to resample`\n- `services/voice-agent/deploy/Dockerfile.ml` at HEAD clearly `pip install`s `torchaudio` (commit `41a4b052`).\n- `voice-api` `/turn` returns `502` for any non-16 kHz input (48 kHz opus/webm, 22.05 kHz wav).\n- The dependency is genuinely absent inside the running container, despite being in source control.\n\n## Root Cause\n\nThe **running image is older than the Dockerfile fix**. The container came from a locally cached image built **2026-09-20 21:34**, but the Dockerfile commit adding `torchaudio` landed **2026-09-20 22:33** — about an hour later. Compose was never asked to rebuild, so it reused the stale image and the new `RUN pip install ... torchaudio` layer never ran. Nothing is wrong with HEAD; the artifact is wrong.\n\nKey insight: an `ImportError` in a container is a statement about the **image**, not about the **Dockerfile**.\n\n## Diagnose (before touching code)\n\n```bash\ndocker inspect eduos-voice-stt-1 --format '{{.Image}} {{.Config.Image}}'\ndocker exec eduos-voice-stt-1 python -c \\\n  'import importlib.util as u; print(u.find_spec(\"torchaudio\"))'\ndocker images eduos-voice-ml --format '{{.ID}} {{.CreatedAt}} {{.Repository}}:{{.Tag}}'\ngit log --oneline -1 -S torchaudio -- services/voice-agent/deploy/Dockerfile.ml\ngit show -s --format='%H %ci %s' 41a4b052\n```\n\nIf `image.CreatedAt` < the Dockerfile commit time → stale image, **do not** edit source.\n\n## Fix (rebuild + recreate, no code changes)\n\n```bash\ncd /path/to/eduos/repo\ndocker compose build voice-stt\ndocker compose up -d --no-deps voice-stt\n```\n\n`--no-deps` recreates only the target without bouncing unchanged upstream services.\n\n## Verification\n\n```bash\ndocker inspect eduos-voice-stt-1 --format '{{.Image}}'\ndocker images eduos-voice-ml --format '{{.ID}} {{.CreatedAt}}'   # IDs match, time is \"just now\"\ndocker exec eduos-voice-stt-1 python -c 'import torchaudio; print(torchaudio.__version__)'  # 2.11.0+cpu\n\ncurl -s -o /tmp/a.json -w '%{http_code}\\n' -F 'audio=@/tmp/sample_48k.webm' http://localhost:8080/turn  # 200\ncurl -s -o /tmp/b.json -w '%{http_code}\\n' -F 'audio=@/tmp/sample_22k.wav'  http://localhost:8080/turn  # 200\n```\n\nVerified: torchaudio `2.11.0+cpu` importable; both non-16 kHz inputs returned `200` transcripts where they previously `502`ed.\n\n## Prevention Rule\n\nImportError for a dep the Dockerfile installs → **suspect a stale image first**: compare `docker inspect` image ID/build time against `git log -1 -S <dep> -- <Dockerfile>` commit date. Rebuild/recreate instead of editing source. Only edit code if the image is current and the dep is still missing.\n",
+      "evidence": "# Evidence\n- Problem class: eduos-voice-stt-container-image-predates-dockerfile-dep-fix\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-27T05:23:13.462Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Class: container ImportError for a dependency that IS present in the Dockerfile at HEAD. Symptom seen on eduos voice STT (eduos-voice-stt-1, image eduos-voice-ml): AutomaticSpeechRecognitionPipeline raised ImportError torchaudio required to resample, while services/voice-agent/deploy/Dockerfile.ml at HEAD clearly pip-installs torchaudio (commit 41a4b052). Root cause: the RUNNING image (built 2026-09-20 21:34) predates the Dockerfile fix commit (2026-09-20 22:33) - compose never rebuilt, so the container kept the stale image. General lesson: when a container log shows an ImportError for a dependency that the Dockerfile at HEAD installs, FIRST compare the image build timestamp against the git commit date that touched the Dockerfile (git log --oneline -1 -S <dep> -- <Dockerfile>) before editing any code; the fix is docker compose build <svc> + up -d --no-deps <svc(s)>, not source changes. Diagnose with docker inspect <container> --format {{.Image}} cross-checked against docker images <image> --format {{.ID}} {{.CreatedAt}}. Verified fix: rebuild+recreate made torchaudio 2.11.0+cpu importable and non-16kHz inputs (48kHz opus webm, 22.05kHz wav) return 200 transcripts through voice-api /turn where they previously 502ed.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "eduos-voice-stt-container-image-predates-dockerfile-dep-fix",
+        "provider": "openrouter",
+        "solved_at": "2026-09-27T05:23:13.463Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-09-27 05:23:13"
+    }
+  ]
+}

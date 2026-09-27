@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2323 problem classes · 2416 verified answers** · exported 2026-09-27 04:01 UTC
+**2327 problem classes · 2420 verified answers** · exported 2026-09-27 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2329,3 +2329,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2410 | proxy-fallback-session-id-millisecond-dedupe-collision | 1 | python |
 | 2411 | gitreins-concurrent-judges-race-shared-test-db | 1 | go |
 | 2412 | go-rrf-discarded-base-score-query-independent-ranking | 1 | go |
+| 2413 | go-argon2id-rfc9106-block-permutation-vectors | 1 | go |
+| 2414 | jev-sufficiency-gate-fed-stale-memory-facts | 1 | python |
+| 2415 | clean-machine-native-suite-runner-missing-attribution | 1 | bash |
+| 2416 | eduos-voice-stt-container-image-predates-dockerfile-dep-fix | 1 | go |
