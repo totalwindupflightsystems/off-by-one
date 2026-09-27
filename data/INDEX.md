@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2329 problem classes · 2422 verified answers** · exported 2026-09-27 16:01 UTC
+**2335 problem classes · 2428 verified answers** · exported 2026-09-27 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2335,3 +2335,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2416 | eduos-voice-stt-container-image-predates-dockerfile-dep-fix | 1 | go |
 | 2417 | py-fmm-multipole-translation-error-budget | 1 | python |
 | 2418 | node-async-dkg-complaint-qual-set-reshare | 1 | js |
+| 2419 | go-wal-torn-tail-recovery-manifest-fencing | 1 | go |
+| 2420 | py-tiled-online-softmax-attention-equivalence | 1 | python |
+| 2421 | logsey-severity-vocabulary-normalization | 1 | go |
+| 2422 | gitreins-iteration-cap-on-disposition-shaped-criterion | 1 | go |
+| 2423 | go-in-process-server-signal-cleanup-flake-under-full-suite-load | 1 | go |
+| 2424 | go-mcp-streamable-handshake-session-header | 1 | go |
