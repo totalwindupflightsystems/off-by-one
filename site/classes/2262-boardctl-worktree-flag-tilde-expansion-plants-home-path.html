@@ -50,12 +50,12 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <p>The leak is a <strong>shell expansion-order</strong> bug, not a boardctl bug. In an unquoted shell word, bash performs tilde expansion <em>before</em> the external command receives <code>argv</code>:</p>
 <pre><code>boardctl update T-2 --worktree ~/worktrees/proj-T-2 --branch wt/T-2
                                       └────── bash rewrites this ──────┘
-argv[3] = /home/kara/worktrees/proj-T-2      # boardctl never sees &quot;~&quot;
+argv[3] = ~/worktrees/proj-T-2      # boardctl never sees &quot;~&quot;
 </code></pre>
 <p>boardctl then faithfully serializes <code>argv</code> into <code>.coding-hermes/board/*.jsonl</code>. Because those <code>.jsonl</code> files are <strong>tracked in a public repo</strong>, the absolute home path is committed. This violates the TRBL-047 hard law (<code>zero /home/&lt;user&gt;</code> in tracked files).</p>
 <p>Contributing factors:
 - <code>worktree.sh flags &lt;proj&gt; &lt;id&gt;</code> prints an <strong>absolute</strong> <code>WT_ROOT</code>, so piping its output straight into a boardctl value re-injects the leak even when a human typed no tilde.
-- The bad value is only detectable <strong>after</strong> the write; the foreman's <code>git grep -c /home/kara -- .</code> exposed it (4 planted rows) only because the parent commit was clean, so the diff was reviewable.</p>
+- The bad value is only detectable <strong>after</strong> the write; the foreman's <code>git grep -c ~ -- .</code> exposed it (4 planted rows) only because the parent commit was clean, so the diff was reviewable.</p>
 <p>The fix must operate at three layers: <strong>normalize input</strong>, <strong>fail-closed gate after every write</strong>, and <strong>scrub any already-planted value</strong>.</p>
 <hr />
 <h2>Fix</h2>
@@ -68,7 +68,7 @@ boardctl update &quot;$id&quot; --worktree &quot;$wt&quot; --branch &quot;wt/$id
 </code></pre>
 <blockquote>
 <p><strong>Gotcha worth remembering:</strong> inside bash parameter-expansion replacement
-<code>${var//"$HOME"/~}</code>, a <strong>bare</strong> <code>~</code> is itself tilde-expanded (you get <code>/home/kara</code>
+<code>${var//"$HOME"/~}</code>, a <strong>bare</strong> <code>~</code> is itself tilde-expanded (you get <code>~</code>
 back). Use <code>\~</code> to emit a literal tilde: <code>${arg//"$HOME"/\~}</code>.</p>
 </blockquote>
 <h3>2. <code>boardctl-safe</code> — normalize argv, then fail closed</h3>
@@ -152,33 +152,33 @@ git add .coding-hermes/board &amp;&amp; git commit -m &quot;board: ...&quot;
 <h2>Verification</h2>
 <p>Reproduced the bug in a scratch tracked repo with a fake <code>boardctl</code>:</p>
 <pre><code>$ bash -c 'boardctl update T-2 --worktree ~/worktrees/proj-T-2 --branch wt/T-2'
-$ git grep -c /home/kara -- .
+$ git grep -c ~ -- .
 .coding-hermes/board/tasks.jsonl:1        # LEAK reproduced
 </code></pre>
 <p>After the fix, all paths pass:</p>
 <pre><code>$ boardctl-safe update T-3 --worktree ~/worktrees/proj-T-3 --branch wt/T-3
-boardctl-safe: normalized HOME path argument: /home/kara/worktrees/proj-T-3 -&gt; ~/worktrees/proj-T-3
+boardctl-safe: normalized HOME path argument: ~/worktrees/proj-T-3 -&gt; ~/worktrees/proj-T-3
 exit=0
 
 $ board-scrub-home.sh
 board-scrub-home: scrubbed .coding-hermes/board/tasks.jsonl
-board-scrub-home: OK (0 hits for /home/kara under .coding-hermes/board)
+board-scrub-home: OK (0 hits for ~ under .coding-hermes/board)
 
-$ git grep -c /home/kara -- .
+$ git grep -c ~ -- .
 0 hits: PASS
 </code></pre>
 <ul>
-<li><strong>Fail-closed gate:</strong> a fake binary that injects <code>/home/kara/...</code> directly (modeling <code>worktree.sh flags</code> output) is caught immediately:
+<li><strong>Fail-closed gate:</strong> a fake binary that injects <code>~/...</code> directly (modeling <code>worktree.sh flags</code> output) is caught immediately:
   <code>boardctl-safe: CRITICAL: absolute HOME path in .coding-hermes/board</code> → non-zero exit.</li>
-<li><strong>Scrub correctness:</strong> nested <code>{"paths":["/home/kara/..."]}</code> and mid-string <code>"log at /home/kara/tmp/z"</code> became <code>"paths":["~/..."]</code> / <code>"log at ~/tmp/z"</code>; <code>jq -e .</code> validated every line; 0 grep hits remain.</li>
-<li><strong>Parameter-expansion gotcha confirmed:</strong> <code>${a//"$HOME"/~}</code> re-expands to <code>/home/kara</code>, while <code>${a//"$HOME"/\~}</code> yields the literal <code>~</code> — hence the <code>\~</code> in the scripts.</li>
+<li><strong>Scrub correctness:</strong> nested <code>{"paths":["~/..."]}</code> and mid-string <code>"log at ~/tmp/z"</code> became <code>"paths":["~/..."]</code> / <code>"log at ~/tmp/z"</code>; <code>jq -e .</code> validated every line; 0 grep hits remain.</li>
+<li><strong>Parameter-expansion gotcha confirmed:</strong> <code>${a//"$HOME"/~}</code> re-expands to <code>~</code>, while <code>${a//"$HOME"/\~}</code> yields the literal <code>~</code> — hence the <code>\~</code> in the scripts.</li>
 </ul>
 <p><strong>Operational rule:</strong> never pass <code>~</code> or any <code>$HOME</code>-derived path as a boardctl field <em>value</em> on a public repo. Normalize to <code>~</code> form first (via <code>boardctl-safe</code> or <code>sed "s#^$HOME#~#"</code>), and treat <code>git grep -c "/home/$USER" -- .</code> as a mandatory gate on every board commit.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
 - Problem class: boardctl-worktree-flag-tilde-expansion-plants-home-path
 - Model: openrouter/deepseek/deepseek-v4.1-flash
 - Solved: 2026-09-24T17:26:23.224Z
 - Verification: solution produced by pi in sandbox; see signatures.json
-</pre><pre>{&quot;description&quot;: &quot;On a PUBLIC repo whose .coding-hermes/board/*.jsonl are tracked, running boardctl update &lt;id&gt; --worktree ~/worktrees/&lt;proj&gt;-&lt;id&gt; --branch wt/&lt;id&gt; inside a bash -c context let the SHELL tilde-expand the VALUE arguments to /home/&lt;user&gt;/worktrees/... before boardctl saw them. boardctl happily wrote the absolute paths into 4 previously-clean rows (the helper worktree.sh flags &lt;proj&gt; &lt;id&gt; also prints absolute WT paths, inviting the same). The repo has a hard board-leak law (TRBL-047: zero /home/&lt;user&gt; in tracked files; every scrub re-checks after each board write), so the foreman detected it via git grep -c /home/kara -- . immediately after the dispatch commit (parent was clean, diff showed 4 planted hits), fixed with value-only sed substitution to ~ form + jq validity re-check + scrub re-commit. Lesson: never pass ~ (or any $HOME-derived path) as a boardctl field VALUE on a public repo; expand/normalize to the tilde form FIRST (or use worktree.sh output piped through sed), and treat post-write git grep for the home path as a mandatory gate on every board commit.&quot;, &quot;environment&quot;: &quot;bash 5.x on Linux, boardctl 0e4cc91+, public repo with tracked .coding-hermes/board/*.jsonl&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;boardctl-worktree-flag-tilde-expansion-plants-home-path&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-24T17:26:23.225Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+</pre><pre>{&quot;description&quot;: &quot;On a PUBLIC repo whose .coding-hermes/board/*.jsonl are tracked, running boardctl update &lt;id&gt; --worktree ~/worktrees/&lt;proj&gt;-&lt;id&gt; --branch wt/&lt;id&gt; inside a bash -c context let the SHELL tilde-expand the VALUE arguments to /home/&lt;user&gt;/worktrees/... before boardctl saw them. boardctl happily wrote the absolute paths into 4 previously-clean rows (the helper worktree.sh flags &lt;proj&gt; &lt;id&gt; also prints absolute WT paths, inviting the same). The repo has a hard board-leak law (TRBL-047: zero /home/&lt;user&gt; in tracked files; every scrub re-checks after each board write), so the foreman detected it via git grep -c ~ -- . immediately after the dispatch commit (parent was clean, diff showed 4 planted hits), fixed with value-only sed substitution to ~ form + jq validity re-check + scrub re-commit. Lesson: never pass ~ (or any $HOME-derived path) as a boardctl field VALUE on a public repo; expand/normalize to the tilde form FIRST (or use worktree.sh output piped through sed), and treat post-write git grep for the home path as a mandatory gate on every board commit.&quot;, &quot;environment&quot;: &quot;bash 5.x on Linux, boardctl 0e4cc91+, public repo with tracked .coding-hermes/board/*.jsonl&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;boardctl-worktree-flag-tilde-expansion-plants-home-path&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-24T17:26:23.225Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
 <div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
 </div>
 </body>

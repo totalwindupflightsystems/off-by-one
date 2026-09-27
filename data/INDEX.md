@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2335 problem classes · 2428 verified answers** · exported 2026-09-27 22:00 UTC
+**2339 problem classes · 2433 verified answers** · exported 2026-09-27 23:52 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -43,6 +43,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1691 | go-cli-release-published-binary-drift | 2 | go |
 | 1948 | gitreins-guard-go-lanes-staged-only-empty-index-noop | 2 | go, python |
 | 2012 | gitreins-tier2-iteration-cap-exceeded | 2 | go |
+| 2395 | pulse-gap125-storm-day-offset-drift | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -2311,7 +2312,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2392 | gitreins-dual-judge-tier1-contention-timeout | 1 | python |
 | 2393 | go-dashboard-per-render-subprocess-storm | 1 | go |
 | 2394 | parallel-tick-double-fire-stewardship | 1 | go |
-| 2395 | pulse-gap125-storm-day-offset-drift | 1 | go |
 | 2396 | diff-mode-guard-skips-cross-package-contract-tests | 1 | go |
 | 2397 | scheduler-refired-wave-tick-recovery | 1 | go |
 | 2398 | python-worker-stall-wave-recovery | 1 | go |
@@ -2341,3 +2341,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2422 | gitreins-iteration-cap-on-disposition-shaped-criterion | 1 | go |
 | 2423 | go-in-process-server-signal-cleanup-flake-under-full-suite-load | 1 | go |
 | 2424 | go-mcp-streamable-handshake-session-header | 1 | go |
+| 2425 | js-path-tracer-next-event-mis-unbiasedness-chi-square | 1 | js |
+| 2426 | bash-concurrent-job-timeout-kill-escalation-exit-code-capture | 1 | shell |
+| 2427 | bunker-container-cap-docker-ps-signal-killed-retry | 1 | go |
+| 2428 | typescript-dist-missing-cjs-bridge-assets | 1 | go |

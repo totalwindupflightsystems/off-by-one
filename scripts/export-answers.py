@@ -15,6 +15,14 @@ SQLite remains the operational store for the live server.
 
 Usage:
   python3 scripts/export-answers.py [path-to-off-by-one.db]
+
+Host-path hygiene (REVIEW-OB-006): the corpus is public, so no operator
+machine path may leak into it. Every emitted text field is passed through
+sanitize_host_paths(), which rewrites any /home/<user> prefix (kara,
+bunker, bunker-*, runner, user — generically any account name matching
+[A-Za-z0-9_-]+) to the portable `~` form:
+    /home/kara/.local/bin/pi-agent  ->  ~/.local/bin/pi-agent
+JSON record shapes are unchanged — only string values are rewritten.
 """
 import json
 import os
@@ -65,6 +73,22 @@ EXCLUDED_CLASS_PATTERNS = [
 ]
 _EXCLUDED_RES = [re.compile(p, re.IGNORECASE) for p in EXCLUDED_CLASS_PATTERNS]
 
+# REVIEW-OB-006: operator host paths (/home/kara, /home/bunker-*,
+# /home/runner, /home/user, ...) must never reach the public corpus.
+# The account-name class covers any user; the mapping is prefix -> "~".
+_HOST_PATH_RE = re.compile(r"/home/[A-Za-z0-9_-]+")
+
+
+def sanitize_host_paths(text):
+    """Rewrite every /home/<user> prefix in a corpus text field to `~`.
+
+    None/empty pass through unchanged. Non-path text (e.g. "/usr/bin",
+    "home/kara" without a leading slash) is untouched.
+    """
+    if not text:
+        return text
+    return _HOST_PATH_RE.sub("~", text)
+
 
 def is_excluded_class(title: str) -> bool:
     """True if a raw (pre-slugify) class title is a self-test/canary/probe."""
@@ -95,24 +119,27 @@ def main() -> None:
     """)
     rows = c.fetchall()
 
-    # Group by class
+    # Group by class. Every text field is sanitized on the way in
+    # (REVIEW-OB-006) so no /home/<user> operator path can reach any
+    # output file, whichever writer (JSONL, per-class JSON, INDEX.md)
+    # consumes the record.
     classes: dict[int, dict] = {}
     for r in rows:
         cls = classes.setdefault(r["class_id"], {
             "class_id": r["class_id"],
-            "title": r["title"],
-            "description": r["description"],
+            "title": sanitize_host_paths(r["title"]),
+            "description": sanitize_host_paths(r["description"]),
             "created_at": r["class_created"],
             "answers": [],
         })
         cls["answers"].append({
             "answer_id": r["answer_id"],
-            "language": r["lang"],
-            "environment": r["env"],
-            "version": r["version"],
-            "solution": r["solution"],
-            "evidence": r["evidence"],
-            "signatures": json.loads(r["signatures"]) if r["signatures"] else None,
+            "language": sanitize_host_paths(r["lang"]),
+            "environment": sanitize_host_paths(r["env"]),
+            "version": sanitize_host_paths(r["version"]),
+            "solution": sanitize_host_paths(r["solution"]),
+            "evidence": sanitize_host_paths(r["evidence"]),
+            "signatures": json.loads(sanitize_host_paths(r["signatures"])) if r["signatures"] else None,
             "status": r["status"],
             "created_at": r["answer_created"],
         })

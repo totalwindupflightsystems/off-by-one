@@ -1,0 +1,905 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-bgp-best-path-selection-route-reflector-loop-exactness — Off-By-One verified answer</title>
+<meta name="description" content="The task is not &quot;pick the smallest AS path&quot;. Byte-exactness against a 480-prefix Loc-RIB fails for these concrete reasons:">
+<meta property="og:title" content="go-bgp-best-path-selection-route-reflector-loop-exactness — Off-By-One">
+<meta property="og:description" content="The task is not &quot;pick the smallest AS path&quot;. Byte-exactness against a 480-prefix Loc-RIB fails for these concrete reasons:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2365-go-bgp-best-path-selection-route-reflector-loop-exactness.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-bgp-best-path-selection-route-reflector-loop-exactness</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>The task is not "pick the smallest AS path". Byte-exactness against a 480-prefix Loc-RIB fails for these concrete reasons:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2365-go-bgp-best-path-selection-route-reflector-loop-exactness.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>All code is built, tested, and re-extracted from the markdown into a clean module where it compiles and passes. Final deliverable: <code>/workspace/SOLUTION.md</code> (47 KB, includes full regression suite too) and the module at <code>/workspace/bgpselect/</code>.</p>
+<hr />
+<h1>bgpselect — byte-exact RFC 4271 best-path selection with route-reflector loop rejection</h1>
+<h2>1. Root-cause analysis</h2>
+<p>The task is not "pick the smallest AS path". Byte-exactness against a 480-prefix Loc-RIB fails for these concrete reasons:</p>
+<ol>
+<li>
+<p><strong>Loop rejection must happen before any comparison, and only for the two rules in scope.</strong> A path is ineligible if its <code>AS_PATH</code> already contains the local ASN, or if its <code>CLUSTER_LIST</code> already carries the local cluster ID. Route-reflector dumps are full of both. The ORIGINATOR_ID trap: two paths may legitimately carry the <em>same</em> ORIGINATOR_ID (the same originating router reflected by two RRs). That is a collision, not a loop — it must <strong>not</strong> by itself reject a path. RFC 4456's <code>ORIGINATOR_ID == local router-id</code> check is an opt-in flag (<code>-reject-originator-id</code>) so the literal two-rule behaviour is default and the dump's ORIGINATOR_ID collisions survive into comparison.</p>
+</li>
+<li>
+<p><strong>MED has a narrow scope.</strong> MULTI_EXIT_DISC is only comparable between paths learned from the <strong>same neighbouring AS</strong> (RFC 4271 §9.1.2.2). A naive global <code>min(MED)</code> discards other-AS paths and produces the wrong winner <em>and</em> wrong multipath set. Correct reduction is per-AS: inside each peer-AS group keep lowest-MED paths, then union the groups.</p>
+</li>
+<li>
+<p><strong>The multipath set and the decisive stage are different things.</strong> The ECMP set is everything left after IGP metric, <em>before</em> router-ID/peer-address tie-breakers. The decisive stage is the <strong>last</strong> criterion that removed candidates (<code>only_path</code> when loop rejection leaves a singleton). Conflating them breaks both fields.</p>
+</li>
+<li>
+<p><strong>Stage order is fixed:</strong> WEIGHT → LOCAL_PREF → locally originated → AS_PATH length → ORIGIN → MED (same neighbour AS) → eBGP over iBGP → lowest IGP metric → router-ID → peer-address.</p>
+</li>
+<li>
+<p><strong>Direction of each comparison.</strong> Higher-is-better: WEIGHT, LOCAL_PREF, locally-originated. Lower-is-better: AS_PATH length, ORIGIN, MED, IGP metric, router-ID, peer-address. eBGP beats iBGP.</p>
+</li>
+<li>
+<p><strong>Byte-exact output needs deterministic ordering.</strong> Canonicalise prefixes, sort numerically (address then mask length), de-duplicate/sort the multipath set, compact JSON, fixed field order, newline-terminated records.</p>
+</li>
+<li>
+<p><strong>AS_PATH decoding details.</strong> <code>AS_SET</code> counts as one hop; handle 4-byte <code>AS_PATH</code>/<code>AS4_PATH</code>.</p>
+</li>
+</ol>
+<h2>2. Deliverable</h2>
+<p>Module <code>bgpselect</code> reads <code>rib.jsonl</code>, writes <code>locrib.jsonl</code>:</p>
+<pre><code>{&quot;prefix&quot;:&quot;10.0.0.0/24&quot;,&quot;next_hop&quot;:&quot;192.0.2.2&quot;,&quot;as_path&quot;:[65001],&quot;decisive_stage&quot;:&quot;as_path_length&quot;,&quot;multipath_set&quot;:[&quot;192.0.2.2&quot;]}
+</code></pre>
+<p><code>decisive_stage</code> ∈ <code>only_path, weight, local_pref, locally_originated, as_path_length, origin, med, ebgp_over_ibgp, igp_metric, router_id, peer_address</code>. <code>multipath_set</code> is the sorted set of ECMP-equal <code>next_hop</code>s after the IGP-metric stage; <code>next_hop</code> is the winner of the router-ID / peer-address tie-break inside it.</p>
+<p>The reader accepts enriched JSON path records (aliases tolerated), a leading config line (<code>local_as</code>, <code>cluster_id</code>, <code>router_id</code>), and optionally raw MRT hex (bare or under <code>mrt</code>/<code>record</code>/<code>hex</code>/<code>raw</code>), carrying the peer-index table across records.</p>
+<h2>3. Exact fix</h2>
+<p><code>go.mod</code>:</p>
+<pre><code>module bgpselect
+
+go 1.26
+</code></pre>
+<h3><code>main.go</code></h3>
+<pre><code class="language-go">package main
+
+import (
+    &quot;bufio&quot;
+    &quot;encoding/json&quot;
+    &quot;flag&quot;
+    &quot;fmt&quot;
+    &quot;os&quot;
+)
+
+// locribRecord is the exact output shape. Field order is fixed so the emitted
+// JSON is byte-stable across runs.
+type locribRecord struct {
+    Prefix        string   `json:&quot;prefix&quot;`
+    NextHop       string   `json:&quot;next_hop&quot;`
+    ASPath        []uint32 `json:&quot;as_path&quot;`
+    DecisiveStage string   `json:&quot;decisive_stage&quot;`
+    MultipathSet  []string `json:&quot;multipath_set&quot;`
+}
+
+func main() {
+    in := flag.String(&quot;in&quot;, &quot;rib.jsonl&quot;, &quot;input RIB-in JSONL file&quot;)
+    out := flag.String(&quot;out&quot;, &quot;locrib.jsonl&quot;, &quot;output Loc-RIB JSONL file&quot;)
+    localAS := flag.Uint(&quot;local-as&quot;, 0, &quot;override local ASN for AS_PATH loop rejection&quot;)
+    clusterID := flag.String(&quot;cluster-id&quot;, &quot;&quot;, &quot;override local cluster ID for CLUSTER_LIST loop rejection&quot;)
+    routerID := flag.String(&quot;router-id&quot;, &quot;&quot;, &quot;override local router ID for ORIGINATOR_ID checks&quot;)
+    rejectOrig := flag.Bool(&quot;reject-originator-id&quot;, false, &quot;also reject paths whose ORIGINATOR_ID equals the local router ID (RFC 4456)&quot;)
+    flag.Parse()
+
+    routes, cfg, err := readRIB(*in)
+    if err != nil {
+        fmt.Fprintln(os.Stderr, &quot;bgpselect:&quot;, err)
+        os.Exit(1)
+    }
+    if *localAS != 0 {
+        cfg.LocalAS = uint32(*localAS)
+    }
+    if *clusterID != &quot;&quot; {
+        cfg.ClusterID = *clusterID
+    }
+    if *routerID != &quot;&quot; {
+        cfg.RouterID = *routerID
+    }
+
+    decisions := ProcessPrefix(routes, cfg, *rejectOrig)
+
+    f, err := os.Create(*out)
+    if err != nil {
+        fmt.Fprintln(os.Stderr, &quot;bgpselect:&quot;, err)
+        os.Exit(1)
+    }
+    defer f.Close()
+    w := bufio.NewWriter(f)
+    enc := json.NewEncoder(w)
+    enc.SetEscapeHTML(false)
+    for _, d := range decisions {
+        rec := locribRecord{
+            Prefix:        d.Prefix,
+            NextHop:       d.NextHop,
+            ASPath:        d.ASPath,
+            DecisiveStage: d.DecisiveStage,
+            MultipathSet:  d.Multipath,
+        }
+        if err := enc.Encode(rec); err != nil {
+            fmt.Fprintln(os.Stderr, &quot;bgpselect:&quot;, err)
+            os.Exit(1)
+        }
+    }
+    if err := w.Flush(); err != nil {
+        fmt.Fprintln(os.Stderr, &quot;bgpselect:&quot;, err)
+        os.Exit(1)
+    }
+}
+
+// readRIB parses the JSONL dump. Both a leading config line and per-line
+// config fields are accepted. Any line that carries a prefix is a route.
+func readRIB(path string) ([]Route, Config, error) {
+    f, err := os.Open(path)
+    if err != nil {
+        return nil, Config{}, err
+    }
+    defer f.Close()
+
+    var routes []Route
+    var cfg Config
+    mrt := newMRTState()
+    sc := bufio.NewScanner(f)
+    sc.Buffer(make([]byte, 1024*1024), 16*1024*1024)
+    line := 0
+    for sc.Scan() {
+        line++
+        raw := sc.Bytes()
+        trimmed := bytesTrimSpace(raw)
+        if len(trimmed) == 0 {
+            continue
+        }
+        // A bare hex string is an MRT record.
+        if trimmed[0] != '{' {
+            if rs, err := mrt.feed(string(trimmed), cfg); err == nil {
+                routes = append(routes, rs...)
+                continue
+            }
+        }
+        var m map[string]json.RawMessage
+        if err := json.Unmarshal(raw, &amp;m); err != nil {
+            return nil, cfg, fmt.Errorf(&quot;line %d: %w&quot;, line, err)
+        }
+        if _, isRoute := rawLookup(m, &quot;prefix&quot;, &quot;nlri&quot;, &quot;network&quot;); isRoute {
+            routes = append(routes, ParseRoute(m))
+            continue
+        }
+        // An embedded hex MRT record.
+        if rawHex, ok := rawLookup(m, &quot;mrt&quot;, &quot;mrt_hex&quot;, &quot;record&quot;, &quot;hex&quot;, &quot;raw&quot;, &quot;data&quot;); ok {
+            if hs, err := decodeString(rawHex); err == nil {
+                if rs, err := mrt.feed(hs, cfg); err == nil {
+                    routes = append(routes, rs...)
+                    continue
+                }
+            }
+        }
+        if nested, ok := rawLookup(m, &quot;config&quot;); ok {
+            var cm map[string]json.RawMessage
+            if json.Unmarshal(nested, &amp;cm) == nil {
+                if c, ok := ParseConfig(cm); ok {
+                    cfg = mergeConfig(cfg, c)
+                }
+            }
+        }
+        if c, ok := ParseConfig(m); ok {
+            cfg = mergeConfig(cfg, c)
+        }
+    }
+    if err := sc.Err(); err != nil {
+        return nil, cfg, err
+    }
+    return routes, cfg, nil
+}
+
+func mergeConfig(base, over Config) Config {
+    if over.LocalAS != 0 {
+        base.LocalAS = over.LocalAS
+    }
+    if over.ClusterID != &quot;&quot; {
+        base.ClusterID = over.ClusterID
+    }
+    if over.RouterID != &quot;&quot; {
+        base.RouterID = over.RouterID
+    }
+    return base
+}
+
+func bytesTrimSpace(b []byte) []byte {
+    start := 0
+    for start &lt; len(b) &amp;&amp; (b[start] == ' ' || b[start] == '\t' || b[start] == '\r' || b[start] == '\n') {
+        start++
+    }
+    end := len(b)
+    for end &gt; start &amp;&amp; (b[end-1] == ' ' || b[end-1] == '\t' || b[end-1] == '\r' || b[end-1] == '\n') {
+        end--
+    }
+    return b[start:end]
+}
+</code></pre>
+<h3><code>types.go</code></h3>
+<pre><code class="language-go">package main
+
+import (
+    &quot;encoding/json&quot;
+    &quot;fmt&quot;
+    &quot;net&quot;
+    &quot;strconv&quot;
+    &quot;strings&quot;
+)
+
+// Route is a single BGP path (RIB-in entry) for a prefix.
+type Route struct {
+    Prefix            string   `json:&quot;prefix&quot;`
+    NextHop           string   `json:&quot;next_hop&quot;`
+    PeerAddress       string   `json:&quot;peer_address&quot;`
+    PeerAS            uint32   `json:&quot;peer_as&quot;`
+    PeerType          string   `json:&quot;peer_type&quot;` // &quot;ebgp&quot;, &quot;ibgp&quot; or &quot;local&quot;
+    ASPath            []uint32 `json:&quot;as_path&quot;`
+    Origin            int      `json:&quot;origin&quot;` // 0=IGP, 1=EGP, 2=INCOMPLETE
+    LocalPref         uint32   `json:&quot;local_pref&quot;`
+    MED               uint32   `json:&quot;med&quot;`
+    Weight            uint32   `json:&quot;weight&quot;`
+    IGPMetric         uint32   `json:&quot;igp_metric&quot;`
+    RouterID          string   `json:&quot;router_id&quot;`
+    ClusterList       []string `json:&quot;cluster_list&quot;`
+    OriginatorID      string   `json:&quot;originator_id&quot;`
+    LocallyOriginated bool     `json:&quot;locally_originated&quot;`
+}
+
+// Config holds the local autonomous system identity used for loop rejection.
+type Config struct {
+    LocalAS   uint32
+    ClusterID string
+    RouterID  string
+}
+
+func rawLookup(m map[string]json.RawMessage, keys ...string) (json.RawMessage, bool) {
+    for _, k := range keys {
+        if v, ok := m[k]; ok {
+            return v, true
+        }
+    }
+    return nil, false
+}
+
+func decodeString(raw json.RawMessage) (string, error) {
+    var s string
+    if err := json.Unmarshal(raw, &amp;s); err == nil {
+        return s, nil
+    }
+    var n json.Number
+    if err := json.Unmarshal(raw, &amp;n); err == nil {
+        return n.String(), nil
+    }
+    return &quot;&quot;, fmt.Errorf(&quot;not a string&quot;)
+}
+
+func rawToString(m map[string]json.RawMessage, keys ...string) string {
+    raw, ok := rawLookup(m, keys...)
+    if !ok {
+        return &quot;&quot;
+    }
+    s, err := decodeString(raw)
+    if err != nil {
+        return &quot;&quot;
+    }
+    return s
+}
+
+func rawToUint(m map[string]json.RawMessage, keys ...string) uint32 {
+    raw, ok := rawLookup(m, keys...)
+    if !ok {
+        return 0
+    }
+    var n json.Number
+    if err := json.Unmarshal(raw, &amp;n); err != nil {
+        var s string
+        if err := json.Unmarshal(raw, &amp;s); err == nil {
+            if v, err := strconv.ParseUint(strings.TrimSpace(s), 10, 32); err == nil {
+                return uint32(v)
+            }
+        }
+        return 0
+    }
+    v, err := strconv.ParseUint(n.String(), 10, 32)
+    if err != nil {
+        return 0
+    }
+    return uint32(v)
+}
+
+func rawToInt(raw json.RawMessage) int {
+    var n json.Number
+    if err := json.Unmarshal(raw, &amp;n); err == nil {
+        if v, err := strconv.Atoi(n.String()); err == nil {
+            return v
+        }
+    }
+    var s string
+    if err := json.Unmarshal(raw, &amp;s); err == nil {
+        switch strings.ToLower(strings.TrimSpace(s)) {
+        case &quot;igp&quot;, &quot;i&quot;, &quot;0&quot;:
+            return 0
+        case &quot;egp&quot;, &quot;e&quot;, &quot;1&quot;:
+            return 1
+        case &quot;incomplete&quot;, &quot;inc&quot;, &quot;?&quot;, &quot;2&quot;:
+            return 2
+        }
+        if v, err := strconv.Atoi(strings.TrimSpace(s)); err == nil {
+            return v
+        }
+    }
+    return 2
+}
+
+func toUint32Slice(raw json.RawMessage) []uint32 {
+    var nums []json.Number
+    if err := json.Unmarshal(raw, &amp;nums); err == nil {
+        out := make([]uint32, 0, len(nums))
+        for _, n := range nums {
+            v, err := strconv.ParseUint(n.String(), 10, 32)
+            if err == nil {
+                out = append(out, uint32(v))
+            }
+        }
+        return out
+    }
+    var strs []string
+    if err := json.Unmarshal(raw, &amp;strs); err == nil {
+        out := make([]uint32, 0, len(strs))
+        for _, s := range strs {
+            v, err := strconv.ParseUint(strings.TrimSpace(s), 10, 32)
+            if err == nil {
+                out = append(out, uint32(v))
+            }
+        }
+        return out
+    }
+    return nil
+}
+
+func toStringSlice(raw json.RawMessage) []string {
+    var strs []string
+    if err := json.Unmarshal(raw, &amp;strs); err == nil {
+        return strs
+    }
+    var one string
+    if err := json.Unmarshal(raw, &amp;one); err == nil {
+        one = strings.TrimSpace(one)
+        if one == &quot;&quot; {
+            return nil
+        }
+        parts := strings.Split(one, &quot; &quot;)
+        out := make([]string, 0, len(parts))
+        for _, p := range parts {
+            if p = strings.TrimSpace(p); p != &quot;&quot; {
+                out = append(out, p)
+            }
+        }
+        return out
+    }
+    return nil
+}
+
+// ParseRoute converts a decoded JSON object into a Route.
+func ParseRoute(m map[string]json.RawMessage) Route {
+    r := Route{
+        Prefix:       rawToString(m, &quot;prefix&quot;, &quot;nlri&quot;, &quot;network&quot;),
+        NextHop:      rawToString(m, &quot;next_hop&quot;, &quot;nexthop&quot;, &quot;next-hop&quot;),
+        PeerAddress:  rawToString(m, &quot;peer_address&quot;, &quot;peer&quot;, &quot;neighbor&quot;, &quot;peer_addr&quot;),
+        PeerAS:       rawToUint(m, &quot;peer_as&quot;, &quot;peeras&quot;, &quot;peer-as&quot;, &quot;neighbor_as&quot;),
+        PeerType:     strings.ToLower(rawToString(m, &quot;peer_type&quot;, &quot;peer-type&quot;, &quot;type&quot;, &quot;session_type&quot;)),
+        RouterID:     rawToString(m, &quot;router_id&quot;, &quot;router-id&quot;, &quot;routerid&quot;, &quot;peer_router_id&quot;),
+        OriginatorID: rawToString(m, &quot;originator_id&quot;, &quot;originator-id&quot;, &quot;originatorid&quot;),
+        LocalPref:    rawToUint(m, &quot;local_pref&quot;, &quot;local-pref&quot;, &quot;localpref&quot;),
+        MED:          rawToUint(m, &quot;med&quot;, &quot;multi_exit_discriminator&quot;),
+        Weight:       rawToUint(m, &quot;weight&quot;, &quot;local_weight&quot;),
+        IGPMetric:    rawToUint(m, &quot;igp_metric&quot;, &quot;igp-metric&quot;, &quot;igpmetric&quot;, &quot;metric&quot;),
+    }
+    if raw, ok := rawLookup(m, &quot;as_path&quot;, &quot;as-path&quot;, &quot;aspath&quot;, &quot;as_paths&quot;); ok {
+        r.ASPath = toUint32Slice(raw)
+    }
+    if raw, ok := rawLookup(m, &quot;cluster_list&quot;, &quot;cluster-list&quot;, &quot;clusterlist&quot;, &quot;cluster_id&quot;); ok {
+        r.ClusterList = toStringSlice(raw)
+    }
+    if raw, ok := rawLookup(m, &quot;origin&quot;, &quot;origin_code&quot;); ok {
+        r.Origin = rawToInt(raw)
+    } else {
+        r.Origin = 2
+    }
+    if raw, ok := rawLookup(m, &quot;locally_originated&quot;, &quot;locally-originated&quot;, &quot;local_origin&quot;, &quot;is_local&quot;); ok {
+        var b bool
+        if err := json.Unmarshal(raw, &amp;b); err == nil {
+            r.LocallyOriginated = b
+        }
+    }
+    if r.PeerType == &quot;local&quot; || r.PeerType == &quot;self&quot; {
+        r.LocallyOriginated = true
+    }
+    if r.PeerAddress == &quot;&quot; {
+        r.PeerAddress = r.NextHop
+    }
+    if r.RouterID == &quot;&quot; {
+        r.RouterID = r.PeerAddress
+    }
+    return r
+}
+
+// ParseConfig extracts the local identity from a JSON object.
+func ParseConfig(m map[string]json.RawMessage) (Config, bool) {
+    c := Config{
+        LocalAS:   rawToUint(m, &quot;local_as&quot;, &quot;local-as&quot;, &quot;our_asn&quot;, &quot;local_asn&quot;, &quot;my_asn&quot;),
+        ClusterID: rawToString(m, &quot;cluster_id&quot;, &quot;cluster-id&quot;, &quot;clusterid&quot;, &quot;our_cluster_id&quot;),
+        RouterID:  rawToString(m, &quot;router_id&quot;, &quot;router-id&quot;, &quot;local_router_id&quot;, &quot;bgp_identifier&quot;),
+    }
+    if c.LocalAS == 0 &amp;&amp; c.ClusterID == &quot;&quot; &amp;&amp; c.RouterID == &quot;&quot; {
+        return c, false
+    }
+    return c, true
+}
+
+func ipKey(s string) []byte {
+    ip := net.ParseIP(strings.TrimSpace(s))
+    if ip == nil {
+        return []byte(strings.TrimSpace(s))
+    }
+    if v4 := ip.To4(); v4 != nil {
+        return v4
+    }
+    return ip.To16()
+}
+
+func cmpIP(a, b string) int {
+    return strings.Compare(string(ipKey(a)), string(ipKey(b)))
+}
+
+func canonicalPrefix(p string) (string, bool) {
+    ip, ipnet, err := net.ParseCIDR(p)
+    if err != nil {
+        return p, false
+    }
+    ones, _ := ipnet.Mask.Size()
+    return ip.Mask(ipnet.Mask).String() + &quot;/&quot; + strconv.Itoa(ones), true
+}
+
+func prefixSortKey(p string) ([]byte, int) {
+    ip, ipnet, err := net.ParseCIDR(p)
+    if err != nil {
+        return []byte(p), 0
+    }
+    ones, _ := ipnet.Mask.Size()
+    return ip.Mask(ipnet.Mask), ones
+}
+</code></pre>
+<h3><code>select.go</code></h3>
+<pre><code class="language-go">package main
+
+import (
+    &quot;bytes&quot;
+    &quot;fmt&quot;
+    &quot;sort&quot;
+)
+
+// Stage names reported in the decisive_stage field.
+const (
+    StageOnlyPath          = &quot;only_path&quot;
+    StageWeight            = &quot;weight&quot;
+    StageLocalPref         = &quot;local_pref&quot;
+    StageLocallyOriginated = &quot;locally_originated&quot;
+    StageASPathLength      = &quot;as_path_length&quot;
+    StageOrigin            = &quot;origin&quot;
+    StageMED               = &quot;med&quot;
+    StageEBGPOverIBGP      = &quot;ebgp_over_ibgp&quot;
+    StageIGPMetric         = &quot;igp_metric&quot;
+    StageRouterID          = &quot;router_id&quot;
+    StagePeerAddress       = &quot;peer_address&quot;
+)
+
+// Decision is the result of running best-path selection for one prefix.
+type Decision struct {
+    Prefix        string
+    NextHop       string
+    ASPath        []uint32
+    DecisiveStage string
+    Multipath     []string
+}
+
+func normalizeASPath(p []uint32) []uint32 {
+    if p == nil {
+        return []uint32{}
+    }
+    return p
+}
+
+// looped reports whether a path must be rejected for AS / route-reflector loop
+// reasons: AS_PATH contains our ASN, or CLUSTER_LIST carries our cluster ID.
+// rejectOriginator additionally applies the RFC 4456 ORIGINATOR_ID check.
+func looped(r Route, cfg Config, rejectOriginator bool) bool {
+    for _, as := range r.ASPath {
+        if as == cfg.LocalAS &amp;&amp; cfg.LocalAS != 0 {
+            return true
+        }
+    }
+    if cfg.ClusterID != &quot;&quot; {
+        for _, cl := range r.ClusterList {
+            if sameIP(cl, cfg.ClusterID) {
+                return true
+            }
+        }
+    }
+    if rejectOriginator &amp;&amp; cfg.RouterID != &quot;&quot; &amp;&amp; r.OriginatorID != &quot;&quot; &amp;&amp; sameIP(r.OriginatorID, cfg.RouterID) {
+        return true
+    }
+    return false
+}
+
+func sameIP(a, b string) bool {
+    return string(ipKey(a)) == string(ipKey(b))
+}
+
+// applyMED reduces the candidate set using MULTI_EXIT_DISC, but only within
+// paths learned from the same neighbouring AS (RFC 4271 §9.1.2.2). Each AS
+// group independently keeps its lowest-MED paths; groups are unioned so MED is
+// never used to eliminate a whole neighbouring AS.
+func applyMED(cands []Route) []Route {
+    type group struct {
+        best uint32
+        seen bool
+    }
+    groups := map[uint32]*group{}
+    for _, c := range cands {
+        g := groups[c.PeerAS]
+        if g == nil {
+            g = &amp;group{}
+            groups[c.PeerAS] = g
+        }
+        if !g.seen || c.MED &lt; g.best {
+            g.best = c.MED
+            g.seen = true
+        }
+    }
+    out := make([]Route, 0, len(cands))
+    for _, c := range cands {
+        if c.MED == groups[c.PeerAS].best {
+            out = append(out, c)
+        }
+    }
+    return out
+}
+
+func originRank(o int) int {
+    if o &lt; 0 || o &gt; 2 {
+        return 2
+    }
+    return o
+}
+
+func ebgpRank(t string) int {
+    switch t {
+    case &quot;ebgp&quot;, &quot;external&quot;, &quot;local&quot;, &quot;self&quot;:
+        return 2
+    default:
+        return 1
+    }
+}
+
+// SelectBest runs the full decision process over the candidate paths for a
+// single prefix. Each candidate must already have passed loop rejection.
+func SelectBest(prefix string, cands []Route) (Decision, bool) {
+    if len(cands) == 0 {
+        return Decision{}, false
+    }
+    dec := Decision{Prefix: prefix}
+    if len(cands) == 1 {
+        dec.NextHop = cands[0].NextHop
+        dec.ASPath = normalizeASPath(cands[0].ASPath)
+        dec.DecisiveStage = StageOnlyPath
+        dec.Multipath = []string{cands[0].NextHop}
+        return dec, true
+    }
+
+    cur := cands
+    decisive := &quot;&quot;
+    reduce := func(stage string, key func(Route) int64) {
+        if len(cur) &lt;= 1 {
+            return
+        }
+        best := key(cur[0])
+        for _, c := range cur[1:] {
+            if k := key(c); k &lt; best {
+                best = k
+            }
+        }
+        next := make([]Route, 0, len(cur))
+        for _, c := range cur {
+            if key(c) == best {
+                next = append(next, c)
+            }
+        }
+        if len(next) &lt; len(cur) {
+            decisive = stage
+            cur = next
+        }
+    }
+
+    // 1. WEIGHT (higher is better).
+    reduce(StageWeight, func(r Route) int64 { return -int64(r.Weight) })
+    // 2. LOCAL_PREF (higher is better).
+    reduce(StageLocalPref, func(r Route) int64 { return -int64(r.LocalPref) })
+    // 3. Locally originated (preferred over learned).
+    reduce(StageLocallyOriginated, func(r Route) int64 {
+        if r.LocallyOriginated {
+            return 0
+        }
+        return 1
+    })
+    // 4. Shortest AS_PATH.
+    reduce(StageASPathLength, func(r Route) int64 { return int64(len(r.ASPath)) })
+    // 5. Lowest ORIGIN.
+    reduce(StageOrigin, func(r Route) int64 { return int64(originRank(r.Origin)) })
+    // 6. MED, restricted to the same neighbouring AS.
+    if len(cur) &gt; 1 {
+        if next := applyMED(cur); len(next) &lt; len(cur) {
+            decisive = StageMED
+            cur = next
+        }
+    }
+    // 7. eBGP preferred over iBGP.
+    reduce(StageEBGPOverIBGP, func(r Route) int64 { return int64(-ebgpRank(r.PeerType)) })
+    // 8. Lowest IGP metric to the next hop.
+    reduce(StageIGPMetric, func(r Route) int64 { return int64(r.IGPMetric) })
+
+    // Everything still in cur is equal cost and forms the multipath set.
+    multipath := append([]Route(nil), cur...)
+
+    // 9. Lowest router ID.
+    reduce(StageRouterID, func(r Route) int64 { return int64(ipToUint(r.RouterID)) })
+    // 10. Lowest peer address.
+    reduce(StagePeerAddress, func(r Route) int64 { return int64(ipToUint(r.PeerAddress)) })
+
+    // Final deterministic fallback if peer addresses also collide.
+    if len(cur) &gt; 1 {
+        minNH := cur[0].NextHop
+        for _, c := range cur[1:] {
+            if cmpIP(c.NextHop, minNH) &lt; 0 {
+                minNH = c.NextHop
+            }
+        }
+        next := make([]Route, 0, len(cur))
+        for _, c := range cur {
+            if c.NextHop == minNH {
+                next = append(next, c)
+            }
+        }
+        cur = next
+    }
+
+    winner := cur[0]
+    dec.NextHop = winner.NextHop
+    dec.ASPath = normalizeASPath(winner.ASPath)
+    dec.DecisiveStage = decisive
+    if dec.DecisiveStage == &quot;&quot; {
+        dec.DecisiveStage = StagePeerAddress
+    }
+    dec.Multipath = multipathNextHops(multipath)
+    return dec, true
+}
+
+func multipathNextHops(rs []Route) []string {
+    set := make(map[string]struct{}, len(rs))
+    for _, r := range rs {
+        set[r.NextHop] = struct{}{}
+    }
+    out := make([]string, 0, len(set))
+    for nh := range set {
+        out = append(out, nh)
+    }
+    sort.Slice(out, func(i, j int) bool { return cmpIP(out[i], out[j]) &lt; 0 })
+    return out
+}
+
+func ipToUint(s string) uint64 {
+    b := ipKey(s)
+    var v uint64
+    for i := 0; i &lt; len(b) &amp;&amp; i &lt; 8; i++ {
+        v = v&lt;&lt;8 | uint64(b[i])
+    }
+    return v
+}
+
+// ProcessPrefix groups routes by prefix, rejects loops and selects the best
+// path for each prefix, returning entries in numeric prefix order.
+func ProcessPrefix(routes []Route, cfg Config, rejectOriginator bool) []Decision {
+    byPrefix := make(map[string][]Route)
+    order := make([]string, 0)
+    for _, r := range routes {
+        cp, ok := canonicalPrefix(r.Prefix)
+        if !ok {
+            cp = r.Prefix
+        }
+        if _, seen := byPrefix[cp]; !seen {
+            order = append(order, cp)
+        }
+        byPrefix[cp] = append(byPrefix[cp], r)
+    }
+
+    var out []Decision
+    for _, p := range order {
+        var valid []Route
+        for _, r := range byPrefix[p] {
+            if r.LocallyOriginated &amp;&amp; len(r.ASPath) == 0 {
+                valid = append(valid, r)
+                continue
+            }
+            if looped(r, cfg, rejectOriginator) {
+                continue
+            }
+            valid = append(valid, r)
+        }
+        if len(valid) == 0 {
+            continue
+        }
+        if d, ok := SelectBest(p, valid); ok {
+            out = append(out, d)
+        }
+    }
+
+    sort.Slice(out, func(i, j int) bool {
+        ai, al := prefixSortKey(out[i].Prefix)
+        bi, bl := prefixSortKey(out[j].Prefix)
+        if c := bytes.Compare(ai, bi); c != 0 {
+            return c &lt; 0
+        }
+        return al &lt; bl
+    })
+    return out
+}
+
+func (d Decision) String() string {
+    return fmt.Sprintf(&quot;%s via %s [%s] %v&quot;, d.Prefix, d.NextHop, d.DecisiveStage, d.Multipath)
+}
+</code></pre>
+<h3><code>mrt.go</code> (optional raw-hex input)</h3>
+<p>Full decoder for MRT <code>TABLE_DUMP_V2</code> (PEER_INDEX_TABLE, RIB_IPV4/IPV6_UNICAST), legacy <code>TABLE_DUMP</code>, and BGP path attributes (ORIGIN, AS_PATH/AS4_PATH, NEXT_HOP, MED, LOCAL_PREF, ORIGINATOR_ID, CLUSTER_LIST, MP_REACH_NLRI). <code>AS_SET</code> counts as one hop. The full file is in <code>/workspace/bgpselect/mrt.go</code> and <code>/workspace/SOLUTION.md</code> §3.5.</p>
+<h2>4. Build and run</h2>
+<pre><code class="language-bash">cd bgpselect
+go build -o bgpselect .
+./bgpselect -in rib.jsonl -out locrib.jsonl
+# flags: -local-as, -cluster-id, -router-id, -reject-originator-id
+</code></pre>
+<h2>5. Verification</h2>
+<h3>5.1 Regression suite</h3>
+<p><code>select_test.go</code> + <code>mrt_test.go</code> cover every decisive stage, MED scope, loop rejection, ORIGINATOR_ID non-rejection, deterministic ordering, MRT decoding, and a 480-prefix end-to-end pass. Full source is in <code>/workspace/SOLUTION.md</code> §5.1 and <code>/workspace/bgpselect/</code>.</p>
+<h3>5.2 Commands and observed results</h3>
+<pre><code class="language-text">$ go vet ./...
+$ go test ./... -v
+--- PASS: TestMRTTableDumpV2 (0.00s)
+--- PASS: TestStages (0.00s)
+--- PASS: TestMEDNotComparedAcrossAS (0.00s)
+--- PASS: TestMEDWithinASOnly (0.00s)
+--- PASS: TestMultipathSet (0.00s)
+--- PASS: TestLoopRejection (0.00s)
+--- PASS: TestOriginatorIDNotRejectedByDefault (0.00s)
+--- PASS: TestCanonicalPrefixSort (0.00s)
+--- PASS: Test480EndToEnd (0.02s)
+PASS
+ok      bgpselect       0.019s
+</code></pre>
+<h3>5.3 Self-containment proof</h3>
+<p>The six Go blocks were extracted from <code>SOLUTION.md</code> into a clean <code>go.mod</code> module; it compiled and passed:</p>
+<pre><code class="language-text">$ go build ./... &amp;&amp; go vet ./... &amp;&amp; go test ./...
+ok      bgpselect       0.023s
+EXTRACTED_BUILD_TEST_OK
+</code></pre>
+<h3>5.4 End-to-end determinism check</h3>
+<pre><code class="language-text">$ ./bgpselect -in rib480.jsonl -out a.jsonl
+$ ./bgpselect -in rib480.jsonl -out b.jsonl
+$ cmp a.jsonl b.jsonl &amp;&amp; echo byte-identical
+byte-identical
+$ wc -l a.jsonl
+480 a.jsonl
+</code></pre>
+<p>Sample output (AS_PATH loop + stale CLUSTER_LIST leave one path; equal-cost pair resolved by router-ID):</p>
+<pre><code class="language-text">{&quot;prefix&quot;:&quot;10.0.0.0/24&quot;,&quot;next_hop&quot;:&quot;192.0.2.2&quot;,&quot;as_path&quot;:[65001],&quot;decisive_stage&quot;:&quot;as_path_length&quot;,&quot;multipath_set&quot;:[&quot;192.0.2.2&quot;]}
+{&quot;prefix&quot;:&quot;10.0.1.0/24&quot;,&quot;next_hop&quot;:&quot;192.0.2.3&quot;,&quot;as_path&quot;:[65001],&quot;decisive_stage&quot;:&quot;router_id&quot;,&quot;multipath_set&quot;:[&quot;192.0.2.3&quot;,&quot;192.0.2.4&quot;]}
+{&quot;prefix&quot;:&quot;10.0.2.0/24&quot;,&quot;next_hop&quot;:&quot;192.0.2.7&quot;,&quot;as_path&quot;:[65001],&quot;decisive_stage&quot;:&quot;only_path&quot;,&quot;multipath_set&quot;:[&quot;192.0.2.7&quot;]}
+</code></pre>
+<h3>5.5 Stage-coverage map</h3>
+<table>
+<thead>
+<tr>
+<th>decisive_stage</th>
+<th>test</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>only_path</code></td>
+<td><code>TestLoopRejection</code>, end-to-end</td>
+</tr>
+<tr>
+<td><code>weight</code></td>
+<td><code>TestStages/weight</code></td>
+</tr>
+<tr>
+<td><code>local_pref</code></td>
+<td><code>TestStages/local_pref</code></td>
+</tr>
+<tr>
+<td><code>locally_originated</code></td>
+<td><code>TestStages/locally_originated</code></td>
+</tr>
+<tr>
+<td><code>as_path_length</code></td>
+<td><code>TestStages/as_path_length</code></td>
+</tr>
+<tr>
+<td><code>origin</code></td>
+<td><code>TestStages/origin</code></td>
+</tr>
+<tr>
+<td><code>med</code></td>
+<td><code>TestStages/med</code>, <code>TestMEDWithinASOnly</code></td>
+</tr>
+<tr>
+<td><code>ebgp_over_ibgp</code></td>
+<td><code>TestStages/ebgp_over_ibgp</code></td>
+</tr>
+<tr>
+<td><code>igp_metric</code></td>
+<td><code>TestStages/igp_metric</code></td>
+</tr>
+<tr>
+<td><code>router_id</code></td>
+<td><code>TestStages/router_id</code>, <code>TestMultipathSet</code></td>
+</tr>
+<tr>
+<td><code>peer_address</code></td>
+<td><code>TestStages/peer_address</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><strong>Files produced:</strong> <code>/workspace/bgpselect/{go.mod,main.go,types.go,select.go,mrt.go,select_test.go,mrt_test.go}</code> and <code>/workspace/SOLUTION.md</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-bgp-best-path-selection-route-reflector-loop-exactness
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-26T04:29:07.038Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Parse a 480-prefix RIB-in dump (MRT hex records from 12 eBGP/iBGP sessions, one route-reflector cluster with a stale CLUSTER_LIST and two ORIGINATOR_ID collisions) and implement RFC 4271 best-path selection in full order: WEIGHT, LOCAL_PREF, locally originated, AS_PATH length, ORIGIN, MED restricted to paths from the same neighboring AS, eBGP over iBGP, lowest IGP metric, then router-ID and peer-address tie-break. Reject every path whose AS_PATH already contains our ASN or whose CLUSTER_LIST carries our cluster ID, and attribute each Loc-RIB entry to the exact tie-break stage that decided it. Deliverable: Go module bgpselect reading rib.jsonl and writing locrib.jsonl with prefix, next_hop, as_path, decisive_stage and multipath_set, byte-exact against all 480 expected prefixes.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-bgp-best-path-selection-route-reflector-loop-exactness&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-26T04:29:07.038Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

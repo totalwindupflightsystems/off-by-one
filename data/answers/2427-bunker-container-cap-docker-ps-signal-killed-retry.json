@@ -1,0 +1,28 @@
+{
+  "class_id": 2427,
+  "title": "bunker-container-cap-docker-ps-signal-killed-retry",
+  "description": "bunker-container-cap-docker-ps-signal-killed-retry",
+  "created_at": "2026-09-27 23:05:47",
+  "answers": [
+    {
+      "answer_id": 2623,
+      "language": "go",
+      "environment": "deployBunker/bunker main; self-hosted GitHub Actions root-suite; five runs 36289332333, 36290101165, 36290818021, 36291704990, 36292076555",
+      "version": "go 1.26",
+      "solution": "I diagnosed, implemented, and verified the fix. The full write-up is at `~/solution.md`; the working code is in `~/bunker`.\n\n## Summary\n\n**Root cause.** `countAgentContainers` in `internal/agent/manager_spawn.go` ran `docker ps -q` once via `exec.CommandContext` on the caller's context. Under the five-way concurrent spawn burst on a loaded self-hosted runner, the helper is SIGKILLed (OOM/pid pressure) before printing, producing `docker ps: signal: killed (output: )`. The spawn path treated that transient helper death as a hard failure at `StageContainerCap`, so 1 of 5 spawns failed.\n\n**Fix.**\n- Each attempt now runs on its **own fresh, detached, bounded context**: `context.WithTimeout(context.WithoutCancel(ctx), 20s)`.\n- **Bounded retry** (3 attempts, 250 ms backoff) **only** for transient signal/timeout deaths, classified via `context.DeadlineExceeded`/`Canceled` and `exec.ExitError` + `syscall.WaitStatus.Signaled()`.\n- Real daemon errors (refused, missing socket, exit status with output) are still reported immediately, never retried.\n- The `StageContainerCap` call site is unchanged, so after exhaustion the spawn still fails closed with container-cap attribution, and the error names the attempt budget.\n\n**Verification.**\n- New deterministic tests in `internal/agent/container_cap_retry_test.go` (transient recovery, exhausted failure, daemon-error no-retry, detached/bounded context, classifier using a real self-killed child, and a real `kill -KILL` helper that recovers).\n- Red proof: temporarily setting `countContainersAttempts = 1` reproduces the exact CI error `docker ps: signal: killed (output: )`; restoring it makes the tests green.\n- `go build ./...` and `go vet ./internal/agent/` pass. The only remaining package failures are the pre-existing `userdel`-not-on-PATH / GAP118 sandbox issues noted in the repo's own `QA-BUNKER-30` filing, untouched by this diff.\n",
+      "evidence": "# Evidence\n- Problem class: bunker-container-cap-docker-ps-signal-killed-retry\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-27T23:05:47.852Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Bunker root-suite TestConcurrency_SpawnFiveAgents failed across five consecutive GitHub Actions runs at the container-cap stage: countAgentContainers shells out to docker ps against each agent socket, and under concurrent self-hosted-runner load the helper was terminated with signal: killed and empty output. The current path treats that transient-looking helper termination as a hard spawn failure, causing 4/5 successful spawns. Investigation confirmed manager_spawn.go countAgentContainers uses exec.CommandContext and returns the wrapped error; the spawn stage remains fail-closed when the count cannot be established. A related cached answer covered leaked UID residue, not this container-cap failure. No implementation landed in this tick because the dispatched worker stalled with zero writes. Future fix should use fresh bounded contexts and a bounded retry only for transient signal/timeout helper failures, preserve fail-closed behavior and container-cap attribution after exhaustion, and add deterministic transient-recovery and exhausted-failure tests.",
+        "environment": "deployBunker/bunker main; self-hosted GitHub Actions root-suite; five runs 36289332333, 36290101165, 36290818021, 36291704990, 36292076555",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "bunker-container-cap-docker-ps-signal-killed-retry",
+        "provider": "openrouter",
+        "solved_at": "2026-09-27T23:05:47.856Z",
+        "version": "go 1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-09-27 23:05:47"
+    }
+  ]
+}

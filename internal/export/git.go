@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -302,9 +303,9 @@ func (e *Engine) writeItem(ctx context.Context, item ExportItem) ([]string, *Ski
 		return nil, nil, fmt.Errorf("mkdir export dir: %w", err)
 	}
 
-	solutionMD := formatSolutionMD(pc, answer)
-	evidenceMD := formatEvidenceMD(answer)
-	signaturesJSON := formatSignatures(answer)
+	solutionMD := sanitizeHostPaths(formatSolutionMD(pc, answer))
+	evidenceMD := sanitizeHostPaths(formatEvidenceMD(answer))
+	signaturesJSON := sanitizeHostPaths(formatSignatures(answer))
 
 	paths := []string{
 		filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version, "solution.md"),
@@ -422,6 +423,23 @@ func normalizeRepoURL(u string) string {
 	s = strings.TrimSuffix(s, ".git")
 	s = strings.TrimSuffix(s, "/")
 	return s
+}
+
+// --- Host-path hygiene (REVIEW-OB-006) -----------------------------------
+
+// hostPathPattern matches an operator-machine home prefix: /home/<user>
+// where <user> is any plausible account name (kara, bunker, bunker-*,
+// runner, user, ...). The subtree export is a public surface, so these
+// must never be written into it.
+var hostPathPattern = regexp.MustCompile(`/home/[A-Za-z0-9_-]+`)
+
+// sanitizeHostPaths rewrites every /home/<user> prefix in s to "~"
+// (e.g. "/home/kara/.local/bin/pi-agent" -> "~/.local/bin/pi-agent").
+// Non-path text ("/usr/bin", a bare "/home", "home/kara" without the
+// leading slash) is untouched. writeItem applies it to every rendered
+// file before it reaches disk.
+func sanitizeHostPaths(s string) string {
+	return hostPathPattern.ReplaceAllString(s, "~")
 }
 
 // --- Formatting (spec §5.1) ---------------------------------------------

@@ -754,3 +754,129 @@ func TestFormatSignatures_InvalidJSON(t *testing.T) {
 		t.Errorf("formatSignatures should wrap invalid JSON in a 'raw' key")
 	}
 }
+
+// --- REVIEW-OB-006: host-path hygiene -------------------------------------
+
+func TestSanitizeHostPaths(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"brief example", "/home/kara/.local/bin/pi-agent", "~/.local/bin/pi-agent"},
+		{"kara", "/home/kara/repo", "~/repo"},
+		{"bunker", "/home/bunker/x", "~/x"},
+		{"bunker agent", "/home/bunker-eduos-agent/voice-harness", "~/voice-harness"},
+		{"runner", "/home/runner/work/sdk-python/sdk-python", "~/work/sdk-python/sdk-python"},
+		{"user", "/home/user/repo/engine", "~/repo/engine"},
+		{"generic uppercase", "/home/OLDUSER/.venv/bin", "~/.venv/bin"},
+		{"generic underscore digit", "/home/svc_01/data", "~/data"},
+		{"multiple in one text", "copy /home/kara/a to /home/bunker-deadbeef/b", "copy ~/a to ~/b"},
+		{"non-home path untouched", "/usr/bin/env python3", "/usr/bin/env python3"},
+		{"bare /home untouched", "/home", "/home"},
+		{"no leading slash untouched", "home/kara is not absolute", "home/kara is not absolute"},
+		{"template placeholder untouched", "/home/<you>/project", "/home/<you>/project"},
+		{"no paths at all", "no paths at all", "no paths at all"},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sanitizeHostPaths(tc.in); got != tc.want {
+				t.Errorf("sanitizeHostPaths(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestExport_SanitizesHostPaths proves the answer writer applies the
+// scrub end to end: an answer whose solution/evidence carry operator host
+// paths must be written with ~/ prefixes, while non-path text survives
+// byte-identical.
+func TestExport_SanitizesHostPaths(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	if runtime.GOOS == "windows" {
+		t.Skip("file path separators differ on Windows")
+	}
+
+	store, err := graph.OpenShared("export-test-" + t.Name())
+	if err != nil {
+		t.Fatalf("graph.OpenShared: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	ctx := context.Background()
+	pc, created, err := store.UpsertProblemClass(ctx, "stale-home-path", "Script ships with /home/kara baked in")
+	if err != nil {
+		t.Fatalf("UpsertProblemClass: %v", err)
+	}
+	if !created {
+		t.Fatal("expected class to be created")
+	}
+	answerID, err := store.CreateAnswerNode(ctx, pc.ID, 0,
+		"docker", "bash", "latest",
+		"Edit /home/kara/x to point at /usr/bin/real-tool instead.",
+		"Observed on /home/runner/work/shop while /etc/hosts stayed put.",
+		`{"v1":{"model":"deepseek-v4-flash","passed":true}}`,
+	)
+	if err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+	if err := store.UpdateAnswerStatus(ctx, answerID, graph.AnswerVerified); err != nil {
+		t.Fatalf("UpdateAnswerStatus: %v", err)
+	}
+	answer, err := store.GetAnswerNode(ctx, answerID)
+	if err != nil {
+		t.Fatalf("GetAnswerNode: %v", err)
+	}
+
+	barePath := initBareRepo(t, "main")
+	seedRemote(t, barePath, "main")
+
+	localDir := filepath.Join(t.TempDir(), "clone")
+	e := NewEngine(Config{
+		RepoURL:  barePath,
+		Branch:   "main",
+		LocalDir: localDir,
+	}, store)
+
+	res, err := e.Export(ctx, []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if res.ItemsExported != 1 {
+		t.Fatalf("ItemsExported = %d, want 1", res.ItemsExported)
+	}
+
+	exportDir := filepath.Join(localDir, "pre-solve-answers", "stale-home-path", "docker", "latest")
+
+	solData, err := os.ReadFile(filepath.Join(exportDir, "solution.md"))
+	if err != nil {
+		t.Fatalf("read solution.md: %v", err)
+	}
+	sol := string(solData)
+	if !strings.Contains(sol, "~/x") {
+		t.Errorf("solution.md should contain ~/x, got:\n%s", sol)
+	}
+	if strings.Contains(sol, "/home/kara") {
+		t.Errorf("solution.md still leaks /home/kara:\n%s", sol)
+	}
+	if !strings.Contains(sol, "/usr/bin/real-tool") {
+		t.Errorf("solution.md must keep non-path text untouched, got:\n%s", sol)
+	}
+
+	evData, err := os.ReadFile(filepath.Join(exportDir, "evidence.md"))
+	if err != nil {
+		t.Fatalf("read evidence.md: %v", err)
+	}
+	ev := string(evData)
+	if !strings.Contains(ev, "~/work/shop") {
+		t.Errorf("evidence.md should contain ~/work/shop, got:\n%s", ev)
+	}
+	if strings.Contains(ev, "/home/runner") {
+		t.Errorf("evidence.md still leaks /home/runner:\n%s", ev)
+	}
+	if !strings.Contains(ev, "/etc/hosts") {
+		t.Errorf("evidence.md must keep non-path text untouched, got:\n%s", ev)
+	}
+}

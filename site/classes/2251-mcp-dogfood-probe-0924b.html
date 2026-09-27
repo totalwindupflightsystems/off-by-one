@@ -50,7 +50,7 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <p>The probe payload carries <strong>no diagnostic content</strong>: <code>error_message</code>, <code>stack_trace</code>, <code>version</code> and <code>context</code> are all empty, and the only human-readable text is <code>"second probe via MCP tools/call"</code>. There is therefore <strong>no failing program, stack frame, or error string to reproduce</strong>. This is a synthetic health probe emitted through an MCP <code>tools/call</code>, not a bug report.</p>
 <p>A diagnostic sweep of the sandbox found exactly one concrete environment anomaly, and it is the only actionable defect:</p>
 <blockquote>
-<p><code>~/.local/bin/go</code> and <code>~/.local/bin/gofmt</code> are <strong>stale, broken symlinks</strong> pointing at <code>/home/kara/sdk/go1.26.5/{go,gofmt}</code>. That directory does not exist. The real toolchain is the system Go <strong>1.26.0</strong> at <code>/usr/lib/go-1.26</code> (<code>/usr/bin/go</code>).</p>
+<p><code>~/.local/bin/go</code> and <code>~/.local/bin/gofmt</code> are <strong>stale, broken symlinks</strong> pointing at <code>~/sdk/go1.26.5/{go,gofmt}</code>. That directory does not exist. The real toolchain is the system Go <strong>1.26.0</strong> at <code>/usr/lib/go-1.26</code> (<code>/usr/bin/go</code>).</p>
 </blockquote>
 <p>The anomaly is masked in normal use because Bash/<code>exec.LookPath</code> skip broken symlinks and fall through to <code>/usr/bin/go</code>, but any code/tooling that invokes the resolved <code>~/.local/bin/go</code> path directly fails with <code>No such file or directory</code> (exit 127).</p>
 <h2>Root-cause analysis</h2>
@@ -72,20 +72,20 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 </li>
 <li>
 <p><strong>Toolchain side (the only real anomaly).</strong> PATH order inside the sandbox is:
-   <code>/tmp/pi-agent-1000/bin:/home/kara/.local/bin:/usr/local/bin:/usr/bin:/bin</code>
-   <code>/home/kara/.local/bin</code> precedes <code>/usr/bin</code> and contains:
-   <code>go    -&gt; /home/kara/sdk/go1.26.5/bin/go      (target missing)
-   gofmt -&gt; /home/kara/sdk/go1.26.5/bin/gofmt   (target missing)</code>
-   <code>/home/kara/sdk</code> does not exist. The intended SDK (Go 1.26.5 at a user-local prefix) was never installed or was removed, leaving dangling links. The system toolchain is Go 1.26.0 at <code>/usr/lib/go-1.26</code>.</p>
+   <code>/tmp/pi-agent-1000/bin:~/.local/bin:/usr/local/bin:/usr/bin:/bin</code>
+   <code>~/.local/bin</code> precedes <code>/usr/bin</code> and contains:
+   <code>go    -&gt; ~/sdk/go1.26.5/bin/go      (target missing)
+   gofmt -&gt; ~/sdk/go1.26.5/bin/gofmt   (target missing)</code>
+   <code>~/sdk</code> does not exist. The intended SDK (Go 1.26.5 at a user-local prefix) was never installed or was removed, leaving dangling links. The system toolchain is Go 1.26.0 at <code>/usr/lib/go-1.26</code>.</p>
 </li>
 <li>
 <p><strong>Why the difference normally does not surface.</strong> A PATH search (<code>command -v</code>, <code>type -a</code>, <code>exec.LookPath</code>, Bash lookup) treats a dangling symlink as non-existent and continues to <code>/usr/bin/go</code>, so <code>go version</code>, <code>go build</code>, <code>go test</code>, <code>go vet</code>, <code>gofmt</code> all work. The failure only appears when the dangling path is used <strong>literally</strong>:
-   <code>$ /home/kara/.local/bin/go version
-   /bin/bash: line 1: /home/kara/.local/bin/go: No such file or directory   (exit 127)</code>
+   <code>$ ~/.local/bin/go version
+   /bin/bash: line 1: ~/.local/bin/go: No such file or directory   (exit 127)</code>
    That is the classic "works for me, fails in the harness/Makefile" trap for a dogfood/probe tool that resolves the binary path once and reuses it.</p>
 </li>
 <li>
-<p><strong>Scope note.</strong> <code>/home/kara/.local/bin</code> is mounted read-only inside the bwrap sandbox (<code>... /home/kara/.local/bin type ext4 (ro,...)</code>), so the repair must be made on the host (or by removing the shadowing directory from the probe's PATH).</p>
+<p><strong>Scope note.</strong> <code>~/.local/bin</code> is mounted read-only inside the bwrap sandbox (<code>... ~/.local/bin type ext4 (ro,...)</code>), so the repair must be made on the host (or by removing the shadowing directory from the probe's PATH).</p>
 </li>
 </ol>
 <h2>Exact fix</h2>
@@ -101,14 +101,14 @@ ln -sfn /usr/bin/gofmt ~/.local/bin/gofmt
 
 # Re-check
 ls -l ~/.local/bin/go ~/.local/bin/gofmt
-/home/kara/.local/bin/go version
+~/.local/bin/go version
 </code></pre>
 <p>Option B — remove the shadowing links:</p>
 <pre><code class="language-bash">rm -f ~/.local/bin/go ~/.local/bin/gofmt
 # PATH then resolves /usr/bin/go and /usr/bin/gofmt directly.
 </code></pre>
 <p>If the probe genuinely needs Go 1.26.5 (the version the links expected), install the missing SDK instead of downgrading the links:</p>
-<pre><code class="language-bash"># Either provide the expected SDK tree ... so /home/kara/sdk/go1.26.5/bin/go exists
+<pre><code class="language-bash"># Either provide the expected SDK tree ... so ~/sdk/go1.26.5/bin/go exists
 # ... or let the Go toolchain self-provision when go.mod demands it:
 #   GOTOOLCHAIN=auto  (default) automatically downloads go1.26.5 on demand.
 </code></pre>
@@ -122,15 +122,15 @@ ls -l ~/.local/bin/go ~/.local/bin/gofmt
 <li>
 <p>Show the anomaly and that the sandbox mount is read-only:
    <code>console
-   $ ls -l /home/kara/.local/bin/go /home/kara/.local/bin/gofmt
-   lrwxrwxrwx ... /home/kara/.local/bin/go    -&gt; /home/kara/sdk/go1.26.5/bin/go
-   lrwxrwxrwx ... /home/kara/.local/bin/gofmt -&gt; /home/kara/sdk/go1.26.5/bin/gofmt
-   $ readlink -f /home/kara/.local/bin/go || echo "(unresolvable)"
+   $ ls -l ~/.local/bin/go ~/.local/bin/gofmt
+   lrwxrwxrwx ... ~/.local/bin/go    -&gt; ~/sdk/go1.26.5/bin/go
+   lrwxrwxrwx ... ~/.local/bin/gofmt -&gt; ~/sdk/go1.26.5/bin/gofmt
+   $ readlink -f ~/.local/bin/go || echo "(unresolvable)"
    (unresolvable)
-   $ /home/kara/.local/bin/go version
-   /bin/bash: line 1: /home/kara/.local/bin/go: No such file or directory   # exit 127
+   $ ~/.local/bin/go version
+   /bin/bash: line 1: ~/.local/bin/go: No such file or directory   # exit 127
    $ mount | grep local/bin
-   /dev/nvme0n1p2 on /home/kara/.local/bin type ext4 (ro,nosuid,nodev,relatime)</code></p>
+   /dev/nvme0n1p2 on ~/.local/bin type ext4 (ro,nosuid,nodev,relatime)</code></p>
 </li>
 <li>
 <p>Confirm the real toolchain and that PATH lookup already falls through to it:
@@ -142,7 +142,7 @@ ls -l ~/.local/bin/go ~/.local/bin/gofmt
    go version go1.26.0 linux/amd64
    $ /usr/bin/go env GOROOT GOPATH
    /usr/lib/go-1.26
-   /home/kara/go</code></p>
+   ~/go</code></p>
 </li>
 <li>
 <p>End-to-end Go vet/test/build/run passes on the system toolchain:
@@ -157,7 +157,7 @@ ls -l ~/.local/bin/go ~/.local/bin/gofmt
 <li>
 <p>After applying Option A on the host, the dangling-path failure disappears:
    <code>console
-   $ /home/kara/.local/bin/go version
+   $ ~/.local/bin/go version
    go version go1.26.0 linux/amd64          # exit 0</code></p>
 </li>
 <li>
@@ -167,7 +167,7 @@ ls -l ~/.local/bin/go ~/.local/bin/gofmt
    ['error_message', 'stack_trace', 'version', 'context']</code></p>
 </li>
 </ol>
-<p><strong>Conclusion:</strong> no defect is attributable to the probe payload itself. The only reproducible fault in this environment is the dangling <code>~/.local/bin/go</code> and <code>~/.local/bin/gofmt</code> symlinks (expected Go 1.26.5 under a missing <code>/home/kara/sdk</code>). Repoint them at <code>/usr/bin</code> (or remove them) on the host; the sandbox's read-only bind mount means the fix cannot be applied from inside the sandbox. Use <code>command -v go</code> for runtime resolution to remain robust against a broken leading PATH entry.</p>
+<p><strong>Conclusion:</strong> no defect is attributable to the probe payload itself. The only reproducible fault in this environment is the dangling <code>~/.local/bin/go</code> and <code>~/.local/bin/gofmt</code> symlinks (expected Go 1.26.5 under a missing <code>~/sdk</code>). Repoint them at <code>/usr/bin</code> (or remove them) on the host; the sandbox's read-only bind mount means the fix cannot be applied from inside the sandbox. Use <code>command -v go</code> for runtime resolution to remain robust against a broken leading PATH entry.</p>
 <p><em>(Also written to <code>/workspace/solution.md</code>.)</em></p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
 - Problem class: mcp-dogfood-probe-0924b
 - Model: openrouter/deepseek/deepseek-v4.1-flash

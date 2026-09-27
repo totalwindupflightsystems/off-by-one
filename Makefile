@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest check-corpus-hygiene check-corpus-hygiene-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -218,6 +218,26 @@ pi-agent-watchdog-selftest:
 # Pure in-process unittest: no network, no DB, no credentials.
 export-exclusions-selftest:
 	python3 scripts/tests/export_answers_exclusions_test.py
+
+# Regression test for the export host-path sanitizer
+# (scripts/export-answers.py sanitize_host_paths, REVIEW-OB-006): the
+# /home/<user> -> ~ mapping, untouched non-path text, unchanged JSON shapes.
+# Pure in-process unittest: no network, no DB, no credentials.
+export-hostpaths-selftest:
+	python3 scripts/tests/export_answers_hostpaths_test.py
+
+# REVIEW-OB-006 corpus hygiene guard: data/ and site/ are public surfaces —
+# fail (listing offenders) when any /home/<user> operator path appears in
+# them, pass when clean.
+check-corpus-hygiene:
+	bash scripts/check-corpus-hygiene.sh
+
+# Non-vacuity self-test for the guard: temp fixture trees prove a /home/<user>
+# leak under data/ OR site/ fails (exit 1, file named) and a clean tree
+# passes. Never touches the repo's real corpus except for the final
+# "real tree passes" arm.
+check-corpus-hygiene-selftest:
+	bash scripts/tests/check-corpus-hygiene-selftest.sh
 
 lint:
 	go vet ./...
