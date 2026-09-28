@@ -373,7 +373,7 @@ Database path resolution: the `-db` flag wins, then the `OFF_BY_ONE_DB` environm
 | `DEEPSEEK_API_KEY` | Yes (for solver) | — | DeepSeek API key for Pi Agent |
 | `OPENROUTER_API_KEY` | No | — | Optional embeddings key |
 | `OFF_BY_ONE_PORT` | No | `8766` | HTTP port |
-| `OFF_BY_ONE_HOST` | No | — | HTTP listen host (empty = all interfaces) |
+| `OFF_BY_ONE_HOST` | No | `127.0.0.1` | HTTP listen host (loopback-only by default; set `0.0.0.0` — or set the variable to an empty value — to listen on all interfaces) |
 | `OFF_BY_ONE_DB` | No | `./off-by-one.db` | SQLite path |
 | `OFF_BY_ONE_BWRAP` | No | `/usr/bin/bwrap` | Bubblewrap binary path |
 | `OFF_BY_ONE_PI_AGENT` | No | `pi-agent` | Pi Agent binary path |
@@ -397,7 +397,7 @@ go run ./cmd/off-by-one --help
 | Flag | Description |
 |------|-------------|
 | `--port` | HTTP listen port |
-| `--host` | HTTP listen host (empty = all interfaces) |
+| `--host` | HTTP listen host (default 127.0.0.1 = loopback only; use 0.0.0.0 to listen on all interfaces) |
 | `--db` | SQLite database path |
 | `--bwrap` | Path to bubblewrap binary |
 | `--pi-agent` | Path to Pi Agent binary |

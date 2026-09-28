@@ -214,7 +214,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
 | `DEEPSEEK_API_KEY` | Yes | — | DeepSeek API key for Pi Agent solving |
 | `OPENROUTER_API_KEY` | No | — | OpenRouter API key for embeddings (DS-003) |
 | `OFF_BY_ONE_PORT` | No | `8766` | HTTP server port |
-| `OFF_BY_ONE_HOST` | No | *(all interfaces)* | HTTP listen host (empty = all interfaces; use `127.0.0.1` behind a reverse proxy) |
+| `OFF_BY_ONE_HOST` | No | `127.0.0.1` | HTTP listen host (loopback-only by default; set `0.0.0.0` — or set the variable to an empty value — to listen on all interfaces, e.g. behind a reverse proxy) |
 | `OFF_BY_ONE_DB` | No | `./off-by-one.db` | SQLite database path |
 | `OFF_BY_ONE_BWRAP` | No | `/usr/bin/bwrap` | Path to bubblewrap binary |
 | `OFF_BY_ONE_PI_AGENT` | No | `pi-agent` | Path to Pi Agent binary (resolved via PATH) |
@@ -239,7 +239,7 @@ go run ./cmd/off-by-one --help
 | `--cron-interval` | Cron loop wake interval |
 | `--db` | SQLite database path |
 | `--export-dir` | Working directory for git export clones (empty = `POST /api/v1/export` disabled, 501) |
-| `--host` | HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy) |
+| `--host` | HTTP listen host (default 127.0.0.1 = loopback only; use 0.0.0.0 to listen on all interfaces) |
 | `--import-dir` | Working directory for git import clones (empty = `POST /api/v1/import` disabled, 501) |
 | `--load-threshold` | Max loadavg(1) for idle detection (negative = always idle) |
 | `--pi-agent` | Path to Pi Agent binary |

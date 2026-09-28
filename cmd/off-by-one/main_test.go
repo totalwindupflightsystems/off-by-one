@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"flag"
+	"net"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,6 +14,117 @@ import (
 	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
+
+// TestServerHostDefaultsToLoopback pins REVIEW-OB-007: a fresh invocation
+// with neither OFF_BY_ONE_HOST nor --host must resolve the loopback host
+// (secure-by-default), not all interfaces.
+func TestServerHostDefaultsToLoopback(t *testing.T) {
+	unsetOffByOneHost(t)
+
+	fs := flag.NewFlagSet("host-default", flag.ContinueOnError)
+	cfg := registerServerFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := *cfg.host; got != "127.0.0.1" {
+		t.Errorf("default host: got %q, want %q", got, "127.0.0.1")
+	}
+}
+
+// unsetOffByOneHost removes OFF_BY_ONE_HOST for the duration of the test so
+// the ambient environment cannot leak into default-resolution assertions.
+func unsetOffByOneHost(t *testing.T) {
+	t.Helper()
+	if v, ok := os.LookupEnv("OFF_BY_ONE_HOST"); ok {
+		if err := os.Unsetenv("OFF_BY_ONE_HOST"); err != nil {
+			t.Fatalf("unsetenv: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := os.Setenv("OFF_BY_ONE_HOST", v); err != nil {
+				t.Errorf("restore OFF_BY_ONE_HOST: %v", err)
+			}
+		})
+	}
+}
+
+// TestServerHostEnvOverride pins that an explicit OFF_BY_ONE_HOST value
+// still wins over the loopback default (REVIEW-OB-007).
+func TestServerHostEnvOverride(t *testing.T) {
+	t.Setenv("OFF_BY_ONE_HOST", "0.0.0.0")
+
+	fs := flag.NewFlagSet("host-env", flag.ContinueOnError)
+	cfg := registerServerFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := *cfg.host; got != "0.0.0.0" {
+		t.Errorf("env host: got %q, want %q", got, "0.0.0.0")
+	}
+}
+
+// TestServerHostFlagOverridesEnv pins that an explicit --host flag beats the
+// environment value (REVIEW-OB-007).
+func TestServerHostFlagOverridesEnv(t *testing.T) {
+	t.Setenv("OFF_BY_ONE_HOST", "192.0.2.1")
+
+	fs := flag.NewFlagSet("host-flag", flag.ContinueOnError)
+	cfg := registerServerFlags(fs)
+	if err := fs.Parse([]string{"--host", "10.0.0.5"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := *cfg.host; got != "10.0.0.5" {
+		t.Errorf("flag host: got %q, want %q", got, "10.0.0.5")
+	}
+}
+
+// TestServerHostExplicitEmptyEnvStillAllInterfaces documents the opt-in
+// escape hatch: envString distinguishes an unset variable from an explicitly
+// empty one, so OFF_BY_ONE_HOST="" remains the documented way to bind all
+// interfaces (REVIEW-OB-007).
+func TestServerHostExplicitEmptyEnvStillAllInterfaces(t *testing.T) {
+	t.Setenv("OFF_BY_ONE_HOST", "")
+
+	fs := flag.NewFlagSet("host-empty-env", flag.ContinueOnError)
+	cfg := registerServerFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := *cfg.host; got != "" {
+		t.Errorf("explicit-empty env host: got %q, want %q (all interfaces)", got, "")
+	}
+}
+
+// TestServerHostDefaultBindsLoopbackOnly is the runtime half of
+// REVIEW-OB-007: the default host, resolved through the real flag
+// registration, must produce a listener bound to loopback on an ephemeral
+// port — not a wildcard address.
+func TestServerHostDefaultBindsLoopbackOnly(t *testing.T) {
+	unsetOffByOneHost(t)
+
+	fs := flag.NewFlagSet("host-bind", flag.ContinueOnError)
+	cfg := registerServerFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+
+	ln, err := net.Listen("tcp", net.JoinHostPort(*cfg.host, "0"))
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() {
+		if cerr := ln.Close(); cerr != nil {
+			t.Errorf("close listener: %v", cerr)
+		}
+	}()
+
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener addr type: got %T, want *net.TCPAddr", ln.Addr())
+	}
+	if !addr.IP.IsLoopback() {
+		t.Errorf("default bind address: got %v, want a loopback address", addr.IP)
+	}
+}
 
 // TestLooksPlaceholderAPIKey covers the startup key-validation
 // heuristic: empty, short, and placeholder-marked keys must be flagged;

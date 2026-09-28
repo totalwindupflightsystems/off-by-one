@@ -304,7 +304,7 @@ type serverConfig struct {
 func registerServerFlags(fs *flag.FlagSet) *serverConfig {
 	return &serverConfig{
 		port:          fs.Int("port", envInt("OFF_BY_ONE_PORT", 8766), "HTTP listen port"),
-		host:          fs.String("host", envString("OFF_BY_ONE_HOST", ""), "HTTP listen host (empty = all interfaces; use 127.0.0.1 behind a reverse proxy)"),
+		host:          fs.String("host", envString("OFF_BY_ONE_HOST", "127.0.0.1"), "HTTP listen host (default 127.0.0.1 = loopback only; use 0.0.0.0 or set OFF_BY_ONE_HOST= to an empty value to listen on all interfaces)"),
 		dbPath:        fs.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path"),
 		bwrapPath:     fs.String("bwrap", envString("OFF_BY_ONE_BWRAP", "/usr/bin/bwrap"), "Path to bwrap binary"),
 		piAgentPath:   fs.String("pi-agent", envString("OFF_BY_ONE_PI_AGENT", "pi-agent"), "Path to pi-agent binary"),
