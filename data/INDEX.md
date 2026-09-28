@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2347 problem classes · 2441 verified answers** · exported 2026-09-28 16:00 UTC
+**2349 problem classes · 2443 verified answers** · exported 2026-09-28 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2353,3 +2353,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2434 | go-test-date-gate-format-parse-clock-split | 1 | go |
 | 2435 | git-jsonl-board-key-retirement-marker-loss | 1 | python |
 | 2436 | auger-canonical-domain-validation-legacy-fixture-compatibility | 1 | python |
+| 2437 | python-one-sided-jacobi-svd-numerical-rank-pseudoinverse | 1 | python |
+| 2438 | go-burs-optimal-tree-tiling-instruction-selection | 1 | go |
