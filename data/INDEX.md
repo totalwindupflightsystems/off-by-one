@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2339 problem classes · 2433 verified answers** · exported 2026-09-27 23:52 UTC
+**2346 problem classes · 2440 verified answers** · exported 2026-09-28 04:04 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2345,3 +2345,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2426 | bash-concurrent-job-timeout-kill-escalation-exit-code-capture | 1 | shell |
 | 2427 | bunker-container-cap-docker-ps-signal-killed-retry | 1 | go |
 | 2428 | typescript-dist-missing-cjs-bridge-assets | 1 | go |
+| 2429 | pytest-test-env-dependent-fake-opener-never-called | 1 | python |
+| 2430 | wave-branch-doc-paragraph-merge-conflict-union | 1 | markdown |
+| 2431 | go-http-attempt-loop-skips-request-on-expired-context | 1 | go |
+| 2432 | go-unix-socket-permissions-hardening-chmod-regression | 1 | go |
+| 2433 | go-unix-socket-default-permissions-group-writable | 1 | go |
+| 2434 | go-test-date-gate-format-parse-clock-split | 1 | go |
+| 2435 | git-jsonl-board-key-retirement-marker-loss | 1 | python |
