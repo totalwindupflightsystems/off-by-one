@@ -183,12 +183,30 @@ type importRequest struct {
 	ConflictStrategy string `json:"conflict_strategy,omitempty"`
 }
 
-// importResponse mirrors ImportResponse from the OpenAPI spec.
+// importDetailWire is the JSON shape of one per-answer import outcome,
+// mirroring the engine's ImportDetail (DF-OFF-BY-ONE-22). Every key is
+// always emitted: a missing action or answer_id is indistinguishable from
+// a server that forgot to emit it.
+type importDetailWire struct {
+	ClassTitle string `json:"class_title"`
+	Env        string `json:"env"`
+	Version    string `json:"version"`
+	Lang       string `json:"lang"`
+	Action     string `json:"action"`
+	AnswerID   int64  `json:"answer_id"`
+	Reason     string `json:"reason"`
+}
+
+// importResponse mirrors ImportResponse from the OpenAPI spec. Details is
+// additive: the aggregate counters keep their documented meaning, and the
+// per-answer list is always a (possibly empty) JSON array, never null.
 type importResponse struct {
-	Added      int `json:"added"`
-	Updated    int `json:"updated"`
-	Skipped    int `json:"skipped"`
-	Conflicted int `json:"conflicted"`
+	Added      int                `json:"added"`
+	Updated    int                `json:"updated"`
+	Skipped    int                `json:"skipped"`
+	Conflicted int                `json:"conflicted"`
+	ParseErr   int                `json:"parse_errors"`
+	Details    []importDetailWire `json:"details"`
 }
 
 // --- Handlers ------------------------------------------------------------
@@ -943,6 +961,13 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	result, err := engine.Export(r.Context(), items)
 	if err != nil {
+		// Community edits in the export clone that the export would
+		// destroy are a conflict the caller can resolve (push/revert the
+		// clone or re-clone), not a server fault (DF-OFF-BY-ONE-22).
+		if errors.Is(err, export.ErrUnsafeExport) {
+			writeError(w, http.StatusConflict, "export_conflict", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "export_failed", err.Error())
 		return
 	}
@@ -992,12 +1017,26 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, importResponse{
+	out := importResponse{
 		Added:      result.Added,
 		Updated:    result.Updated,
 		Skipped:    result.Skipped,
 		Conflicted: result.Conflicted,
-	})
+		ParseErr:   result.ParseErr,
+		Details:    []importDetailWire{},
+	}
+	for _, d := range result.Details {
+		out.Details = append(out.Details, importDetailWire{
+			ClassTitle: d.ClassTitle,
+			Env:        d.Env,
+			Version:    d.Version,
+			Lang:       d.Lang,
+			Action:     string(d.Action),
+			AnswerID:   d.AnswerID,
+			Reason:     d.Reason,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // parseIntDefault returns the parsed int or def if invalid. Bounds

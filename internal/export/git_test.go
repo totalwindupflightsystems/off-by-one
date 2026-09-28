@@ -1,6 +1,7 @@
 package export
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -349,6 +350,82 @@ func TestExport_FullFlow(t *testing.T) {
 	verifySolution := filepath.Join(verifyDir, "pre-solve-answers", "docker-file-ownership", "docker", "go-1.26", "solution.md")
 	if _, err := os.Stat(verifySolution); err != nil {
 		t.Errorf("exported file not in remote repo: %v", err)
+	}
+}
+
+func TestExport_RejectsModifiedExistingFileBeforeOverwrite(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+	barePath := initBareRepo(t, "main")
+	seedRemote(t, barePath, "main")
+
+	localDir := filepath.Join(t.TempDir(), "clone")
+	e := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir}, store)
+	if _, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}}); err != nil {
+		t.Fatalf("initial Export: %v", err)
+	}
+	solutionPath := filepath.Join(localDir, "pre-solve-answers", pc.Title, answer.Env, answer.Version, "solution.md")
+	communityBytes := []byte("community edit\n")
+	if err := os.WriteFile(solutionPath, communityBytes, 0o644); err != nil {
+		t.Fatalf("write community edit: %v", err)
+	}
+
+	_, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if !errors.Is(err, ErrUnsafeExport) {
+		t.Fatalf("Export error = %v, want ErrUnsafeExport", err)
+	}
+	got, readErr := os.ReadFile(solutionPath)
+	if readErr != nil {
+		t.Fatalf("read solution after rejected export: %v", readErr)
+	}
+	if !bytes.Equal(got, communityBytes) {
+		t.Fatalf("rejected export changed community bytes: got %q, want %q", got, communityBytes)
+	}
+}
+
+func TestExport_RejectsUnpushedCommunityCommitBeforeOverwrite(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+	barePath := initBareRepo(t, "main")
+	seedRemote(t, barePath, "main")
+
+	localDir := filepath.Join(t.TempDir(), "clone")
+	e := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir}, store)
+	if _, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}}); err != nil {
+		t.Fatalf("initial Export: %v", err)
+	}
+	solutionPath := filepath.Join(localDir, "pre-solve-answers", pc.Title, answer.Env, answer.Version, "solution.md")
+	communityBytes := []byte("community commit edit\n")
+	if err := os.WriteFile(solutionPath, communityBytes, 0o644); err != nil {
+		t.Fatalf("write community edit: %v", err)
+	}
+	relSolutionPath, err := filepath.Rel(localDir, solutionPath)
+	if err != nil {
+		t.Fatalf("relative solution path: %v", err)
+	}
+	addCmd := exec.Command("git", "add", relSolutionPath)
+	addCmd.Dir = localDir
+	if out, err := addCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git add: %v\n%s", err, out)
+	}
+	commitCmd := exec.Command("git", "commit", "-m", "community edit")
+	commitCmd.Dir = localDir
+	if out, err := commitCmd.CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v\n%s", err, out)
+	}
+
+	_, err = e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if !errors.Is(err, ErrUnsafeExport) {
+		t.Fatalf("Export error = %v, want ErrUnsafeExport", err)
+	}
+	got, readErr := os.ReadFile(solutionPath)
+	if readErr != nil {
+		t.Fatalf("read solution after rejected export: %v", readErr)
+	}
+	if !bytes.Equal(got, communityBytes) {
+		t.Fatalf("rejected export changed committed community bytes: got %q, want %q", got, communityBytes)
 	}
 }
 

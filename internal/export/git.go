@@ -15,6 +15,7 @@
 package export
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -147,6 +148,15 @@ var ErrNoItems = errors.New("export: no items to export")
 // refuses before any fetch, checkout or commit.
 var ErrRepoMismatch = errors.New("export: RepoURL does not match the existing clone")
 
+// ErrUnsafeExport is returned when a file the export is about to write
+// holds content that is neither the fetched remote baseline nor identical
+// to what this export would write — i.e. a community edit (an uncommitted
+// modification or an unpushed commit in the clone) that the write would
+// silently destroy. The engine refuses before any answer file is
+// overwritten; only the exact target files are checked, never unrelated
+// working-tree changes.
+var ErrUnsafeExport = errors.New("export: refusing to overwrite community edits")
+
 // Export runs the full export flow for the given items:
 //
 //  1. Prepare the local clone (clone or pull)
@@ -172,9 +182,10 @@ func (e *Engine) Export(ctx context.Context, items []ExportItem) (*ExportResult,
 		return nil, fmt.Errorf("prepare clone: %w", err)
 	}
 
-	// Step 2: write each answer's files.
+	// Step 2: render each answer's files (no disk writes yet).
+	var pending []renderedFile
 	for _, item := range items {
-		files, skip, err := e.writeItem(ctx, item)
+		files, skip, err := e.renderItem(ctx, item)
 		if err != nil {
 			// Name the request field the caller controls: an item that
 			// cannot be resolved is a request problem (a bogus
@@ -187,16 +198,30 @@ func (e *Engine) Export(ctx context.Context, items []ExportItem) (*ExportResult,
 			res.ItemsSkipped = append(res.ItemsSkipped, *skip)
 			continue
 		}
-		res.FilesWritten = append(res.FilesWritten, files...)
+		for _, f := range files {
+			res.FilesWritten = append(res.FilesWritten, f.relPath)
+		}
+		pending = append(pending, files...)
 		res.ItemsExported++
 	}
 
-	// Step 3: nothing to do if no files were written.
-	if len(res.FilesWritten) == 0 {
+	// Step 3: nothing to do if no files were rendered.
+	if len(pending) == 0 {
 		return res, nil
 	}
 
-	// Step 4: stage, commit, push.
+	// Step 4: fail closed. If any target file holds community edits the
+	// write would destroy, refuse before touching disk (DF-OFF-BY-ONE-22).
+	if err := e.checkNoForeignContent(ctx, pending); err != nil {
+		return nil, err
+	}
+
+	// Step 5: write the rendered files.
+	if err := e.writeRendered(pending); err != nil {
+		return nil, err
+	}
+
+	// Step 6: stage, commit, push.
 	if e.skipCommit {
 		return res, nil
 	}
@@ -276,11 +301,19 @@ func (e *Engine) prepareClone(ctx context.Context) error {
 	return nil
 }
 
-// writeItem fetches the class and answer from the store, formats the
-// output files, and writes them to disk. Returns the list of file paths
-// written (relative to repo root) or a SkipReason if the answer was
-// skipped.
-func (e *Engine) writeItem(ctx context.Context, item ExportItem) ([]string, *SkipReason, error) {
+// renderedFile is one file the export will write: a path relative to the
+// repo root plus the exact content to write. Files are rendered in memory
+// first so the fail-closed community-edit check can compare before any
+// bytes touch disk.
+type renderedFile struct {
+	relPath string
+	content []byte
+}
+
+// renderItem fetches the class and answer from the store and formats the
+// output files WITHOUT writing them to disk. Returns the rendered files
+// or a SkipReason if the answer was skipped.
+func (e *Engine) renderItem(ctx context.Context, item ExportItem) ([]renderedFile, *SkipReason, error) {
 	pc, err := e.store.GetProblemClass(ctx, item.ClassID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("get problem class: %w", err)
@@ -297,39 +330,90 @@ func (e *Engine) writeItem(ctx context.Context, item ExportItem) ([]string, *Ski
 		}, nil
 	}
 
-	// Directory: {subtree}/{class}/{env}/{version}/
-	dir := filepath.Join(e.cfg.LocalDir, e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, nil, fmt.Errorf("mkdir export dir: %w", err)
-	}
-
 	solutionMD := sanitizeHostPaths(formatSolutionMD(pc, answer))
 	evidenceMD := sanitizeHostPaths(formatEvidenceMD(answer))
 	signaturesJSON := sanitizeHostPaths(formatSignatures(answer))
 
-	paths := []string{
-		filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version, "solution.md"),
-		filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version, "evidence.md"),
-		filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version, "signatures.json"),
+	dir := filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version)
+	files := []renderedFile{
+		{filepath.Join(dir, "solution.md"), []byte(solutionMD)},
+		{filepath.Join(dir, "evidence.md"), []byte(evidenceMD)},
+		{filepath.Join(dir, "signatures.json"), []byte(signaturesJSON)},
 	}
+	return files, nil, nil
+}
 
-	writes := []struct {
-		relPath string
-		content []byte
-	}{
-		{paths[0], []byte(solutionMD)},
-		{paths[1], []byte(evidenceMD)},
-		{paths[2], []byte(signaturesJSON)},
-	}
-
-	for _, w := range writes {
-		full := filepath.Join(e.cfg.LocalDir, w.relPath)
-		if err := os.WriteFile(full, w.content, 0o644); err != nil {
-			return nil, nil, fmt.Errorf("write %s: %w", w.relPath, err)
+// writeRendered writes each rendered file to disk under LocalDir,
+// creating parent directories as needed.
+func (e *Engine) writeRendered(files []renderedFile) error {
+	for _, f := range files {
+		full := filepath.Join(e.cfg.LocalDir, f.relPath)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			return fmt.Errorf("mkdir export dir for %s: %w", f.relPath, err)
+		}
+		if err := os.WriteFile(full, f.content, 0o644); err != nil {
+			return fmt.Errorf("write %s: %w", f.relPath, err)
 		}
 	}
+	return nil
+}
 
-	return paths, nil, nil
+// checkNoForeignContent refuses the export when any target file holds
+// content that is neither the fetched remote baseline (origin/Branch) nor
+// identical to the content this export is about to write. Such content is
+// a community edit — an uncommitted modification or an unpushed commit in
+// the clone — and overwriting it would silently destroy work the export
+// does not own.
+//
+// Only the exact files this export will write are examined; unrelated
+// working-tree changes (inside or outside the subtree) never block an
+// export. Three states are safe:
+//
+//   - the file is absent locally and absent from the baseline (new answer);
+//   - the local content equals the baseline (clean fast-forward state —
+//     this also covers community edits that were PUSHED to the remote,
+//     whose resolution belongs to a conflict strategy, not this guard);
+//   - the local content already equals the rendered content (idempotent
+//     re-export over the producer's own unpushed export commit).
+func (e *Engine) checkNoForeignContent(ctx context.Context, files []renderedFile) error {
+	var conflicts []string
+	seen := make(map[string]bool, len(files))
+	for _, f := range files {
+		if seen[f.relPath] {
+			continue
+		}
+		seen[f.relPath] = true
+
+		full := filepath.Join(e.cfg.LocalDir, f.relPath)
+		current, curErr := os.ReadFile(full)
+		if curErr == nil && bytes.Equal(current, f.content) {
+			// No-op write — already exactly what we would write.
+			continue
+		}
+
+		// Read the baseline blob. A failure means the file is absent
+		// from origin/Branch (or the ref does not exist yet) — both
+		// read as "no baseline", which is fail-closed here: any local
+		// content then counts as foreign.
+		baseline, baseErr := e.gitOutput(ctx, e.cfg.LocalDir,
+			"show", "origin/"+e.cfg.Branch+":"+filepath.ToSlash(f.relPath))
+		if curErr == nil && baseErr == nil && bytes.Equal(current, []byte(baseline)) {
+			// Clean state: local content matches the fetched baseline.
+			continue
+		}
+		if curErr != nil && baseErr != nil {
+			// New file, absent locally and from the baseline.
+			continue
+		}
+		conflicts = append(conflicts, f.relPath)
+	}
+
+	if len(conflicts) > 0 {
+		return fmt.Errorf("%w: %s in %s differ from both origin/%s and the export content; "+
+			"push or revert those changes, or point LocalDir at a fresh clone",
+			ErrUnsafeExport, strings.Join(conflicts, ", "), e.cfg.LocalDir, e.cfg.Branch)
+	}
+	return nil
 }
 
 // stageAndCommit stages all files in FilesWritten, creates a commit,

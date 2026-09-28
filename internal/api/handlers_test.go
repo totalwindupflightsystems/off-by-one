@@ -2522,6 +2522,43 @@ func TestImportBadRequest(t *testing.T) {
 	}
 }
 
+// TestImportResponseDetails exposes each engine outcome without dropping the
+// per-answer detail list at the HTTP boundary.
+func TestImportResponseDetails(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed — skipping import integration test")
+	}
+	s, _, _ := newTestServer(t)
+	s.ImportLocalDir = filepath.Join(t.TempDir(), "import-clone")
+	repo := initBareRepoForHandler(t, "main")
+	seedBareRepoForHandler(t, repo, "main")
+	pushAnswerFilesForHandler(t, repo, "main", "import-detail-class", "docker", "go-1.26")
+
+	rr := do(t, s, "POST", "/api/v1/import", importRequest{SourceRepo: repo})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Added   int `json:"added"`
+		Details []struct {
+			ClassTitle string `json:"class_title"`
+			Action     string `json:"action"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Added != 1 {
+		t.Fatalf("added = %d, want 1; body: %s", body.Added, rr.Body.String())
+	}
+	if body.Details == nil || len(body.Details) != 1 {
+		t.Fatalf("details = %#v, want one non-null detail", body.Details)
+	}
+	if body.Details[0].ClassTitle != "import-detail-class" || body.Details[0].Action != "added" {
+		t.Fatalf("detail = %#v, want import-detail-class/added", body.Details[0])
+	}
+}
+
 // TestImportSourceRepoMismatch_Conflict verifies that a source_repo which
 // does not match the origin of the existing import clone is rejected with
 // 409 source_repo_mismatch — never 200 with skipped>=1 from the stale clone
