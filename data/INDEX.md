@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2346 problem classes · 2440 verified answers** · exported 2026-09-28 12:13 UTC
+**2347 problem classes · 2441 verified answers** · exported 2026-09-28 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2352,3 +2352,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2433 | go-unix-socket-default-permissions-group-writable | 1 | go |
 | 2434 | go-test-date-gate-format-parse-clock-split | 1 | go |
 | 2435 | git-jsonl-board-key-retirement-marker-loss | 1 | python |
+| 2436 | auger-canonical-domain-validation-legacy-fixture-compatibility | 1 | python |
