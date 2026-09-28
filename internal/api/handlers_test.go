@@ -241,6 +241,96 @@ func TestSubmit_DedupPending(t *testing.T) {
 	}
 }
 
+// assertRelatedProblemsArray decodes a submit response body and asserts
+// the related_problems key is present and holds a JSON array — never
+// null and never omitted (REVIEW-OB-008). Returns the array elements.
+func assertRelatedProblemsArray(t *testing.T, body []byte) []any {
+	t.Helper()
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		t.Fatalf("decode raw: %v, body = %s", err, body)
+	}
+	v, ok := raw["related_problems"]
+	if !ok {
+		t.Fatalf("related_problems key missing, body = %s", body)
+	}
+	arr, ok := v.([]any)
+	if !ok {
+		t.Fatalf("related_problems = %#v (%T), want a JSON array, body = %s", v, v, body)
+	}
+	return arr
+}
+
+// TestSubmit_Queued_RelatedProblemsEmptyArray locks the wire contract
+// for the queued path: a submission whose class has no related edges
+// must emit related_problems as an empty JSON array, not null
+// (REVIEW-OB-008).
+func TestSubmit_Queued_RelatedProblemsEmptyArray(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	body := submitProblemRequest{
+		ProblemClass: "docker-volume-permissions",
+		Cadence:      ingest.CadencePrePhase,
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+	}
+	if arr := assertRelatedProblemsArray(t, rr.Body.Bytes()); len(arr) != 0 {
+		t.Errorf("related_problems = %v, want empty array", arr)
+	}
+}
+
+// TestSubmit_Dedup_RelatedProblemsEmptyArray locks the same contract
+// for the deduplicated path (REVIEW-OB-008).
+func TestSubmit_Dedup_RelatedProblemsEmptyArray(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	body := submitProblemRequest{
+		ProblemClass: "docker-perms",
+		Cadence:      ingest.CadencePrePhase,
+	}
+	rr1 := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr1.Code != http.StatusOK {
+		t.Fatalf("first submit: %d", rr1.Code)
+	}
+	rr2 := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr2.Code != http.StatusConflict {
+		t.Fatalf("dedup status = %d, want 409", rr2.Code)
+	}
+	if arr := assertRelatedProblemsArray(t, rr2.Body.Bytes()); len(arr) != 0 {
+		t.Errorf("related_problems = %v, want empty array", arr)
+	}
+}
+
+// TestSubmit_RelatedProblemsPopulated verifies existing non-empty
+// related-problem behavior survives the empty-array normalization: a
+// class with a related edge still lists the related title.
+func TestSubmit_RelatedProblemsPopulated(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	classA, err := store.CreateProblemClass(context.Background(), "class-a", "desc")
+	if err != nil {
+		t.Fatalf("create class-a: %v", err)
+	}
+	classB, err := store.CreateProblemClass(context.Background(), "class-b", "desc")
+	if err != nil {
+		t.Fatalf("create class-b: %v", err)
+	}
+	if _, err := store.CreateEdge(context.Background(), classA, classB, graph.EdgeSameRootCause, 0.8); err != nil {
+		t.Fatalf("create edge: %v", err)
+	}
+
+	rr := do(t, s, "POST", "/api/v1/problems/submit", submitProblemRequest{
+		ProblemClass: "class-a",
+		Cadence:      ingest.CadencePrePhase,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+	}
+	arr := assertRelatedProblemsArray(t, rr.Body.Bytes())
+	if len(arr) != 1 || arr[0] != "class-b" {
+		t.Errorf("related_problems = %v, want [class-b]", arr)
+	}
+}
+
 func TestSubmit_DedupVerifiedAnswer(t *testing.T) {
 	s, store, _ := newTestServer(t)
 	// Pre-seed a verified answer for "docker-perms".

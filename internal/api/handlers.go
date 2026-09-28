@@ -40,6 +40,11 @@ type submitProblemRequest struct {
 }
 
 // submitProblemResponse mirrors SubmitProblemResponse in the spec.
+//
+// RelatedProblems carries no `omitempty` and must never marshal as
+// null: the published contract always emits the key as a JSON array, so
+// an edge-less class returns `"related_problems":[]` (REVIEW-OB-008).
+// Construction sites normalize nil via nonNilStrings.
 type submitProblemResponse struct {
 	SubmissionID      string   `json:"submission_id"`
 	ProblemClass      string   `json:"problem_class"`
@@ -314,7 +319,7 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 				resp.Position = s.queuePosition(r, existing)
 			}
 			resp.ExistingSolutions = s.countAnswersFor(r, slug)
-			resp.RelatedProblems = s.relatedFor(r, slug)
+			resp.RelatedProblems = nonNilStrings(s.relatedFor(r, slug))
 			writeJSON(w, status, resp)
 			return
 		}
@@ -338,7 +343,7 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 		Position:          depth,
 		EstimatedTime:     estimateTime(depth, perJob),
 		ExistingSolutions: s.countAnswersFor(r, slug),
-		RelatedProblems:   s.relatedFor(r, slug),
+		RelatedProblems:   nonNilStrings(s.relatedFor(r, slug)),
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -876,6 +881,15 @@ func (s *Server) countAnswersFor(r *http.Request, slug string) int {
 		return 0
 	}
 	return n
+}
+
+// nonNilStrings normalizes a nil slice to a non-nil empty slice so the
+// JSON encoder emits [] instead of null (REVIEW-OB-008).
+func nonNilStrings(v []string) []string {
+	if v == nil {
+		return []string{}
+	}
+	return v
 }
 
 // relatedFor returns the titles of related problem classes for a
