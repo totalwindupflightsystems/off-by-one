@@ -1,0 +1,492 @@
+commit 590ada5e0ed58e18a081593ec283db51668d3ab6
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Mon Sep 28 08:46:45 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Mon Sep 28 08:46:45 2026 -0500
+
+    fix(export): protect community edits and expose import details. Addresses DF-OFF-BY-ONE-22.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ internal/api/handlers.go      |  53 +++++++++++++--
+ internal/api/handlers_test.go |  37 +++++++++++
+ internal/export/git.go        | 150 ++++++++++++++++++++++++++++++++----------
+ internal/export/git_test.go   |  77 ++++++++++++++++++++++
+ pkg/api/openapi.yaml          |  24 +++++++
+ 5 files changed, 301 insertions(+), 40 deletions(-)
+
+diff --git a/internal/api/handlers.go b/internal/api/handlers.go
+index 0617bcaa..8f97dc7a 100644
+--- a/internal/api/handlers.go
++++ b/internal/api/handlers.go
+@@ -183,12 +183,30 @@ type importRequest struct {
+ 	ConflictStrategy string `json:"conflict_strategy,omitempty"`
+ }
+ 
+-// importResponse mirrors ImportResponse from the OpenAPI spec.
++// importDetailWire is the JSON shape of one per-answer import outcome,
++// mirroring the engine's ImportDetail (DF-OFF-BY-ONE-22). Every key is
++// always emitted: a missing action or answer_id is indistinguishable from
++// a server that forgot to emit it.
++type importDetailWire struct {
++	ClassTitle string `json:"class_title"`
++	Env        string `json:"env"`
++	Version    string `json:"version"`
++	Lang       string `json:"lang"`
++	Action     string `json:"action"`
++	AnswerID   int64  `json:"answer_id"`
++	Reason     string `json:"reason"`
++}
++
++// importResponse mirrors ImportResponse from the OpenAPI spec. Details is
++// additive: the aggregate counters keep their documented meaning, and the
++// per-answer list is always a (possibly empty) JSON array, never null.
+ type importResponse struct {
+-	Added      int `json:"added"`
+-	Updated    int `json:"updated"`
+-	Skipped    int `json:"skipped"`
+-	Conflicted int `json:"conflicted"`
++	Added      int                `json:"added"`
++	Updated    int                `json:"updated"`
++	Skipped    int                `json:"skipped"`
++	Conflicted int                `json:"conflicted"`
++	ParseErr   int                `json:"parse_errors"`
++	Details    []importDetailWire `json:"details"`
+ }
+ 
+ // --- Handlers ------------------------------------------------------------
+@@ -943,6 +961,13 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+ 
+ 	result, err := engine.Export(r.Context(), items)
+ 	if err != nil {
++		// Community edits in the export clone that the export would
++		// destroy are a conflict the caller can resolve (push/revert the
++		// clone or re-clone), not a server fault (DF-OFF-BY-ONE-22).
++		if errors.Is(err, export.ErrUnsafeExport) {
++			writeError(w, http.StatusConflict, "export_conflict", err.Error())
++			return
++		}
+ 		writeError(w, http.StatusInternalServerError, "export_failed", err.Error())
+ 		return
+ 	}
+@@ -992,12 +1017,26 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+ 		return
+ 	}
+ 
+-	writeJSON(w, http.StatusOK, importResponse{
++	out := importResponse{
+ 		Added:      result.Added,
+ 		Updated:    result.Updated,
+ 		Skipped:    result.Skipped,
+ 		Conflicted: result.Conflicted,
+-	})
++		ParseErr:   result.ParseErr,
++		Details:    []importDetailWire{},
++	}
++	for _, d := range result.Details {
++		out.Details = append(out.Details, importDetailWire{
++			ClassTitle: d.ClassTitle,
++			Env:        d.Env,
++			Version:    d.Version,
++			Lang:       d.Lang,
++			Action:     string(d.Action),
++			AnswerID:   d.AnswerID,
++			Reason:     d.Reason,
++		})
++	}
++	writeJSON(w, http.StatusOK, out)
+ }
+ 
+ // parseIntDefault returns the parsed int or def if invalid. Bounds
+diff --git a/internal/api/handlers_test.go b/internal/api/handlers_test.go
+index 21670b00..6d926a29 100644
+--- a/internal/api/handlers_test.go
++++ b/internal/api/handlers_test.go
+@@ -2522,6 +2522,43 @@ func TestImportBadRequest(t *testing.T) {
+ 	}
+ }
+ 
++// TestImportResponseDetails exposes each engine outcome without dropping the
++// per-answer detail list at the HTTP boundary.
++func TestImportResponseDetails(t *testing.T) {
++	if _, err := exec.LookPath("git"); err != nil {
++		t.Skip("git not installed — skipping import integration test")
++	}
++	s, _, _ := newTestServer(t)
++	s.ImportLocalDir = filepath.Join(t.TempDir(), "import-clone")
++	repo := initBareRepoForHandler(t, "main")
++	seedBareRepoForHandler(t, repo, "main")
++	pushAnswerFilesForHandler(t, repo, "main", "import-detail-class", "docker", "go-1.26")
++
++	rr := do(t, s, "POST", "/api/v1/import", importRequest{SourceRepo: repo})
++	if rr.Code != http.StatusOK {
++		t.Fatalf("status = %d, want 200; body: %s", rr.Code, rr.Body.String())
++	}
++	var body struct {
++		Added   int `json:"added"`
++		Details []struct {
++			ClassTitle string `json:"class_title"`
++			Action     string `json:"action"`
++		} `json:"details"`
++	}
++	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
++		t.Fatalf("decode response: %v", err)
++	}
++	if body.Added != 1 {
++		t.Fatalf("added = %d, want 1; body: %s", body.Added, rr.Body.String())
++	}
++	if body.Details == nil || len(body.Details) != 1 {
++		t.Fatalf("details = %#v, want one non-null detail", body.Details)
++	}
++	if body.Details[0].ClassTitle != "import-detail-class" || body.Details[0].Action != "added" {
++		t.Fatalf("detail = %#v, want import-detail-class/added", body.Details[0])
++	}
++}
++
+ // TestImportSourceRepoMismatch_Conflict verifies that a source_repo which
+ // does not match the origin of the existing import clone is rejected with
+ // 409 source_repo_mismatch — never 200 with skipped>=1 from the stale clone
+diff --git a/internal/export/git.go b/internal/export/git.go
+index 7a911e70..7968d4ab 100644
+--- a/internal/export/git.go
++++ b/internal/export/git.go
+@@ -15,6 +15,7 @@
+ package export
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"encoding/json"
+ 	"errors"
+@@ -147,6 +148,15 @@ var ErrNoItems = errors.New("export: no items to export")
+ // refuses before any fetch, checkout or commit.
+ var ErrRepoMismatch = errors.New("export: RepoURL does not match the existing clone")
+ 
++// ErrUnsafeExport is returned when a file the export is about to write
++// holds content that is neither the fetched remote baseline nor identical
++// to what this export would write — i.e. a community edit (an uncommitted
++// modification or an unpushed commit in the clone) that the write would
++// silently destroy. The engine refuses before any answer file is
++// overwritten; only the exact target files are checked, never unrelated
++// working-tree changes.
++var ErrUnsafeExport = errors.New("export: refusing to overwrite community edits")
++
+ // Export runs the full export flow for the given items:
+ //
+ //  1. Prepare the local clone (clone or pull)
+@@ -172,9 +182,10 @@ func (e *Engine) Export(ctx context.Context, items []ExportItem) (*ExportResult,
+ 		return nil, fmt.Errorf("prepare clone: %w", err)
+ 	}
+ 
+-	// Step 2: write each answer's files.
++	// Step 2: render each answer's files (no disk writes yet).
++	var pending []renderedFile
+ 	for _, item := range items {
+-		files, skip, err := e.writeItem(ctx, item)
++		files, skip, err := e.renderItem(ctx, item)
+ 		if err != nil {
+ 			// Name the request field the caller controls: an item that
+ 			// cannot be resolved is a request problem (a bogus
+@@ -187,16 +198,30 @@ func (e *Engine) Export(ctx context.Context, items []ExportItem) (*ExportResult,
+ 			res.ItemsSkipped = append(res.ItemsSkipped, *skip)
+ 			continue
+ 		}
+-		res.FilesWritten = append(res.FilesWritten, files...)
++		for _, f := range files {
++			res.FilesWritten = append(res.FilesWritten, f.relPath)
++		}
++		pending = append(pending, files...)
+ 		res.ItemsExported++
+ 	}
+ 
+-	// Step 3: nothing to do if no files were written.
+-	if len(res.FilesWritten) == 0 {
++	// Step 3: nothing to do if no files were rendered.
++	if len(pending) == 0 {
+ 		return res, nil
+ 	}
+ 
+-	// Step 4: stage, commit, push.
++	// Step 4: fail closed. If any target file holds community edits the
++	// write would destroy, refuse before touching disk (DF-OFF-BY-ONE-22).
++	if err := e.checkNoForeignContent(ctx, pending); err != nil {
++		return nil, err
++	}
++
++	// Step 5: write the rendered files.
++	if err := e.writeRendered(pending); err != nil {
++		return nil, err
++	}
++
++	// Step 6: stage, commit, push.
+ 	if e.skipCommit {
+ 		return res, nil
+ 	}
+@@ -276,11 +301,19 @@ func (e *Engine) prepareClone(ctx context.Context) error {
+ 	return nil
+ }
+ 
+-// writeItem fetches the class and answer from the store, formats the
+-// output files, and writes them to disk. Returns the list of file paths
+-// written (relative to repo root) or a SkipReason if the answer was
+-// skipped.
+-func (e *Engine) writeItem(ctx context.Context, item ExportItem) ([]string, *SkipReason, error) {
++// renderedFile is one file the export will write: a path relative to the
++// repo root plus the exact content to write. Files are rendered in memory
++// first so the fail-closed community-edit check can compare before any
++// bytes touch disk.
++type renderedFile struct {
++	relPath string
++	content []byte
++}
++
++// renderItem fetches the class and answer from the store and formats the
++// output files WITHOUT writing them to disk. Returns the rendered files
++// or a SkipReason if the answer was skipped.
++func (e *Engine) renderItem(ctx context.Context, item ExportItem) ([]renderedFile, *SkipReason, error) {
+ 	pc, err := e.store.GetProblemClass(ctx, item.ClassID)
+ 	if err != nil {
+ 		return nil, nil, fmt.Errorf("get problem class: %w", err)
+@@ -297,39 +330,90 @@ func (e *Engine) writeItem(ctx context.Context, item ExportItem) ([]string, *Ski
+ 		}, nil
+ 	}
+ 
+-	// Directory: {subtree}/{class}/{env}/{version}/
+-	dir := filepath.Join(e.cfg.LocalDir, e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version)
+-	if err := os.MkdirAll(dir, 0o755); err != nil {
+-		return nil, nil, fmt.Errorf("mkdir export dir: %w", err)
+-	}
+-
+ 	solutionMD := sanitizeHostPaths(formatSolutionMD(pc, answer))
+ 	evidenceMD := sanitizeHostPaths(formatEvidenceMD(answer))
+ 	signaturesJSON := sanitizeHostPaths(formatSignatures(answer))
+ 
+-	paths := []string{
+-		filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version, "solution.md"),
+-		filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version, "evidence.md"),
+-		filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version, "signatures.json"),
++	dir := filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version)
++	files := []renderedFile{
++		{filepath.Join(dir, "solution.md"), []byte(solutionMD)},
++		{filepath.Join(dir, "evidence.md"), []byte(evidenceMD)},
++		{filepath.Join(dir, "signatures.json"), []byte(signaturesJSON)},
+ 	}
++	return files, nil, nil
++}
+ 
+-	writes := []struct {
+-		relPath string
+-		content []byte
+-	}{
+-		{paths[0], []byte(solutionMD)},
+-		{paths[1], []byte(evidenceMD)},
+-		{paths[2], []byte(signaturesJSON)},
++// writeRendered writes each rendered file to disk under LocalDir,
++// creating parent directories as needed.
++func (e *Engine) writeRendered(files []renderedFile) error {
++	for _, f := range files {
++		full := filepath.Join(e.cfg.LocalDir, f.relPath)
++		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
++			return fmt.Errorf("mkdir export dir for %s: %w", f.relPath, err)
++		}
++		if err := os.WriteFile(full, f.content, 0o644); err != nil {
++			return fmt.Errorf("write %s: %w", f.relPath, err)
++		}
+ 	}
++	return nil
++}
++
++// checkNoForeignContent refuses the export when any target file holds
++// content that is neither the fetched remote baseline (origin/Branch) nor
++// identical to the content this export is about to write. Such content is
++// a community edit — an uncommitted modification or an unpushed commit in
++// the clone — and overwriting it would silently destroy work the export
++// does not own.
++//
++// Only the exact files this export will write are examined; unrelated
++// working-tree changes (inside or outside the subtree) never block an
++// export. Three states are safe:
++//
++//   - the file is absent locally and absent from the baseline (new answer);
++//   - the local content equals the baseline (clean fast-forward state —
++//     this also covers community edits that were PUSHED to the remote,
++//     whose resolution belongs to a conflict strategy, not this guard);
++//   - the local content already equals the rendered content (idempotent
++//     re-export over the producer's own unpushed export commit).
++func (e *Engine) checkNoForeignContent(ctx context.Context, files []renderedFile) error {
++	var conflicts []string
++	seen := make(map[string]bool, len(files))
++	for _, f := range files {
++		if seen[f.relPath] {
++			continue
++		}
++		seen[f.relPath] = true
+ 
+-	for _, w := range writes {
+-		full := filepath.Join(e.cfg.LocalDir, w.relPath)
+-		if err := os.WriteFile(full, w.content, 0o644); err != nil {
+-			return nil, nil, fmt.Errorf("write %s: %w", w.relPath, err)
++		full := filepath.Join(e.cfg.LocalDir, f.relPath)
++		current, curErr := os.ReadFile(full)
++		if curErr == nil && bytes.Equal(current, f.content) {
++			// No-op write — already exactly what we would write.
++			continue
+ 		}
++
++		// Read the baseline blob. A failure means the file is absent
++		// from origin/Branch (or the ref does not exist yet) — both
++		// read as "no baseline", which is fail-closed here: any local
++		// content then counts as foreign.
++		baseline, baseErr := e.gitOutput(ctx, e.cfg.LocalDir,
++			"show", "origin/"+e.cfg.Branch+":"+filepath.ToSlash(f.relPath))
++		if curErr == nil && baseErr == nil && bytes.Equal(current, []byte(baseline)) {
++			// Clean state: local content matches the fetched baseline.
++			continue
++		}
++		if curErr != nil && baseErr != nil {
++			// New file, absent locally and from the baseline.
++			continue
++		}
++		conflicts = append(conflicts, f.relPath)
+ 	}
+ 
+-	return paths, nil, nil
++	if len(conflicts) > 0 {
++		return fmt.Errorf("%w: %s in %s differ from both origin/%s and the export content; "+
++			"push or revert those changes, or point LocalDir at a fresh clone",
++			ErrUnsafeExport, strings.Join(conflicts, ", "), e.cfg.LocalDir, e.cfg.Branch)
++	}
++	return nil
+ }
+ 
+ // stageAndCommit stages all files in FilesWritten, creates a commit,
+diff --git a/internal/export/git_test.go b/internal/export/git_test.go
+index 3874b4b5..042291e2 100644
+--- a/internal/export/git_test.go
++++ b/internal/export/git_test.go
+@@ -1,6 +1,7 @@
+ package export
+ 
+ import (
++	"bytes"
+ 	"context"
+ 	"encoding/json"
+ 	"errors"
+@@ -352,6 +353,82 @@ func TestExport_FullFlow(t *testing.T) {
+ 	}
+ }
+ 
++func TestExport_RejectsModifiedExistingFileBeforeOverwrite(t *testing.T) {
++	skipIfNoGit(t)
++	setGitIdentity(t)
++	store, pc, answer := makeStore(t)
++	barePath := initBareRepo(t, "main")
++	seedRemote(t, barePath, "main")
++
++	localDir := filepath.Join(t.TempDir(), "clone")
++	e := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir}, store)
++	if _, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}}); err != nil {
++		t.Fatalf("initial Export: %v", err)
++	}
++	solutionPath := filepath.Join(localDir, "pre-solve-answers", pc.Title, answer.Env, answer.Version, "solution.md")
++	communityBytes := []byte("community edit\n")
++	if err := os.WriteFile(solutionPath, communityBytes, 0o644); err != nil {
++		t.Fatalf("write community edit: %v", err)
++	}
++
++	_, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
++	if !errors.Is(err, ErrUnsafeExport) {
++		t.Fatalf("Export error = %v, want ErrUnsafeExport", err)
++	}
++	got, readErr := os.ReadFile(solutionPath)
++	if readErr != nil {
++		t.Fatalf("read solution after rejected export: %v", readErr)
++	}
++	if !bytes.Equal(got, communityBytes) {
++		t.Fatalf("rejected export changed community bytes: got %q, want %q", got, communityBytes)
++	}
++}
++
++func TestExport_RejectsUnpushedCommunityCommitBeforeOverwrite(t *testing.T) {
++	skipIfNoGit(t)
++	setGitIdentity(t)
++	store, pc, answer := makeStore(t)
++	barePath := initBareRepo(t, "main")
++	seedRemote(t, barePath, "main")
++
++	localDir := filepath.Join(t.TempDir(), "clone")
++	e := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir}, store)
++	if _, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}}); err != nil {
++		t.Fatalf("initial Export: %v", err)
++	}
++	solutionPath := filepath.Join(localDir, "pre-solve-answers", pc.Title, answer.Env, answer.Version, "solution.md")
++	communityBytes := []byte("community commit edit\n")
++	if err := os.WriteFile(solutionPath, communityBytes, 0o644); err != nil {
++		t.Fatalf("write community edit: %v", err)
++	}
++	relSolutionPath, err := filepath.Rel(localDir, solutionPath)
++	if err != nil {
++		t.Fatalf("relative solution path: %v", err)
++	}
++	addCmd := exec.Command("git", "add", relSolutionPath)
++	addCmd.Dir = localDir
++	if out, err := addCmd.CombinedOutput(); err != nil {
++		t.Fatalf("git add: %v\n%s", err, out)
++	}
++	commitCmd := exec.Command("git", "commit", "-m", "community edit")
++	commitCmd.Dir = localDir
++	if out, err := commitCmd.CombinedOutput(); err != nil {
++		t.Fatalf("git commit: %v\n%s", err, out)
++	}
++
++	_, err = e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
++	if !errors.Is(err, ErrUnsafeExport) {
++		t.Fatalf("Export error = %v, want ErrUnsafeExport", err)
++	}
++	got, readErr := os.ReadFile(solutionPath)
++	if readErr != nil {
++		t.Fatalf("read solution after rejected export: %v", readErr)
++	}
++	if !bytes.Equal(got, communityBytes) {
++		t.Fatalf("rejected export changed committed community bytes: got %q, want %q", got, communityBytes)
++	}
++}
++
+ func TestExport_DryRun(t *testing.T) {
+ 	skipIfNoGit(t)
+ 	setGitIdentity(t)
+diff --git a/pkg/api/openapi.yaml b/pkg/api/openapi.yaml
+index 527f779c..a86995f6 100644
+--- a/pkg/api/openapi.yaml
++++ b/pkg/api/openapi.yaml
+@@ -748,6 +748,30 @@ components:
+           type: integer
+         conflicted:
+           type: integer
++        parse_errors:
++          type: integer
++        details:
++          type: array
++          items:
++            $ref: '#/components/schemas/ImportDetail'
++
++    ImportDetail:
++      type: object
++      properties:
++        class_title:
++          type: string
++        env:
++          type: string
++        version:
++          type: string
++        lang:
++          type: string
++        action:
++          type: string
++        answer_id:
++          type: integer
++        reason:
++          type: string
+ 
+     TaxonomyResponse:
+       type: object
