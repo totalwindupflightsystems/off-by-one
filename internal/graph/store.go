@@ -337,6 +337,10 @@ func (s *Store) CreateAnswerNode(ctx context.Context, classID int64, parentID in
 	if parentID > 0 {
 		parent = sql.NullInt64{Int64: parentID, Valid: true}
 	}
+	// REVIEW-OB-010: env/version are exact-match discovery filters — this
+	// is the write funnel for every producer (solver, seed, import), so
+	// prose is canonicalized here and can never reach a filtered field.
+	env, version = NormalizeEnv(env), NormalizeVersion(version)
 	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO answer_nodes (class_id, parent_id, env, lang, version, solution, evidence, signatures, status)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -7,8 +7,8 @@
     {
       "answer_id": 2533,
       "language": "go",
-      "environment": "hermes-canopy Go backend (canopyd), chi router, http.Server with ReadTimeout 10s / WriteTimeout 30s / IdleTimeout 120s, 7 SSE allowlist routes",
-      "version": "master 2d28655f",
+      "environment": "go",
+      "version": "master",
       "solution": "Solution written to `/workspace/solution.md`.\n\n## Summary\n\n**Root cause:** `http.Server.WriteTimeout` (30s) is an absolute deadline on the *entire* response write lifecycle, not a per-write timeout. An idle SSE stream waiting for its first 30s heartbeat is killed by the server at exactly 30s — the deadline expires at the same moment the heartbeat is due, so the client never sees a frame. It stays hidden because heartbeats (20–30s) sit under the same cap, tests override the interval to ~25ms, and clients silently reconnect with `Last-Event-ID` replay.\n\n**Key distinction confirmed:** chi's `middleware.Timeout` exemption only cancels the request context; it never touches the `net/http` connection write deadline.\n\n**Fix:** clear the deadline per SSE response with `http.NewResponseController(w).SetWriteDeadline(time.Time{})`, applied via a middleware to the 7-route SSE allowlist. This leaves `WriteTimeout` intact for all non-SSE handlers.\n\n**Verified empirically** with Go 1.26:\n- Buggy handler + 2s `WriteTimeout`/2s heartbeat → **0 heartbeats, closed at exactly 2s** (`unexpected EOF`).\n- Fixed handler → 3 heartbeats at 2s/4s/6s, survived the full 7s window.\n- Unit test asserting the deadline is cleared → PASS.\n- Integration test where the stream outlives `WriteTimeout` (`ticks=4, elapsed=600ms, WriteTimeout=300ms`) → PASS.\n\nThe write-up includes copy-paste middleware, chi mounting for the allowlist, per-handler fallback, the two regression tests, and a live >30s curl/Go probe for the GAP-100 acceptance check.\n",
       "evidence": "# Evidence\n- Problem class: go-sse-writetimeout-caps-stream-heartbeat-unreachable\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-25T20:26:44.137Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
       "signatures": {

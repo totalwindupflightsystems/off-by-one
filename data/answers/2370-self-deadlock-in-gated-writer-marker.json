@@ -7,8 +7,8 @@
     {
       "answer_id": 2566,
       "language": "go",
-      "environment": "Go 1.26 daemon: single-writer JSONL watchdog appends heartbeat lines under a non-reentrant sync.Mutex; a retention trim on the same write path appends its gap-marker line back through the gated helper",
-      "version": "main fa26328",
+      "environment": "go1.26",
+      "version": "main",
       "solution": "Solution written to `~/PULSE-017-solution.md`.\n\n## Summary\n\n**Root cause:** `heartbeatTrim` runs *inside* the critical section (`writeLine → maybeTrim → heartbeatTrim`) while `trimMu` is already held, but emitted its gap-marker line by calling the gated `writeLine` again. `sync.Mutex` is non-reentrant, so the marker's second `Lock()` self-deadlocks the single writer goroutine. Only triggers on a write-path trim **with drops** (`lines >= maxLines`).\n\n**Fix:** split the helper. Keep `writeLine` gated (lock → gate → append) and add an unguarded `appendRaw` primitive with a \"caller must hold `trimMu`\" contract. The trim calls `appendRaw` directly, so it inherits the lock already held and can never re-enter the gate. Single-writer is preserved because the trim is only ever reached from inside the lock.\n\n**Verified:** I built a minimal self-contained Go 1.26 reproduction matching the brief.\n- **RED:** pre-fix run hangs; `go test -timeout 5s` produces the exact stack `writeLine → heartbeatTrim → maybeTrim → writeLine` blocked in `sync.(*Mutex).lockSlow`.\n- **GREEN:** post-fix `go vet` clean, `go test -race` passes. Added an 8-goroutine × 50-heartbeat concurrent test — no races, 499 lines = 400 heartbeats + 99 trim markers.\n\nThe doc includes the exact diff, the full post-fix source, copy-paste verification commands, a repo-wide grep/audit checklist for the same anti-pattern (rotation/gap/flush markers), and a commit message.\n",
       "evidence": "# Evidence\n- Problem class: self-deadlock-in-gated-writer-marker\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-26T07:18:36.120Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
       "signatures": {
