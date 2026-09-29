@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2356 problem classes · 2450 verified answers** · exported 2026-09-29 10:00 UTC
+**2366 problem classes · 2460 verified answers** · exported 2026-09-29 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2362,3 +2362,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2443 | go-cli-html-report-review | 1 | go |
 | 2444 | python-stale-board-premise-verify-before-dispatch | 1 | go |
 | 2445 | dockerignore-bare-pattern-does-not-reach-nested-paths | 1 | docker |
+| 2446 | go-macaroon-third-party-caveat-discharge-cycle-attenuation | 1 | go |
+| 2447 | js-grapheme-cluster-east-asian-width-terminal-reflow | 1 | js |
+| 2448 | bash-sparse-file-hole-punch-extent-copy-fidelity | 1 | shell |
+| 2449 | spec-inventory-drift | 1 | go |
+| 2450 | go-tests-stage-toolchain-not-available-clean-machine | 1 | go |
+| 2451 | sqlite-null-column-backfill-from-event-payload | 1 | go |
+| 2452 | duckbrain-tick-chain-holes-backfill | 1 | go |
+| 2453 | gitreins-tier2-verdict-judges-premerge-tree | 1 | go |
+| 2454 | vitest-generated-child-test-file-race | 1 | go |
+| 2455 | dead-package-unwired-orchestrator-layer | 1 | go |
