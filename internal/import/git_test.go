@@ -884,3 +884,124 @@ func TestImportLinksSimilarEdges(t *testing.T) {
 		t.Errorf("edges created on re-import = %d, want 0", edges)
 	}
 }
+
+// --- Conflict strategy tests (DF-OFF-BY-ONE-24) ----------------------------
+
+// TestImportAnswer_ConflictStrategy covers the differing-content branch of
+// importAnswer for every conflict_strategy value: "" and "replace" overwrite
+// (backward-compatible default), "skip" keeps the existing answer, and
+// "manual" reports an ActionConflict without overwriting.
+func TestImportAnswer_ConflictStrategy(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name         string
+		strategy     string
+		wantAction   Action
+		wantSolution string // stored solution after the import
+	}{
+		{"default empty behaves as replace", "", ActionUpdated, "NEW solution text."},
+		{"replace overwrites", "replace", ActionUpdated, "NEW solution text."},
+		{"skip keeps existing", "skip", ActionSkipped, "OLD solution text."},
+		{"manual reports conflict", "manual", ActionConflict, "OLD solution text."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := makeStore(t)
+			pc, _, err := store.UpsertProblemClass(ctx, "conflict-class", "")
+			if err != nil {
+				t.Fatalf("UpsertProblemClass: %v", err)
+			}
+			answerID, err := store.CreateAnswerNode(ctx, pc.ID, 0,
+				"docker", "go", "go-1.26",
+				"OLD solution text.", "OLD evidence.", "{}")
+			if err != nil {
+				t.Fatalf("CreateAnswerNode: %v", err)
+			}
+
+			engine := NewEngine(Config{ConflictStrategy: tc.strategy}, store)
+			parsed := ParsedAnswer{
+				ClassTitle: "conflict-class",
+				Env:        "docker",
+				Version:    "go-1.26",
+				Lang:       "go",
+				Solution:   "NEW solution text.",
+				Evidence:   "NEW evidence.",
+				Signatures: `{"new":true}`,
+			}
+			detail, _, err := engine.importAnswer(ctx, parsed)
+			if err != nil {
+				t.Fatalf("importAnswer: %v", err)
+			}
+			if detail.Action != tc.wantAction {
+				t.Errorf("action = %q, want %q", detail.Action, tc.wantAction)
+			}
+			if detail.AnswerID != answerID {
+				t.Errorf("answer_id = %d, want existing %d", detail.AnswerID, answerID)
+			}
+			if (tc.strategy == "skip" || tc.strategy == "manual") &&
+				!strings.Contains(detail.Reason, "conflict_strategy="+tc.strategy) {
+				t.Errorf("reason = %q, want it to name conflict_strategy=%s", detail.Reason, tc.strategy)
+			}
+
+			got, err := store.GetAnswerNode(ctx, answerID)
+			if err != nil {
+				t.Fatalf("GetAnswerNode: %v", err)
+			}
+			if got.Solution != tc.wantSolution {
+				t.Errorf("stored solution = %q, want %q", got.Solution, tc.wantSolution)
+			}
+		})
+	}
+}
+
+// TestImport_ConflictStrategyManual runs the full Import flow with
+// conflict_strategy=manual and verifies the conflict is counted into
+// res.Conflicted while the existing answer is left untouched.
+func TestImport_ConflictStrategyManual(t *testing.T) {
+	skipIfNoGit(t)
+	store := makeStore(t)
+
+	// Pre-populate the graph with an existing answer whose content differs
+	// from what the source repo carries.
+	ctx := context.Background()
+	pc, _, err := store.UpsertProblemClass(ctx, "docker-permission-denied", "")
+	if err != nil {
+		t.Fatalf("UpsertProblemClass: %v", err)
+	}
+	oldAnswerID, err := store.CreateAnswerNode(ctx, pc.ID, 0,
+		"docker", "go", "go-1.26",
+		"OLD solution text.", "OLD evidence.", "{}")
+	if err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+
+	barePath := setupSourceRepo(t, "main")
+
+	localDir := filepath.Join(t.TempDir(), "clone")
+	e := NewEngine(Config{
+		RepoURL:          barePath,
+		Branch:           "main",
+		LocalDir:         localDir,
+		ConflictStrategy: "manual",
+	}, store)
+
+	res, err := e.Import(context.Background())
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if res.Conflicted != 1 {
+		t.Errorf("Conflicted = %d, want 1", res.Conflicted)
+	}
+	if res.Updated != 0 {
+		t.Errorf("Updated = %d, want 0 (manual must not overwrite)", res.Updated)
+	}
+
+	// The existing answer must be unchanged.
+	existing, err := store.GetAnswerNode(ctx, oldAnswerID)
+	if err != nil {
+		t.Fatalf("GetAnswerNode: %v", err)
+	}
+	if existing.Solution != "OLD solution text." {
+		t.Errorf("existing solution = %q, want it untouched", existing.Solution)
+	}
+}

@@ -1009,13 +1009,22 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "source_repo is required")
 		return
 	}
+	switch req.ConflictStrategy {
+	case "", "skip", "replace", "manual":
+		// valid
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request",
+			"conflict_strategy must be one of: skip, replace, manual")
+		return
+	}
 
 	engine := importgit.NewEngine(importgit.Config{
-		RepoURL:       req.SourceRepo,
-		Branch:        req.Branch,
-		LocalDir:      s.ImportLocalDir,
-		SubtreePrefix: "pre-solve-answers",
-		GitPath:       "git",
+		RepoURL:          req.SourceRepo,
+		Branch:           req.Branch,
+		LocalDir:         s.ImportLocalDir,
+		SubtreePrefix:    "pre-solve-answers",
+		GitPath:          "git",
+		ConflictStrategy: req.ConflictStrategy,
 	}, s.Store)
 
 	result, err := engine.Import(r.Context())

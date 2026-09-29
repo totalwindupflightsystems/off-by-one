@@ -47,6 +47,16 @@ type Config struct {
 
 	// GitPath is the path to the git binary. Defaults to "git".
 	GitPath string
+
+	// ConflictStrategy controls how the engine handles an existing answer
+	// whose content differs from the imported one. One of "skip",
+	// "replace", or "manual"; "" defaults to "replace" for backward
+	// compatibility — the documented and historical behavior.
+	//   - "replace": overwrite the existing answer (Action "updated").
+	//   - "skip": leave the existing answer untouched (Action "skipped").
+	//   - "manual": leave the existing answer untouched and report the
+	//     conflict (Action "conflict", counted into ImportResult.Conflicted).
+	ConflictStrategy string
 }
 
 // ParsedAnswer is one answer parsed from the source repo's directory tree.
@@ -409,7 +419,25 @@ func (e *Engine) importAnswer(ctx context.Context, ans ParsedAnswer) (ImportDeta
 		return detail, 0, nil
 	}
 
-	// Content differs — update the existing answer.
+	// Content differs — honor the configured conflict strategy.
+	switch e.cfg.ConflictStrategy {
+	case "skip":
+		// Do not overwrite: the existing answer wins.
+		detail.Action = ActionSkipped
+		detail.AnswerID = existing.ID
+		detail.Reason = "existing content differs (conflict_strategy=skip)"
+		return detail, 0, nil
+	case "manual":
+		// Do not overwrite: surface the conflict for a human to resolve.
+		// The engine counts ActionConflict into res.Conflicted.
+		detail.Action = ActionConflict
+		detail.AnswerID = existing.ID
+		detail.Reason = "existing content differs (conflict_strategy=manual)"
+		return detail, 0, nil
+	}
+
+	// "" or "replace" — update the existing answer (backward-compatible
+	// default: the documented and historical behavior).
 	_, err = e.store.DB().ExecContext(ctx,
 		`UPDATE answer_nodes SET solution = ?, evidence = ?, signatures = ? WHERE id = ?`,
 		ans.Solution, ans.Evidence, ans.Signatures, existing.ID)

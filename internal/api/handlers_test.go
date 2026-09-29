@@ -2869,3 +2869,32 @@ func TestSubmitMultipartNoAttachmentsDir(t *testing.T) {
 		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
+
+// TestImportInvalidConflictStrategy verifies the handler rejects an unknown
+// conflict_strategy with 400 invalid_request naming the field
+// (DF-OFF-BY-ONE-24).
+func TestImportInvalidConflictStrategy(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	s.ImportLocalDir = "/tmp/obo-test-import"
+
+	rr := do(t, s, "POST", "/api/v1/import", importRequest{
+		SourceRepo:       "https://github.com/example/repo.git",
+		ConflictStrategy: "bogus",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != "invalid_request" {
+		t.Errorf("error = %q, want invalid_request", body.Error)
+	}
+	if !strings.Contains(body.Message, "conflict_strategy") {
+		t.Errorf("message = %q, want it to name conflict_strategy", body.Message)
+	}
+}
