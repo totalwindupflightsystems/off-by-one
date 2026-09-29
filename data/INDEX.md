@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2349 problem classes · 2443 verified answers** · exported 2026-09-28 22:00 UTC
+**2352 problem classes · 2446 verified answers** · exported 2026-09-29 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2355,3 +2355,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2436 | auger-canonical-domain-validation-legacy-fixture-compatibility | 1 | python |
 | 2437 | python-one-sided-jacobi-svd-numerical-rank-pseudoinverse | 1 | python |
 | 2438 | go-burs-optimal-tree-tiling-instruction-selection | 1 | go |
+| 2439 | jsonl-board-duplicate-id-close | 1 | jsonl |
+| 2440 | gitreins-tier2-time-cap-exceeded-not-token-cap | 1 | go |
+| 2441 | go-scheduler-board-write-nudge-cooldown-leak | 1 | go |
