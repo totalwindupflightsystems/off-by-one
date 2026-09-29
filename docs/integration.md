@@ -36,7 +36,7 @@ make build
 
 > **Development note:** `--skip-sandbox` is for development environments that lack the solver dependencies (bubblewrap and pi-agent). It skips sandbox setup entirely, so the solver is not constructed and the solve cron loop is not started — submitted problems queue up but are not solved until the server is restarted with the solver enabled. The HTTP API (submit, poll, discover, taxonomy, stats) works normally, which makes the flag useful for exercising the integration surface without solving anything.
 
-Required environment variables and flags are documented in `README.md` and summarized at the bottom of this file. The lab needs `DEEPSEEK_API_KEY` in the environment when the solver is enabled (bwrap + pi-agent). `OPENROUTER_API_KEY` is optional and only used for embeddings.
+Required environment variables and flags are documented in `README.md` and summarized at the bottom of this file. The lab needs `DEEPSEEK_API_KEY` in the environment when the solver is enabled (bwrap + pi-agent). `OPENROUTER_API_KEY` is optional and used only by the internal DS-003 embeddings package, which is experimental and unwired — it has no production callers and no API route, so the key has no runtime effect on the served API.
 
 Health check:
 
@@ -404,7 +404,7 @@ Database path resolution: the `-db` flag wins, then the `OFF_BY_ONE_DB` environm
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `DEEPSEEK_API_KEY` | Yes (for solver) | — | DeepSeek API key for Pi Agent |
-| `OPENROUTER_API_KEY` | No | — | Optional embeddings key |
+| `OPENROUTER_API_KEY` | No | — | Optional; experimental — read only by the unwired DS-003 embeddings package, no runtime effect on the served API |
 | `OFF_BY_ONE_PORT` | No | `8766` | HTTP port |
 | `OFF_BY_ONE_HOST` | No | `127.0.0.1` | HTTP listen host (loopback-only by default; set `0.0.0.0` — or set the variable to an empty value — to listen on all interfaces) |
 | `OFF_BY_ONE_DB` | No | `./off-by-one.db` | SQLite path |
