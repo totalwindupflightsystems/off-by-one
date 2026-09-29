@@ -464,11 +464,12 @@ What's checked:
 
 ### CI/CD
 
-GitHub Actions runs on every push to `master` and every PR — three jobs in `.github/workflows/ci.yml`:
+GitHub Actions runs on every push to `master` and every PR — four jobs in `.github/workflows/ci.yml`:
 
 - **`Test (short)`** — matrix **Go 1.26**; steps: Checkout → Setup Go → Cache modules → Build → Vet → *Install bubblewrap* → *Lift the AppArmor unprivileged-userns restriction* → *Ensure setuid-root bwrap fallback* → Test (short).
 - **`Transport retry self-test`** — runs `scripts/tests/transport-retry-selftest.sh` against a scratch DB (needs `sqlite3`).
 - **`Deploy gate self-test`** — `make check-deploy-test` against an unshallowed checkout so the version stamp resolves.
+- **`Binary seed probe`** — builds the binary, seeds a throwaway DB from the bundled corpus, and probes discovery (OB-GAP-065) so a broken seed path cannot reach the deployed artifact.
 
 The three bubblewrap steps exist because the sandbox tests are only *real* when bwrap can actually create a user namespace. Without the install they silently skip (`BwrapAvailable()`); with the install but without the AppArmor lift, Ubuntu 24.04 runners fail with `bwrap: setting up uid map: Permission denied` — the runner image ships `kernel.apparmor_restrict_unprivileged_userns=1`. CI lifts the knob (fail-open if the kernel has no such sysctl) and additionally forces the setuid-root fallback, so the tests run *and* fail loudly instead of degrading to skips.
 
