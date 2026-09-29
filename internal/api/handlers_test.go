@@ -2784,7 +2784,7 @@ func TestSubmitWithFiles(t *testing.T) {
 	fw2, _ := mw.CreateFormFile("trace", "trace.txt")
 	_, _ = fw2.Write([]byte("goroutine 1 [running]:\n"))
 
-	mw.Close()
+	_ = mw.Close()
 
 	req := httptest.NewRequest("POST", "/api/v1/problems/submit", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -2818,7 +2818,7 @@ func TestSubmitMultipartWithoutDataField(t *testing.T) {
 	mw := multipart.NewWriter(&buf)
 	fw, _ := mw.CreateFormFile("file", "test.txt")
 	_, _ = fw.Write([]byte("content"))
-	mw.Close()
+	_ = mw.Close()
 
 	req := httptest.NewRequest("POST", "/api/v1/problems/submit", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())
@@ -2858,7 +2858,7 @@ func TestSubmitMultipartNoAttachmentsDir(t *testing.T) {
 	_, _ = w.Write([]byte(`{"problem_class":"no-dir","cadence":"post-debug"}`))
 	fw, _ := mw.CreateFormFile("file", "test.txt")
 	_, _ = fw.Write([]byte("content"))
-	mw.Close()
+	_ = mw.Close()
 
 	req := httptest.NewRequest("POST", "/api/v1/problems/submit", &buf)
 	req.Header.Set("Content-Type", mw.FormDataContentType())

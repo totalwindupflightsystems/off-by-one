@@ -398,7 +398,7 @@ func (q *Queue) scanEntries(ctx context.Context, qry string, args ...any) ([]Ent
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var entries []Entry
 	for rows.Next() {
 		e, err := scanEntryRows(rows)

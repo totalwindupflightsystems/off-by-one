@@ -356,7 +356,7 @@ func saveUpload(dir string, fh *multipart.FileHeader) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
 
 	// Sanitize filename — use base name only, no path traversal.
 	name := filepath.Base(fh.Filename)
@@ -376,7 +376,7 @@ func saveUpload(dir string, fh *multipart.FileHeader) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer dst.Close()
+	defer func() { _ = dst.Close() }()
 
 	if _, err := io.Copy(dst, src); err != nil {
 		return "", err
@@ -705,7 +705,7 @@ func (s *Server) handleTaxonomy(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	var tree []taxonomyNode = []taxonomyNode{}
+	tree := []taxonomyNode{}
 	for _, p := range rows {
 		node := taxonomyNode{
 			Title:       p.Title,

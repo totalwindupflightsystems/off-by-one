@@ -202,7 +202,7 @@ func udfQueryPlan(t *testing.T, ctx context.Context, db *sql.DB, qry string) str
 	if err != nil {
 		t.Fatalf("explain: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out strings.Builder
 	for rows.Next() {
 		var id, parent, notused int
@@ -227,7 +227,7 @@ func udfProgram(t *testing.T, ctx context.Context, db *sql.DB, qry string, args 
 	if err != nil {
 		t.Fatalf("explain program: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	cols, err := rows.Columns()
 	if err != nil {
 		t.Fatalf("program columns: %v", err)

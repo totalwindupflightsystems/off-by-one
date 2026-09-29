@@ -153,7 +153,7 @@ func (m *mustermock) postJSON(path string, body any) (int, map[string]any) {
 		m.logf("post %s: %v", path, err)
 		return 0, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	var out map[string]any
 	_ = json.Unmarshal(data, &out)
@@ -167,7 +167,7 @@ func (m *mustermock) getJSON(path string) (int, map[string]any) {
 		m.logf("get %s: %v", path, err)
 		return 0, nil
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	data, _ := io.ReadAll(resp.Body)
 	var out map[string]any
 	_ = json.Unmarshal(data, &out)

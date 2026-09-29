@@ -42,7 +42,7 @@ func TestInitEmbeddings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	if err := store.InitEmbeddings(ctx); err != nil {
@@ -70,7 +70,7 @@ func TestStoreAndGetEmbedding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ctx := context.Background()
 	if err := store.InitEmbeddings(ctx); err != nil {
@@ -138,7 +138,7 @@ func TestStoreEmbeddingValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 	_ = store.InitEmbeddings(ctx)
 
@@ -186,7 +186,7 @@ func TestSimilaritySearch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 	_ = store.InitEmbeddings(ctx)
 
@@ -328,7 +328,7 @@ func TestEmbedAndStoreClass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	classID, _ := store.CreateProblemClass(ctx, "embed-store-test", "A class to embed")
@@ -350,7 +350,7 @@ func TestEmbedAndStoreClass_NilEmbedder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	classID, _ := store.CreateProblemClass(ctx, "nil-embed-test", "desc")
@@ -365,7 +365,7 @@ func TestSimilarClasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	emb := newMockEmbedder()
@@ -389,7 +389,7 @@ func TestDiscoveryWithSimilar(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	emb := newMockEmbedder()
@@ -428,7 +428,7 @@ func TestDiscoveryWithSimilar_NilEmbedder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ctx := context.Background()
 
 	c1, _ := store.CreateProblemClass(ctx, "nil-disco", "nil embedder test")

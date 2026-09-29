@@ -288,7 +288,7 @@ func (s *Store) similarCandidates(ctx context.Context, classID int64, srcTokens 
 	if err != nil {
 		return nil, fmt.Errorf("list candidate classes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []similarCandidate
 	for rows.Next() {
@@ -344,7 +344,7 @@ func (s *Store) loadTitleIndex(ctx context.Context) (*titleIndex, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list candidate classes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	idx := &titleIndex{byToken: make(map[string][]int)}
 	for rows.Next() {

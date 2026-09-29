@@ -298,7 +298,7 @@ func referenceCandidates(t *testing.T, s *Store, ctx context.Context, classID in
 	if err != nil {
 		t.Fatalf("reference candidate scan: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var out []similarCandidate
 	for rows.Next() {
@@ -389,7 +389,7 @@ func referenceLinkAll(t *testing.T, s *Store, ctx context.Context, minShared, ma
 	if err := rows.Err(); err != nil {
 		t.Fatalf("reference: list ids: %v", err)
 	}
-	rows.Close()
+	_ = rows.Close()
 
 	all := make(edgeSet)
 	for _, id := range ids {
@@ -412,7 +412,7 @@ func dbEdgeSet(t *testing.T, s *Store, ctx context.Context) edgeSet {
 	if err != nil {
 		t.Fatalf("select problem_edges: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	out := make(edgeSet)
 	for rows.Next() {

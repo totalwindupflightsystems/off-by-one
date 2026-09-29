@@ -126,7 +126,7 @@ func (s *Store) Search(ctx context.Context, query, env, lang, status string, lim
 	if err != nil {
 		return nil, fmt.Errorf("search query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []SearchHit
 	for rows.Next() {
 		var hit SearchHit

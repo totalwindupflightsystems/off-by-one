@@ -86,7 +86,7 @@ func (e *OpenRouterEmbedder) Embed(ctx context.Context, text string) ([]float64,
 	if err != nil {
 		return nil, fmt.Errorf("graph: embed request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		var errBody struct {
@@ -211,7 +211,7 @@ func (s *Store) SimilaritySearch(ctx context.Context, queryVec []float64, limit 
 	if err != nil {
 		return nil, fmt.Errorf("graph: similarity search: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var candidates []candidate
 	for rows.Next() {

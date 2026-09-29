@@ -208,7 +208,7 @@ func (b *Bridge) fetchSpec(ctx context.Context) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		return nil, fmt.Errorf("openapi.json returned %d", resp.StatusCode)
 	}
@@ -239,7 +239,7 @@ func (b *Bridge) HealthCheck(ctx context.Context) *HealthResult {
 		result.Error = fmt.Sprintf("server unreachable: %v", err)
 		return result
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	result.ServerUp = resp.StatusCode == 200
 
 	// 2. Validate the spec.
@@ -262,7 +262,7 @@ func (b *Bridge) HealthCheck(ctx context.Context) *HealthResult {
 		mReq, _ := http.NewRequestWithContext(ctx, "GET", musterURL+"/health", nil)
 		mResp, mErr := b.client.Do(mReq)
 		if mErr == nil {
-			mResp.Body.Close()
+			_ = mResp.Body.Close()
 			result.MusterUp = mResp.StatusCode == 200
 		}
 	}

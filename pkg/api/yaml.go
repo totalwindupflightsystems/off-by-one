@@ -184,14 +184,16 @@ func splitYAMLLines(data []byte) ([]yamlLine, error) {
 			continue
 		}
 		indent := 0
+	indentLoop:
 		for _, r := range s {
-			if r == ' ' {
+			switch r {
+			case ' ':
 				indent++
-			} else if r == '\t' {
+			case '	':
 				// Tabs are forbidden in YAML for indentation.
 				return nil, fmt.Errorf("line %d: tab in indentation", i+1)
-			} else {
-				break
+			default:
+				break indentLoop
 			}
 		}
 		out = append(out, yamlLine{indent: indent, text: s, lineNo: i + 1})
@@ -612,9 +614,10 @@ func flowInterior(s string, closer byte) (string, bool) {
 			escaped = false
 			continue
 		case inDouble:
-			if c == '\\' {
+			switch c {
+			case '\\':
 				escaped = true
-			} else if c == '"' {
+			case '"':
 				inDouble = false
 			}
 			continue
@@ -668,9 +671,10 @@ func splitFlowTopLevel(s string) []string {
 			escaped = false
 			continue
 		case inDouble:
-			if c == '\\' {
+			switch c {
+			case '\\':
 				escaped = true
-			} else if c == '"' {
+			case '"':
 				inDouble = false
 			}
 			continue
@@ -718,9 +722,10 @@ func findFlowColon(s string) int {
 			escaped = false
 			continue
 		case inDouble:
-			if c == '\\' {
+			switch c {
+			case '\\':
 				escaped = true
-			} else if c == '"' {
+			case '"':
 				inDouble = false
 			}
 			continue

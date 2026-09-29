@@ -26,7 +26,7 @@ func sqliteQueryPlan(t *testing.T, ctx context.Context, q *Queue, qry string, ar
 	if err != nil {
 		t.Fatalf("explain: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out strings.Builder
 	for rows.Next() {
 		var id, parent, notused int
@@ -58,7 +58,7 @@ func sqliteVDBEProgram(t *testing.T, ctx context.Context, q *Queue, qry string, 
 	if err != nil {
 		t.Fatalf("explain program: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	cols, err := rows.Columns()
 	if err != nil {
 		t.Fatalf("program columns: %v", err)

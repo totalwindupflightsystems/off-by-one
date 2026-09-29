@@ -326,10 +326,10 @@ func registerServerFlags(fs *flag.FlagSet) *serverConfig {
 // so --help/-h (ErrHelp) and parse errors all show it.
 func printUsage() {
 	out := flag.CommandLine.Output()
-	fmt.Fprintf(out, "Usage of off-by-one:\n")
-	fmt.Fprintf(out, "\nCommands:\n")
-	fmt.Fprintf(out, "  seed    one-shot corpus loader: merge data/answers/ into the SQLite DB (see README Quick Start)\n")
-	fmt.Fprintf(out, "\nFlags:\n")
+	_, _ = fmt.Fprintf(out, "Usage of off-by-one:\n")
+	_, _ = fmt.Fprintf(out, "\nCommands:\n")
+	_, _ = fmt.Fprintf(out, "  seed    one-shot corpus loader: merge data/answers/ into the SQLite DB (see README Quick Start)\n")
+	_, _ = fmt.Fprintf(out, "\nFlags:\n")
 	flag.PrintDefaults()
 }
 

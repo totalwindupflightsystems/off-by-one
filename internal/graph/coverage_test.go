@@ -26,7 +26,7 @@ func TestStore_OpenShared(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenShared: %v", err)
 	}
-	defer s.Close()
+	defer func() { _ = s.Close() }()
 	// Verify the DB is usable.
 	ctx := context.Background()
 	if _, err := s.CreateProblemClass(ctx, "shared-test", "desc"); err != nil {
@@ -124,7 +124,7 @@ func TestStore_ListProblemClasses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenShared empty: %v", err)
 	}
-	defer empty.Close()
+	defer func() { _ = empty.Close() }()
 	classes, err := empty.ListProblemClasses(ctx, 10, 0)
 	if err != nil {
 		t.Fatalf("ListProblemClasses on empty: %v", err)

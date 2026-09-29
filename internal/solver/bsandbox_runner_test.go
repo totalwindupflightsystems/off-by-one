@@ -37,7 +37,7 @@ func TestBSandboxRunner_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph.OpenShared: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	// Build a small helper script and place it in the workspace
 	// so the bwrap can exec /bin/sh with it as an argument.

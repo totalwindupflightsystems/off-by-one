@@ -19,7 +19,7 @@ func TestHandler_RootServesIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: got %d, want 200", resp.StatusCode)
@@ -47,7 +47,7 @@ func TestHandler_CSSAsset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /css/style.css: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: got %d, want 200", resp.StatusCode)
@@ -73,7 +73,7 @@ func TestHandler_JSAsset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /js/app.js: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: got %d, want 200", resp.StatusCode)
@@ -98,7 +98,7 @@ func TestHandler_SearchJSAsset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /js/search.js: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status: got %d, want 200", resp.StatusCode)
@@ -127,7 +127,7 @@ func TestHandler_SPAFallback(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GET %s: %v", p, err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
 				t.Fatalf("status: got %d, want 200", resp.StatusCode)
 			}
@@ -150,7 +150,7 @@ func TestHandler_APIPathNotHandled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /api/v1/stats: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status: got %d, want 404", resp.StatusCode)
 	}
@@ -167,7 +167,7 @@ func TestHandler_UnknownAssetReturns404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /js/nonexistent.js: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status: got %d, want 404", resp.StatusCode)
 	}
@@ -184,7 +184,7 @@ func TestHandler_HeadOnRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HEAD /: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status: got %d, want 200", resp.StatusCode)
 	}
@@ -205,7 +205,7 @@ func TestHandler_PostReturns404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST /: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status: got %d, want 404", resp.StatusCode)
 	}

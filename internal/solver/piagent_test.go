@@ -291,7 +291,7 @@ func TestExecutor_Solve_MissingBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph.OpenShared: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ex := NewExecutor(Config{PiAgentPath: "/nonexistent/pi-agent"}, nil, store)
 	_, err = ex.Solve(context.Background(), sampleEntry("sub-x"))
 	if !errors.Is(err, ErrPiAgentNotFound) {
@@ -304,7 +304,7 @@ func TestExecutor_Solve_EmptyBinaryPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph.OpenShared: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ex := NewExecutor(Config{}, nil, store)
 	_, err = ex.Solve(context.Background(), sampleEntry("sub-y"))
 	if !errors.Is(err, ErrPiAgentNotFound) {
@@ -330,7 +330,7 @@ func TestExecutor_Solve_RequiredToolsInProblemJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph.OpenShared: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ex := NewExecutor(Config{
 		PiAgentPath: "/bin/true",
 		Model:       "deepseek-v4-flash",
@@ -377,7 +377,7 @@ func TestExecutor_Solve_ExecFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph.OpenShared: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ex := NewExecutor(Config{
 		PiAgentPath: "/bin/true",
 		Model:       "x",
@@ -751,7 +751,7 @@ func TestExecutor_Solve_PropagatesAPIVars(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph.OpenShared: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ex := NewExecutor(Config{
 		PiAgentPath: "/bin/true",
 		Model:       "deepseek-v4-flash",
@@ -804,7 +804,7 @@ func TestExecutor_Solve_PropagatesExtraEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph.OpenShared: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ex := NewExecutor(Config{
 		PiAgentPath: "/bin/true",
@@ -868,7 +868,7 @@ func TestExecutor_Solve_NoPIModelEnvWhenUnset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph.OpenShared: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	ex := NewExecutor(Config{
 		PiAgentPath: "/bin/true",
@@ -1022,7 +1022,7 @@ func TestExecutor_Solve_ContextCanceled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("graph.OpenShared: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 	ex := NewExecutor(Config{
 		PiAgentPath: "/bin/true",
 		Model:       "x",

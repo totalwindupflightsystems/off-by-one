@@ -73,7 +73,7 @@ func TestChatHandler_OfflineResponse(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	// First message is the system greeting.
 	greeting := readMsg(t, c)
@@ -113,7 +113,7 @@ func TestChatHandler_RelaysToRunner(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	// Read greeting.
 	_ = readMsg(t, c)
@@ -159,7 +159,7 @@ func TestChatHandler_ActionsInResponse(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	_ = readMsg(t, c) // greeting
 
@@ -195,7 +195,7 @@ func TestChatHandler_RunnerError(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	_ = readMsg(t, c) // greeting
 
@@ -230,7 +230,7 @@ func TestChatHandler_InvalidJSON(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	_ = readMsg(t, c) // greeting
 
@@ -253,7 +253,7 @@ func TestChatHandler_BinaryMessageIgnored(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	_ = readMsg(t, c) // greeting
 
@@ -294,7 +294,7 @@ func TestChatHandler_LongTurnSurvivesReadTimeout(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	// Send the message before reading the greeting so the tiny idle
 	// window is irrelevant to the timing under test.
@@ -341,7 +341,7 @@ func TestChatHandler_SecondMessageDuringTurnRejected(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	_ = readMsg(t, c) // greeting
 
@@ -388,7 +388,7 @@ func TestChatHandler_IdleTimeoutClosesConnection(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.CloseNow()
+	defer func() { _ = c.CloseNow() }()
 
 	_ = readMsg(t, c) // greeting
 
@@ -457,7 +457,7 @@ func TestChat_StatusFrameBeforeAgentFrame(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	_ = readMsg(t, c) // greeting
 
@@ -504,7 +504,7 @@ func TestChat_PeriodicStatusUntilAgentFrame(t *testing.T) {
 	defer srv.Close()
 
 	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer c.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
 
 	_ = readMsg(t, c) // greeting
 
@@ -553,7 +553,7 @@ func TestChat_PeriodicStatusUntilAgentFrame(t *testing.T) {
 	defer srv2.Close()
 
 	c2 := dialWS(t, strings.Replace(srv2.URL, "http://", "ws://", 1))
-	defer c2.Close(websocket.StatusNormalClosure, "done")
+	defer func() { _ = c2.Close(websocket.StatusNormalClosure, "done") }()
 
 	_ = readMsg(t, c2) // greeting
 	userData1, _ := json.Marshal(ChatMessage{Type: "user", Message: "long question"})

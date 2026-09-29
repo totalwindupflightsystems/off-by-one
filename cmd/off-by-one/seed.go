@@ -125,13 +125,13 @@ func seedRun(args []string) error {
 	dir := fs.String("dir", seedDirDefault, "Corpus data directory (contains answers/*.json); default ./data, else next to the executable")
 	dbPath := fs.String("db", envString("OFF_BY_ONE_DB", "./off-by-one.db"), "SQLite database path")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "Usage: off-by-one seed [-dir DIR] [-db DB]\n\n")
-		fmt.Fprintf(fs.Output(), "Loads the bundled flat answer corpus (DIR/answers/*.json) into the\n")
-		fmt.Fprintf(fs.Output(), "SQLite graph store so fresh installs start with a discoverable catalog.\n")
-		fmt.Fprintf(fs.Output(), "Idempotent — safe to re-run; only the corpus delta is imported.\n\n")
-		fmt.Fprintf(fs.Output(), "Without -dir the corpus is looked up relative to the working directory\n")
-		fmt.Fprintf(fs.Output(), "(./data), then relative to the executable (./data, ./../data).\n\n")
-		fmt.Fprintf(fs.Output(), "Flags:\n")
+		_, _ = fmt.Fprintf(fs.Output(), "Usage: off-by-one seed [-dir DIR] [-db DB]\n\n")
+		_, _ = fmt.Fprintf(fs.Output(), "Loads the bundled flat answer corpus (DIR/answers/*.json) into the\n")
+		_, _ = fmt.Fprintf(fs.Output(), "SQLite graph store so fresh installs start with a discoverable catalog.\n")
+		_, _ = fmt.Fprintf(fs.Output(), "Idempotent — safe to re-run; only the corpus delta is imported.\n\n")
+		_, _ = fmt.Fprintf(fs.Output(), "Without -dir the corpus is looked up relative to the working directory\n")
+		_, _ = fmt.Fprintf(fs.Output(), "(./data), then relative to the executable (./data, ./../data).\n\n")
+		_, _ = fmt.Fprintf(fs.Output(), "Flags:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

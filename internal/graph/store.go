@@ -304,7 +304,7 @@ func (s *Store) ListProblemClasses(ctx context.Context, limit, offset int) ([]Pr
 	if err != nil {
 		return nil, fmt.Errorf("list problem_classes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ProblemClass
 	for rows.Next() {
 		pc, err := scanProblemClassRows(rows)
@@ -363,7 +363,7 @@ func (s *Store) ListAnswers(ctx context.Context, classID int64) ([]AnswerNode, e
 	if err != nil {
 		return nil, fmt.Errorf("list answer_nodes: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []AnswerNode
 	for rows.Next() {
 		a, err := scanAnswerNodeRows(rows)
@@ -446,7 +446,7 @@ func (s *Store) ListEdgesFrom(ctx context.Context, sourceID int64) ([]Edge, erro
 	if err != nil {
 		return nil, fmt.Errorf("list edges: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Edge
 	for rows.Next() {
 		e, err := scanEdgeRows(rows)
@@ -478,7 +478,7 @@ func (s *Store) RelatedTitles(ctx context.Context, sourceID int64) ([]string, er
 	if err != nil {
 		return nil, fmt.Errorf("related titles: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var title string
@@ -655,7 +655,7 @@ func (s *Store) ListProblemClassesWithCountsFiltered(ctx context.Context, status
 	if err != nil {
 		return nil, fmt.Errorf("list problem_classes with counts: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []ProblemClassWithCounts
 	for rows.Next() {
 		var p ProblemClassWithCounts

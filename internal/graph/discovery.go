@@ -102,7 +102,7 @@ func (s *Store) bestAnswer(ctx context.Context, classID int64, env, lang, versio
 	if err != nil {
 		return nil, fmt.Errorf("bestAnswer query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
 			return nil, err
@@ -177,7 +177,7 @@ func (s *Store) relatedClasses(ctx context.Context, sourceID int64) ([]RelatedEd
 	if err != nil {
 		return nil, fmt.Errorf("relatedClasses query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []RelatedEdge
 	for rows.Next() {
 		var r RelatedEdge
@@ -207,7 +207,7 @@ func (s *Store) versionWarnings(ctx context.Context, classID int64, env, lang, v
 	if err != nil {
 		return nil, fmt.Errorf("versionWarnings query: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []string
 	seen := map[string]bool{}
 	for rows.Next() {
