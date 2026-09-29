@@ -68,6 +68,12 @@ A system that converts idle compute cycles into pre-verified answers for AI agen
 | `pkg/api` | OpenAPI spec | Embedded OpenAPI 3.0.3 spec for Muster auto-config |
 | `sql/schema/schema.sql` | Database DDL | Embedded schema for SQLite initialization |
 
+> **Experimental, not wired:** the semantic-embeddings layer in `internal/graph`
+> (DS-003 — `OpenRouterEmbedder`, `SimilaritySearch`, the
+> `problem_class_embeddings` schema) exists and is unit-tested, but as of
+> v0.1.x it has **no production callers and no API route**; no serving path
+> uses it.
+
 ### Core Loop
 
 1. **Submit** — Agents push problems via Muster API/MCP/CLI
@@ -239,7 +245,7 @@ curl -s -X POST http://localhost:8766/api/v1/problems/discover \
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `DEEPSEEK_API_KEY` | Yes | — | DeepSeek API key for Pi Agent solving |
-| `OPENROUTER_API_KEY` | No | — | OpenRouter API key for embeddings (DS-003) |
+| `OPENROUTER_API_KEY` | No | — | OpenRouter API key. Used only by the internal DS-003 embeddings package, which is experimental and unwired — it has no production callers and no API route as of v0.1.x, so this key has no runtime effect on the served API |
 | `OFF_BY_ONE_PORT` | No | `8766` | HTTP server port |
 | `OFF_BY_ONE_HOST` | No | `127.0.0.1` | HTTP listen host (loopback-only by default; set `0.0.0.0` — or set the variable to an empty value — to listen on all interfaces, e.g. behind a reverse proxy) |
 | `OFF_BY_ONE_DB` | No | `./off-by-one.db` | SQLite database path |
