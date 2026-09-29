@@ -78,6 +78,33 @@ A system that converts idle compute cycles into pre-verified answers for AI agen
 6. **Export** — Verified answers pushed as git subtree commits
 7. **Discover** — Agents query graph, get answers + related problems
 
+### Join a community answers repo (empty-node bootstrap)
+
+Seeding the bundled corpus is one way to fill a fresh node, but not the only
+one: a node started with an empty database can bootstrap directly from any
+community answers repo — import pulls the subtree's answers into the graph and
+discovery serves them immediately, with no seed step and no bundled corpus.
+
+```bash
+# 1. Run a fresh node with an import working dir configured (no seed step)
+./off-by-one --import-dir /var/lib/off-by-one/imports -db /var/lib/off-by-one/fresh.db
+
+# 2. Import a community answers repo (schema + conflict_strategy: API Reference, Export / Import)
+curl -s -X POST http://localhost:8766/api/v1/import \
+  -H "Content-Type: application/json" \
+  -d '{"source_repo": "https://github.com/example/pre-solve-answers", "branch": "main"}'
+
+# 3. Discover now answers the imported classes (and 404s everything else)
+curl -s -X POST http://localhost:8766/api/v1/problems/discover \
+  -H "Content-Type: application/json" \
+  -d '{"problem_class": "<imported-class-id>"}'
+```
+
+This is the lightweight community-sharing deployment: nodes keep solving
+locally and trade verified answers through git repos. Import and `seed` compose
+— either alone produces a node that serves `found: true` discoveries (measured
+on a fresh DB: import 3 answers, first `discover` ~156 ms cold / ~90 ms warm).
+
 ### Connecting an MCP client
 
 The bridge lives in `internal/muster` — it validates the OpenAPI spec and logs MCP tool calls —

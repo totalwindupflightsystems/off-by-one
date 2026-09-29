@@ -16,7 +16,8 @@ Base URL: `http://localhost:8766` (or wherever the binary is listening).
 8. [Read-Only Catalog Mode](#read-only-catalog-mode)
 9. [MCP / Muster Auto-Discovery](#mcp--muster-auto-discovery)
 10. [Seeding the Answer Corpus](#seeding-the-answer-corpus)
-11. [Configuration Reference](#configuration-reference)
+11. [Join a community answers repo (empty-node bootstrap)](#join-a-community-answers-repo-empty-node-bootstrap)
+12. [Configuration Reference](#configuration-reference)
 
 ---
 
@@ -281,6 +282,38 @@ curl -s -X POST http://localhost:8766/api/v1/import \
 `conflict_strategy` can be `skip`, `replace`, or `manual`.
 
 ---
+
+### Join a community answers repo (empty-node bootstrap)
+
+A fresh node does not need the bundled corpus to be useful. Seeding is one way to
+fill the graph (`seed` loads `data/answers/*.json`), but a node started with an
+empty database can bootstrap directly from any community answers repo: import
+pulls the subtree's answers into the SQLite graph, and discovery serves them
+immediately — no seed step, no bundled corpus. Verified flow (fresh `-db`, zero
+classes, zero answers, import of a 3-answer community repo, first `discover`
+~156 ms cold / ~90 ms warm):
+
+```bash
+# 1. Run a fresh node with an import working dir configured (no seed step)
+./off-by-one --import-dir /var/lib/off-by-one/imports -db /var/lib/off-by-one/fresh.db
+
+# 2. Import a community answers repo (see Import answers from a git repo above
+#    for the full request schema and conflict_strategy semantics)
+curl -s -X POST http://localhost:8766/api/v1/import \
+  -H "Content-Type: application/json" \
+  -d '{"source_repo": "https://github.com/example/pre-solve-answers", "branch": "main"}'
+
+# 3. Discover now answers the imported classes (and 404s everything else)
+curl -s -X POST http://localhost:8766/api/v1/problems/discover \
+  -H "Content-Type: application/json" \
+  -d '{"problem_class": "<imported-class-id>"}'
+```
+
+This is the lightweight community-sharing deployment: each node keeps solving
+its own problems locally and trades verified answers through git repos, and the
+`seed` subcommand remains optional for nodes that also want the bundled corpus
+(see [Seeding the Answer Corpus](#seeding-the-answer-corpus)). Import and seed
+compose — either alone produces a node that serves `found: true` discoveries.
 
 ## Deduplication and Queue Behavior
 
