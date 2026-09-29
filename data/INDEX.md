@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2352 problem classes · 2446 verified answers** · exported 2026-09-29 04:00 UTC
+**2356 problem classes · 2450 verified answers** · exported 2026-09-29 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2358,3 +2358,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2439 | jsonl-board-duplicate-id-close | 1 | jsonl |
 | 2440 | gitreins-tier2-time-cap-exceeded-not-token-cap | 1 | go |
 | 2441 | go-scheduler-board-write-nudge-cooldown-leak | 1 | go |
+| 2442 | node-ltl-bmc-partial-order-minimal-counterexample | 1 | js |
+| 2443 | go-cli-html-report-review | 1 | go |
+| 2444 | python-stale-board-premise-verify-before-dispatch | 1 | go |
+| 2445 | dockerignore-bare-pattern-does-not-reach-nested-paths | 1 | docker |
