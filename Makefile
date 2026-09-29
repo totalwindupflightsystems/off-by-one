@@ -226,6 +226,14 @@ export-exclusions-selftest:
 export-hostpaths-selftest:
 	python3 scripts/tests/export_answers_hostpaths_test.py
 
+# Regression test for the env/version filter-token normalizer
+# (scripts/export-answers.py normalize_env/normalize_version, REVIEW-OB-010):
+# prose -> canonical token mappings, prose drops to the discovery wildcard,
+# and the no-whitespace/';'/'~' output contract the hygiene guard enforces.
+# Pure in-process unittest: no network, no DB, no credentials.
+export-normalize-selftest:
+	python3 scripts/tests/export_answers_normalize_test.py
+
 # REVIEW-OB-006 corpus hygiene guard: data/ and site/ are public surfaces —
 # fail (listing offenders) when any /home/<user> operator path appears in
 # them, pass when clean.

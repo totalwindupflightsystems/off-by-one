@@ -90,6 +90,96 @@ def sanitize_host_paths(text):
     return _HOST_PATH_RE.sub("~", text)
 
 
+# REVIEW-OB-010: environment/version are exact-match discovery filters
+# (internal/graph/discovery.go ranks answers by (env, lang, version) tuple
+# specificity; empty values act as wildcards). Free-text prose in these
+# fields ("linux host, go 1.26.6", "~/auger; DuckBrain live substrate",
+# "api.deepseek.com/v1, verified 2026-09-15T02:39Z") makes an answer
+# unreachable via tuple-scoped discovery and leaks host context into the
+# public catalog. Both fields are normalized to canonical tokens at export:
+# a token-shaped value (no whitespace, ';' or '~') passes through
+# lowercased; a leading comma/semicolon segment that is itself a clean
+# token wins; prose maps to a canonical token when a recognizable pattern
+# exists; anything else is dropped to "" (the discovery wildcard) — prose
+# never reaches the filtered fields. Mirrored in internal/graph/normalize.go
+# (keep the two in sync).
+_TOKEN_FORBIDDEN_RE = re.compile(r"[\s;~]")
+
+# Ordered — first match wins: CI/container platforms precede bare OS tokens
+# (a GitHub Actions runner IS ubuntu; the CI context is the distinguishing
+# one) and OS tokens precede language runtimes.
+_ENV_PATTERNS = [
+    (re.compile(r"github[- ]actions|actions runner"), "github-actions"),
+    (re.compile(r"docker"), "docker"),
+    (re.compile(r"kubernetes|k8s"), "kubernetes"),
+    (re.compile(r"darwin|macos|mac os"), "darwin"),
+    (re.compile(r"wsl|linux|ubuntu|debian|posix"), "linux"),
+    (re.compile(r"windows"), "windows"),
+    (re.compile(r"production"), "production"),
+    (re.compile(r"vitest|nodejs|\bnode\b|nextjs|pnpm|\bnpm\b"), "node"),
+    (re.compile(r"pytest|python|venv"), "python3"),
+    (re.compile(r"\bgo ?1\.26|\bgo1\.26"), "go1.26"),
+    (re.compile(r"golang|\bgo\b"), "go"),
+    (re.compile(r"\bbash\b"), "bash"),
+    (re.compile(r"\bshell\b|\bsh\b"), "shell"),
+]
+
+_VERSION_TOKEN_RE = re.compile(r"^v?\d+(?:\.\d+)*$")
+_VERSION_BRANCH_TOKENS = ("latest", "main", "master")
+
+
+def _clean_token(value):
+    """Return value lowercased/trimmed if already token-shaped, else None."""
+    v = (value or "").strip().lower()
+    if not v or _TOKEN_FORBIDDEN_RE.search(v):
+        return None
+    return v
+
+
+def normalize_env(value):
+    """Canonicalize an environment filter token (REVIEW-OB-010).
+
+    Prose with no recognizable pattern drops to "" — the discovery
+    wildcard; it never survives into the filtered field.
+    """
+    tok = _clean_token(value)
+    if tok is not None:
+        return tok
+    v = (value or "").strip().lower()
+    if not v:
+        return ""
+    first = re.split(r"[,;]", v, maxsplit=1)[0].strip()
+    if first and not _TOKEN_FORBIDDEN_RE.search(first):
+        return first
+    for pattern, token in _ENV_PATTERNS:
+        if pattern.search(v):
+            return token
+    return ""
+
+
+def normalize_version(value):
+    """Canonicalize a version filter token (REVIEW-OB-010).
+
+    Prose yields the first whitespace-delimited token that is
+    version-shaped ("gitreins 0.14.0" -> "0.14.0"), then a branch token
+    ("main e50aea4" -> "main"), and drops to "" when neither exists.
+    """
+    tok = _clean_token(value)
+    if tok is not None:
+        return tok
+    v = (value or "").strip().lower()
+    if not v:
+        return ""
+    fields = [t.strip(",;") for t in v.split()]
+    for t in fields:
+        if _VERSION_TOKEN_RE.match(t):
+            return t
+    for t in fields:
+        if t in _VERSION_BRANCH_TOKENS:
+            return t
+    return ""
+
+
 def is_excluded_class(title: str) -> bool:
     """True if a raw (pre-slugify) class title is a self-test/canary/probe."""
     t = title.lower()
@@ -135,8 +225,10 @@ def main() -> None:
         cls["answers"].append({
             "answer_id": r["answer_id"],
             "language": sanitize_host_paths(r["lang"]),
-            "environment": sanitize_host_paths(r["env"]),
-            "version": sanitize_host_paths(r["version"]),
+            # REVIEW-OB-010: env/version are exact-match discovery filters —
+            # sanitize, then canonicalize so prose never enters the export.
+            "environment": normalize_env(sanitize_host_paths(r["env"])),
+            "version": normalize_version(sanitize_host_paths(r["version"])),
             "solution": sanitize_host_paths(r["solution"]),
             "evidence": sanitize_host_paths(r["evidence"]),
             "signatures": json.loads(sanitize_host_paths(r["signatures"])) if r["signatures"] else None,

@@ -330,6 +330,13 @@ func (e *Engine) renderItem(ctx context.Context, item ExportItem) ([]renderedFil
 		}, nil
 	}
 
+	// REVIEW-OB-010: env/version are exact-match discovery filters and path
+	// segments of the export layout — canonicalize legacy rows that predate
+	// the store-funnel normalization so prose never reaches the exported
+	// tree or the rendered markdown.
+	answer.Env = graph.NormalizeEnv(answer.Env)
+	answer.Version = graph.NormalizeVersion(answer.Version)
+
 	solutionMD := sanitizeHostPaths(formatSolutionMD(pc, answer))
 	evidenceMD := sanitizeHostPaths(formatEvidenceMD(answer))
 	signaturesJSON := sanitizeHostPaths(formatSignatures(answer))
