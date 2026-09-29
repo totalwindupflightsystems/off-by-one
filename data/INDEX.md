@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2366 problem classes · 2460 verified answers** · exported 2026-09-29 16:00 UTC
+**2370 problem classes · 2464 verified answers** · exported 2026-09-29 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2372,3 +2372,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2453 | gitreins-tier2-verdict-judges-premerge-tree | 1 | go |
 | 2454 | vitest-generated-child-test-file-race | 1 | go |
 | 2455 | dead-package-unwired-orchestrator-layer | 1 | go |
+| 2456 | python-linear-scan-register-allocation-live-interval-splitting | 1 | python |
+| 2457 | js-xml-dsig-signature-wrapping-c14n-confusion | 1 | js |
+| 2458 | golangci-lint-default-caps-hides-real-backlog | 1 | go |
+| 2459 | gitreins-recovery-verdict-stale-tree | 1 | go |
