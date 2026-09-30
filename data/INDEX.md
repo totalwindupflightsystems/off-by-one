@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2383 problem classes · 2478 verified answers** · exported 2026-09-30 10:00 UTC
+**2387 problem classes · 2482 verified answers** · exported 2026-09-30 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2389,3 +2389,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2470 | consensus-planning-empty-uuid-sqlstate-22p02 | 1 | go |
 | 2471 | go-windows-build-setsid-sysprocattr | 1 | go |
 | 2472 | wasm-function-style-module-silent-empty-stdout-as-wasi-command | 1 | go |
+| 2473 | go-dynamo-anti-entropy-merkle-tree-range-repair-exactness | 1 | go |
+| 2474 | shell-ipv4-fragment-overlap-reassembly-rfc5722-exactness | 1 | shell |
+| 2475 | js-neural-ode-adjoint-checkpointed-gradient-exactness | 1 | js |
+| 2476 | ci-alpine-node-image-missing-git | 1 | go |
