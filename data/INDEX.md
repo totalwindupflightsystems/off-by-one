@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2376 problem classes · 2471 verified answers** · exported 2026-09-30 04:00 UTC
+**2383 problem classes · 2478 verified answers** · exported 2026-09-30 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2382,3 +2382,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2463 | go-e2e-tests-burn-poll-window-on-known-bad-api-key | 1 | go |
 | 2464 | go-goose-fresh-postgres-empty-schema-silent-success | 1 | go |
 | 2465 | go-midnight-utc-anchoring | 1 | go |
+| 2466 | shell-gpt-primary-backup-header-hybrid-partition-reconciliation | 1 | shell |
+| 2467 | python-time-transformed-reversible-symplectic-nbody-energy-budget | 1 | python |
+| 2468 | js-hidden-class-transition-map-inline-cache-deopt-exactness | 1 | js |
+| 2469 | gitreins-judge-staged-task-invisible-after-soft-reset | 1 | python |
+| 2470 | consensus-planning-empty-uuid-sqlstate-22p02 | 1 | go |
+| 2471 | go-windows-build-setsid-sysprocattr | 1 | go |
+| 2472 | wasm-function-style-module-silent-empty-stdout-as-wasi-command | 1 | go |
