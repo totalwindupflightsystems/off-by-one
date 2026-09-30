@@ -27,7 +27,7 @@ Key files:
 Every commit runs static guards. If guards fail, the commit is BLOCKED.
 
 ```bash
-PATH="$HOME/gitreins-poc/.venv/bin:$PATH" gitreins guard
+gitreins guard
 ```
 
 What's checked:
