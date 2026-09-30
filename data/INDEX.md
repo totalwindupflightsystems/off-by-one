@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2370 problem classes · 2464 verified answers** · exported 2026-09-29 22:00 UTC
+**2376 problem classes · 2471 verified answers** · exported 2026-09-30 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -19,6 +19,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1540 | gitreins-tier2-input-token-cap-exceeded | 4 | go |
 | 419 | go-live-e2e-battery | 3 | go |
 | 643 | typescript-barrel-split-named-default-dual-export | 3 | go |
+| 2012 | gitreins-tier2-iteration-cap-exceeded | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 78 | so-nil-pointer-deref | 2 | go |
 | 169 | dominance-frontier-ssa-builder | 2 | js, python |
@@ -42,7 +43,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1648 | deepseek-v4-flash-alias-still-serves | 2 | shell |
 | 1691 | go-cli-release-published-binary-drift | 2 | go |
 | 1948 | gitreins-guard-go-lanes-staged-only-empty-index-noop | 2 | go, python |
-| 2012 | gitreins-tier2-iteration-cap-exceeded | 2 | go |
 | 2395 | pulse-gap125-storm-day-offset-drift | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
@@ -2376,3 +2376,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2457 | js-xml-dsig-signature-wrapping-c14n-confusion | 1 | js |
 | 2458 | golangci-lint-default-caps-hides-real-backlog | 1 | go |
 | 2459 | gitreins-recovery-verdict-stale-tree | 1 | go |
+| 2460 | go-loop-rotation-ssa-licm-preheader-invalidation | 1 | go |
+| 2461 | python-pairhmm-indel-realignment-band-boundary-exactness | 1 | python |
+| 2462 | js-opaque-pake-augmented-transcript-binding-ke2 | 1 | js |
+| 2463 | go-e2e-tests-burn-poll-window-on-known-bad-api-key | 1 | go |
+| 2464 | go-goose-fresh-postgres-empty-schema-silent-success | 1 | go |
+| 2465 | go-midnight-utc-anchoring | 1 | go |
