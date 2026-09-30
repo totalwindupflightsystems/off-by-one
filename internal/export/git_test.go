@@ -865,6 +865,47 @@ func TestSanitizeHostPaths(t *testing.T) {
 	}
 }
 
+// --- REVIEW-OB-009: internal-name hygiene ---------------------------------
+
+func TestSanitizeInternalNames(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"hermes-dagger", "run hermes-dagger pipeline", "run <project> pipeline"},
+		{"chimera-v2", "chimera-v2 namespace sync", "<project> namespace sync"},
+		{"warpfs", "mounted warpfs share", "mounted <project> share"},
+		{"crier", "crier bus route 404s", "<project> bus route 404s"},
+		{"gitreins tool path with home prefix", "/home/kara/.local/bin/gitreins", "<tool>"},
+		{"gitreins tool path with tilde", "~/.local/bin/gitreins", "<tool>"},
+		{"gitreins tool path bare", "run .local/bin/gitreins guard", "run <tool> guard"},
+		{"bare word gitreins untouched", "gitreins guard blocks the commit", "gitreins guard blocks the commit"},
+		{"multiple names in one text", "crier + warpfs + hermes-dagger", "<project> + <project> + <project>"},
+		{"unrelated text untouched", "off-by-one corpus export", "off-by-one corpus export"},
+		{"empty", "", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sanitizeInternalNames(tc.in); got != tc.want {
+				t.Errorf("sanitizeInternalNames(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSanitizeCorpusText(t *testing.T) {
+	// The composed scrub must remove both leak classes in one pass, and the
+	// <tool> rule must consume its /home/<user>/ prefix so no account name
+	// survives to the host-path stage.
+	if got, want := sanitizeCorpusText("/home/kara/.local/bin/gitreins"), "<tool>"; got != want {
+		t.Errorf("sanitizeCorpusText tool path = %q, want %q", got, want)
+	}
+	if got, want := sanitizeCorpusText("edit /home/kara/x then run crier"), "edit ~/x then run <project>"; got != want {
+		t.Errorf("sanitizeCorpusText mixed = %q, want %q", got, want)
+	}
+}
+
 // TestExport_SanitizesHostPaths proves the answer writer applies the
 // scrub end to end: an answer whose solution/evidence carry operator host
 // paths must be written with ~/ prefixes, while non-path text survives

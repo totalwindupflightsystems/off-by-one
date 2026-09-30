@@ -14,6 +14,10 @@
 #   6. REVIEW-OB-010: a data/ fixture with prose in "environment" FAILS;
 #   7. REVIEW-OB-010: a data/ fixture with prose in "version" FAILS;
 #   8. REVIEW-OB-010: a site/ fixture with a prose env badge FAILS.
+#   9-12. REVIEW-OB-009: one data/ fixture per internal name
+#      (hermes-dagger, chimera-v2, warpfs, crier) FAILS, file named;
+#   13. REVIEW-OB-009: a site/ fixture with a .local/bin/gitreins path FAILS;
+#   14. REVIEW-OB-009: <project>/<tool> placeholder text PASSES.
 #
 # Fixture strings are plain paths — no key-shaped strings.
 # Temp fixtures only; the repo tree is never read or written.
@@ -137,6 +141,43 @@ printf '\nARM 8 — prose env badge: exit 1, file named\n'
 check "exit code 1" "1" "$OUT_RC"
 check_contains "names the offending file" "prose-badge.html" "$OUT"
 check_contains "names the badge rule" "prose environment badge" "$OUT"
+
+# ── ARM 9 — REVIEW-OB-009: one dirty fixture per internal-name pattern ─────
+# Each leaking string gets its own arm: the guard must fail (exit 1) and
+# name the offending file, proving the name check is not vacuous for ANY
+# single pattern. Placeholder text (<project>, <tool>) is clean and is
+# covered by ARM 14.
+n=9
+for leak in hermes-dagger chimera-v2 warpfs crier; do
+  FIX="$TMP/arm$n-name-$leak"
+  mkdir -p "$FIX/data/answers"
+  printf '{"solution":"debug the %s deploy pipeline"}\n' "$leak" > "$FIX/data/answers/0001-$leak.json"
+  run_guard "$FIX"
+  printf '\nARM %s — %s leak under data/: exit 1, file named\n' "$n" "$leak"
+  check "exit code 1" "1" "$OUT_RC"
+  check_contains "names the offending file" "0001-$leak.json" "$OUT"
+  check_contains "names the rule" "internal project/tool names" "$OUT"
+  n=$((n + 1))
+done
+
+# ── ARM 13 — REVIEW-OB-009: gitreins tool-path leak under site/ fails ──────
+FIX="$TMP/arm13-gitreins-path"
+mkdir -p "$FIX/data" "$FIX/site/classes"
+printf '{"environment":"linux","version":"latest"}\n' > "$FIX/data/answers.jsonl"
+printf '<pre>invoke ~/.local/bin/gitreins guard before commit</pre>\n' > "$FIX/site/classes/tool-path.html"
+run_guard "$FIX"
+printf '\nARM 13 — .local/bin/gitreins leak under site/: exit 1, file named\n'
+check "exit code 1" "1" "$OUT_RC"
+check_contains "names the offending file" "tool-path.html" "$OUT"
+
+# ── ARM 14 — REVIEW-OB-009: redacted placeholders are clean ────────────────
+FIX="$TMP/arm14-placeholders"
+mkdir -p "$FIX/data/answers" "$FIX/site/classes"
+printf '{"solution":"debug the <project> deploy pipeline with <tool>"}\n' > "$FIX/data/answers/0001-redacted.json"
+printf '<pre>invoke &lt;tool&gt; guard before commit</pre>\n' > "$FIX/site/classes/redacted.html"
+run_guard "$FIX"
+printf '\nARM 14 — <project>/<tool> placeholders only: exit 0\n'
+check "exit code 0" "0" "$OUT_RC"
 
 # ── summary ────────────────────────────────────────────────────────────────
 total=$((pass + fail))

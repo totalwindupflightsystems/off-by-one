@@ -18,11 +18,19 @@ Usage:
 
 Host-path hygiene (REVIEW-OB-006): the corpus is public, so no operator
 machine path may leak into it. Every emitted text field is passed through
-sanitize_host_paths(), which rewrites any /home/<user> prefix (kara,
+sanitize_corpus_text(), which rewrites any /home/<user> prefix (kara,
 bunker, bunker-*, runner, user — generically any account name matching
 [A-Za-z0-9_-]+) to the portable `~` form:
     /home/kara/.local/bin/pi-agent  ->  ~/.local/bin/pi-agent
 JSON record shapes are unchanged — only string values are rewritten.
+
+Name hygiene (REVIEW-OB-009): internal project/tool names are lab-internal
+identifiers and must not leak either. sanitize_corpus_text() also rewrites
+them to neutral placeholders via _NAME_REDACTIONS:
+    hermes-dagger | chimera-v2 | warpfs | crier  ->  <project>
+    /home/<user>/.local/bin/gitreins | ~/.local/bin/gitreins | .local/bin/gitreins
+                                                ->  <tool>
+Mirrored in internal/export/git.go sanitizeInternalNames (keep in sync).
 """
 import json
 import os
@@ -90,6 +98,49 @@ def sanitize_host_paths(text):
     return _HOST_PATH_RE.sub("~", text)
 
 
+# REVIEW-OB-009: internal project/tool names are lab-internal identifiers —
+# the corpus and the generated site are public, so they must never appear in
+# any emitted text field. Each (pattern, placeholder) pair rewrites one
+# internal name to a neutral token. Ordered: the gitreins tool path comes
+# first and swallows its own /home/<user>/ or ~/ prefix, so the account name
+# cannot survive as a host-path leak when the generic rewrite runs after.
+# Mirrored in internal/export/git.go internalNameRedactions (keep in sync).
+_NAME_REDACTIONS = [
+    (re.compile(r"(?:/home/[A-Za-z0-9_-]+|~)?/?\.local/bin/gitreins"), "<tool>"),
+    (re.compile(r"hermes-dagger"), "<project>"),
+    (re.compile(r"chimera-v2"), "<project>"),
+    (re.compile(r"warpfs"), "<project>"),
+    (re.compile(r"crier"), "<project>"),
+]
+
+
+def sanitize_internal_names(text):
+    """Rewrite every internal project/tool name in a corpus text field.
+
+    None/empty pass through unchanged. Unrelated text — including the word
+    "gitreins" alone (only the .local/bin/gitreins install path is
+    redacted) — is untouched.
+    """
+    if not text:
+        return text
+    for pattern, placeholder in _NAME_REDACTIONS:
+        text = pattern.sub(placeholder, text)
+    return text
+
+
+def sanitize_corpus_text(text):
+    """Full corpus-text scrub: internal names first, then host paths.
+
+    Name redaction runs first because the <tool> rule consumes its own
+    /home/<user>/ prefix; the host-path rewrite then backstops any other
+    /home/<user> occurrence. Applied to every emitted text field
+    (title/description/lang/env/version/solution/evidence/signatures).
+    """
+    if not text:
+        return text
+    return sanitize_host_paths(sanitize_internal_names(text))
+
+
 # REVIEW-OB-010: environment/version are exact-match discovery filters
 # (internal/graph/discovery.go ranks answers by (env, lang, version) tuple
 # specificity; empty values act as wildcards). Free-text prose in these
@@ -97,13 +148,14 @@ def sanitize_host_paths(text):
 # "api.deepseek.com/v1, verified 2026-09-15T02:39Z") makes an answer
 # unreachable via tuple-scoped discovery and leaks host context into the
 # public catalog. Both fields are normalized to canonical tokens at export:
-# a token-shaped value (no whitespace, ';' or '~') passes through
-# lowercased; a leading comma/semicolon segment that is itself a clean
-# token wins; prose maps to a canonical token when a recognizable pattern
-# exists; anything else is dropped to "" (the discovery wildcard) — prose
-# never reaches the filtered fields. Mirrored in internal/graph/normalize.go
-# (keep the two in sync).
-_TOKEN_FORBIDDEN_RE = re.compile(r"[\s;~]")
+# a token-shaped value (no whitespace, ';', '~' or '<'/'>' — the REVIEW-OB-009
+# redaction placeholders, e.g. "hilo/<project>", are not meaningful filter
+# tokens) passes through lowercased; a leading comma/semicolon segment that
+# is itself a clean token wins; prose maps to a canonical token when a
+# recognizable pattern exists; anything else is dropped to "" (the
+# discovery wildcard) — prose never reaches the filtered fields. Mirrored
+# in internal/graph/normalize.go (keep the two in sync).
+_TOKEN_FORBIDDEN_RE = re.compile(r"[\s;~<>]")
 
 # Ordered — first match wins: CI/container platforms precede bare OS tokens
 # (a GitHub Actions runner IS ubuntu; the CI context is the distinguishing
@@ -210,28 +262,28 @@ def main() -> None:
     rows = c.fetchall()
 
     # Group by class. Every text field is sanitized on the way in
-    # (REVIEW-OB-006) so no /home/<user> operator path can reach any
-    # output file, whichever writer (JSONL, per-class JSON, INDEX.md)
-    # consumes the record.
+    # (REVIEW-OB-006 host paths, REVIEW-OB-009 internal names) so no
+    # operator path or lab-internal identifier can reach any output file,
+    # whichever writer (JSONL, per-class JSON, INDEX.md) consumes the record.
     classes: dict[int, dict] = {}
     for r in rows:
         cls = classes.setdefault(r["class_id"], {
             "class_id": r["class_id"],
-            "title": sanitize_host_paths(r["title"]),
-            "description": sanitize_host_paths(r["description"]),
+            "title": sanitize_corpus_text(r["title"]),
+            "description": sanitize_corpus_text(r["description"]),
             "created_at": r["class_created"],
             "answers": [],
         })
         cls["answers"].append({
             "answer_id": r["answer_id"],
-            "language": sanitize_host_paths(r["lang"]),
+            "language": sanitize_corpus_text(r["lang"]),
             # REVIEW-OB-010: env/version are exact-match discovery filters —
             # sanitize, then canonicalize so prose never enters the export.
-            "environment": normalize_env(sanitize_host_paths(r["env"])),
-            "version": normalize_version(sanitize_host_paths(r["version"])),
-            "solution": sanitize_host_paths(r["solution"]),
-            "evidence": sanitize_host_paths(r["evidence"]),
-            "signatures": json.loads(sanitize_host_paths(r["signatures"])) if r["signatures"] else None,
+            "environment": normalize_env(sanitize_corpus_text(r["env"])),
+            "version": normalize_version(sanitize_corpus_text(r["version"])),
+            "solution": sanitize_corpus_text(r["solution"]),
+            "evidence": sanitize_corpus_text(r["evidence"]),
+            "signatures": json.loads(sanitize_corpus_text(r["signatures"])) if r["signatures"] else None,
             "status": r["status"],
             "created_at": r["answer_created"],
         })

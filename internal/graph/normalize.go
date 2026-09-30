@@ -11,8 +11,10 @@ package graph
 // NormalizeEnv and NormalizeVersion canonicalize the two fields at the
 // store write funnel (CreateAnswerNode) and at export render time:
 //
-//  1. a value that is already token-shaped (no whitespace, ';' or '~')
-//     passes through, lowercased and trimmed;
+//  1. a value that is already token-shaped (no whitespace, ';', '~' or
+//     '<'/'>' — REVIEW-OB-009 redaction placeholders like "hilo/<project>"
+//     are not meaningful filter tokens) passes through, lowercased and
+//     trimmed;
 //  2. otherwise, if the leading comma/semicolon segment is itself a clean
 //     token ("Linux, crier repo ~/crier" -> "linux"), that segment wins;
 //  3. otherwise prose is mapped to a canonical token when a recognizable
@@ -29,8 +31,9 @@ import (
 )
 
 // tokenForbidden matches the characters that must never appear in a
-// canonical env/version filter token: whitespace, ';' and '~'.
-var tokenForbidden = regexp.MustCompile(`[\s;~]`)
+// canonical env/version filter token: whitespace, ';', '~' and '<'/'>'
+// (REVIEW-OB-009 redaction placeholders).
+var tokenForbidden = regexp.MustCompile(`[\s;~<>]`)
 
 // envPatterns maps recognizable prose substrings to canonical environment
 // tokens. Ordered — first match wins: CI/container platforms precede bare

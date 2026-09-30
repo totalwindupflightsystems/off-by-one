@@ -23,7 +23,7 @@ import os
 import re
 import sys
 
-FORBIDDEN = re.compile(r"[\s;~]")
+FORBIDDEN = re.compile(r"[\s;~<>]")
 
 ROOT = sys.argv[1] if len(sys.argv) > 1 else os.path.dirname(
     os.path.dirname(os.path.abspath(__file__)))
@@ -61,7 +61,7 @@ def main():
 
     if offenders:
         print("corpus hygiene VIOLATION: prose in environment/version filter "
-              "fields (whitespace, ; or ~) under data/:", file=sys.stderr)
+              "fields (whitespace, ;, ~ or redaction placeholder) under data/:", file=sys.stderr)
         for o in offenders:
             print(f"  {o}", file=sys.stderr)
         return 1

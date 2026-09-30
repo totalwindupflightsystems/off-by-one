@@ -55,6 +55,11 @@ func TestNormalizeEnv(t *testing.T) {
 		// prose with no recognizable pattern drops to the wildcard
 		{"unrecognizable prose", "warpfs (hilo) Rust workspace", ""},
 		{"host path only", "~/auger", ""},
+
+		// REVIEW-OB-009: a token carrying a redaction placeholder is not a
+		// meaningful filter value — drop to the wildcard.
+		{"placeholder token", "hilo/<project>", ""},
+		{"placeholder leading segment", "hilo/<project>, Rust workspace, tracing-subscriber 0.3.23", ""},
 	}
 
 	for _, tc := range cases {
@@ -93,6 +98,11 @@ func TestNormalizeVersion(t *testing.T) {
 		{"api endpoint with verified stamp", "api.deepseek.com/v1, verified 2026-09-15T02:39Z", ""},
 		{"pure prose", "tick 520 follow-up notes", "520"}, // first numeric token wins — deterministic
 		{"no version token", "verified on the shared host", ""},
+
+		// REVIEW-OB-009: placeholders are not filter tokens — a real
+		// version-shaped field still wins, a bare placeholder drops.
+		{"placeholder then version", "<tool> 0.14.0", "0.14.0"},
+		{"placeholder token only", "hilo/<project>", ""},
 	}
 
 	for _, tc := range cases {

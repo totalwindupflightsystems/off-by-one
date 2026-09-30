@@ -32,7 +32,7 @@ _spec.loader.exec_module(_mod)
 normalize_env = _mod.normalize_env
 normalize_version = _mod.normalize_version
 
-FORBIDDEN = re.compile(r"[\s;~]")
+FORBIDDEN = re.compile(r"[\s;~<>]")
 
 ENV_CASES = [
     # (input, expected)
@@ -60,6 +60,10 @@ ENV_CASES = [
     ("GitHub Actions exact implementation SHA passed and Linux, crier repo ~/crier", "github-actions"),
     ("warpfs (hilo) Rust workspace", ""),
     ("~/auger", ""),
+    # REVIEW-OB-009: a token carrying a redaction placeholder is not a
+    # meaningful filter value — drop to the wildcard.
+    ("hilo/<project>", ""),
+    ("hilo/<project>, Rust workspace, tracing-subscriber 0.3.23", ""),
 ]
 
 VERSION_CASES = [
@@ -76,6 +80,10 @@ VERSION_CASES = [
     ("main e50aea4", "main"),
     ("api.deepseek.com/v1, verified 2026-09-15T02:39Z", ""),
     ("verified on the shared host", ""),
+    # REVIEW-OB-009: placeholders are not filter tokens — a real
+    # version-shaped field still wins, a bare placeholder drops.
+    ("<tool> 0.14.0", "0.14.0"),
+    ("hilo/<project>", ""),
 ]
 
 

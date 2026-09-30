@@ -66,6 +66,10 @@ def slug_stem(filename):
 def render_md(text):
     if not text:
         return ""
+    # REVIEW-OB-009: the corpus placeholders (<project>, <tool>) are TEXT —
+    # escape them before markdown, which would otherwise parse them as raw
+    # HTML tags and swallow them from the rendered page.
+    text = text.replace("<project>", "&lt;project&gt;").replace("<tool>", "&lt;tool&gt;")
     MD.reset()
     return MD.convert(text)
 

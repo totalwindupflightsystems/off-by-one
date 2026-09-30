@@ -27,6 +27,8 @@ _spec = importlib.util.spec_from_file_location("export_answers", _SELF_PATH)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 sanitize_host_paths = _mod.sanitize_host_paths
+sanitize_internal_names = _mod.sanitize_internal_names
+sanitize_corpus_text = _mod.sanitize_corpus_text
 
 
 class SanitizeHostPathsTest(unittest.TestCase):
@@ -94,14 +96,70 @@ class SanitizeHostPathsTest(unittest.TestCase):
     def test_record_build_uses_sanitizer(self):
         # Guard against regression to raw field passthrough: the SELECT row
         # assembly in main() must route every text field through the
-        # sanitizer. Source-level assertion, like the exclusions test's
-        # reliance on the module's public surface.
+        # composed scrub (host paths + internal names). Source-level
+        # assertion, like the exclusions test's reliance on the module's
+        # public surface.
         import inspect
         src = inspect.getsource(_mod.main)
         for field in ('r["title"]', 'r["description"]', 'r["lang"]', 'r["env"]',
                       'r["version"]', 'r["solution"]', 'r["evidence"]', 'r["signatures"]'):
             with self.subTest(field=field):
-                self.assertIn(f"sanitize_host_paths({field}", src)
+                self.assertIn(f"sanitize_corpus_text({field}", src)
+
+
+class SanitizeInternalNamesTest(unittest.TestCase):
+    """REVIEW-OB-009: internal project/tool names map to placeholders."""
+
+    def test_project_names(self):
+        cases = {
+            "run hermes-dagger pipeline": "run <project> pipeline",
+            "chimera-v2 namespace sync": "<project> namespace sync",
+            "mounted warpfs share": "mounted <project> share",
+            "crier bus route 404s": "<project> bus route 404s",
+        }
+        for src, want in cases.items():
+            with self.subTest(src=src):
+                self.assertEqual(sanitize_internal_names(src), want)
+
+    def test_gitreins_tool_path_forms(self):
+        # Every documented form collapses to <tool>, swallowing its prefix
+        # so no /home/<user> account name can survive to the host-path pass.
+        for src in ("/home/kara/.local/bin/gitreins",
+                    "/home/bunker-deadbeef/.local/bin/gitreins",
+                    "~/.local/bin/gitreins",
+                    ".local/bin/gitreins"):
+            with self.subTest(src=src):
+                self.assertEqual(sanitize_internal_names(src), "<tool>")
+
+    def test_bare_gitreins_word_untouched(self):
+        # Only the install path is redacted; the tool's name in prose stays.
+        src = "gitreins guard blocks the commit"
+        self.assertEqual(sanitize_internal_names(src), src)
+
+    def test_multiple_names_in_one_text(self):
+        src = "crier + warpfs + hermes-dagger + chimera-v2"
+        self.assertEqual(sanitize_internal_names(src),
+                         "<project> + <project> + <project> + <project>")
+
+    def test_unrelated_text_untouched(self):
+        for src in ("off-by-one corpus export", "/usr/bin/env python3", "no names here"):
+            with self.subTest(src=src):
+                self.assertEqual(sanitize_internal_names(src), src)
+
+    def test_empty_and_none_pass_through(self):
+        self.assertEqual(sanitize_internal_names(""), "")
+        self.assertIsNone(sanitize_internal_names(None))
+
+    def test_composed_scrub_covers_both_classes(self):
+        # sanitize_corpus_text removes names AND host paths in one pass.
+        self.assertEqual(
+            sanitize_corpus_text("edit /home/kara/x then run crier"),
+            "edit ~/x then run <project>",
+        )
+        self.assertEqual(
+            sanitize_corpus_text("/home/kara/.local/bin/gitreins"),
+            "<tool>",
+        )
 
 
 if __name__ == "__main__":

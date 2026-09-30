@@ -337,9 +337,9 @@ func (e *Engine) renderItem(ctx context.Context, item ExportItem) ([]renderedFil
 	answer.Env = graph.NormalizeEnv(answer.Env)
 	answer.Version = graph.NormalizeVersion(answer.Version)
 
-	solutionMD := sanitizeHostPaths(formatSolutionMD(pc, answer))
-	evidenceMD := sanitizeHostPaths(formatEvidenceMD(answer))
-	signaturesJSON := sanitizeHostPaths(formatSignatures(answer))
+	solutionMD := sanitizeCorpusText(formatSolutionMD(pc, answer))
+	evidenceMD := sanitizeCorpusText(formatEvidenceMD(answer))
+	signaturesJSON := sanitizeCorpusText(formatSignatures(answer))
 
 	dir := filepath.Join(e.cfg.SubtreePrefix, pc.Title, answer.Env, answer.Version)
 	files := []renderedFile{
@@ -531,6 +531,45 @@ var hostPathPattern = regexp.MustCompile(`/home/[A-Za-z0-9_-]+`)
 // file before it reaches disk.
 func sanitizeHostPaths(s string) string {
 	return hostPathPattern.ReplaceAllString(s, "~")
+}
+
+// --- Internal-name hygiene (REVIEW-OB-009) --------------------------------
+
+// internalNameRedactions mirrors _NAME_REDACTIONS in
+// scripts/export-answers.py (keep the two in sync): internal project/tool
+// names are lab-internal identifiers and must never reach the public
+// corpus or site. Ordered: the gitreins tool path comes first and swallows
+// its own /home/<user>/ or ~/ prefix so the account name cannot survive as
+// a host-path leak when the generic rewrite runs after.
+var internalNameRedactions = []struct {
+	pattern     *regexp.Regexp
+	placeholder string
+}{
+	{regexp.MustCompile(`(?:/home/[A-Za-z0-9_-]+|~)?/?\.local/bin/gitreins`), "<tool>"},
+	{regexp.MustCompile(`hermes-dagger`), "<project>"},
+	{regexp.MustCompile(`chimera-v2`), "<project>"},
+	{regexp.MustCompile(`warpfs`), "<project>"},
+	{regexp.MustCompile(`crier`), "<project>"},
+}
+
+// sanitizeInternalNames rewrites every internal project/tool name in s to
+// its neutral placeholder. Unrelated text — including the word "gitreins"
+// alone (only the .local/bin/gitreins install path is redacted) — is
+// untouched.
+func sanitizeInternalNames(s string) string {
+	for _, r := range internalNameRedactions {
+		s = r.pattern.ReplaceAllString(s, r.placeholder)
+	}
+	return s
+}
+
+// sanitizeCorpusText is the full corpus-text scrub: internal names first,
+// then host paths. Name redaction runs first because the <tool> rule
+// consumes its own /home/<user>/ prefix; the host-path rewrite then
+// backstops any other /home/<user> occurrence. writeItem applies it to
+// every rendered file before it reaches disk.
+func sanitizeCorpusText(s string) string {
+	return sanitizeHostPaths(sanitizeInternalNames(s))
 }
 
 // --- Formatting (spec §5.1) ---------------------------------------------

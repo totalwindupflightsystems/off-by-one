@@ -17,6 +17,11 @@
 #    "environment"/"version" JSON fields under data/ plus the rendered
 #    env badge (class='badge v') under site/.
 #
+# 3. REVIEW-OB-009 — internal project/tool names: hermes-dagger,
+#    chimera-v2, warpfs, crier and any .local/bin/gitreins install path
+#    are lab-internal identifiers. The export pipeline rewrites them to
+#    <project>/<tool> placeholders at write time.
+#
 # Exit 1 (listing the offending files) when a match is found under data/ or
 # site/; exit 0 when clean. Ops files legitimately carry deploy paths and are
 # deliberately out of scope — only data/ and site/ are scanned.
@@ -33,6 +38,8 @@ GUARD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOST_PATH_PATTERN='/home/[A-Za-z0-9_-]+'
 # The rendered env badge on the static site carries the same value.
 BADGE_PATTERN="class='badge v'>[^<]*[ ;~]"
+# REVIEW-OB-009: internal project/tool names must never be published.
+NAME_PATTERN='hermes-dagger|chimera-v2|warpfs|crier|\.local/bin/gitreins'
 
 rc=0
 
@@ -40,6 +47,13 @@ host_offenders="$(grep -rEl "$HOST_PATH_PATTERN" "$ROOT/data" "$ROOT/site" 2>/de
 if [ -n "$host_offenders" ]; then
   printf 'corpus hygiene VIOLATION: operator host paths (/home/<user>) under data/ or site/:\n' >&2
   printf '%s\n' "$host_offenders" | sed 's/^/  /' >&2
+  rc=1
+fi
+
+name_offenders="$(grep -rEl "$NAME_PATTERN" "$ROOT/data" "$ROOT/site" 2>/dev/null)"
+if [ -n "$name_offenders" ]; then
+  printf 'corpus hygiene VIOLATION: internal project/tool names (hermes-dagger, chimera-v2, warpfs, crier, .local/bin/gitreins) under data/ or site/:\n' >&2
+  printf '%s\n' "$name_offenders" | sed 's/^/  /' >&2
   rc=1
 fi
 
@@ -65,5 +79,5 @@ if [ "$rc" -ne 0 ]; then
   exit 1
 fi
 
-printf 'corpus hygiene OK: no /home/<user> paths and no prose env/version tokens under %s/{data,site}\n' "$ROOT"
+printf 'corpus hygiene OK: no /home/<user> paths, no internal names and no prose env/version tokens under %s/{data,site}\n' "$ROOT"
 exit 0
