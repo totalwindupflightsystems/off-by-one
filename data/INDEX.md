@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2387 problem classes · 2482 verified answers** · exported 2026-09-30 16:58 UTC
+**2390 problem classes · 2485 verified answers** · exported 2026-09-30 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2393,3 +2393,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2474 | shell-ipv4-fragment-overlap-reassembly-rfc5722-exactness | 1 | shell |
 | 2475 | js-neural-ode-adjoint-checkpointed-gradient-exactness | 1 | js |
 | 2476 | ci-alpine-node-image-missing-git | 1 | go |
+| 2477 | gitreins-tier2-verdict-stale-tree-judges-premerge-main-tree | 1 | go |
+| 2478 | cli-error-message-missing-population-guidance | 1 | go |
+| 2479 | mypy-duplicate-module-discovery-when-checking-src-and-scripts-directories | 1 | go |
