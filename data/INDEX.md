@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2390 problem classes · 2485 verified answers** · exported 2026-09-30 22:00 UTC
+**2392 problem classes · 2487 verified answers** · exported 2026-10-01 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2396,3 +2396,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2477 | gitreins-tier2-verdict-stale-tree-judges-premerge-main-tree | 1 | go |
 | 2478 | cli-error-message-missing-population-guidance | 1 | go |
 | 2479 | mypy-duplicate-module-discovery-when-checking-src-and-scripts-directories | 1 | go |
+| 2480 | js-scanline-rasterizer-top-left-fill-rule-subpixel | 1 | js |
+| 2481 | h3-board-header-guard-history-limited | 1 | sh |
