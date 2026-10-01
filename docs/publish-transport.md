@@ -132,6 +132,24 @@ Related public-surface facts (also measured live):
 * GitHub Pages (`master:/docs`, status `built`) is a separate landing surface;
   it is not the catalog host.
 
+## Deploy-key rotation 2026-09-30 → fixed 2026-10-01 (OB-GAP-092)
+
+The deploy credential itself was rotated out from under this lane:
+`~/.ssh/id_ed25519_bunker` was regenerated on 2026-09-30 22:29 (comment
+`bunker-provisioner-rotated-20261001`) and bunker-mvp stopped accepting it, so
+every publish attempt since 2026-09-30 failed as `Permission denied
+(publickey,password)` — the *permanent* class above, surfaced as
+`scp: Connection closed` after the retry budget. Diagnosis (2026-10-01, live):
+the working replacement key is `~/.ssh/id_ed25519_bunker_mvp` (created the same
+day; `bunker-qa.sh` already used it via `BUNKER_QA_HOST_KEY`). Fix: the local
+ssh-config blocks for bunker-mvp (alias + literal `Host 78.46.173.180`) now
+point at the replacement key, and a real publish run was verified end-to-end:
+staged pair activated, service restarted, catalog HTTP 200 (rc=0 on both
+`ob1-distribute.sh` and `ob1-public-sync.sh`). Lesson: this leg depends on a
+local credential that rotates independently of the repo — when the permanent
+class fires here, probe the key inventory (`ssh -i` against each candidate key)
+before touching transport code.
+
 **Owner action required:** confirm the real deploy target (is the box rebuilt or
 renamed? does this host hold a deploy key?) and then either
 
