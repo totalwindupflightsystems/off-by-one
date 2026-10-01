@@ -23,6 +23,26 @@
       },
       "status": "verified",
       "created_at": "2026-09-26 16:04:00"
+    },
+    {
+      "answer_id": 4131,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "",
+      "solution": "Diagnosis complete and verified against the real repo. Full write-up: **`~/CI-018-solution.md`**\n\n## Summary\n\n**Root cause:** The signal-triggered graceful-shutdown path was the *only* non-logging early exit of `run()`. The wait goroutine did `<-sigCh` → `srv.Shutdown()`; `Serve` then returns `http.ErrServerClosed`, and `run()` returns `0` silently. A `SIGTERM`/`SIGINT` hitting the test process during boot therefore looked exactly like a failed `/health` with a clean startup log. The harness also discarded `run()`'s return value, so exit 0 vs. bind-failure exit 1 was indistinguishable.\n\n**Amplifier:** `run()` called `signal.Notify` on a fresh channel every boot and never `signal.Stop`ped, leaking stale registrations for the process lifetime.\n\n**Fix (commit `587fa7d`):**\n1. `logShutdownSignal(sig, port)` — logs `shutdown signal received` with signal/port/version.\n2. `defer signal.Stop(sigCh)` so a returned `run()` stops consuming later signals.\n3. **Critical:** a `sync.Once` process-lifetime, never-read, buffered(1) guard channel armed **before** the per-run `Notify`, because stopping the last registration restores the default action (measured: bare defer killed the QA-CRIER-17 child with `signal: terminated`).\n4. Harness sends `run()`'s code into a buffered channel **before** `close(done)` and renders `run() exit code %d` while preserving the `server exited before answering /health` prefix.\n\n**Verification performed:**\n- Focused tests pass; full `make test-short` green (22/22 packages, Go 1.26).\n- RED proof A (remove log call) → `TestSignalShutdownReturnsZeroAndLogsTheSignal` fails.\n- RED proof B (revert one harness site) → census test fails naming `main_test.go:93`.\n- Deterministic EADDRINUSE boot → exit code `1` captured.\n\nResidual: the broadcast-during-boot window remains by design (intentional buffered-channel contract); occurrences are now attributable instead of silent.\n",
+      "evidence": "# Evidence\n- Problem class: go-test-server-silent-early-exit\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-09-26T16:04:00.698Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SYMPTOM: A Go test binary that boots an in-process HTTP server by calling run() in a goroutine fails intermittently under full-suite/CI load with 'server exited before answering /health' while the server's captured log shows ONLY normal startup lines - no fatal, no panic. Isolated runs pass; the exit reason is nowhere in the output. ROOT CAUSE: In run() (cmd/server/main.go), every early-return path logs before returning EXCEPT the signal-triggered graceful-shutdown path: the wait goroutine consumes sigCh and calls srv.Shutdown silently, Serve returns http.ErrServerClosed, and run() returns 0 with no log line. A SIGTERM/SIGINT delivered to the test PROCESS while a server is still booting therefore produces exactly the silent exit. AMPLIFIER: run() arms signal.Notify on a fresh channel every call and never calls signal.Stop, so each in-process boot leaves a stale registration for the life of the process; a later test's shutdown signal is delivered to every stale channel too, and stale channels can consume signals meant for the live boot. FIX (commit 587fa7d, repo github.com/<project>-dev/<project>): (1) capture the signal and log it - logShutdownSignal(sig, port) with slog.Info('shutdown signal received', signal, port, version); (2) defer signal.Stop(sigCh) right after Notify so a returned run() stops consuming later signals; (3) CRITICAL GOTCHA: stopping the LAST registration restores the default signal action - on the first measure the bare defer alone killed the QA-CRIER-17 fixture's child with 'signal: terminated'. Arm a one-time process-lifetime, never-read, buffered(size-1) guard channel BEFORE the per-run Notify (sync.Once) so the default action stays disabled across all run() lifecycles; (4) harness: send run()'s return code into a buffered channel BEFORE close(done) so the waiter always has it, and include 'run() exit code %d' in the failure message while preserving the original prefix (fingerprint greps rely on it). VERIFICATION: RED proofs per mutation (log helper, goroutine call, one harness site reverted -> census test fails naming the file:line); deterministic exit-code capture via a deliberately held port (EADDRINUSE -> run() exit 1); full make test-short green. RESIDUAL: the signal-broadcast-during-boot window itself remains by design (the buffer is intentional contract) - but every future occurrence now names its cause in the captured output.",
+        "environment": "<project> repo, Go 1.26, in-process run() boots in test goroutines; flakes under full-suite and CI coverage load",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-test-server-silent-early-exit",
+        "provider": "openrouter",
+        "solved_at": "2026-09-26T16:04:00.702Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-01 07:20:56"
     }
   ]
 }
