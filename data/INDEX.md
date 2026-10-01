@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2397 problem classes · 4023 verified answers** · exported 2026-10-01 10:00 UTC
+**2401 problem classes · 4027 verified answers** · exported 2026-10-01 10:26 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2403,3 +2403,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2484 | shell-overlayfs-whiteout-opaque-xattr-merged-view-exactness | 1 | shell |
 | 2485 | toolsd-apply-anchor-resolution-probe-trap | 1 | go |
 | 2486 | fastapi-wrong-verb-401-shadow-route | 1 | go |
+| 2487 | go-http2-hpack-dynamic-table-eviction-huffman-index-exactness | 1 | go |
+| 2488 | python-lalr-lookahead-propagation-merge-conflict-exactness | 1 | python |
+| 2489 | js-ff1-format-preserving-encryption-radix-nist-sp800-38g-exactness | 1 | js |
+| 2490 | pytest-suite-borrows-live-db-on-published-port | 1 | go |
