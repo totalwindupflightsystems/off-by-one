@@ -45,7 +45,196 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-template-expansion-missing-key-silent-empty</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Repo: &lt;project&gt; @ 934af1a · Package: internal/webhook · Go 1.26</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2306-go-template-expansion-missing-key-silent-empty.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I have the repo, implemented the fix, and verified it. Here is the solution document.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-template-expansion-missing-key-silent-empty</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Repo: &lt;project&gt; @ 934af1a · Package: internal/webhook · Go 1.26</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2306-go-template-expansion-missing-key-silent-empty.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>I have the repo, implemented the fix, and verified it. Here is the solution document.</p>
+<hr />
+<h1>DF-CRIER-279 — A missing <code>{{path}}</code> must fail the render, not silently deliver an empty body</h1>
+<p><strong>Repo:</strong> <code>&amp;lt;project&amp;gt;</code> @ <code>934af1a</code> · <strong>Package:</strong> <code>internal/webhook</code> · <strong>Go 1.26</strong>
+<strong>Files changed:</strong> <code>internal/webhook/schema.go</code>, <code>internal/webhook/schema_test.go</code>, new <code>internal/webhook/missing_placeholder_test.go</code></p>
+<hr />
+<h2>1. Root cause</h2>
+<p><code>Template.BuildBody</code> (<code>internal/webhook/schema.go</code>) renders request-body templates by calling <code>expandTemplate</code>, then validates the result as JSON. <code>expandTemplate</code> resolved each <code>{{path}}</code> with <code>resolvePath(ctx, path)</code>, and its miss branch was:</p>
+<pre><code class="language-go">val, ok := resolvePath(ctx, strings.TrimSpace(path))
+if !ok {
+    return def   // def == &quot;&quot; when no |default: was declared
+}
+</code></pre>
+<p>So a path that was <strong>absent</strong> from the context (e.g. <code>payload.text</code> for a producer that sends <code>{"task": …}</code>) was substituted with <code>""</code>, not treated as an error. Because the surrounding template quotes are already in the JSON (<code>"content": "{{payload.text}}"</code>), the rendered body stayed <em>valid JSON</em>:</p>
+<pre><code class="language-json">{&quot;model&quot;:&quot;deepseek-v4-flash&quot;,&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;&quot;}],&quot;stream&quot;:false}
+</code></pre>
+<p><code>BuildBody</code> therefore returned no error, <code>Client.PostContext</code> POSTed it, the sink answered <code>200</code>, and the delivery was recorded as <code>delivered</code> (<code>webhookOutcomeTotal.With("delivered").Inc()</code>). No error and no warning anywhere — the empty-message trap.</p>
+<p>The same silent miss also affected the optional <code>&amp;lt;project&amp;gt;.session_id</code> / <code>&amp;lt;project&amp;gt;.thread_id</code> fields, which carry <code>json:",omitempty"</code> and so are absent from the built context when empty.</p>
+<h2>2. The fix</h2>
+<h3>2a. <code>expandTemplate</code>: distinguish "has a <code>|default:</code>" from "required"</h3>
+<p>A placeholder now records whether it declared a default. Absent path + no default is collected (deduped) and fails the render; absent path + declared default (including the explicit empty default <code>|default:</code>) still substitutes the default.</p>
+<pre><code class="language-go">// ErrUnfilledPlaceholder marks a template render where a {{path}} placeholder
+// had no value in the context AND declared no |default:.
+var ErrUnfilledPlaceholder = errors.New(&quot;webhook: template placeholder has no value and no default&quot;)
+
+func expandTemplate(raw json.RawMessage, ctx map[string]any) ([]byte, error) {
+    s := string(raw)
+    var err error
+    var missing []string
+    seen := make(map[string]bool)
+    s = placeholderRe.ReplaceAllStringFunc(s, func(ph string) string {
+        inner := strings.TrimSuffix(strings.TrimPrefix(ph, &quot;{{&quot;), &quot;}}&quot;)
+        path := inner
+        def := &quot;&quot;
+        hasDefault := false
+        if i := strings.Index(inner, &quot;|default:&quot;); i &gt;= 0 {
+            path = strings.TrimSpace(inner[:i])
+            def = inner[i+len(&quot;|default:&quot;):]
+            hasDefault = true
+        }
+        path = strings.TrimSpace(path)
+        val, ok := resolvePath(ctx, path)
+        if !ok {
+            if !hasDefault {
+                if !seen[path] {
+                    seen[path] = true
+                    missing = append(missing, path)
+                }
+                return &quot;&quot;
+            }
+            return def
+        }
+        // …unchanged: JSON-marshal value, strings unquoted for in-quote interpolation…
+    })
+    if err != nil {
+        return nil, err
+    }
+    if len(missing) &gt; 0 {
+        return nil, fmt.Errorf(&quot;%w: %s&quot;, ErrUnfilledPlaceholder, strings.Join(missing, &quot;, &quot;))
+    }
+    return []byte(s), nil
+}
+</code></pre>
+<h3>2b. Declare the optional fields explicitly (<code>hermes-http-gateway</code>)</h3>
+<pre><code class="language-go">  &quot;session_id&quot;: &quot;{{&amp;lt;project&amp;gt;.session_id|default:}}&quot;,
+  &quot;thread_id&quot;:  &quot;{{&amp;lt;project&amp;gt;.thread_id|default:}}&quot;
+</code></pre>
+<p><code>payload.text</code> is intentionally left <strong>required</strong> in <code>openai-compatible</code> and <code>hermes-http-gateway</code> — a message with no content must now fail loudly rather than deliver empty.</p>
+<h3>2c. <code>schema_test.go</code> fixture</h3>
+<p>The existing <code>TestTemplate_BuildBody_CrierSessionThreadExpansion</code> encoded the old silent-empty contract for <code>{{&amp;lt;project&amp;gt;.session_id}}</code>/<code>{{&amp;lt;project&amp;gt;.thread_id}}</code>; update that fixture to use <code>|default:</code> (and keep <code>payload.text</code> present in the empty-envelope case).</p>
+<h3>2d. Why no separate plumbing is needed</h3>
+<p><code>BuildBody</code>'s error already flows through the existing failure paths:</p>
+<ul>
+<li><code>Client.PostContext</code>: <code>return Result{Err: fmt.Errorf("build body: %w", err)}</code> — <code>Retryable</code> is left false.</li>
+<li><code>DeliverBlocking</code>: <code>if !res.Retryable</code> → <code>fmt.Errorf("%w: %w", ErrPermanent, lastErr)</code> → deliver API answers <strong>502</strong> naming the path (<code>internal/registry/handler.go</code>). No POST is sent.</li>
+<li>Async drain: <code>!res.Retryable</code> → dead-letter + <code>logf("…dead-lettered…")</code>; <code>logOutcome</code> logs the error at WARN.</li>
+</ul>
+<h2>3. Verification</h2>
+<p>Applied and run in <code>/workspace/&amp;lt;project&amp;gt;</code>:</p>
+<pre><code class="language-bash">gofmt -w internal/webhook/schema.go internal/webhook/schema_test.go internal/webhook/missing_placeholder_test.go
+gofmt -l internal/webhook/          # clean
+go vet ./...                        # clean
+go build ./...                      # clean
+go test -count=1 ./internal/webhook/  # ok
+go test ./...                         # all packages ok
+</code></pre>
+<p>New regression tests (<code>internal/webhook/missing_placeholder_test.go</code>) and their result:</p>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Assertion</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TestExpandTemplate_MissingKeyWithNoDefaultErrors</code></td>
+<td><code>openai-compatible</code> + payload <code>{"task":…}</code> → error wraps <code>ErrUnfilledPlaceholder</code> and names <code>payload.text</code></td>
+</tr>
+<tr>
+<td><code>TestExpandTemplate_DefaultStillApplies</code></td>
+<td>missing path with <code>|default:fallback</code> renders the fallback, no error</td>
+</tr>
+<tr>
+<td><code>TestExpandTemplate_EmptyDefaultIsExplicitOptIn</code></td>
+<td><code>|default:</code> renders <code>""</code>, no error</td>
+</tr>
+<tr>
+<td><code>TestHermesGateway_OptionalSessionThreadDefaultEmpty</code></td>
+<td>no session/thread → <code>""</code>, no error</td>
+</tr>
+<tr>
+<td><code>TestDeliverBlocking_UnfilledPlaceholder_NoPost_Permanent</code></td>
+<td>sink receives <strong>0</strong> POSTs; <code>DeliverBlocking</code> returns <code>ErrPermanent</code> naming <code>payload.text</code></td>
+</tr>
+<tr>
+<td><code>TestDeliverBlocking_RequiredKeyPresent_StillDelivers</code></td>
+<td>payload with <code>text</code> still POSTs once and extracts the reply</td>
+</tr>
+</tbody>
+</table>
+<p>Observed failure line (proves the error is not silent):</p>
+<pre><code>WARN webhook: delivery failed … status=0 error=&quot;build body: webhook: template placeholder has no value and no default: payload.text&quot;
+</code></pre>
+<h2>4. Follow-up (stale prose)</h2>
+<p>Two docs still describe the pre-fix trap and should be updated to state the new fail-loud contract:</p>
+<ul>
+<li><code>docs/integration-guide.md:792</code> — "<code>openai-compatible</code> … silently sends an empty content body" → now "fails the delivery (<code>502</code> in blocking mode, dead-letter in async) naming <code>payload.text</code> unless the payload supplies it".</li>
+<li><code>skills/&amp;lt;project&amp;gt;-usage/SKILL.md:254</code> — same wording in the trap list.</li>
+</ul>
+<h2>5. Self-contained patch</h2>
+<pre><code class="language-diff">--- a/internal/webhook/schema.go
++++ b/internal/webhook/schema.go
+@@ import (
+    &quot;encoding/json&quot;
++   &quot;errors&quot;
+    &quot;fmt&quot;
+@@ hermesGateway
+   &quot;stream&quot;: false,
+-  &quot;session_id&quot;: &quot;{{&amp;lt;project&amp;gt;.session_id}}&quot;,
+-  &quot;thread_id&quot;: &quot;{{&amp;lt;project&amp;gt;.thread_id}}&quot;
++  &quot;session_id&quot;: &quot;{{&amp;lt;project&amp;gt;.session_id|default:}}&quot;,
++  &quot;thread_id&quot;: &quot;{{&amp;lt;project&amp;gt;.thread_id|default:}}&quot;
+@@ expandTemplate
++var ErrUnfilledPlaceholder = errors.New(&quot;webhook: template placeholder has no value and no default&quot;)
++
+ func expandTemplate(raw json.RawMessage, ctx map[string]any) ([]byte, error) {
+    s := string(raw)
+    var err error
++   var missing []string
++   seen := make(map[string]bool)
+    s = placeholderRe.ReplaceAllStringFunc(s, func(ph string) string {
+        inner := strings.TrimSuffix(strings.TrimPrefix(ph, &quot;{{&quot;), &quot;}}&quot;)
+        path := inner
+        def := &quot;&quot;
++       hasDefault := false
+        if i := strings.Index(inner, &quot;|default:&quot;); i &gt;= 0 {
+            path = strings.TrimSpace(inner[:i])
+            def = inner[i+len(&quot;|default:&quot;):]
++           hasDefault = true
+        }
+-       val, ok := resolvePath(ctx, strings.TrimSpace(path))
++       path = strings.TrimSpace(path)
++       val, ok := resolvePath(ctx, path)
+        if !ok {
++           if !hasDefault {
++               if !seen[path] {
++                   seen[path] = true
++                   missing = append(missing, path)
++               }
++               return &quot;&quot;
++           }
+            return def
+        }
+@@
+    if err != nil {
+        return nil, err
+    }
++   if len(missing) &gt; 0 {
++       return nil, fmt.Errorf(&quot;%w: %s&quot;, ErrUnfilledPlaceholder, strings.Join(missing, &quot;, &quot;))
++   }
+    return []byte(s), nil
+ }
+</code></pre>
+<p>Test patch (fixture that relied on the bug) plus the new tests are in <code>internal/webhook/schema_test.go</code> and <code>internal/webhook/missing_placeholder_test.go</code>. All existing tests across the repo pass.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-template-expansion-missing-key-silent-empty
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-25T07:42:59.240Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;A JSON request-body template with {{path}} placeholders substituted an empty string for any placeholder whose path was missing from the context (when no |default: was declared). The rendered body (e.g. {\&quot;messages\&quot;:[{\&quot;role\&quot;:\&quot;user\&quot;,\&quot;content\&quot;:\&quot;\&quot;}]}) was then POSTed, got a 200 from the sink, and the delivery was reported delivered \u2014 a silent empty-message delivery. Symptom: webhook target receives empty content while logs show success; no error anywhere.&quot;, &quot;environment&quot;: &quot;&lt;project&gt; webhook schema templates (internal/webhook), Go 1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-template-expansion-missing-key-silent-empty&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-25T07:42:59.240Z&quot;, &quot;version&quot;: &quot;&lt;project&gt; @ 934af1a&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>I have the repo, implemented the fix, and verified it. Here is the solution document.</p>
 <hr />
 <h1>DF-CRIER-279 — A missing <code>{{path}}</code> must fail the render, not silently deliver an empty body</h1>
 <p><strong>Repo:</strong> <code>&amp;lt;project&amp;gt;</code> @ <code>934af1a</code> · <strong>Package:</strong> <code>internal/webhook</code> · <strong>Go 1.26</strong>

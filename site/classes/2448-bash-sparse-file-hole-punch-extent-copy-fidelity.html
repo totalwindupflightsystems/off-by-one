@@ -45,7 +45,330 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bash-sparse-file-hole-punch-extent-copy-fidelity</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>Files created: ~/sparse-copy (tested, executable) and ~/SOLUTION.md (full write-up). The code block below was diffed byte-for-byte against the tested script.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2448-bash-sparse-file-hole-punch-extent-copy-fidelity.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>Both artifacts are in place and verified. Here is the solution.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bash-sparse-file-hole-punch-extent-copy-fidelity</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>Files created: ~/sparse-copy (tested, executable) and ~/SOLUTION.md (full write-up). The code block below was diffed byte-for-byte against the tested script.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2448-bash-sparse-file-hole-punch-extent-copy-fidelity.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>Both artifacts are in place and verified. Here is the solution.</p>
+<hr />
+<h1>Hole-for-hole sparse copy in bash with <code>SEEK_DATA</code>/<code>SEEK_HOLE</code></h1>
+<p><strong>Files created:</strong> <code>~/sparse-copy</code> (tested, executable) and <code>~/SOLUTION.md</code> (full write-up). The code block below was diffed byte-for-byte against the tested script.</p>
+<h2>Root-cause analysis</h2>
+<p>Sparseness is a property of a file's <strong>extent map</strong>, not of its bytes. It can only be read with <code>lseek(2)</code> <code>SEEK_DATA</code>/<code>SEEK_HOLE</code>:</p>
+<ul>
+<li><code>lseek(fd, off, SEEK_DATA)</code> → start of the next data extent at/after <code>off</code> (<code>ENXIO</code> when the tail is a hole).</li>
+<li><code>lseek(fd, off, SEEK_HOLE)</code> → start of the next hole; the virtual hole at <code>EOF</code> is always reported.</li>
+</ul>
+<p>Any copier that inspects bytes or copies <code>[0,size)</code> linearly destroys the mapping:</p>
+<table>
+<thead>
+<tr>
+<th>command</th>
+<th>src <code>st_blocks</code></th>
+<th>dst <code>st_blocks</code></th>
+<th>failure</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>naive read/write loop</td>
+<td>2056</td>
+<td>131072</td>
+<td>holes materialized as zeros</td>
+</tr>
+<tr>
+<td><code>cp --sparse=always</code></td>
+<td>2056</td>
+<td><strong>8</strong></td>
+<td>allocated all-zero data extent collapsed into a hole</td>
+</tr>
+<tr>
+<td><code>dd conv=sparse</code></td>
+<td>2056</td>
+<td><strong>8</strong></td>
+<td>zero-detection ≠ hole detection</td>
+</tr>
+<tr>
+<td>this copier</td>
+<td>2056</td>
+<td>2056</td>
+<td>preserved</td>
+</tr>
+</tbody>
+</table>
+<p>Bash cannot call these <code>lseek</code> modes, so the extent walk lives in an embedded <code>python3</code> helper (a C helper with the same loop also works). The concurrency requirement means a single pass is not trusted: it must never leave a partial tail, retry on source change, and exit nonzero with a mapping report when divergence remains.</p>
+<h2>The fix</h2>
+<p>Save as <code>sparse-copy</code>, <code>chmod +x sparse-copy</code>.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# sparse-copy -- hole-for-hole sparse file copier using SEEK_DATA/SEEK_HOLE.
+#
+# Usage: sparse-copy SRC DST
+#
+# Exit status:
+#   0  destination mapping/logical size/allocated blocks match the source
+#   1  mapping diverged (per-extent fidelity report is printed)
+#   2  usage / setup error
+#
+# Bash cannot call lseek(2) with SEEK_DATA/SEEK_HOLE itself, so the byte-level
+# extent walk is delegated to an embedded Python 3 helper.  Bash owns argument
+# handling, process plumbing and the final exit status; Python owns the
+# SEEK_DATA/SEEK_HOLE extent walk, the sparse pwrite copy and the report.
+
+set -u -o pipefail
+
+die() { printf 'sparse-copy: %s\n' &quot;$*&quot; &gt;&amp;2; exit 2; }
+
+[[ $# -eq 2 ]] || die &quot;usage: sparse-copy SRC DST&quot;
+src=$1
+dst=$2
+
+[[ -e $src ]] || die &quot;source does not exist: $src&quot;
+[[ -f $src ]] || die &quot;source is not a regular file: $src&quot;
+[[ -d $dst ]] &amp;&amp; die &quot;destination is a directory: $dst&quot;
+
+command -v python3 &gt;/dev/null 2&gt;&amp;1 || die &quot;python3 is required for SEEK_DATA/SEEK_HOLE&quot;
+
+exec python3 - &quot;$src&quot; &quot;$dst&quot; &lt;&lt;'PY'
+import errno
+import os
+import sys
+
+SRC, DST = sys.argv[1], sys.argv[2]
+CHUNK = 1 &lt;&lt; 20       # read/write unit for a single data extent
+MAX_ATTEMPTS = 8      # bounded retries while a concurrent writer is active
+
+ENXIO = errno.ENXIO
+
+
+def file_extents(fd, size):
+    &quot;&quot;&quot;Return [(kind, start, end), ...] covering [0, size) using SEEK_DATA/HOLE.&quot;&quot;&quot;
+    out = []
+    off = 0
+    while off &lt; size:
+        try:
+            data = os.lseek(fd, off, os.SEEK_DATA)
+        except OSError as e:
+            if e.errno == ENXIO:          # no more data: remainder is a hole
+                if off &lt; size:
+                    out.append((&quot;hole&quot;, off, size))
+                break
+            raise
+        if data &gt; off:
+            out.append((&quot;hole&quot;, off, data))
+        if data &gt;= size:
+            break
+        try:
+            hole = os.lseek(fd, data, os.SEEK_HOLE)
+        except OSError:
+            hole = size
+        # A filesystem without hole support reports hole == data.
+        if hole &lt;= data:
+            hole = size
+        hole = min(hole, size)
+        out.append((&quot;data&quot;, data, hole))
+        off = hole
+    return out
+
+
+def extents_of_path(path):
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        st = os.fstat(fd)
+        return file_extents(fd, st.st_size), st
+    finally:
+        os.close(fd)
+
+
+def copy_once(sfd, dfd):
+    &quot;&quot;&quot;One pass.  Returns (status, copied_bytes, torn_at_or_None).&quot;&quot;&quot;
+    st0 = os.fstat(sfd)
+    size0 = st0.st_size
+    os.ftruncate(dfd, size0)              # establish logical size; holes stay holes
+    copied = 0
+    off = 0
+    torn_at = None
+    while off &lt; size0:
+        try:
+            data = os.lseek(sfd, off, os.SEEK_DATA)
+        except OSError as e:
+            if e.errno == ENXIO:
+                break
+            raise
+        if data &gt;= size0:
+            break
+        try:
+            hole = os.lseek(sfd, data, os.SEEK_HOLE)
+        except OSError:
+            hole = size0
+        if hole &lt;= data:
+            hole = size0
+        hole = min(hole, size0)
+
+        pos = data
+        while pos &lt; hole:
+            want = min(CHUNK, hole - pos)
+            buf = os.pread(sfd, want, pos)
+            if len(buf) &lt; want:
+                # Source shrank under us mid-extent: never keep a partial tail.
+                os.ftruncate(dfd, data)
+                torn_at = data
+                return (&quot;torn&quot;, copied, torn_at)
+            n = os.pwrite(dfd, buf, pos)
+            if n &lt;= 0:
+                raise OSError(errno.EIO, &quot;short write at offset %d&quot; % pos)
+            copied += n
+            pos += n
+        off = hole
+
+    os.fsync(dfd)
+    st1 = os.fstat(sfd)
+    stable = (
+        st1.st_size == st0.st_size
+        and st1.st_mtime_ns == st0.st_mtime_ns
+        and st1.st_ctime_ns == st0.st_ctime_ns
+        and st1.st_blocks == st0.st_blocks
+    )
+    return (&quot;stable&quot; if stable else &quot;changed&quot;, copied, None)
+
+
+def segment_union(src_ex, dst_ex, size):
+    &quot;&quot;&quot;Slice [0,size) at every boundary from both mappings; label each slice.&quot;&quot;&quot;
+    bounds = {0, size}
+    for _, a, b in src_ex + dst_ex:
+        bounds.add(a)
+        bounds.add(b)
+    bounds = sorted(b for b in bounds if 0 &lt;= b &lt;= size)
+    return list(zip(bounds, bounds[1:]))
+
+
+def kind_at(ext_list, pos):
+    for kind, a, b in ext_list:
+        if a &lt;= pos &lt; b:
+            return kind
+    return &quot;hole&quot;
+
+
+def report(src, dst, copied):
+    src_ex, sst = extents_of_path(src)
+    dst_ex, dst_st = extents_of_path(dst)
+
+    size = sst.st_size
+    src_data = sum(b - a for k, a, b in src_ex if k == &quot;data&quot;)
+    dst_data = sum(b - a for k, a, b in dst_ex if k == &quot;data&quot;)
+    src_holes = sum(1 for k, _, _ in src_ex if k == &quot;hole&quot;)
+    dst_holes = sum(1 for k, _, _ in dst_ex if k == &quot;hole&quot;)
+
+    same_size = sst.st_size == dst_st.st_size
+    same_blocks = sst.st_blocks == dst_st.st_blocks
+
+    rows = []
+    mismatch = (not same_size) or (not same_blocks) or (src_ex != dst_ex)
+    for a, b in segment_union(src_ex, dst_ex, size):
+        ks = kind_at(src_ex, a)
+        kd = kind_at(dst_ex, a)
+        ok = ks == kd
+        mismatch |= not ok
+        rows.append((a, b, ks, kd, (b - a) if ks == &quot;data&quot; else 0, ok))
+
+    out = sys.stdout
+    out.write(&quot;=== sparse-copy fidelity report ===\n&quot;)
+    out.write(&quot;source: %s\n&quot; % src)
+    out.write(&quot;dest:   %s\n&quot; % dst)
+    out.write(&quot;logical size:     src=%d dst=%d %s\n&quot;
+              % (sst.st_size, dst_st.st_size, &quot;OK&quot; if same_size else &quot;DIVERGED&quot;))
+    out.write(&quot;allocated blocks: src=%d dst=%d %s (512B units)\n&quot;
+              % (sst.st_blocks, dst_st.st_blocks, &quot;OK&quot; if same_blocks else &quot;DIVERGED&quot;))
+    out.write(&quot;data bytes:       copied=%d src=%d dst=%d\n&quot; % (copied, src_data, dst_data))
+    out.write(&quot;holes preserved:  src=%d dst=%d\n&quot; % (src_holes, dst_holes))
+    out.write(&quot;extents (union of source/destination mappings):\n&quot;)
+    out.write(&quot;  %-4s %-28s %-6s %-6s %-10s %s\n&quot;
+              % (&quot;#&quot;, &quot;range&quot;, &quot;src&quot;, &quot;dst&quot;, &quot;bytes&quot;, &quot;status&quot;))
+    for i, (a, b, ks, kd, nbytes, ok) in enumerate(rows, 1):
+        out.write(&quot;  %-4d [%-10d,%-10d) %-6s %-6s %-10d %s\n&quot;
+                  % (i, a, b, ks, kd, nbytes, &quot;ok&quot; if ok else &quot;MISMATCH&quot;))
+    out.write(&quot;RESULT: %s\n&quot; % (&quot;MATCH&quot; if not mismatch else &quot;DIVERGED&quot;))
+    return 0 if not mismatch else 1
+
+
+def main():
+    sfd = os.open(SRC, os.O_RDONLY)
+    sst = os.fstat(sfd)
+    mode = sst.st_mode &amp; 0o7777
+    try:
+        dst_st = os.stat(DST)
+        if (dst_st.st_dev, dst_st.st_ino) == (sst.st_dev, sst.st_ino):
+            sys.stderr.write(&quot;sparse-copy: refusing to copy a file onto itself\n&quot;)
+            return 2
+    except FileNotFoundError:
+        pass
+    dfd = os.open(DST, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+    try:
+        last = None
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            status, copied, torn = copy_once(sfd, dfd)
+            last = (status, copied, torn)
+            if status == &quot;stable&quot; or attempt == MAX_ATTEMPTS:
+                break
+            # Source moved under us: rewind destination and take a fresh snapshot.
+            os.ftruncate(dfd, 0)
+        status, copied, torn = last
+        if status != &quot;stable&quot;:
+            sys.stderr.write(
+                &quot;sparse-copy: source changed during copy &quot;
+                &quot;(attempts=%d, last=%s%s)\n&quot;
+                % (MAX_ATTEMPTS, status,
+                   &quot;, torn extent @%d&quot; % torn if torn is not None else &quot;&quot;))
+    finally:
+        os.close(sfd)
+        os.close(dfd)
+
+    # Preserve mode on an existing destination too.
+    try:
+        os.chmod(DST, mode)
+    except OSError:
+        pass
+
+    rc = report(SRC, DST, copied)
+    return rc
+
+
+if __name__ == &quot;__main__&quot;:
+    sys.exit(main())
+PY
+</code></pre>
+<h3>Key points</h3>
+<ul>
+<li><code>ftruncate(dst, size0)</code> <strong>before</strong> writing extends the file without allocating, so untouched regions stay holes.</li>
+<li><code>pwrite</code> at the original offset for each <code>[data, hole)</code> range — no seek bookkeeping can drift.</li>
+<li>Allocated <strong>zero</strong> data survives because extents come from <code>SEEK_DATA</code>, never from inspecting bytes.</li>
+<li>No torn tail: a short <code>pread</code> immediately does <code>ftruncate(dst, data)</code>.</li>
+<li>Bounded retry (8×) re-snapshots on source change; the destination is only zeroed <em>between</em> retries, so the last coherent pass is kept.</li>
+<li>Exits <code>1</code> with a per-extent report whenever size, extent kinds, or <code>st_blocks</code> diverge.</li>
+</ul>
+<h2>Verification</h2>
+<p><strong>1. Hole preservation</strong></p>
+<pre><code class="language-bash">cd /tmp
+python3 - &lt;&lt;'PY'
+import os
+fd=os.open('/tmp/src.bin',os.O_RDWR|os.O_CREAT|os.O_TRUNC,0o640)
+os.pwrite(fd,b'A'*4096,0); os.pwrite(fd,b'B'*8192,5*1024*1024)
+os.ftruncate(fd,16*1024*1024); os.close(fd)
+PY
+fallocate --punch-hole --offset $((5*1024*1024+4096)) --length 4096 /tmp/src.bin
+sparse-copy /tmp/src.bin /tmp/dst.bin
+cmp /tmp/src.bin /tmp/dst.bin &amp;&amp; echo &quot;content identical&quot;
+stat -c '%s %b' /tmp/src.bin /tmp/dst.bin
+</code></pre>
+<p>Observed: exit 0, <code>RESULT: MATCH</code>, both <code>size=16777216 blocks=24</code>.</p>
+<p><strong>2. The bug actually fixed</strong> — an allocated all-zero 1 MiB extent:</p>
+<pre><code class="language-bash">cp --sparse=always /tmp/zero.bin /tmp/zero.cpsparse   # blocks=8    (allocation lost)
+sparse-copy       /tmp/zero.bin /tmp/zero.ours        # blocks=2056 (preserved)
+</code></pre>
+<p><strong>3. Concurrent truncate + append</strong> (hammer writer never settling): copier prints <code>source changed during copy (attempts=8, last=changed)</code>, <code>RESULT: DIVERGED</code>, destination keeps the last coherent pass, exit <code>1</code>. Once the writer stops, the retry converges to exit 0 / MATCH with equal <code>size</code> and <code>blocks</code>.</p>
+<p><strong>4. Edge cases checked:</strong> 0-byte file, 100 MB all-hole file (<code>blocks=0</code> both sides), 5 MB all-data file, unaligned 11-byte write (holes confirmed via <code>ENXIO</code>), 400-extent randomized sparse file (<code>cmp</code> clean), self-copy refused (exit 2), mode <code>0640</code> preserved — all pass.</p>
+<hr />
+<p>Full write-up: <code>~/SOLUTION.md</code>; tested script: <code>~/sparse-copy</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: bash-sparse-file-hole-punch-extent-copy-fidelity
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-29T10:17:05.598Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Write a sparse-aware copier in bash that preserves hole structure one-for-one using SEEK_DATA/SEEK_HOLE semantics so the destination&#x27;s allocated-block count and logical size match the source instead of materializing zeros. It must tolerate a concurrent writer truncating or appending to the source mid-copy, never leave a torn final extent, and finish with a nonzero exit plus a per-extent fidelity report (holes preserved, data bytes copied, allocated blocks each side) whenever the mapping diverges.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;bash-sparse-file-hole-punch-extent-copy-fidelity&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-29T10:17:05.598Z&quot;, &quot;version&quot;: &quot;5.2&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>Both artifacts are in place and verified. Here is the solution.</p>
 <hr />
 <h1>Hole-for-hole sparse copy in bash with <code>SEEK_DATA</code>/<code>SEEK_HOLE</code></h1>
 <p><strong>Files created:</strong> <code>~/sparse-copy</code> (tested, executable) and <code>~/SOLUTION.md</code> (full write-up). The code block below was diffed byte-for-byte against the tested script.</p>

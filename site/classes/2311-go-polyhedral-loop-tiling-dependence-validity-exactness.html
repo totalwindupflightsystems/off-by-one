@@ -45,7 +45,285 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-polyhedral-loop-tiling-dependence-validity-exactness</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-polyhedral-loop-tiling-dependence-validity-exactness</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2311-go-polyhedral-loop-tiling-dependence-validity-exactness.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Exact Tiling + Permutation Legality for Perfectly Nested Affine Loops</h1>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-polyhedral-loop-tiling-dependence-validity-exactness</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-polyhedral-loop-tiling-dependence-validity-exactness</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2311-go-polyhedral-loop-tiling-dependence-validity-exactness.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><h1>Exact Tiling + Permutation Legality for Perfectly Nested Affine Loops</h1>
+<p><strong>Problem class:</strong> <code>go-polyhedral-loop-tiling-dependence-validity-exactness</code>
+<strong>Environment:</strong> Go 1.26 · <strong>Implementation:</strong> <code>/workspace/polyhedral</code></p>
+<hr />
+<h2>1. What is being decided</h2>
+<p>Given</p>
+<ul>
+<li>a perfectly nested loop nest with constant bounds <code>for i_k = Lo_k .. Hi_k</code>,</li>
+<li>a body of affine array accesses <code>A[ f(i) ]</code> together with a read/write flag,</li>
+<li>a proposed schedule = tile sizes <code>s_k ≥ 1</code> plus a permutation <code>π</code> of the
+  <code>2D</code> coordinates <code>(tile_k, rem_k)</code>, where
+  <code>tile_k = ⌊i_k / s_k⌋</code>, <code>rem_k = i_k mod s_k</code>,</li>
+</ul>
+<p>decide <strong>exactly</strong> whether the tiled/permuted execution order is a legal
+reordering of the original sequential program. Emit a machine-checkable
+certificate:</p>
+<ul>
+<li><strong>legal</strong> → the schedule is a valid linear extension of every dependence
+  (the input schedule is the witness),</li>
+<li><strong>illegal</strong> → a concrete iteration pair <code>(i, j)</code> with <code>i &lt;_lex j</code>,
+  <code>f_a(i) = f_b(j)</code> for a conflicting access pair, and
+  <code>Key(i) &gt;_lex Key(j)</code> (the tiled order reorders them).</li>
+</ul>
+<p>All analysis must be <strong>integer-exact</strong> (not floating point, not merely the
+rational relaxation), and must agree with exhaustive brute force on small nests,
+including degenerate <code>i = j</code> (loop-independent) and self-output dependences.</p>
+<hr />
+<h2>2. Root-cause analysis</h2>
+<p>A naive implementation fails for seven distinct reasons. These are the actual
+failure modes addressed by the fix.</p>
+<h3>RC-1 — "All dependences are lex-positive, so any tiling is legal" is false</h3>
+<p>Taking direction vectors from earlier to later iteration always yields a
+lexicographically positive <code>δ</code> (first non-zero component <code>&gt; 0</code>). But the
+<strong>tile-major</strong> order <code>(t_0,…,t_{D-1}, r_0,…,r_{D-1})</code> is <em>not</em> a linear
+extension of lexicographic order. Counterexample (depth 2, <code>s = (2,2)</code>,
+<code>index = 5·i + j</code>):</p>
+<pre><code>p = (0,5), q = (1,0),  p &lt;_lex q,  δ = q - p = (1,-5)   (lex-positive)
+Key(p) = (t0,t1,r0,r1) = (0,2,0,1)
+Key(q) = (0,0,1,0)
+Key(p) &gt; Key(q)   →  ILLEGAL
+</code></pre>
+<p>So legality <strong>must</strong> compare the actual keys of the two iterations, not just
+signs of dependence directions. (The <em>interleaved</em> order <code>(t_0,r_0,t_1,r_1,…)</code>
+<em>is</em> always legal — it is the reason RC-1 bites only for tile-major schedules —
+and the test suite checks both facts.)</p>
+<h3>RC-2 — Treating the real relaxation as integer feasibility</h3>
+<p>Banerjee bounds / Fourier-Motzkin decide feasibility over <code>ℚ</code>. They are
+necessary but <strong>not sufficient</strong> over <code>ℤ</code> (e.g. <code>2x = 1</code> is rationally
+feasible, integrally infeasible). Using them alone yields both false
+"illegal" and false "legal" verdicts. The GCD test is required, and in general
+an integer method (dark-shadow/branch-and-bound) is required.</p>
+<h3>RC-3 — <code>⌊·⌋</code> and <code>mod</code> are not affine</h3>
+<p><code>Key(i)</code> contains <code>⌊i_k/s_k⌋</code> and <code>i_k mod s_k</code>. Substituting these directly
+into a linear solver is invalid. The fix introduces <strong>tile and remainder
+variables</strong> <code>i_k = s_k·t_k + r_k</code>, <code>0 ≤ r_k &lt; s_k</code>, which makes both <code>Key</code> and
+the subscript equalities <em>linear</em>.</p>
+<h3>RC-4 — Zero-distance / loop-independent dependences</h3>
+<p>A conflicting pair with <code>i = j</code> (e.g. <code>A[i] = A[i] + 1</code>) is loop-independent:
+it imposes <strong>no</strong> reordering constraint, because statements inside one
+iteration are never reordered. Treating it as a constraint falsely rejects
+legal schedules. Conversely, a <strong>self-output</strong> dependence with <code>i ≠ j</code> (two
+writes to the same location) must be enforced, or illegal schedules are
+accepted. Both are covered explicitly by tests.</p>
+<h3>RC-5 — Read/read pairs are not dependences</h3>
+<p>Two reads of the same location do not constrain the schedule. Omitting the
+"at least one side writes" filter produces spurious dependences.</p>
+<h3>RC-6 — Orientation of distance/direction vectors</h3>
+<p><code>δ</code> must be <code>later − earlier</code> where "earlier" is the lexicographically smaller
+iteration, not the raw index order in an access list. Wrong orientation flips
+signs and inverts the verdict.</p>
+<h3>RC-7 — Only checking local/adjacent distances</h3>
+<p>Legality is about <em>all</em> conflicting pairs in the (bounded but potentially large)
+iteration space, not just neighbours. A polyhedral encoding avoids enumerating
+<code>|space|²</code> pairs.</p>
+<hr />
+<h2>3. Exact fix</h2>
+<h3>3.1 Model and schedule key</h3>
+<pre><code class="language-go">type Affine struct { Coef []int64; Const int64 }        // Const + Σ Coef[k]·i_k
+type Access struct { Stmt, Array string; Write bool; Index []Affine }
+type Nest   struct { D int; Lo, Hi []int64; Accesses []Access }
+type Schedule struct { Sizes []int64; Perm []int }       // Perm[0] = most significant
+
+func (s *Schedule) Key(i []int64) []int64 {
+    d := len(s.Sizes)
+    coord := make([]int64, 2*d)
+    for k := 0; k &lt; d; k++ {
+        sz := s.Sizes[k]
+        t := floorDiv(i[k], sz)
+        coord[2*k]   = t
+        coord[2*k+1] = i[k] - t*sz
+    }
+    key := make([]int64, 2*d)
+    for p, c := range s.Perm { key[p] = coord[c] }
+    return key
+}
+</code></pre>
+<p><strong>Certificate semantics.</strong> A witness is valid iff it passes</p>
+<pre><code class="language-go">func (n *Nest) VerifyCertificate(s *Schedule, dep *Dependence) bool {
+    i, j := dep.SrcIter, dep.DstIter
+    // in bounds, i &lt;_lex j, same array location, ≥1 write, Key(i) &gt;_lex Key(j)
+}
+</code></pre>
+<h3>3.2 Brute-force oracle (ground truth)</h3>
+<p>Lists every iteration and every conflicting pair, then compares keys. It is the
+reference the polyhedral engine is tested against.</p>
+<pre><code class="language-go">for a := range n.Accesses {
+  for b := range n.Accesses {
+    if accesses[a].Array != accesses[b].Array { continue }
+    if !accesses[a].Write &amp;&amp; !accesses[b].Write { continue }   // RC-5
+    for i before j (i &lt;_lex j):                                // RC-6
+      if sameLoc(a,b,i,j) {
+        if Key(i) &gt; Key(j) { return illegal witness(i,j) }     // RC-1
+      }
+  }
+}
+</code></pre>
+<p>Loop-independent pairs <code>i = j</code> are skipped by <code>i &lt;_lex j</code>, which is exactly the
+correct semantics (RC-4).</p>
+<h3>3.3 Polyhedral encoding of a violation</h3>
+<p>Introduce <code>4D</code> integer variables per conflicting pair: <code>tI_k, rI_k, tJ_k, rJ_k</code>
+with <code>i_k = s_k·tI_k + rI_k</code>, <code>j_k = s_k·tJ_k + rJ_k</code>. Then:</p>
+<ul>
+<li>bounds and remainder boxes become linear constraints;</li>
+<li>each array-dimension equality <code>f_a(i) = f_b(j)</code> becomes a linear equality;</li>
+<li><code>i &lt;_lex j</code> is a disjunction over the first differing coordinate <code>im</code>
+  (<code>i_l = j_l</code> for <code>l &lt; im</code>, <code>i_im − j_im ≤ −1</code>);</li>
+<li><code>Key(i) &gt;_lex Key(j)</code> is a disjunction over the first differing schedule
+  position <code>km</code> (<code>coord = coord</code> for earlier positions, <code>coord_i − coord_j ≥ 1</code>).</li>
+</ul>
+<pre><code class="language-go">func (n *Nest) violationSystem(s *Schedule, a, b, im, km int) *system {
+    sys := n.baseSystem(s)                 // bounds + 0≤r&lt;s for i and j
+    n.subscriptConstraints(s, a, b, sys)   // f_a(i) = f_b(j)
+    for l := 0; l &lt; im; l++ { sys.addEq(iterDiff(l), 0) }
+    sys.add(iterDiff(im), -1, le)          // i &lt;_lex j
+    for p := 0; p &lt; km; p++ { sys.addEq(coordDiff(s.Perm[p]), 0) }
+    sys.add(negate(coordDiff(s.Perm[km])), -1, le) // Key(i) &gt;_lex Key(j)
+    return sys
+}
+</code></pre>
+<h3>3.4 Decision pipeline (exact)</h3>
+<p>For each access pair, each <code>im</code>, each <code>km</code>:</p>
+<ol>
+<li><strong>Banerjee bounds</strong> — necessary interval test on every subscript equality.</li>
+<li><strong>GCD test</strong> — <code>gcd(coeffs) | rhs</code> for every equality.</li>
+<li><strong>Fourier-Motzkin over <code>math/big.Rat</code></strong> — refutes rational-infeasible
+   systems exactly. Elimination order is chosen by smallest <code>pos·neg</code> product;
+   a constraint cap returns "not refuted" (never "infeasible"), so capping only
+   affects speed, never soundness.</li>
+<li><strong>Exact bounded integer search</strong> — DFS branch-and-bound with interval
+   propagation (<code>solveInteger</code>). Domains come from the constant loop bounds, so
+   the search is complete; it is the final authority on integer feasibility.</li>
+<li>A satisfying model is decoded back to <code>(i, j)</code> and checked with
+   <code>VerifyCertificate</code>.</li>
+</ol>
+<pre><code class="language-go">func (n *Nest) Analyze(s *Schedule) (Result, error) {
+    for each conflicting (a,b) {
+      for im { for km {
+        sys := violationSystem(...)
+        if !gcdAdmissible(sys) || !banerjeeAdmissible(sys) { continue }
+        if !fmFeasible(sys.v, sys.constraints)             { continue }
+        if ok, model := solveInteger(sys); ok {
+            i, j := decode(model, s)
+            return illegal(witness i,j)
+        }
+      }}
+    }
+    return legal(s)   // s itself is the tile-legal witness
+}
+</code></pre>
+<p>Direction/distance enumeration uses the same machinery over the <code>3^D</code> sign
+patterns (<code>FeasibleDirections</code>), and is cross-checked against the brute-force
+<code>CollectDependences</code>.</p>
+<h3>3.5 Searching for a legal schedule</h3>
+<p>When the proposed schedule is illegal, <code>FindLegalSchedule</code> enumerates
+permutations for the given tile sizes and returns the first one the exact
+analyzer accepts — this is the "tile-legal witness schedule" branch.</p>
+<h3>3.6 Run it</h3>
+<pre><code class="language-bash">cd /workspace/polyhedral
+go vet ./...
+go test ./...                      # unit + randomized cross-checks
+
+# analyze the classic 2-D illegal tile-major schedule
+go run ./cmd/polytile examples/illegal2d.json
+# find a legal permutation and dump all direction vectors
+go run ./cmd/polytile -brute -find-legal examples/illegal2d.json
+</code></pre>
+<p>Input/output are JSON; see <code>examples/</code>. Illegal output for <code>examples/illegal2d.json</code>:</p>
+<pre><code class="language-json">{
+  &quot;Legal&quot;: false,
+  &quot;Method&quot;: &quot;fm+gcd+banerjee+bounded-integer-search&quot;,
+  &quot;Verified&quot;: true,
+  &quot;Witness&quot;: {
+    &quot;Src&quot;: 0, &quot;Dst&quot;: 0,
+    &quot;SrcIter&quot;: [0,5], &quot;DstIter&quot;: [1,0],
+    &quot;Distance&quot;: [1,-5], &quot;Dir&quot;: &quot;+-&quot;
+  }
+}
+</code></pre>
+<hr />
+<h2>4. Verification</h2>
+<h3>4.1 Build and static checks</h3>
+<pre><code>$ go vet ./...      # clean
+$ go build ./...    # BUILD_OK
+</code></pre>
+<h3>4.2 Targeted semantics (all pass)</h3>
+<pre><code>$ go test -run 'TestClassic|TestLoop|Test2D|TestFindLegal|TestInterleaved' -v
+--- PASS: TestClassic1DLegal              (tiling A[i]=A[i-1]+1, s=1..8)
+--- PASS: TestClassic1DIllegalSwap        (rem-outside-tile reverses δ=+1)
+--- PASS: TestLoopIndependentAndSelfOutput (A[i]=A[i]+1 plus A[i]=A[i-1])
+--- PASS: Test2DTilingIdentityIllegal     (δ=(1,-5), tile-major → illegal)
+--- PASS: TestFindLegalSchedule           (alternate schedule re-verified)
+--- PASS: TestInterleavedAlwaysLegal      (interleaved order, 300 nests)
+PASS
+</code></pre>
+<p>The tests assert:</p>
+<ul>
+<li>legal 1-D tiling accepted for tile sizes <code>1,2,3,4,8</code>;</li>
+<li>swapped <code>(rem,tile)</code> schedule rejected <strong>and</strong> both brute-force and polyhedral
+  witnesses pass <code>VerifyCertificate</code>;</li>
+<li>zero-distance read/write self-access never forces a rejection, while the
+  carried <code>δ=+1</code> dependence still does;</li>
+<li>tile-major 2-D schedule rejected for the lex-positive <code>(1,-5)</code> dependence;</li>
+<li>interleaved <code>(t_0,r_0,t_1,r_1,…)</code> order accepted on 300 random nests —
+  proving the RC-1 subtlety is handled, not over-rejected.</li>
+</ul>
+<h3>4.3 Randomized cross-check vs. brute force</h3>
+<p><code>TestRandomCrossCheck</code> builds <strong>1500</strong> random nests
+(<code>D ∈ {1,2,3}</code>, bounds of width ≤ 3, 1–3 accesses, random affine subscripts,
+random tile sizes <code>∈ {1,2,3}</code>, random <code>(2D)!</code> permutation) and requires</p>
+<pre><code>BruteForce.Legal == Analyze.Legal
+</code></pre>
+<p>for every case, and that every polyhedral witness verifies. Result:</p>
+<pre><code>$ go test -run TestRandomCrossCheck -v
+--- PASS: TestRandomCrossCheck
+</code></pre>
+<p><code>TestDirectionsCrossCheck</code> additionally requires the polyhedral
+<code>FeasibleDirections</code> direction set to equal the brute-force
+<code>CollectDependences</code> set on <strong>400</strong> random nests:</p>
+<pre><code>--- PASS: TestDirectionsCrossCheck
+</code></pre>
+<p>Full suite:</p>
+<pre><code>$ go test ./...
+ok  example.com/polyhedral   38.5s
+</code></pre>
+<h3>4.4 Why the verification is meaningful</h3>
+<ul>
+<li><strong>Two independent engines</strong> (exhaustive simulation vs. Fourier-Motzkin +
+  GCD/Banerjee + exact integer search) agree on thousands of random nests.</li>
+<li>Every "illegal" witness is re-checked by an independent predicate
+  (<code>VerifyCertificate</code>): bounds, order, array-location equality, write flag,
+  and key reversal.</li>
+<li>The corner cases singled out by the problem — degenerate zero-distance
+  loop-independent accesses and self-output dependences — have dedicated tests.</li>
+<li>The one non-obvious theoretical trap (lex-positive dependence still illegal
+  under tile-major order) has an explicit regression test and a positive control
+  (interleaved order always legal).</li>
+</ul>
+<hr />
+<h2>5. Assumptions / boundaries</h2>
+<ul>
+<li>Loop bounds are compile-time constants. This makes the integer search
+  complete (all domains finite); symbolic bounds would require parametric
+  Fourier-Motzkin.</li>
+<li>Array extents are not modelled: equal affine subscripts are treated as a
+  conflict. With explicit extents this would be conservative; add each access's
+  index-range constraints to <code>baseSystem</code> to make it exact.</li>
+<li><code>D</code> is small in practice (<code>4D</code> variables, <code>O(D²)</code> disjuncts). The rational
+  Fourier-Motzkin step is capped and is only a refutation aid; the exact integer
+  search always runs and decides.</li>
+</ul>
+<p><strong>Source:</strong> <code>/workspace/polyhedral/solver.go</code>,
+<code>/workspace/polyhedral/solver_test.go</code>,
+<code>/workspace/polyhedral/cmd/polytile/main.go</code>. A copy of this document is at
+<code>/workspace/SOLUTION.md</code> and <code>~/SOLUTION.md</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-polyhedral-loop-tiling-dependence-validity-exactness
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-25T10:25:16.472Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Given a perfectly nested affine loop nest and a proposed tiling plus permutation schedule, decide exact legality and emit a machine-checkable certificate. Compute all dependence distance and direction vectors from the affine subscript functions, decide integer feasibility of the violated-directions system (Banerjee/GCD bounds refined by Fourier-Motzkin elimination over exact rationals), and return either a tile-legal witness schedule or a concrete iteration pair that the tiled schedule illegally reorders. Cross-check by exhaustive simulation on small nests, where the analyzer verdict must match brute-force permutation testing including degenerate zero-distance (loop-independent) and self-output dependences.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-polyhedral-loop-tiling-dependence-validity-exactness&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-25T10:25:16.474Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><h1>Exact Tiling + Permutation Legality for Perfectly Nested Affine Loops</h1>
 <p><strong>Problem class:</strong> <code>go-polyhedral-loop-tiling-dependence-validity-exactness</code>
 <strong>Environment:</strong> Go 1.26 · <strong>Implementation:</strong> <code>/workspace/polyhedral</code></p>
 <hr />

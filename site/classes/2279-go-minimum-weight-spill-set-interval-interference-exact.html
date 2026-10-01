@@ -45,7 +45,249 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-minimum-weight-spill-set-interval-interference-exact</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>We are given N live intervals. Interval i has a start point si, an end point ei, and a spill weight wi &gt; 0, plus K physical registers. Two intervals interfere when simultaneously live. The interference graph of intervals is an interval graph, and an interval graph is K-colorable iff its maximum clique is at most K. For intervals, the maximum clique is exactly the maximum depth:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2279-go-minimum-weight-spill-set-interval-interference-exact.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I diagnosed the problem, implemented and verified an exact solver, and wrote the report to <code>~/spill/SOLUTION.md</code>. Here is the solution:</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-minimum-weight-spill-set-interval-interference-exact</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>We are given N live intervals. Interval i has a start point si, an end point ei, and a spill weight wi &gt; 0, plus K physical registers. Two intervals interfere when simultaneously live. The interference graph of intervals is an interval graph, and an interval graph is K-colorable iff its maximum clique is at most K. For intervals, the maximum clique is exactly the maximum depth:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2279-go-minimum-weight-spill-set-interval-interference-exact.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>I diagnosed the problem, implemented and verified an exact solver, and wrote the report to <code>~/spill/SOLUTION.md</code>. Here is the solution:</p>
+<hr />
+<h1>Exact Minimum-Weight Spill Set for Interval Interference</h1>
+<h2>1. Problem</h2>
+<p>We are given <code>N</code> live intervals. Interval <code>i</code> has a start point <code>s_i</code>, an end point <code>e_i</code>, and a spill weight <code>w_i &gt; 0</code>, plus <code>K</code> physical registers. Two intervals interfere when simultaneously live. The interference graph of intervals is an <strong>interval graph</strong>, and an interval graph is <code>K</code>-colorable iff its maximum clique is at most <code>K</code>. For intervals, the maximum clique is exactly the maximum <em>depth</em>:</p>
+<blockquote>
+<p>survivors are <code>K</code>-colorable ⇔ at every program point at most <code>K</code> survivors are live.</p>
+</blockquote>
+<p>We must choose a set <code>S</code> of intervals to spill minimizing <code>Σ_{i∈S} w_i</code> subject to survivors having depth <code>≤ K</code>. Print spilled indices ascending, then total spilled weight, breaking equal-weight ties by <strong>choosing the larger index first</strong>.</p>
+<p>Input format:</p>
+<pre><code>N K
+s_1 e_1 w_1
+...
+s_N e_N w_N
+</code></pre>
+<p>Overlap semantics are compiled in via <code>closed</code>:
+<code>closed = true</code> means <code>[1,2]</code> and <code>[2,3]</code> clash (share point <code>2</code>); <code>closed = false</code> means half-open <code>[1,2)</code>/<code>[2,3)</code> (linear-scan convention).</p>
+<h2>2. Root-cause analysis: the greedy is not exact</h2>
+<p>The standard linear-scan heuristic sweeps by start and, on overflow, spills the <em>lightest currently live</em> interval. It has no lookahead and is provably suboptimal.</p>
+<p><strong>Witness</strong> (<code>K = 1</code>):</p>
+<table>
+<thead>
+<tr>
+<th>idx</th>
+<th>interval</th>
+<th>weight</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>[3, 12]</td>
+<td>6</td>
+</tr>
+<tr>
+<td>2</td>
+<td>[9, 18]</td>
+<td>6</td>
+</tr>
+<tr>
+<td>3</td>
+<td>[1, 10]</td>
+<td>1</td>
+</tr>
+<tr>
+<td>4</td>
+<td>[5, 7]</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+<p>Greedy: spills <code>{3,4,1}</code> → <code>1+2+6 = 9</code>. Exact: spills <code>{1,3}</code> → <code>6+1 = 7</code>; survivors <code>{2,4}</code> are disjoint. The heavy interval <code>1</code> overlaps several lights; greedy wastes cheap spills (<code>3</code>, then <code>4</code>) protecting it and then must spill it anyway. Any local overflow decision cannot see this.</p>
+<h2>3. Exact fix</h2>
+<h3>3.1 DP over the sweep with a bitmask of the active set</h3>
+<p>Process intervals in increasing start order. At interval <code>i</code>'s start, only <strong>which retained intervals are still live</strong> matters. Let <code>f(i, mask)</code> be the minimum spilled weight for intervals <code>i..N-1</code>, where <code>mask</code> is the set of previously retained intervals active at <code>s_i</code>. For interval <code>i</code>:</p>
+<ul>
+<li><strong>spill</strong>: <code>w_i + f(i+1, mask)</code>, add bit <code>i</code> to spill set;</li>
+<li><strong>retain</strong> if <code>popcount(mask)+1 ≤ K</code>: <code>f(i+1, mask | {i})</code>.</li>
+</ul>
+<p>Clear bits that die before the next start (<code>mask &amp;= active[i+1]</code>). Answer <code>f(0, ∅)</code>.</p>
+<p>Checking depth only at start points suffices: if depth is maximal at <code>p</code>, let <code>s</code> be the largest start among intervals covering <code>p</code>; every such interval also covers <code>s</code>, so depth at start <code>s</code> is at least that of <code>p</code>.</p>
+<h3>3.2 Tie-break</h3>
+<p>Give interval <code>j</code> (0-based) bit value <code>2^j</code>. Listing a spilled set in descending index order and comparing lexicographically is <strong>identical</strong> to comparing numeric mask values (largest differing index dominates all lower bits). So "choose the larger index first" = "prefer the larger spill mask". This is safe inside the DP because prefix/suffix spill sets are disjoint, so total value = prefix + suffix and maximizing the suffix mask is optimal for every prefix.</p>
+<h3>3.3 Complexity</h3>
+<p>Memoized state <code>(i, active-mask)</code>: worst case <code>O(N·2^N)</code> time / <code>O(2^N)</code> states, but ended-interval bit clearing collapses states heavily in practice. For very large <code>N</code>, the same optimum is a min-cost flow on the timeline (send <code>K</code> units; timeline edges cap <code>K</code>, cost <code>0</code>; interval edges cap <code>1</code>, cost <code>-w_i</code>), but the bitmask DP is the direct exact fix for the stated class.</p>
+<h2>4. Code</h2>
+<p><code>~/spill/solution.go</code>:</p>
+<pre><code class="language-go">// Exact minimum-weight spill set for interval interference.
+package main
+
+import (
+    &quot;bufio&quot;
+    &quot;fmt&quot;
+    &quot;math/bits&quot;
+    &quot;os&quot;
+    &quot;sort&quot;
+)
+
+type Interval struct {
+    s, e, w int
+    idx     int
+}
+
+type result struct {
+    cost  int
+    spill uint64
+}
+
+func better(a, b result) bool {
+    if a.cost != b.cost {
+        return a.cost &lt; b.cost
+    }
+    return a.spill &gt; b.spill
+}
+
+var closed = true
+
+func activeKept(e, s int) bool {
+    if closed {
+        return e &gt;= s
+    }
+    return e &gt; s
+}
+
+type key struct {
+    i    int
+    mask uint64
+}
+
+func solveExactBitmask(iv []Interval, k int) result {
+    n := len(iv)
+    if n == 0 {
+        return result{}
+    }
+    order := make([]int, n)
+    for i := range order {
+        order[i] = i
+    }
+    sort.Slice(order, func(a, b int) bool {
+        ia, ib := iv[order[a]], iv[order[b]]
+        if ia.s != ib.s {
+            return ia.s &lt; ib.s
+        }
+        if ia.e != ib.e {
+            return ia.e &lt; ib.e
+        }
+        return ia.idx &lt; ib.idx
+    })
+
+    active := make([]uint64, n)
+    for i := 0; i &lt; n; i++ {
+        var m uint64
+        ci := iv[order[i]]
+        for j := 0; j &lt; i; j++ {
+            cj := iv[order[j]]
+            if activeKept(cj.e, ci.s) {
+                m |= 1 &lt;&lt; uint(cj.idx-1)
+            }
+        }
+        active[i] = m
+    }
+
+    memo := make(map[key]result, 1&lt;&lt;14)
+
+    var f func(i int, mask uint64) result
+    f = func(i int, mask uint64) result {
+        if i == n {
+            return result{}
+        }
+        mask &amp;= active[i]
+        kk := key{i, mask}
+        if r, ok := memo[kk]; ok {
+            return r
+        }
+        ci := iv[order[i]]
+        bit := uint64(1) &lt;&lt; uint(ci.idx-1)
+
+        sub := f(i+1, mask)
+        best := result{cost: ci.w + sub.cost, spill: sub.spill | bit}
+
+        if bits.OnesCount64(mask)+1 &lt;= k {
+            sub = f(i+1, mask|bit)
+            if better(sub, best) {
+                best = sub
+            }
+        }
+        memo[kk] = best
+        return best
+    }
+
+    return f(0, 0)
+}
+
+func main() {
+    in := bufio.NewReader(os.Stdin)
+    out := bufio.NewWriter(os.Stdout)
+    defer out.Flush()
+
+    var n, k int
+    if _, err := fmt.Fscan(in, &amp;n, &amp;k); err != nil {
+        return
+    }
+    iv := make([]Interval, n)
+    for i := 0; i &lt; n; i++ {
+        if _, err := fmt.Fscan(in, &amp;iv[i].s, &amp;iv[i].e, &amp;iv[i].w); err != nil {
+            fmt.Fprintln(os.Stderr, &quot;bad input&quot;)
+            os.Exit(1)
+        }
+        iv[i].idx = i + 1
+    }
+
+    res := solveExactBitmask(iv, k)
+
+    first := true
+    for i := 0; i &lt; n; i++ {
+        if res.spill&amp;(uint64(1)&lt;&lt;uint(i)) != 0 {
+            if !first {
+                fmt.Fprint(out, &quot; &quot;)
+            }
+            fmt.Fprintf(out, &quot;%d&quot;, i+1)
+            first = false
+        }
+    }
+    fmt.Fprintf(out, &quot;\n%d\n&quot;, res.cost)
+}
+</code></pre>
+<p><code>~/spill/solution_test.go</code> verifies against exhaustive brute force (see file in the workspace; it enumerates all <code>2^N</code> spill sets, checks depth at every interval endpoint, and compares both the total weight and the exact spill mask, under both closed and half-open semantics).</p>
+<h2>5. Verification</h2>
+<pre><code class="language-bash">go mod init spill
+gofmt -w solution.go solution_test.go
+go vet ./...
+go test -v
+</code></pre>
+<p>Observed:</p>
+<pre><code>=== RUN   TestRandomAgainstBrute
+--- PASS: TestRandomAgainstBrute (9.07s)
+=== RUN   TestGreedyCanBeSuboptimal
+--- PASS: TestGreedyCanBeSuboptimal (0.00s)
+PASS
+ok      spill   9.070s
+</code></pre>
+<ul>
+<li><code>TestRandomAgainstBrute</code>: 4000 random instances per semantics (<code>N ≤ 13</code>, <code>0 ≤ K ≤ N</code>) — DP's <strong>weight and exact mask</strong> match brute force.</li>
+<li><code>TestGreedyCanBeSuboptimal</code>: greedy = <code>9</code>, exact = <code>7</code> on the witness.</li>
+</ul>
+<p>End-to-end:</p>
+<pre><code class="language-bash">printf '4 1\n3 12 6\n9 18 6\n1 10 1\n5 7 2\n' | go run .
+</code></pre>
+<pre><code>1 3
+7
+</code></pre>
+<p>Survivors <code>[9,18]</code> (idx 2) and <code>[5,7]</code> (idx 4) are disjoint, so one register suffices.</p>
+<h2>6. Summary</h2>
+<ul>
+<li><strong>Root cause:</strong> "spill lightest live on overflow" makes an irrevocable local choice and can waste cheap spills protecting a heavy interval that must eventually be spilled.</li>
+<li><strong>Fix:</strong> exact sweep DP carrying the active-retained bitmask, pruning on depth <code>&gt; K</code>; tie-break by maximizing the numeric spill mask (= larger indices first).</li>
+<li><strong>Evidence:</strong> exhaustive brute-force agreement on thousands of random instances + a concrete greedy counterexample.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-minimum-weight-spill-set-interval-interference-exact
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-24T22:08:10.551Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;In an SSA linear-scan register allocator, given N live intervals (each with start point, end point, and spill weight) and K physical registers, compute an EXACT minimum-total-weight set of intervals to spill so the remaining intervals are K-colorable. The interference graph is an interval graph, so max-weight removal to drop the maximum clique below K is solvable by DP over intervals sorted by end point while tracking the active set at each start point in a bitmask -- the naive greedy &#x27;spill the lowest weight live at each overflow&#x27; heuristic is provably suboptimal on instances where a heavy interval overlaps many light ones. Print the spilled interval indices in ascending order followed by the total spilled weight; break ties between equal-weight candidates by choosing the larger index first.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-minimum-weight-spill-set-interval-interference-exact&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-24T22:08:10.552Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>I diagnosed the problem, implemented and verified an exact solver, and wrote the report to <code>~/spill/SOLUTION.md</code>. Here is the solution:</p>
 <hr />
 <h1>Exact Minimum-Weight Spill Set for Interval Interference</h1>
 <h2>1. Problem</h2>

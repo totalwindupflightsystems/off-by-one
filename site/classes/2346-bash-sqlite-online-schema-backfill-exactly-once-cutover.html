@@ -45,7 +45,706 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bash-sqlite-online-schema-backfill-exactly-once-cutover</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>The task is a problem class, not a single bug: reshape a writer-visible table without stopping writers, and survive SIGKILL at any instruction, then prove with SQL that the result is exactly-once. A naive implementation fails in five distinct ways. Each failure mode maps to a specific race or missing invariant.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2346-bash-sqlite-online-schema-backfill-exactly-once-cutover.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Crash-Safe Online Schema Migration in Bash + <code>sqlite3</code></h1>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bash-sqlite-online-schema-backfill-exactly-once-cutover</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>The task is a problem class, not a single bug: reshape a writer-visible table without stopping writers, and survive SIGKILL at any instruction, then prove with SQL that the result is exactly-once. A naive implementation fails in five distinct ways. Each failure mode maps to a specific race or missing invariant.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2346-bash-sqlite-online-schema-backfill-exactly-once-cutover.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><h1>Crash-Safe Online Schema Migration in Bash + <code>sqlite3</code></h1>
+<h2>Root-cause analysis</h2>
+<p>The task is a <em>problem class</em>, not a single bug: reshape a writer-visible table without stopping writers, and survive <code>SIGKILL</code> at <strong>any</strong> instruction, then prove with SQL that the result is exactly-once. A naive implementation fails in five distinct ways. Each failure mode maps to a specific race or missing invariant.</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Failure mode</th>
+<th>Why it happens</th>
+<th>Fix in this design</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Duplicated rows on resume</strong></td>
+<td>Backfill re-runs a chunk after a crash; plain <code>INSERT</code> inserts twice</td>
+<td><code>INSERT OR IGNORE</code> into a shadow table keyed by the same <code>PRIMARY KEY</code>; backfill is idempotent</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Ghost rows (row deleted, then re-inserted)</strong></td>
+<td>Backfill does <code>SELECT</code> then <code>INSERT</code> as two statements; a concurrent <code>DELETE</code> commits in between and its trigger deletes a not-yet-present shadow row, then the backfill inserts it</td>
+<td>Read+write in <strong>one</strong> <code>BEGIN IMMEDIATE</code> transaction (<code>INSERT … SELECT …</code>), so no writer can interleave between snapshot and write</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Lost concurrent <code>UPDATE</code>/<code>DELETE</code></strong></td>
+<td>Backfill copies the row, then a writer changes it; shadow keeps the stale copy</td>
+<td><code>AFTER INSERT/UPDATE</code> triggers upsert the newest source row (<code>ON CONFLICT(id) DO UPDATE</code>), <code>AFTER DELETE</code> trigger removes it</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Torn cutover</strong></td>
+<td><code>ALTER TABLE src RENAME …; ALTER TABLE shadow RENAME …;</code> executed non-atomically leaves no <code>src</code> table if killed between them</td>
+<td>Both <code>ALTER</code>s (plus reconciliation, snapshot, trigger drop, phase flip) run in <strong>one</strong> transaction. SQLite's transactional DDL rolls the whole thing back on <code>SIGKILL</code>; a defensive resume path also completes a persisted partial swap</td>
+</tr>
+<tr>
+<td>5</td>
+<td><strong>No resumable state</strong></td>
+<td>A restart does not know which phase/chunk it reached</td>
+<td>Durable state machine in <code>_migration(key,value)</code> with <code>phase</code>, <code>hwm</code> (high-water mark) and <code>batches_run</code>; every step is idempotent (<code>IF NOT EXISTS</code>, <code>OR IGNORE</code>, <code>INSERT OR REPLACE</code>)</td>
+</tr>
+</tbody>
+</table>
+<p>The central correctness argument is that <strong>cutover is a full reconciliation under a write lock</strong>. <code>BEGIN IMMEDIATE</code> serialises the migration against the application writer, the shadow is upserted from the source and pruned, a <code>_cutover_snapshot</code> of the exact boundary is frozen, then the two <code>ALTER</code>s and the <code>phase='done'</code> flip commit atomically. Therefore:</p>
+<pre><code>new accounts == transform(_cutover_snapshot)          (exactly-once, no loss, no mutation)
+_cutover_snapshot == seed overlaid by committed writer_expected   (concurrent writes survive)
+</code></pre>
+<p>Both are machine-checked by <code>verify.sql</code>.</p>
+<p>The instrumentation trick that makes "killed between the two statements" testable: the cutover is streamed to <code>sqlite3</code> through a pipe, and at the mid-transaction point we emit the dot-command <code>.shell kill -9 $PPID</code>. <code>$PPID</code> is the <code>sqlite3</code> process, so <code>sqlite3</code> itself is <code>SIGKILL</code>ed while the transaction is open — the OS then rolls it back on the next open. A bash-level <code>note_point</code> provides the other ~260 interruption points.</p>
+<hr />
+<h2>Exact fix</h2>
+<p>Four files. Verified working on <code>bash 5.3</code>, <code>sqlite3 3.53</code>, with <code>jq</code>.</p>
+<h3><code>migrate.sh</code></h3>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# =============================================================================
+# migrate.sh -- crash-safe ONLINE schema migration for SQLite, using only the
+#              sqlite3 CLI.  Resumable after SIGKILL at any interruption point.
+#
+# Reshapes:
+#     accounts(id, owner, balance, memo)
+# into:
+#     accounts(id, owner, balance_cents, memo, fingerprint)
+#
+# Env:
+#   MIG_DB        path to the database             (required)
+#   MIG_BATCH     backfill chunk size              (default 25)
+#   KILL_AT       interruption point name to force-kill at (default none)
+#   POINTS_FILE   append every point name to this file (default none)
+# =============================================================================
+set -u
+
+DB=&quot;${MIG_DB:?MIG_DB is required}&quot;
+BATCH=&quot;${MIG_BATCH:-25}&quot;
+KILL_AT=&quot;${KILL_AT:-}&quot;
+POINTS_FILE=&quot;${POINTS_FILE:-}&quot;
+
+# ---- instrumentation --------------------------------------------------------
+register_point() {                      # record only, never kill
+  [[ -n &quot;$POINTS_FILE&quot; ]] &amp;&amp; printf '%s\n' &quot;$1&quot; &gt;&gt;&quot;$POINTS_FILE&quot;
+}
+note_point() {                           # record and (maybe) kill *this* shell
+  register_point &quot;$1&quot;
+  if [[ -n &quot;$KILL_AT&quot; &amp;&amp; &quot;$KILL_AT&quot; == &quot;$1&quot; ]]; then
+    echo &quot;[migrate] FORCED KILL at point '$1'&quot; &gt;&amp;2
+    kill -9 &quot;$$&quot;
+  fi
+}
+
+q() { sqlite3 -cmd &quot;.timeout 10000&quot; &quot;$DB&quot; &quot;$@&quot;; }
+
+# Run one SQL payload (may contain many statements) guarded by two kill points.
+step() {
+  local point=&quot;$1&quot; sql=&quot;$2&quot;
+  note_point &quot;${point}_before&quot;
+  q &quot;$sql&quot; &gt;/dev/null \
+    || { echo &quot;[migrate] sqlite3 failed at ${point}&quot; &gt;&amp;2; exit 1; }
+  note_point &quot;${point}_after&quot;
+}
+
+get_meta() { q &quot;SELECT value FROM _migration WHERE key='$1';&quot;; }
+set_meta() { q &quot;INSERT OR REPLACE INTO _migration(key,value) VALUES('$1','$2');&quot; &gt;/dev/null; }
+set_meta_p() { step &quot;$1&quot; &quot;INSERT OR REPLACE INTO _migration(key,value) VALUES('$2','$3');&quot;; }
+table_exists() { [[ -n &quot;$(q &quot;SELECT 1 FROM sqlite_master WHERE type='table' AND name='$1';&quot;)&quot; ]]; }
+
+# fingerprint is the deterministic, auditable mapping of a source row.
+FP=&quot;owner || '|' || CAST(balance AS TEXT) || '|' || COALESCE(memo,'')&quot;
+
+ensure_meta() {
+  q &quot;PRAGMA journal_mode=WAL;&quot; &gt;/dev/null
+  q &quot;CREATE TABLE IF NOT EXISTS _migration(key TEXT PRIMARY KEY, value TEXT);&quot; &gt;/dev/null
+  q &quot;INSERT OR IGNORE INTO _migration(key,value) VALUES
+       ('phase','init'),('hwm','0'),('batch','$BATCH'),
+       ('cutover_seq','0'),('batches_run','0');&quot; &gt;/dev/null
+  q &quot;CREATE TABLE IF NOT EXISTS writer_expected(
+       id INTEGER PRIMARY KEY, present INTEGER NOT NULL DEFAULT 1,
+       owner TEXT, balance INTEGER, memo TEXT, seq INTEGER NOT NULL DEFAULT 0);&quot; &gt;/dev/null
+  q &quot;CREATE TABLE IF NOT EXISTS writer_log(seq INTEGER PRIMARY KEY, op TEXT, id INTEGER);&quot; &gt;/dev/null
+}
+
+# ---- phase: init ------------------------------------------------------------
+init_target_sql() {
+  cat &lt;&lt;'SQL'
+CREATE TABLE IF NOT EXISTS accounts_new(
+  id            INTEGER PRIMARY KEY,
+  owner         TEXT    NOT NULL,
+  balance_cents INTEGER NOT NULL,
+  memo          TEXT,
+  fingerprint   TEXT    NOT NULL
+);
+CREATE TABLE IF NOT EXISTS _cutover_snapshot(
+  id INTEGER PRIMARY KEY, owner TEXT, balance INTEGER, memo TEXT
+);
+SQL
+}
+
+triggers_sql() {
+  cat &lt;&lt;'SQL'
+CREATE TRIGGER IF NOT EXISTS _mig_acc_ai AFTER INSERT ON accounts BEGIN
+  INSERT INTO accounts_new(id,owner,balance_cents,memo,fingerprint)
+  VALUES(NEW.id,NEW.owner,NEW.balance*100,NEW.memo,
+         NEW.owner || '|' || CAST(NEW.balance AS TEXT) || '|' || COALESCE(NEW.memo,''))
+  ON CONFLICT(id) DO UPDATE SET
+    owner=excluded.owner, balance_cents=excluded.balance_cents,
+    memo=excluded.memo, fingerprint=excluded.fingerprint;
+END;
+CREATE TRIGGER IF NOT EXISTS _mig_acc_au AFTER UPDATE ON accounts BEGIN
+  INSERT INTO accounts_new(id,owner,balance_cents,memo,fingerprint)
+  VALUES(NEW.id,NEW.owner,NEW.balance*100,NEW.memo,
+         NEW.owner || '|' || CAST(NEW.balance AS TEXT) || '|' || COALESCE(NEW.memo,''))
+  ON CONFLICT(id) DO UPDATE SET
+    owner=excluded.owner, balance_cents=excluded.balance_cents,
+    memo=excluded.memo, fingerprint=excluded.fingerprint;
+END;
+CREATE TRIGGER IF NOT EXISTS _mig_acc_ad AFTER DELETE ON accounts BEGIN
+  DELETE FROM accounts_new WHERE id=OLD.id;
+END;
+SQL
+}
+
+# ---- phase: backfill --------------------------------------------------------
+do_backfill() {
+  local n=0 hwm remain
+  while :; do
+    hwm=$(get_meta hwm)
+    remain=$(q &quot;SELECT count(*) FROM accounts WHERE id &gt; COALESCE(CAST('$hwm' AS INTEGER),0);&quot;)
+    [[ &quot;$remain&quot; == &quot;0&quot; ]] &amp;&amp; break
+    n=$((n+1))
+    # The read and the write live in ONE write transaction, so a concurrent
+    # delete can never leave a &quot;ghost&quot; row that the backfill re-inserts.
+    step &quot;backfill_batch_${n}&quot; &quot;
+      BEGIN IMMEDIATE;
+      CREATE TEMP TABLE IF NOT EXISTS _batch(
+        id INTEGER PRIMARY KEY, owner TEXT, balance INTEGER, memo TEXT);
+      DELETE FROM _batch;
+      INSERT INTO _batch
+        SELECT id,owner,balance,memo FROM accounts
+        WHERE id &gt; COALESCE(CAST('$hwm' AS INTEGER),0)
+        ORDER BY id LIMIT $BATCH;
+      INSERT OR IGNORE INTO accounts_new(id,owner,balance_cents,memo,fingerprint)
+        SELECT id,owner,balance*100,memo, $FP FROM _batch;
+      UPDATE _migration
+        SET value = COALESCE((SELECT CAST(max(id) AS TEXT) FROM _batch), value)
+        WHERE key='hwm';
+      UPDATE _migration
+        SET value = CAST(COALESCE(CAST(value AS INTEGER),0)+1 AS TEXT)
+        WHERE key='batches_run';
+      COMMIT;
+    &quot;
+  done
+  set_meta_p &quot;phase_to_cutover&quot; phase cutover
+}
+
+# ---- phase: cutover ---------------------------------------------------------
+do_cutover() {
+  # Defensive detection of an already/partially completed swap.  With SQLite's
+  # transactional DDL a SIGKILL between the two ALTERs is rolled back, but a
+  # real non-transactional engine could persist the intermediate state.
+  if table_exists accounts_old &amp;&amp; table_exists accounts &amp;&amp; ! table_exists accounts_new; then
+    set_meta phase done; return
+  fi
+  if table_exists accounts_old &amp;&amp; table_exists accounts_new &amp;&amp; ! table_exists accounts; then
+    step &quot;cutover_complete_partial&quot; &quot;
+      BEGIN IMMEDIATE;
+      ALTER TABLE accounts_new RENAME TO accounts;
+      COMMIT;&quot;
+    set_meta phase done; return
+  fi
+
+  step &quot;cutover_prep&quot; &quot;$(init_target_sql)$(triggers_sql)&quot;
+
+  local kill_line=&quot;&quot;
+  register_point &quot;cutover_between&quot;          # always enumerated
+  if [[ -n &quot;$KILL_AT&quot; &amp;&amp; &quot;$KILL_AT&quot; == &quot;cutover_between&quot; ]]; then
+    kill_line='.shell kill -9 $PPID'        # kills sqlite3 mid-transaction
+  fi
+
+  note_point &quot;cutover_swap_before&quot;
+  {
+    echo &quot;BEGIN IMMEDIATE;&quot;
+    # Full reconciliation: newest source wins, deleted source rows removed.
+    echo &quot;INSERT INTO accounts_new(id,owner,balance_cents,memo,fingerprint)
+            SELECT id,owner,balance*100,memo, $FP FROM accounts WHERE 1
+          ON CONFLICT(id) DO UPDATE SET
+            owner=excluded.owner, balance_cents=excluded.balance_cents,
+            memo=excluded.memo, fingerprint=excluded.fingerprint;&quot;
+    echo &quot;DELETE FROM accounts_new WHERE id NOT IN (SELECT id FROM accounts);&quot;
+    # Freeze the exact cutover boundary for post-hoc proof.
+    echo &quot;DELETE FROM _cutover_snapshot;&quot;
+    echo &quot;INSERT INTO _cutover_snapshot(id,owner,balance,memo)
+            SELECT id,owner,balance,memo FROM accounts;&quot;
+    echo &quot;UPDATE _migration
+            SET value=COALESCE((SELECT CAST(max(seq) AS TEXT) FROM writer_expected),'0')
+          WHERE key='cutover_seq';&quot;
+    echo &quot;DROP TRIGGER IF EXISTS _mig_acc_ai;&quot;
+    echo &quot;DROP TRIGGER IF EXISTS _mig_acc_au;&quot;
+    echo &quot;DROP TRIGGER IF EXISTS _mig_acc_ad;&quot;
+    echo &quot;ALTER TABLE accounts RENAME TO accounts_old;&quot;
+    [[ -n &quot;$kill_line&quot; ]] &amp;&amp; echo &quot;$kill_line&quot;
+    echo &quot;ALTER TABLE accounts_new RENAME TO accounts;&quot;
+    echo &quot;UPDATE _migration SET value='done' WHERE key='phase';&quot;
+    echo &quot;COMMIT;&quot;
+  } | sqlite3 &quot;$DB&quot;
+  local rc=${PIPESTATUS[1]}
+  if [[ &quot;$rc&quot; -ne 0 ]]; then
+    echo &quot;[migrate] cutover interrupted (sqlite3 rc=$rc)&quot; &gt;&amp;2
+    exit &quot;$rc&quot;
+  fi
+  note_point &quot;cutover_swap_after&quot;
+}
+
+# ---- phase: done ------------------------------------------------------------
+finalize() {
+  step &quot;finalize_drop_old&quot; &quot;DROP TABLE IF EXISTS accounts_old;&quot;
+  step &quot;finalize_drop_triggers&quot; &quot;
+    DROP TRIGGER IF EXISTS _mig_acc_ai;
+    DROP TRIGGER IF EXISTS _mig_acc_au;
+    DROP TRIGGER IF EXISTS _mig_acc_ad;&quot;
+}
+
+# ---- driver -----------------------------------------------------------------
+main() {
+  ensure_meta
+  local phase
+  phase=$(get_meta phase)
+  case &quot;$phase&quot; in
+    init)
+      step &quot;init_target&quot;   &quot;$(init_target_sql)&quot;
+      step &quot;init_triggers&quot; &quot;$(triggers_sql)&quot;
+      set_meta_p &quot;phase_to_backfill&quot; phase backfill
+      ;&amp;
+    backfill)
+      do_backfill
+      ;&amp;
+    cutover)
+      do_cutover
+      ;&amp;
+    done)
+      finalize
+      ;;
+    *)
+      echo &quot;[migrate] unknown phase '$phase'&quot; &gt;&amp;2; exit 2 ;;
+  esac
+}
+
+main &quot;$@&quot;
+</code></pre>
+<h3><code>writer.sh</code> (concurrent application traffic)</h3>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# Concurrent writer.  Runs ONLY while phase='backfill'; stops at cutover.
+# Every mutation touches accounts and writer_expected in the SAME IMMEDIATE
+# transaction, so the writer's committed state is always well defined.
+set -u
+DB=&quot;${1:?db}&quot;
+SEED_ROWS=&quot;${2:-200}&quot;
+seq=0
+
+while :; do
+  phase=$(sqlite3 -cmd &quot;.timeout 10000&quot; &quot;$DB&quot; \
+      &quot;SELECT value FROM _migration WHERE key='phase';&quot; \
+      2&gt;/dev/null || true)
+  case &quot;$phase&quot; in
+    backfill) : ;;                  # keep writing
+    init|&quot;&quot;) sleep 0.01; continue ;;  # migration not ready yet
+    *) break ;;                     # cutover / done -&gt; application stops
+  esac
+
+  seq=$((seq+1))
+  op=$(( seq % 7 ))
+  target=$(( (seq * 31) % SEED_ROWS + 1 ))
+  newid=$(( 100000 + seq ))
+  bal=$(( seq * 3 % 1000 ))
+
+  case &quot;$op&quot; in
+    0|1)  # INSERT a brand-new row
+      sqlite3 -cmd &quot;.timeout 10000&quot; &quot;$DB&quot; &quot; BEGIN IMMEDIATE;
+        INSERT INTO accounts(id,owner,balance,memo) VALUES($newid,'w$seq',$bal,'m$((seq%7))');
+        INSERT INTO writer_expected(id,present,owner,balance,memo,seq)
+          VALUES($newid,1,'w$seq',$bal,'m$((seq%7))',$seq)
+          ON CONFLICT(id) DO UPDATE SET present=1,owner=excluded.owner,
+            balance=excluded.balance,memo=excluded.memo,seq=excluded.seq;
+        INSERT INTO writer_log(seq,op,id) VALUES($seq,'insert',$newid);
+        COMMIT;&quot; 2&gt;/dev/null || true
+      ;;
+    2|3|4) # UPDATE an existing row
+      sqlite3 -cmd &quot;.timeout 10000&quot; &quot;$DB&quot; &quot; BEGIN IMMEDIATE;
+        UPDATE accounts SET balance=balance+1 WHERE id=$target;
+        INSERT INTO writer_expected(id,present,owner,balance,memo,seq)
+          SELECT id,1,owner,balance,memo,$seq FROM accounts WHERE id=$target
+          ON CONFLICT(id) DO UPDATE SET present=1,owner=excluded.owner,
+            balance=excluded.balance,memo=excluded.memo,seq=excluded.seq;
+        INSERT INTO writer_log(seq,op,id) VALUES($seq,'update',$target);
+        COMMIT;&quot; 2&gt;/dev/null || true
+      ;;
+    *)    # DELETE a row
+      sqlite3 -cmd &quot;.timeout 10000&quot; &quot;$DB&quot; &quot; BEGIN IMMEDIATE;
+        DELETE FROM accounts WHERE id=$target;
+        INSERT INTO writer_expected(id,present,seq) VALUES($target,0,$seq)
+          ON CONFLICT(id) DO UPDATE SET present=0,seq=excluded.seq;
+        INSERT INTO writer_log(seq,op,id) VALUES($seq,'delete',$target);
+        COMMIT;&quot; 2&gt;/dev/null || true
+      ;;
+  esac
+done
+</code></pre>
+<h3><code>verify.sql</code> (invariant queries)</h3>
+<pre><code class="language-sql">WITH expected(id, owner, balance, memo) AS (
+  SELECT s.id, s.owner, s.balance, s.memo
+    FROM _seed s
+   WHERE s.id NOT IN (SELECT id FROM writer_expected)
+  UNION ALL
+  SELECT w.id, w.owner, w.balance, w.memo
+    FROM writer_expected w WHERE w.present = 1
+)
+SELECT
+  -- 1. exactly-once: no duplicate ids
+  (SELECT count(*) FROM accounts)                         AS n_new,
+  (SELECT count(DISTINCT id) FROM accounts)               AS n_distinct,
+  (SELECT count(*) FROM _cutover_snapshot)                AS n_snapshot,
+  -- 3. no loss / no mutation: every snapshot row maps correctly
+  (SELECT count(*) FROM (
+     SELECT s.id FROM _cutover_snapshot s
+       LEFT JOIN accounts a ON a.id = s.id
+      WHERE a.id IS NULL
+         OR a.owner          IS NOT s.owner
+         OR a.balance_cents  IS NOT s.balance * 100
+         OR a.memo           IS NOT s.memo
+         OR a.fingerprint    IS NOT (s.owner || '|' || CAST(s.balance AS TEXT) || '|' || COALESCE(s.memo,''))
+  ))                                                       AS n_mismatch,
+  -- 4. no extra rows
+  (SELECT count(*) FROM (
+     SELECT a.id FROM accounts a
+      LEFT JOIN _cutover_snapshot s ON s.id = a.id WHERE s.id IS NULL
+  ))                                                       AS n_extra,
+  -- 5. snapshot == committed writer state (seed overlaid)
+  (SELECT count(*) FROM (
+     SELECT e.id FROM expected e
+      LEFT JOIN _cutover_snapshot s ON s.id = e.id
+      WHERE s.id IS NULL OR s.owner IS NOT e.owner
+         OR s.balance IS NOT e.balance OR s.memo IS NOT e.memo
+  ))                                                       AS n_snap_mismatch,
+  -- 6. every op committed before the cutover boundary survives
+  (SELECT count(*) FROM (
+     SELECT l.id FROM writer_log l
+       LEFT JOIN writer_expected w ON w.id = l.id
+       LEFT JOIN _cutover_snapshot s ON s.id = l.id
+      WHERE l.seq &lt;= COALESCE((SELECT CAST(value AS INTEGER) FROM _migration WHERE key='cutover_seq'),0)
+        AND ((w.present = 1 AND (s.id IS NULL OR s.owner IS NOT w.owner
+                                 OR s.balance IS NOT w.balance OR s.memo IS NOT w.memo))
+             OR (w.present = 0 AND s.id IS NOT NULL))
+  ))                                                       AS n_boundary_mismatch,
+  (SELECT count(*) FROM writer_log
+    WHERE seq &lt;= COALESCE((SELECT CAST(value AS INTEGER) FROM _migration WHERE key='cutover_seq'),0))
+                                                           AS n_boundary_ops,
+  -- 7. artefacts cleaned up
+  (SELECT count(*) FROM sqlite_master
+    WHERE type='trigger' AND name IN ('_mig_acc_ai','_mig_acc_au','_mig_acc_ad')) AS n_triggers,
+  (SELECT count(*) FROM sqlite_master WHERE type='table' AND name='accounts_old') AS n_old,
+  (SELECT count(*) FROM sqlite_master WHERE type='table' AND name='accounts_new') AS n_new_shadow;
+</code></pre>
+<h3><code>harness.sh</code> (kill injection + ledger)</h3>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# Kill-injection harness: for every interruption point, kill, resume, verify,
+# and append one JSONL ledger record.
+set -u
+HERE=$(cd &quot;$(dirname &quot;$0&quot;)&quot; &amp;&amp; pwd)
+WORK=${WORK:-$(mktemp -d)}
+SEED_ROWS=${SEED_ROWS:-200}; BATCH=${BATCH:-20}
+LEDGER=${LEDGER:-$HERE/ledger.jsonl}; MAX_POINTS=${MAX_POINTS:-0}; KEEP=${KEEP:-0}
+cleanup() { [[ &quot;$KEEP&quot; == &quot;1&quot; ]] || rm -rf &quot;$WORK&quot;; }
+trap cleanup EXIT
+log() { printf '[harness] %s\n' &quot;$*&quot; &gt;&amp;2; }
+val()  { sqlite3 -cmd &quot;.timeout 10000&quot; &quot;$1&quot; &quot;$2&quot; 2&gt;/dev/null || true; }
+texists() { [[ &quot;$(val &quot;$1&quot; &quot;SELECT count(*) FROM sqlite_master WHERE type='table' AND name='$2';&quot;)&quot; != &quot;0&quot; ]]; }
+
+TEMPLATE=$WORK/template.db
+make_template() {
+  rm -f &quot;$TEMPLATE&quot; &quot;$TEMPLATE-wal&quot; &quot;$TEMPLATE-shm&quot;
+  sqlite3 &quot;$TEMPLATE&quot; &quot;PRAGMA journal_mode=WAL;
+    CREATE TABLE accounts(id INTEGER PRIMARY KEY, owner TEXT NOT NULL,
+      balance INTEGER NOT NULL DEFAULT 0, memo TEXT);
+    CREATE TABLE _seed(id INTEGER PRIMARY KEY, owner TEXT, balance INTEGER, memo TEXT);
+    WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM c WHERE i &lt; $SEED_ROWS)
+    INSERT INTO accounts(id,owner,balance,memo)
+      SELECT i, 'owner_'||i, (i*37)%1000,
+             CASE WHEN i%5=0 THEN NULL ELSE 'memo_'||i END FROM c;
+    INSERT INTO _seed SELECT id,owner,balance,memo FROM accounts;
+    PRAGMA wal_checkpoint(TRUNCATE);&quot; &gt;/dev/null
+}
+
+discover_points() {
+  local db=$WORK/discover.db pf=$WORK/points.txt
+  cp &quot;$TEMPLATE&quot; &quot;$db&quot;; rm -f &quot;$db-wal&quot; &quot;$db-shm&quot;; : &gt; &quot;$pf&quot;
+  MIG_DB=&quot;$db&quot; MIG_BATCH=&quot;$BATCH&quot; POINTS_FILE=&quot;$pf&quot; &quot;$HERE/migrate.sh&quot; &gt;/dev/null 2&gt;&amp;1 || true
+  mapfile -t POINTS &lt; &lt;(awk '!seen[$0]++' &quot;$pf&quot;)
+}
+
+run_point() {
+  local pt=&quot;$1&quot; run_db=$WORK/run.db
+  cp &quot;$TEMPLATE&quot; &quot;$run_db&quot;; rm -f &quot;$run_db-wal&quot; &quot;$run_db-shm&quot;
+  &quot;$HERE/writer.sh&quot; &quot;$run_db&quot; &quot;$SEED_ROWS&quot; &gt;/dev/null 2&gt;&amp;1 &amp; local wpid=$!
+
+  # sh -c wrapper keeps bash from printing &quot;Killed&quot; job noise
+  sh -c 'MIG_DB=&quot;$1&quot; MIG_BATCH=&quot;$2&quot; KILL_AT=&quot;$3&quot; timeout -k 5 180 &quot;$4&quot;' \
+      sh &quot;$run_db&quot; &quot;$BATCH&quot; &quot;$pt&quot; &quot;$HERE/migrate.sh&quot; &gt;&quot;$WORK/kill_$pt.log&quot; 2&gt;&amp;1
+  local kill_rc=$?
+
+  local s_phase s_hwm s_batches s_accounts s_target s_old s_trig
+  s_phase=$(val  &quot;$run_db&quot; &quot;SELECT COALESCE(value,'') FROM _migration WHERE key='phase';&quot;)
+  s_hwm=$(val    &quot;$run_db&quot; &quot;SELECT COALESCE(value,'0') FROM _migration WHERE key='hwm';&quot;)
+  s_batches=$(val &quot;$run_db&quot; &quot;SELECT COALESCE(value,'0') FROM _migration WHERE key='batches_run';&quot;)
+  s_accounts=$(val &quot;$run_db&quot; &quot;SELECT count(*) FROM accounts;&quot; 2&gt;/dev/null); s_accounts=${s_accounts:-0}
+  if texists &quot;$run_db&quot; accounts_new; then s_target=$(val &quot;$run_db&quot; &quot;SELECT count(*) FROM accounts_new;&quot;); else s_target=-1; fi
+  if texists &quot;$run_db&quot; accounts_old; then s_old=1; else s_old=0; fi
+  s_trig=$(val &quot;$run_db&quot; &quot;SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name LIKE '_mig_acc_%';&quot;); s_trig=${s_trig:-0}
+
+  sh -c 'MIG_DB=&quot;$1&quot; MIG_BATCH=&quot;$2&quot; timeout -k 5 180 &quot;$3&quot;' \
+      sh &quot;$run_db&quot; &quot;$BATCH&quot; &quot;$HERE/migrate.sh&quot; &gt;&quot;$WORK/resume_$pt.log&quot; 2&gt;&amp;1
+  local resume_rc=$?
+
+  local i; for i in $(seq 1 200); do kill -0 &quot;$wpid&quot; 2&gt;/dev/null || break; sleep 0.05; done
+  kill -9 &quot;$wpid&quot; 2&gt;/dev/null || true; wait &quot;$wpid&quot; 2&gt;/dev/null || true
+
+  local e_phase e_hwm e_batches e_rows
+  e_phase=$(val   &quot;$run_db&quot; &quot;SELECT COALESCE(value,'') FROM _migration WHERE key='phase';&quot;)
+  e_hwm=$(val     &quot;$run_db&quot; &quot;SELECT COALESCE(value,'0') FROM _migration WHERE key='hwm';&quot;)
+  e_batches=$(val &quot;$run_db&quot; &quot;SELECT COALESCE(value,'0') FROM _migration WHERE key='batches_run';&quot;)
+  e_rows=$(val    &quot;$run_db&quot; &quot;SELECT count(*) FROM accounts;&quot; 2&gt;/dev/null); e_rows=${e_rows:-0}
+
+  local vj n_new n_distinct n_snapshot n_mismatch n_extra n_snap_mismatch \
+        n_boundary_mismatch n_boundary_ops n_triggers n_old n_shadow
+  vj=$(sqlite3 -json &quot;$run_db&quot; &lt;&quot;$HERE/verify.sql&quot; 2&gt;/dev/null || echo '[]')
+  n_new=$(jq        '.[0].n_new // 0'          &lt;&lt;&lt;&quot;$vj&quot;)
+  n_distinct=$(jq   '.[0].n_distinct // 0'     &lt;&lt;&lt;&quot;$vj&quot;)
+  n_snapshot=$(jq   '.[0].n_snapshot // 0'     &lt;&lt;&lt;&quot;$vj&quot;)
+  n_mismatch=$(jq   '.[0].n_mismatch // 0'     &lt;&lt;&lt;&quot;$vj&quot;)
+  n_extra=$(jq      '.[0].n_extra // 0'        &lt;&lt;&lt;&quot;$vj&quot;)
+  n_snap_mismatch=$(jq '.[0].n_snap_mismatch // 0' &lt;&lt;&lt;&quot;$vj&quot;)
+  n_boundary_mismatch=$(jq '.[0].n_boundary_mismatch // 0' &lt;&lt;&lt;&quot;$vj&quot;)
+  n_boundary_ops=$(jq '.[0].n_boundary_ops // 0' &lt;&lt;&lt;&quot;$vj&quot;)
+  n_triggers=$(jq  '.[0].n_triggers // 0'      &lt;&lt;&lt;&quot;$vj&quot;)
+  n_old=$(jq       '.[0].n_old // 0'           &lt;&lt;&lt;&quot;$vj&quot;)
+  n_shadow=$(jq    '.[0].n_new_shadow // 0'    &lt;&lt;&lt;&quot;$vj&quot;)
+
+  local exactly_once no_loss no_extra snapshot_ok boundary_ok clean_ok result
+  [[ &quot;$n_new&quot; != &quot;0&quot; &amp;&amp; &quot;$n_new&quot; == &quot;$n_distinct&quot; ]] &amp;&amp; exactly_once=true || exactly_once=false
+  [[ &quot;$n_mismatch&quot; == &quot;0&quot; ]]        &amp;&amp; no_loss=true     || no_loss=false
+  [[ &quot;$n_extra&quot; == &quot;0&quot; ]]           &amp;&amp; no_extra=true    || no_extra=false
+  [[ &quot;$n_snap_mismatch&quot; == &quot;0&quot; ]]   &amp;&amp; snapshot_ok=true || snapshot_ok=false
+  [[ &quot;$n_boundary_mismatch&quot; == &quot;0&quot; ]] &amp;&amp; boundary_ok=true || boundary_ok=false
+  [[ &quot;$n_triggers&quot; == &quot;0&quot; &amp;&amp; &quot;$n_old&quot; == &quot;0&quot; &amp;&amp; &quot;$n_shadow&quot; == &quot;0&quot; ]] &amp;&amp; clean_ok=true || clean_ok=false
+  if [[ &quot;$resume_rc&quot; == &quot;0&quot; &amp;&amp; &quot;$exactly_once&quot; == &quot;true&quot; &amp;&amp; &quot;$no_loss&quot; == &quot;true&quot; \
+        &amp;&amp; &quot;$no_extra&quot; == &quot;true&quot; &amp;&amp; &quot;$snapshot_ok&quot; == &quot;true&quot; \
+        &amp;&amp; &quot;$boundary_ok&quot; == &quot;true&quot; &amp;&amp; &quot;$clean_ok&quot; == &quot;true&quot; ]]; then
+    result=PASS
+  else
+    result=FAIL
+  fi
+
+  jq -nc --arg point &quot;$pt&quot; --argjson kill_rc &quot;${kill_rc:-0}&quot; \
+    --arg s_phase &quot;$s_phase&quot; --argjson s_hwm &quot;${s_hwm:-0}&quot; \
+    --argjson s_batches &quot;${s_batches:-0}&quot; --argjson s_accounts &quot;${s_accounts:-0}&quot; \
+    --argjson s_target &quot;${s_target:-0}&quot; --argjson s_old &quot;${s_old:-0}&quot; --argjson s_trig &quot;${s_trig:-0}&quot; \
+    --argjson resume_rc &quot;${resume_rc:-0}&quot; --arg e_phase &quot;$e_phase&quot; --argjson e_hwm &quot;${e_hwm:-0}&quot; \
+    --argjson e_batches &quot;${e_batches:-0}&quot; --argjson e_rows &quot;${e_rows:-0}&quot; \
+    --argjson exactly_once &quot;$exactly_once&quot; --argjson no_loss &quot;$no_loss&quot; \
+    --argjson no_extra &quot;$no_extra&quot; --argjson snapshot_ok &quot;$snapshot_ok&quot; \
+    --argjson boundary_ok &quot;$boundary_ok&quot; --argjson clean_ok &quot;$clean_ok&quot; \
+    --argjson n_new &quot;$n_new&quot; --argjson n_distinct &quot;$n_distinct&quot; \
+    --argjson n_snapshot &quot;$n_snapshot&quot; --argjson n_boundary_ops &quot;$n_boundary_ops&quot; \
+    --arg result &quot;$result&quot; \
+    '{point:$point, killed:($kill_rc==137), kill_rc:$kill_rc,
+      resume_start:{phase:$s_phase, hwm:$s_hwm, batches_run:$s_batches,
+                    accounts_rows:$s_accounts, target_rows:$s_target,
+                    old_exists:($s_old==1), triggers:$s_trig},
+      replayed:{resume_rc:$resume_rc, final_phase:$e_phase, final_hwm:$e_hwm,
+                batches_run:$e_batches, batches_replayed:($e_batches-$s_batches),
+                final_rows:$e_rows, cutover_replayed:($s_phase==&quot;cutover&quot;)},
+      invariants:{exactly_once:$exactly_once, no_loss:$no_loss, no_extra:$no_extra,
+                  snapshot_matches_committed:$snapshot_ok,
+                  boundary_preserved:$boundary_ok, artefacts_clean:$clean_ok,
+                  boundary_ops:$n_boundary_ops, new_rows:$n_new,
+                  distinct_ids:$n_distinct, snapshot_rows:$n_snapshot},
+      result:$result}' &gt;&gt;&quot;$LEDGER&quot;
+
+  printf '%-34s %-4s kill=%s resume=%s rows=%s replayed=%s\n' \
+      &quot;$pt&quot; &quot;$result&quot; &quot;$kill_rc&quot; &quot;$resume_rc&quot; &quot;$e_rows&quot; &quot;$((e_batches-s_batches))&quot; &gt;&amp;2
+  [[ &quot;$result&quot; == &quot;PASS&quot; ]]
+}
+
+main() {
+  make_template; discover_points
+  log &quot;discovered ${#POINTS[@]} interruption points (SEED_ROWS=$SEED_ROWS BATCH=$BATCH)&quot;
+  local selected=(&quot;${POINTS[@]}&quot;)
+  if [[ &quot;$MAX_POINTS&quot; -gt 0 &amp;&amp; &quot;${#POINTS[@]}&quot; -gt &quot;$MAX_POINTS&quot; ]]; then
+    selected=(); local step=$(( ${#POINTS[@]} / MAX_POINTS )) i
+    for ((i=0; i&lt;${#POINTS[@]}; i+=step)); do selected+=(&quot;${POINTS[$i]}&quot;); done
+  fi
+  log &quot;testing ${#selected[@]} points&quot;; : &gt;&quot;$LEDGER&quot;
+  local fails=0 pt
+  for pt in &quot;${selected[@]}&quot;; do run_point &quot;$pt&quot; || fails=$((fails+1)); done
+  log &quot;RESULT: $(( ${#selected[@]} - fails )) pass, $fails fail -- ledger $LEDGER&quot;
+  [[ &quot;$fails&quot; == &quot;0&quot; ]]
+}
+main &quot;$@&quot;
+</code></pre>
+<hr />
+<h2>How to run</h2>
+<pre><code class="language-bash">cd ~/online-migration
+chmod +x migrate.sh writer.sh harness.sh
+
+# quick suite (~25 points)
+SEED_ROWS=60 BATCH=15 ./harness.sh
+
+# full &quot;hundreds of points&quot; suite
+SEED_ROWS=1000 BATCH=8 LEDGER=./ledger-big.jsonl ./harness.sh
+</code></pre>
+<p><code>migrate.sh</code> can also be used standalone (no harness/writer):</p>
+<pre><code class="language-bash">MIG_DB=my.db MIG_BATCH=1000 ./migrate.sh
+</code></pre>
+<hr />
+<h2>Verification</h2>
+<h3>Scale and result</h3>
+<p>The full run used <code>SEED_ROWS=1000</code>, <code>BATCH=8</code> (125 backfill chunks), with a concurrent writer doing inserts/updates/deletes throughout. Interruption points scale with the number of chunks: <code>2·batches + 2·init + 4·cutover + 4·finalize + 1</code>.</p>
+<pre><code>$ jq -s '{points:length, pass:(map(select(.result==&quot;PASS&quot;))|length),
+          fail:(map(select(.result==&quot;FAIL&quot;))|length),
+          killed:(map(select(.killed))|length)}' ledger-big.jsonl
+{
+  &quot;points&quot;: 267,
+  &quot;pass&quot;: 267,
+  &quot;fail&quot;: 0,
+  &quot;killed&quot;: 267
+}
+</code></pre>
+<p>Every run was a genuine <code>SIGKILL</code> (<code>kill_rc==137</code>), including the mid-transaction case. Resume-start phases covered the whole state machine:</p>
+<table>
+<thead>
+<tr>
+<th><code>resume_start.phase</code></th>
+<th style="text-align: right;">points</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>init</code></td>
+<td style="text-align: right;">5</td>
+<td>killed during/around shadow-table + trigger setup</td>
+</tr>
+<tr>
+<td><code>backfill</code></td>
+<td style="text-align: right;">252</td>
+<td>killed before/after every chunk; high-water mark resumed</td>
+</tr>
+<tr>
+<td><code>cutover</code></td>
+<td style="text-align: right;">5</td>
+<td>killed before cutover, after cutover, and <strong>between the two <code>ALTER</code>s</strong></td>
+</tr>
+<tr>
+<td><code>done</code></td>
+<td style="text-align: right;">5</td>
+<td>killed during old-table/trigger cleanup</td>
+</tr>
+</tbody>
+</table>
+<p><code>cutover_between</code> is the hard case. It was killed by <code>sqlite3</code> executing <code>.shell kill -9 $PPID</code> <strong>after</strong> <code>ALTER TABLE accounts RENAME TO accounts_old</code> and <strong>before</strong> <code>ALTER TABLE accounts_new RENAME TO accounts</code>. Transactional DDL rolled it back; resume detected <code>phase='cutover'</code>, replayed the swap, and passed:</p>
+<pre><code class="language-json">{&quot;point&quot;:&quot;cutover_between&quot;,&quot;killed&quot;:true,&quot;kill_rc&quot;:137,
+ &quot;resume_start&quot;:{&quot;phase&quot;:&quot;cutover&quot;,&quot;hwm&quot;:100176,&quot;batches_run&quot;:129,
+                 &quot;accounts_rows&quot;:1000,&quot;target_rows&quot;:1000,&quot;old_exists&quot;:false,&quot;triggers&quot;:3},
+ &quot;replayed&quot;:{&quot;resume_rc&quot;:0,&quot;final_phase&quot;:&quot;done&quot;,&quot;final_hwm&quot;:100176,
+             &quot;batches_run&quot;:129,&quot;batches_replayed&quot;:0,&quot;final_rows&quot;:1000,
+             &quot;cutover_replayed&quot;:true},
+ &quot;invariants&quot;:{&quot;exactly_once&quot;:true,&quot;no_loss&quot;:true,&quot;no_extra&quot;:true,
+               &quot;snapshot_matches_committed&quot;:true,&quot;boundary_preserved&quot;:true,
+               &quot;artefacts_clean&quot;:true,&quot;boundary_ops&quot;:180,
+               &quot;new_rows&quot;:1000,&quot;distinct_ids&quot;:1000,&quot;snapshot_rows&quot;:1000},
+ &quot;result&quot;:&quot;PASS&quot;}
+</code></pre>
+<p>Concurrent writes really were in flight at the boundary: per run there were 180–215 writer operations committed at or before the cutover (<code>cutover_seq</code>), and <strong>all</strong> are reflected in <code>_cutover_snapshot</code> (<code>n_boundary_mismatch == 0</code>). <code>batches_replayed_total = 17 515</code> shows actual work was redone after kills, not vacuous re-runs.</p>
+<h3>The seven checked invariants</h3>
+<table>
+<thead>
+<tr>
+<th>Column in <code>verify.sql</code></th>
+<th>Must be</th>
+<th>Proves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>n_new == n_distinct</code></td>
+<td>equal, non-zero</td>
+<td>no duplicate/no missing id</td>
+</tr>
+<tr>
+<td><code>n_mismatch</code></td>
+<td>0</td>
+<td>every snapshot row present, correct <code>balance_cents</code> &amp; <code>fingerprint</code> — <strong>no loss, no mutation</strong></td>
+</tr>
+<tr>
+<td><code>n_extra</code></td>
+<td>0</td>
+<td>no row in the new table that was not committed at cutover</td>
+</tr>
+<tr>
+<td><code>n_snap_mismatch</code></td>
+<td>0</td>
+<td>frozen snapshot equals seed overlaid by <code>writer_expected</code></td>
+</tr>
+<tr>
+<td><code>n_boundary_mismatch</code></td>
+<td>0</td>
+<td>every writer op with <code>seq &lt;= cutover_seq</code> survives cutover</td>
+</tr>
+<tr>
+<td><code>n_triggers</code>, <code>n_old</code>, <code>n_new_shadow</code></td>
+<td>0</td>
+<td>cleanup complete (<code>accounts_old</code>, shadow, triggers gone)</td>
+</tr>
+</tbody>
+</table>
+<h3>Negative controls (proving the verifier is not vacuous)</h3>
+<ol>
+<li><strong>Tamper</strong> a migrated DB — the verifier fires immediately:</li>
+</ol>
+<pre><code>clean:            n_new=40 n_mismatch=0 n_extra=0
+mutate id=1:      n_new=40 n_mismatch=1 n_extra=0
+delete id=2:      n_new=39 n_mismatch=2 n_extra=0
+insert extra row: n_new=40 n_mismatch=2 n_extra=1
+</code></pre>
+<ol>
+<li>
+<p><strong>Break the migration</strong> — removing the capture triggers <em>and</em> the cutover reconciliation makes the harness fail every point (17/17 <code>FAIL</code>), while the intact code passes 267/267. This confirms the assertions are sensitive to real correctness bugs, not just cosmetic differences.</p>
+</li>
+<li>
+<p><strong>Mid-transaction kill is real</strong> — a standalone check confirmed <code>.shell kill -9 $PPID</code> yields <code>sqlite3 rc=137</code> and leaves the pre-cutover table state intact (the transaction rolls back), so the "between the two statements" test exercises the actual atomicity guarantee rather than a no-op.</p>
+</li>
+</ol>
+<h3>Ledger format</h3>
+<p>One JSON object per interruption point (JSONL), e.g.:</p>
+<pre><code class="language-json">{&quot;point&quot;:&quot;backfill_batch_1_before&quot;,&quot;killed&quot;:true,&quot;kill_rc&quot;:137,
+ &quot;resume_start&quot;:{&quot;phase&quot;:&quot;backfill&quot;,&quot;hwm&quot;:0,&quot;batches_run&quot;:0,&quot;accounts_rows&quot;:1001,
+                 &quot;target_rows&quot;:12,&quot;old_exists&quot;:false,&quot;triggers&quot;:3},
+ &quot;replayed&quot;:{&quot;resume_rc&quot;:0,&quot;final_phase&quot;:&quot;done&quot;,&quot;final_hwm&quot;:100204,
+             &quot;batches_run&quot;:129,&quot;batches_replayed&quot;:129,&quot;final_rows&quot;:999,
+             &quot;cutover_replayed&quot;:false},
+ &quot;invariants&quot;:{&quot;exactly_once&quot;:true,&quot;no_loss&quot;:true,&quot;no_extra&quot;:true,
+               &quot;snapshot_matches_committed&quot;:true,&quot;boundary_preserved&quot;:true,
+               &quot;artefacts_clean&quot;:true,&quot;boundary_ops&quot;:209,&quot;new_rows&quot;:999,
+               &quot;distinct_ids&quot;:999,&quot;snapshot_rows&quot;:999},
+ &quot;result&quot;:&quot;PASS&quot;}
+</code></pre>
+<p>It records exactly what the task asks for: the <strong>state the resume started from</strong> (<code>resume_start</code>), the <strong>work replayed</strong> (<code>replayed.batches_replayed</code>, <code>cutover_replayed</code>, <code>final_hwm</code>), and the <strong>invariants verified</strong> (<code>invariants</code>).</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: bash-sqlite-online-schema-backfill-exactly-once-cutover
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-25T22:29:59.376Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a crash-safe online schema migration in bash driving only the sqlite3 CLI: reshape a writer-visible table through a shadow table, a chunked idempotent backfill that records resumable high-water marks, trigger-based capture of concurrent writer changes, and a final atomic cutover, with the whole migration resumable after an arbitrary SIGKILL at any instruction. The harness must inject forced kills at hundreds of instrumented interruption points, resume each run, and then prove via SQL invariant queries that every committed source row appears exactly once in the new table with the target schema, that no row was lost, duplicated or mutated, and that concurrent writes committed before the cutover boundary survive it, including the case where the cutover itself is interrupted between its two statements. Emit a per-interruption-point JSONL ledger recording the state the resume started from, the work it replayed, and the invariants verified.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;bash-sqlite-online-schema-backfill-exactly-once-cutover&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-25T22:29:59.377Z&quot;, &quot;version&quot;: &quot;5.2&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><h1>Crash-Safe Online Schema Migration in Bash + <code>sqlite3</code></h1>
 <h2>Root-cause analysis</h2>
 <p>The task is a <em>problem class</em>, not a single bug: reshape a writer-visible table without stopping writers, and survive <code>SIGKILL</code> at <strong>any</strong> instruction, then prove with SQL that the result is exactly-once. A naive implementation fails in five distinct ways. Each failure mode maps to a specific race or missing invariant.</p>
 <table>

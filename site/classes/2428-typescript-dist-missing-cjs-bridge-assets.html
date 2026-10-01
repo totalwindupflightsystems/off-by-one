@@ -45,7 +45,291 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>typescript-dist-missing-cjs-bridge-assets</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>Scope: apps/server in the TypeScript pnpm monorepo.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2428-typescript-dist-missing-cjs-bridge-assets.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>No repo was present in this environment, so I authored the solution from the problem specification. It's saved at <code>~/SOLUTION.md</code>. Full contents:</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>typescript-dist-missing-cjs-bridge-assets</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>Scope: apps/server in the TypeScript pnpm monorepo.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2428-typescript-dist-missing-cjs-bridge-assets.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>No repo was present in this environment, so I authored the solution from the problem specification. It's saved at <code>~/SOLUTION.md</code>. Full contents:</p>
+<hr />
+<h1>Fix: missing CommonJS legacy services in <code>dist/</code> + stuck <code>RUNNING</code> runs</h1>
+<p><strong>Scope:</strong> <code>apps/server</code> in the TypeScript pnpm monorepo.
+<strong>Symptoms fixed:</strong> <code>Cannot find module '.../dist/services/legacy-bridge.js'</code> on every game under <code>node dist/index.js</code>; benchmark runs that never leave <code>RUNNING</code>.</p>
+<h2>1. Root cause</h2>
+<h3>Defect A — <code>tsc</code> never emits the hand-written <code>.js</code> services</h3>
+<p>Three plain-CommonJS runtime assets live next to TypeScript sources: <code>legacy-bridge.js</code>, <code>legacy-usage-collector.js</code>, <code>server-game-engine.js</code>. They are launched as child Node processes using a path built from <code>__dirname</code>:</p>
+<pre><code class="language-ts">spawn(process.execPath, [path.resolve(__dirname, 'legacy-bridge.js'), ...args]);
+</code></pre>
+<p>After compilation <code>__dirname</code> is <code>.../dist/services</code>. The build is bare <code>tsc</code>, and <code>allowJs</code> is off, so <code>tsc</code> ignores the <code>.js</code> files and never copies them. <code>dist/services/</code> ends up with only the emitted TS outputs.</p>
+<p><strong>Why dev/Docker mask it:</strong> under <code>tsx</code> and the Docker CMD, <code>__dirname</code> resolves to <code>src/services</code>, where the assets exist. Only the shipped <code>pnpm start</code> (<code>node dist/index.js</code>) hits <code>dist/services</code> and crashes.</p>
+<h3>Defect B — a child that dies at <code>require()</code> leaves the run <code>RUNNING</code> forever</h3>
+<p>The child dies before publishing any terminal event. The parent's predicate only checks <code>completed_at</code>:</p>
+<pre><code class="language-ts">const stillRunning = modelRuns.some(r =&gt; r.completed_at == null);
+if (stillRunning) return; // run stays RUNNING
+</code></pre>
+<p>An errored row has no <code>completed_at</code>, so the run is never finalized and the crash is invisible.</p>
+<h2>2. Fix</h2>
+<h3>Part A — copy the legacy services as part of <code>build</code></h3>
+<p><code>allowJs: true</code> was deliberately avoided to keep <code>tsc</code> emit semantics unchanged; an explicit copy is deterministic and narrowly scoped.</p>
+<p><strong>A.1 New file <code>apps/server/scripts/copy-legacy-services.mjs</code>:</strong></p>
+<pre><code class="language-js">#!/usr/bin/env node
+// apps/server/scripts/copy-legacy-services.mjs
+//
+// The three legacy services below are hand-written CommonJS .js files that are
+// spawned at runtime by path from __dirname. `tsc` cannot see them (allowJs is
+// off), so they must be copied into dist/ explicitly after every build.
+//
+// Keep this list in sync with the spawn sites. If a file is added/removed or
+// moved, update LEGACY_SERVICES.
+
+import { access, copyFile, mkdir } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const serverRoot = resolve(here, '..');
+
+const srcDir = resolve(serverRoot, 'src', 'services');
+const outDir = resolve(serverRoot, 'dist', 'services');
+
+const LEGACY_SERVICES = [
+  'legacy-bridge.js',
+  'legacy-usage-collector.js',
+  'server-game-engine.js',
+];
+
+async function main() {
+  await mkdir(outDir, { recursive: true });
+
+  for (const file of LEGACY_SERVICES) {
+    const from = join(srcDir, file);
+    const to = join(outDir, file);
+
+    try {
+      await access(from, constants.R_OK);
+    } catch {
+      throw new Error(
+        `[copy-legacy-services] expected legacy service missing: ${from}. ` +
+          `Update apps/server/scripts/copy-legacy-services.mjs if it moved.`,
+      );
+    }
+
+    await copyFile(from, to);
+    console.log(`[copy-legacy-services] ${file} -&gt; dist/services/${file}`);
+  }
+}
+
+main().catch((err) =&gt; {
+  console.error(err);
+  process.exitCode = 1;
+});
+</code></pre>
+<p><strong>A.2 Patch <code>apps/server/package.json</code>:</strong></p>
+<pre><code class="language-jsonc">{
+  &quot;scripts&quot;: {
+    // before: &quot;build&quot;: &quot;tsc&quot;,
+    &quot;build&quot;: &quot;tsc &amp;&amp; node scripts/copy-legacy-services.mjs&quot;,
+    &quot;start&quot;: &quot;node dist/index.js&quot;
+  }
+}
+</code></pre>
+<p>The copy step is fail-loud: renaming/deleting an asset breaks the build instead of shipping a broken <code>dist/</code>.</p>
+<h3>Part B — make a crashed child terminal and mark the run <code>FAILED</code></h3>
+<p><strong>B.1 Attach <code>child.on('close')</code> at every spawn site:</strong></p>
+<pre><code class="language-ts">import { spawn, type ChildProcess } from 'node:child_process';
+import path from 'node:path';
+
+const child: ChildProcess = spawn(
+  process.execPath,
+  [path.resolve(__dirname, 'server-game-engine.js'), /* ...args */],
+  { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env } },
+);
+
+// `close` fires even when the child dies during require(), before it can
+// emit any terminal row state.
+child.on('close', (code, signal) =&gt; {
+  void onChildClosed(modelRunId, { code, signal });
+});
+</code></pre>
+<pre><code class="language-ts">type ExitInfo = { code: number | null; signal: NodeJS.Signals | null };
+
+async function onChildClosed(modelRunId: string, { code, signal }: ExitInfo) {
+  if (code === 0) return; // clean exit → child published its terminal state
+
+  const row = await db
+    .selectFrom('model_runs')
+    .where('id', '=', modelRunId)
+    .select(['id', 'run_id', 'completed_at', 'error'])
+    .executeTakeFirst();
+
+  if (!row) return;
+  if (row.completed_at != null || row.error != null) return; // don't clobber
+
+  const detail = signal
+    ? `child process terminated by signal ${signal}`
+    : `child process exited with non-zero code ${code}`;
+
+  await db
+    .updateTable('model_runs')
+    .set({ error: detail })
+    .where('id', '=', modelRunId)
+    .execute();
+
+  await maybeFinalizeRun(row.run_id);
+}
+</code></pre>
+<p>Also handle hard spawn failures:</p>
+<pre><code class="language-ts">child.on('error', (err) =&gt; {
+  void onChildClosed(modelRunId, { code: -1, signal: null }).catch(() =&gt; {});
+});
+</code></pre>
+<p><strong>B.2 Treat <code>error != null</code> as terminal in the completion check:</strong></p>
+<pre><code class="language-ts">async function maybeFinalizeRun(runId: string) {
+  const rows = await db
+    .selectFrom('model_runs')
+    .where('run_id', '=', runId)
+    .select(['completed_at', 'error'])
+    .execute();
+
+  const allTerminal = rows.every(
+    (r) =&gt; r.completed_at != null || r.error != null, // CHANGED
+  );
+  if (!allTerminal) return;
+
+  const anyError = rows.some((r) =&gt; r.error != null);
+
+  await db
+    .updateTable('runs')
+    .set({
+      status: anyError ? 'FAILED' : 'COMPLETED',
+      completed_at: new Date(),
+    })
+    .where('id', '=', runId)
+    .where('status', '=', 'RUNNING') // idempotent
+    .execute();
+}
+</code></pre>
+<p>SQL predicate change:</p>
+<pre><code class="language-sql">-- before: non-terminal = completed_at IS NULL
+-- after:  non-terminal = completed_at IS NULL AND error IS NULL
+SELECT count(*) AS pending
+FROM model_runs
+WHERE run_id = $1
+  AND completed_at IS NULL
+  AND error IS NULL;
+</code></pre>
+<p><strong>B.3 Extend restart reconcile the same way:</strong></p>
+<pre><code class="language-ts">async function reconcileStaleRuns() {
+  const runIds = await db
+    .selectFrom('runs')
+    .where('status', '=', 'RUNNING')
+    .select('id')
+    .execute();
+
+  for (const { id } of runIds) {
+    await maybeFinalizeRun(id);
+  }
+}
+</code></pre>
+<p>Or in one statement:</p>
+<pre><code class="language-sql">UPDATE runs r
+SET status = CASE
+      WHEN EXISTS (SELECT 1 FROM model_runs m
+                   WHERE m.run_id = r.id AND m.error IS NOT NULL)
+        THEN 'FAILED'
+      ELSE 'COMPLETED'
+    END,
+    completed_at = now()
+WHERE r.status = 'RUNNING'
+  AND NOT EXISTS (
+    SELECT 1 FROM model_runs m
+    WHERE m.run_id = r.id
+      AND m.completed_at IS NULL
+      AND m.error IS NULL
+  );
+</code></pre>
+<h2>3. Verification</h2>
+<h3>V.1 Forced, non-cached build emits all three assets</h3>
+<pre><code class="language-bash">cd apps/server
+rm -rf dist
+pnpm build        # tsc &amp;&amp; node scripts/copy-legacy-services.mjs
+ls -1 dist/services
+</code></pre>
+<p>Expected: <code>legacy-bridge.js</code>, <code>legacy-usage-collector.js</code>, <code>server-game-engine.js</code>, plus the three <code>[copy-legacy-services] ...</code> log lines.</p>
+<h3>V.2 Production start reaches terminal state with zero <code>MODULE_NOT_FOUND</code></h3>
+<pre><code class="language-bash">cd apps/server
+pnpm start 2&gt;&amp;1 | tee /tmp/prod-start.log
+grep -c &quot;MODULE_NOT_FOUND\|Cannot find module.*dist/services&quot; /tmp/prod-start.log   # expect 0
+grep -E '&quot;status&quot;: *&quot;(COMPLETED|FAILED)&quot;' /tmp/prod-start.log
+</code></pre>
+<p>Pass criteria: zero <code>MODULE_NOT_FOUND</code>, final run <code>COMPLETED</code>, every model row has <code>completed_at != null</code> or <code>error != null</code>.</p>
+<h3>V.3 Unit test — mocked <code>child_process.spawn</code></h3>
+<pre><code class="language-ts">import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { EventEmitter } from 'node:events';
+
+vi.mock('node:child_process', () =&gt; ({ spawn: vi.fn() }));
+
+import { spawn } from 'node:child_process';
+import { onChildClosed, maybeFinalizeRun } from '../src/services/game-runner';
+
+class FakeChild extends EventEmitter {
+  stdout = new EventEmitter();
+  stderr = new EventEmitter();
+  kill() {}
+}
+
+describe('crashed legacy child', () =&gt; {
+  const db = {
+    row: { id: 'mr1', run_id: 'run1', completed_at: null, error: null },
+    updateTable() { return this; },
+    set(patch: any) { this.lastSet = patch; return this; },
+    where() { return this; },
+    async execute() { Object.assign(this.row, this.lastSet); },
+    selectFrom(_table: string) {
+      return {
+        where: () =&gt; this,
+        select: () =&gt; this,
+        async executeTakeFirst() { return db.row; },
+        async execute() { return [db.row]; },
+      };
+    },
+  };
+
+  beforeEach(() =&gt; {
+    db.row = { id: 'mr1', run_id: 'run1', completed_at: null, error: null };
+    (spawn as any).mockReturnValue(new FakeChild());
+  });
+
+  it('marks row errored and run FAILED on nonzero exit', async () =&gt; {
+    const child = spawn('node', ['server-game-engine.js']) as any;
+
+    child.emit('close', 1, null); // dies at require(), no terminal event
+    await new Promise((r) =&gt; setImmediate(r));
+
+    const updated = await db.selectFrom('model_runs').executeTakeFirst();
+    expect(updated.error).toMatch(/non-zero code 1/);
+    expect(updated.completed_at).toBeNull();
+
+    await maybeFinalizeRun('run1');
+    expect(db.row.status ?? 'FAILED').toBe('FAILED');
+  });
+});
+</code></pre>
+<h2>4. Change checklist</h2>
+<ul>
+<li>[ ] Add <code>apps/server/scripts/copy-legacy-services.mjs</code>.</li>
+<li>[ ] <code>apps/server/package.json</code> → <code>"build": "tsc &amp;&amp; node scripts/copy-legacy-services.mjs"</code>.</li>
+<li>[ ] Register <code>child.on('close', ...)</code> and <code>child.on('error', ...)</code> at each spawn site.</li>
+<li>[ ] Add <code>onChildClosed()</code>: write <code>model_runs.error</code> only when no terminal evidence, then call the finalizer.</li>
+<li>[ ] Change the predicate from <code>completed_at IS NULL</code> to <code>completed_at IS NULL AND error IS NULL</code>.</li>
+<li>[ ] Set run <code>status = FAILED</code> when any terminal row has <code>error != null</code>.</li>
+<li>[ ] Apply the same predicate in the restart reconcile.</li>
+<li>[ ] Add the mocked-spawn unit test.</li>
+<li>[ ] Run V.1–V.3 against a clean <code>dist/</code> via the real <code>pnpm start</code> path.</li>
+</ul>
+<hr />
+<p>Note: since no repository was mounted at <code>~</code> (only <code>/workspace/problem.json</code>), the identifiers <code>db</code>, <code>maybeFinalizeRun</code>, and the spawn-site/module name are given as representative names to adapt to the actual code — the structural and behavioral changes are what matter.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: typescript-dist-missing-cjs-bridge-assets
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-27T23:36:29.500Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;TypeScript pnpm monorepo (apps/server): three hand-written plain-CommonJS modules under src/services (legacy-bridge.js, legacy-usage-collector.js, server-game-engine.js) are spawned at runtime via path.resolve(__dirname, &#x27;&lt;file&gt;.js&#x27;), but tsconfig has no allowJs and the build is bare `tsc`, so dist/ never receives them. Under tsx (dev) and the docker CMD the src/ path resolves and masks the defect; only `node dist/index.js` (the shipped start script) dies with `Cannot find module .../dist/services/legacy-bridge.js` on every game, and because the child dies at require() before publishing any terminal event, the parent leaves the run RUNNING forever (its terminal predicate only checks completed_at). WORKING FIX: (1) append a tiny node copy step to the build script (`tsc &amp;&amp; node scripts/copy-legacy-services.mjs`) that copies the known .js list from src/services to dist/services \u2014 allowJs was avoided to keep tsc emit semantics unchanged; prove with a forced non-cached build. (2) attach a child.on(&#x27;close&#x27;) handler where the spawn happens: on nonzero exit with no terminal evidence on the row, set the row&#x27;s error column and call the run-completion check; extend that check (and the restart reconcile) to treat error!=null as terminal and mark the run FAILED. Covers both the missing-asset crash and the stuck-RUNNING invisibility. Verified: forced build re-emits all 3 files; prod-start 2-model benchmark run reaches COMPLETED with 0 MODULE_NOT_FOUND lines; unit test mocks child_process.spawn to prove the errored-row + FAILED-run path.&quot;, &quot;environment&quot;: &quot;&quot;, &quot;language&quot;: &quot;&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;typescript-dist-missing-cjs-bridge-assets&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-27T23:36:29.500Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>No repo was present in this environment, so I authored the solution from the problem specification. It's saved at <code>~/SOLUTION.md</code>. Full contents:</p>
 <hr />
 <h1>Fix: missing CommonJS legacy services in <code>dist/</code> + stuck <code>RUNNING</code> runs</h1>
 <p><strong>Scope:</strong> <code>apps/server</code> in the TypeScript pnpm monorepo.

@@ -45,7 +45,214 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>python-stale-board-premise-verify-before-dispatch</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>Problem class: python-stale-board-premise-verify-before-dispatch</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2444-python-stale-board-premise-verify-before-dispatch.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>All artifacts are built and exercised in a throwaway git repo that reproduces the exact tick. The full solution is at <strong><code>~/solution/SOLUTION.md</code></strong>; the runnable tools are <code>~/solution/{dispatch_gate.py,release_gate.py,test_gate_tools.py}</code>.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>python-stale-board-premise-verify-before-dispatch</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>Problem class: python-stale-board-premise-verify-before-dispatch</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2444-python-stale-board-premise-verify-before-dispatch.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>All artifacts are built and exercised in a throwaway git repo that reproduces the exact tick. The full solution is at <strong><code>~/solution/SOLUTION.md</code></strong>; the runnable tools are <code>~/solution/{dispatch_gate.py,release_gate.py,test_gate_tools.py}</code>.</p>
+<p>Here is the solution.</p>
+<hr />
+<h1>Fixing the Stale-Board Premise: Verify Before Dispatch, and Treat Cancelled CI as NO Verdict</h1>
+<p><strong>Problem class:</strong> <code>python-stale-board-premise-verify-before-dispatch</code>
+<strong>Observed cost:</strong> TR-240 and TR-241 were still <code>pending</code> after their fixes landed on <code>main</code> (<code>9f4ba95</code>, <code>56a2bb1</code>); two workers were nearly paid to redo finished work. Separately, a <em>cancelled</em> CI run was treated as "not failed", and the very fix that unblocks the gate needed <code>ALLOW_RED_PUSH</code> to land.</p>
+<h2>1. Root-cause analysis</h2>
+<p><strong>1.1 The board is a cache with no invalidation; the dispatcher treats it as truth.</strong>
+A row <code>{status:"pending"}</code> is a <em>belief</em> written in the past. The authoritative sources are (a) <code>git log -- &lt;row.files&gt;</code> and (b) the row's executable tests on <code>HEAD</code>. The dispatcher read <code>status</code> and never re-derived the belief, so <code>pending</code> persists after the fix merges:</p>
+<pre><code>row.status == &quot;pending&quot; -&gt; dispatch worker -&gt; worker finds nothing -&gt; full worker cost burned
+</code></pre>
+<p><strong>1.2 A cancelled CI run is neither green nor red.</strong>
+CI conclusions are tri-state in practice (<code>success</code> / <code>failure</code> / <code>cancelled|skipped|stale|none</code>). Collapsing them into binary either creates a <strong>phantom green</strong> or an <strong>opaque block</strong> with no honest recovery path. Here the gate was blocked by a cancelled run, and the unblocking fix could only land via an override that was not loud or attributable.</p>
+<p><strong>1.3 The two defects compound.</strong> If the gate blocks the unblocking push, the board never updates, so rows look <code>pending</code> forever. Both fixes must ship together.</p>
+<h2>2. The exact fix</h2>
+<h3>2.1 <code>dispatch_gate.py</code> — verify the row premise before paying for a worker</h3>
+<p>Exit codes are the contract consumed by the scheduler:</p>
+<table>
+<thead>
+<tr>
+<th>exit</th>
+<th>meaning</th>
+<th>action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>tests still fail, no fix commit</td>
+<td><strong>dispatch</strong></td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>row tests pass on <code>HEAD</code></td>
+<td><strong>close row with evidence, do NOT dispatch</strong></td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>no test battery</td>
+<td><strong>refuse to dispatch</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Core logic (full file at the path above):</p>
+<pre><code class="language-python">def git_history_for(row, root):
+    base = row.get(&quot;base_sha&quot;)
+    rev = f&quot;{base}..HEAD&quot; if base else &quot;HEAD&quot;
+    code, out = sh([&quot;git&quot;, &quot;log&quot;, &quot;--oneline&quot;, rev, &quot;--&quot;, *(row.get(&quot;files&quot;) or [])], root)
+    return out.splitlines() if code == 0 and out else []
+
+def verify(conn, board_path, row_id, commit):
+    ...
+    commits = git_history_for(row, root)
+    if not row.get(&quot;tests&quot;):
+        print(&quot;UNVERIFIABLE - no test battery; refusing to dispatch.&quot;)
+        return 3
+    passed, log = run_battery(row, root)
+    if passed:
+        latest = commits[0].split()[0] if commits else &quot;unknown&quot;
+        close_row(row, f&quot;row tests pass on HEAD; fix present at {latest}; files={row['files']}&quot;)
+        save_board(board_path, board)
+        return 2
+    return 0
+</code></pre>
+<p>Wire it into the loop so nothing dispatches on <code>status</code> alone:</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+set -euo pipefail
+python3 dispatch_gate.py --conn conn.json --board board.json verify &quot;$1&quot;
+case $? in
+  0) echo &quot;dispatch $1&quot; ;;
+  2) echo &quot;row $1 closed as already-fixed; worker skipped (cost 0)&quot; ;;
+  3) echo &quot;row $1 unverifiable; refusing to dispatch; add tests&quot; &gt;&amp;2; exit 3 ;;
+esac
+</code></pre>
+<p>Board row schema (bind <code>base_sha</code> to the commit when the row was opened):</p>
+<pre><code class="language-json">{&quot;id&quot;:&quot;TR-240&quot;,&quot;title&quot;:&quot;ci gate branch-tip fallback&quot;,&quot;status&quot;:&quot;pending&quot;,
+ &quot;files&quot;:[&quot;gate.py&quot;],&quot;base_sha&quot;:&quot;&lt;sha&gt;&quot;,&quot;tests&quot;:[&quot;python3 -m pytest tests/test_gate.py -q&quot;]}
+</code></pre>
+<h3>2.2 <code>release_gate.py</code> — tri-state verdicts, loud override</h3>
+<table>
+<thead>
+<tr>
+<th>conclusion</th>
+<th>verdict</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>success</code></td>
+<td><code>PASS</code></td>
+</tr>
+<tr>
+<td><code>failure</code>, <code>timed_out</code>, <code>startup_failure</code></td>
+<td><code>FAIL</code></td>
+</tr>
+<tr>
+<td><code>cancelled</code>, <code>skipped</code>, <code>neutral</code>, <code>stale</code>, <code>action_required</code>, <em>(none)</em></td>
+<td><code>NO_VERDICT</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>NO_VERDICT</code> blocks by default; <code>ALLOW_RED_PUSH=1</code> permits the push behind a loud banner; <code>FAIL</code> is never silently green:</p>
+<pre><code class="language-python">PASS = {&quot;success&quot;}
+FAIL = {&quot;failure&quot;, &quot;timed_out&quot;, &quot;startup_failure&quot;}
+NOVERDICT = {&quot;cancelled&quot;, &quot;skipped&quot;, &quot;neutral&quot;, &quot;stale&quot;, &quot;action_required&quot;, &quot;&quot;}
+
+def classify(run):
+    c = (run.get(&quot;conclusion&quot;) or run.get(&quot;status&quot;) or &quot;&quot;).lower()
+    return &quot;PASS&quot; if c in PASS else &quot;FAIL&quot; if c in FAIL else &quot;NO_VERDICT&quot;
+
+# if gate != PASS and ALLOW_RED_PUSH=1:
+#   print(&quot;!&quot;*68)
+#   print(&quot;  ALLOW_RED_PUSH OVERRIDE ENGAGED&quot;)
+#   print(&quot;  CI gate is NO_VERDICT; pushing anyway.&quot;)
+#   print(&quot;  A cancelled run counts as NO verdict, not a green light.&quot;)
+#   print(&quot;!&quot;*68)
+</code></pre>
+<p>Collect real runs and gate:</p>
+<pre><code class="language-bash">gh run list --limit 50 --json name,conclusion,status,headSha &gt; runs.json
+python3 release_gate.py runs.json || {
+    echo &quot;if this push is the unblocking fix: ALLOW_RED_PUSH=1 python3 release_gate.py runs.json&quot; &gt;&amp;2
+    exit 1
+}
+</code></pre>
+<h3>2.3 Operational rule</h3>
+<blockquote>
+<p><strong>Never dispatch on <code>status</code>; dispatch on a fresh premise check.</strong> Tests pass → close as <code>already-fixed</code> (worker cost 0). Tests fail and no commit → dispatch. No tests → refuse.
+<strong>A cancelled CI run is <code>NO_VERDICT</code>, not green.</strong> Block by default; landing the unblocking fix under <code>ALLOW_RED_PUSH=1</code> is allowed only with the loud banner and a recorded reason.</p>
+</blockquote>
+<h2>3. Verification (all executed against a throwaway repo)</h2>
+<p><strong>Genuinely pending row dispatches (no false closure):</strong></p>
+<pre><code class="language-text">$ python3 dispatch_gate.py ... verify TR-240
+  no commits found touching ['gate.py']
+1 failed in 0.01s
+PREMISE VALID - TR-240 tests still fail; safe to dispatch.        exit=0
+</code></pre>
+<p><strong>The exact tick, closed for free after 9f4ba95 / 56a2bb1 land while board stays <code>pending</code>:</strong></p>
+<pre><code class="language-text">$ python3 dispatch_gate.py ... verify TR-240
+  git history touching ['gate.py']:
+    dd32c3a fix ci gate branch-tip fallback (TR-240)
+1 passed in 0.00s
+PREMISE STALE - TR-240 already fixed on main (commit dd32c3a).    exit=2
+
+$ python3 dispatch_gate.py ... verify TR-241
+  git history touching ['proxy.py']:
+    863edb4 fix proxy budget ladder _hop_budget_s (TR-241)
+PREMISE STALE - TR-241 already fixed on main (commit 863edb4).    exit=2
+# board: both rows closed already-fixed; zero workers dispatched
+</code></pre>
+<p><strong>No-battery row refused:</strong></p>
+<pre><code class="language-text">$ python3 dispatch_gate.py ... verify TR-999
+UNVERIFIABLE - TR-999 has no test battery; refusing to dispatch.  exit=3
+</code></pre>
+<p><strong>Cancelled CI is NO verdict, blocked then loudly overridden:</strong></p>
+<pre><code class="language-text">$ python3 release_gate.py runs.json
+  PASS       unit-tests
+  NO_VERDICT release-gate
+release gate: BLOCK (NO_VERDICT)                                  exit=1
+
+$ ALLOW_RED_PUSH=1 python3 release_gate.py runs.json
+  PASS       unit-tests
+  NO_VERDICT release-gate
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  ALLOW_RED_PUSH OVERRIDE ENGAGED
+  CI gate is NO_VERDICT; pushing anyway.
+  This override exists to land the fix that unblocks the gate.
+  A cancelled run counts as NO verdict, not a green light.
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+                                                                  exit=0
+</code></pre>
+<p><strong>Regression suite:</strong></p>
+<pre><code class="language-text">$ python3 -m pytest test_gate_tools.py -q
+........                                                          [100%]
+8 passed in 0.01s
+</code></pre>
+<h2>4. Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Defect</th>
+<th>Fix</th>
+<th>Proof</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Board <code>pending</code> treated as truth</td>
+<td><code>git log -- &lt;files&gt;</code> + run row tests on <code>HEAD</code> before dispatch</td>
+<td>TR-240/241 auto-closed, exit 2, cost 0</td>
+</tr>
+<tr>
+<td>"Can't verify" indistinguishable from "still broken"</td>
+<td>exit 3 for rows without a battery</td>
+<td>TR-999 exit 3</td>
+</tr>
+<tr>
+<td><code>cancelled</code> CI read as green or opaque block</td>
+<td>tri-state <code>PASS</code>/<code>FAIL</code>/<code>NO_VERDICT</code>, default block, loud <code>ALLOW_RED_PUSH</code></td>
+<td>§3 + 8 unit tests</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Invariant:</strong> derived state (the board, CI badges) must be re-derived against its source (git, tests, raw CI conclusions) at the moment of decision. The board and the gate are caches; only the artifacts they point to are authoritative.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: python-stale-board-premise-verify-before-dispatch
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-29T08:13:23.538Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Board rows reading pending while the fix already landed on main: verify row premise via git log --oneline -- &lt;file&gt; and run the row test battery BEFORE dispatching a worker. This tick found TR-240 (ci gate branch-tip fallback, 9f4ba95) and TR-241 (proxy budget ladder _hop_budget_s, 56a2bb1) both already fixed \u2014 closed with live evidence, zero worker cost. Also: a cancelled CI run counts as NO verdict for the release gate (ALLOW_RED_PUSH needed to land the very fix that unblocks the gate \u2014 announce it loudly).&quot;, &quot;environment&quot;: &quot;&quot;, &quot;language&quot;: &quot;&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;python-stale-board-premise-verify-before-dispatch&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-29T08:13:23.542Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>All artifacts are built and exercised in a throwaway git repo that reproduces the exact tick. The full solution is at <strong><code>~/solution/SOLUTION.md</code></strong>; the runnable tools are <code>~/solution/{dispatch_gate.py,release_gate.py,test_gate_tools.py}</code>.</p>
 <p>Here is the solution.</p>
 <hr />
 <h1>Fixing the Stale-Board Premise: Verify Before Dispatch, and Treat Cancelled CI as NO Verdict</h1>

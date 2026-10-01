@@ -45,7 +45,891 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>js-hidden-class-transition-map-inline-cache-deopt-exactness</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>js</span><span class='badge v'>node20</span></div><div class='desc'><p>Artifact: ~/v8-model.js (self-contained, node v8-model.js) — exits non-zero on any failed check.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2468-js-hidden-class-transition-map-inline-cache-deopt-exactness.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Fixing a V8-style Hidden-Class / Inline-Cache / Deopt Model</h1>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>js-hidden-class-transition-map-inline-cache-deopt-exactness</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>js</span><span class='badge v'>node20</span><span class='badge g'>js</span><span class='badge v'>node20</span></div><div class='desc'><p>Artifact: ~/v8-model.js (self-contained, node v8-model.js) — exits non-zero on any failed check.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2468-js-hidden-class-transition-map-inline-cache-deopt-exactness.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><h1>Fixing a V8-style Hidden-Class / Inline-Cache / Deopt Model</h1>
+<p><strong>Artifact:</strong> <code>~/v8-model.js</code> (self-contained, <code>node v8-model.js</code>) — exits non-zero on any failed check.</p>
+<hr />
+<h2>Root-cause analysis</h2>
+<p>The requirements decompose into five coupled invariants, each of which has a specific failure mode if implemented naïvely:</p>
+<ol>
+<li>
+<p><strong>Property insertion order must produce distinct maps.</strong> A <em>shape</em> is defined by the ordered descriptor list, not by the property set. If transitions are cached per property set (or descriptors are sorted), <code>{x,y,tag}</code> and <code>{y,x,tag}</code> collapse to one map, and cache guards become unsound. <strong>Fix:</strong> each map owns an ordered <code>descriptors</code> array plus a <code>transitions</code> table keyed by <code>name\0kind</code>; a new edge is minted per <code>(map, name, kind)</code>.</p>
+</li>
+<li>
+<p><strong>Overflow must split the map on a capacity boundary.</strong> In-object slots are finite (<code>IN_OBJECT_CAPACITY = 4</code>). If the model keeps appending in-object descriptors past capacity, offsets alias and the object has no backing store. <strong>Fix:</strong> when <code>inObjectCount &gt;= capacity</code>, the transition flips <code>usesBackingStore = true</code> and the new descriptor gets <code>where:'backing', slot:-1</code>. The boundary map and the overflow map are <em>different map identities</em>, so guard/cache behavior changes there.</p>
+</li>
+<li>
+<p><strong>Deletion must invalidate every dependent cache without reusing stale handlers.</strong> If deletion only removes a value while leaving the map (and its cached handlers) intact, a handler's cached slot offset/index is stale and future loads read the wrong slot. <strong>Fix:</strong> <code>deleteProp</code> snapshots values, mints a shared <strong>delete-transition map</strong> (which deprecates the old map), rebuilds object storage against the new descriptors, and calls <code>invalidateMap(oldMap)</code>, which removes every entry keyed by that map and marks its handlers <code>valid=false</code> in a global <code>retiredHandlers</code> registry.</p>
+</li>
+<li>
+<p><strong>The optimizing tier must be speculative and map-identity-guarded.</strong> It may only specialize when every IC site is monomorphic; it captures the exact map object per site. A runtime map mismatch must throw a deopt record rather than continue. <strong>Fix:</strong> <code>optimize()</code> refuses unless all sites are <code>monomorphic</code>; <code>optimizedRun</code> checks <code>obj.map !== expected.map</code> at each load and spills live raw registers into a <code>deopt</code> record.</p>
+</li>
+<li>
+<p><strong>Deopt must reconstruct the interpreter frame exactly, including spilled registers and materialized <code>HeapNumber</code> boxes.</strong> The interpreter stores doubles <em>boxed</em>; the optimized code holds them in <em>raw double registers</em>. Reconstructing a frame with raw numbers (or dropping spilled regs) diverges from the all-interpreter execution. <strong>Fix:</strong> <code>reconstructFrame</code> re-boxes every spilled register whose declared kind is <code>double</code>, then resumes interpretation at the recorded <code>pc</code>.</p>
+</li>
+</ol>
+<p>The end-to-end safety property is established by a <strong>differential harness</strong>: for every <code>(shape sequence, mutation)</code> pair, optimized execution (including the deopt continuation) must equal fresh unoptimized interpretation, and the IC state machine transitions must be byte-identical across runs.</p>
+<hr />
+<h2>Exact fix (full source)</h2>
+<pre><code class="language-js">'use strict';
+/*
+ * Minimal V8-style runtime model:
+ *   - hidden classes (maps) with immutable transition chains
+ *   - in-object slots + out-of-object (backing-store) overflow split on a capacity boundary
+ *   - inline caches with monomorphic / polymorphic / megamorphic states
+ *   - property deletion deprecates the old map and invalidates dependent cache handlers
+ *   - a simulated optimizing tier that speculates on map identity and deopts
+ *   - deopt frame reconstruction with spilled registers and HeapNumber boxes
+ *
+ * Run: node v8-model.js
+ */
+
+// ---------------------------------------------------------------------------
+// Tunables / world state
+// ---------------------------------------------------------------------------
+const IN_OBJECT_CAPACITY = 4; // maps split here (in-object vs backing store)
+const POLY_MAX = 3;           // &gt; POLY_MAX distinct maps =&gt; megamorphic
+
+let nextMapId = 1;
+let nextHandlerId = 1;
+
+const ALL_CACHES = new Set();
+const retiredHandlers = new Set();
+const EMPTY = Symbol('empty');
+
+// ---------------------------------------------------------------------------
+// Boxed values (HeapNumber). The interpreter keeps doubles boxed; the
+// optimizing tier keeps them in raw double registers and boxes on deopt.
+// ---------------------------------------------------------------------------
+class Box {
+  constructor(value) { this.value = value; }
+}
+const box = (v) =&gt; (v instanceof Box ? v : new Box(v));
+const unbox = (v) =&gt; (v instanceof Box ? v.value : v);
+
+// ---------------------------------------------------------------------------
+// Inline-cache handler: a compiled property access keyed by map identity.
+// ---------------------------------------------------------------------------
+class Handler {
+  constructor(map, desc) {
+    this.id = nextHandlerId++;
+    this.mapId = map.id;
+    this.name = desc.name;
+    this.kind = desc.kind;           // 'double' | 'tagged'
+    this.where = desc.where;         // 'inobject' | 'backing'
+    this.slot = desc.slot;
+    this.valid = true;
+  }
+  loadRaw(obj) {
+    if (this.where === 'inobject') return obj.slots[this.slot];
+    return obj.backing.get(this.name);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hidden class / map.
+// ---------------------------------------------------------------------------
+class HiddenClass {
+  constructor(parent, key, kind) {
+    this.id = nextMapId++;
+    this.parent = parent;
+    this.key = key;
+    this.kind = kind;
+    this.deprecated = false;
+    this.deprecatedReason = null;
+    this.transitions = new Map();       // &quot;name\0kind&quot; -&gt; HiddenClass
+    this.deleteTransitions = new Map(); // name -&gt; HiddenClass
+    this.deleteOf = null;
+
+    if (parent) {
+      this.descriptors = parent.descriptors.map((d) =&gt; ({ ...d }));
+      this.inObjectCount = parent.inObjectCount;
+      this.usesBackingStore = parent.usesBackingStore;
+      if (key != null) {
+        let where, slot;
+        if (!this.usesBackingStore &amp;&amp; this.inObjectCount &lt; IN_OBJECT_CAPACITY) {
+          where = 'inobject';
+          slot = this.inObjectCount;
+          this.inObjectCount++;
+        } else {
+          // Capacity boundary reached: the map splits into the overflow map.
+          this.usesBackingStore = true;
+          where = 'backing';
+          slot = -1;
+        }
+        this.descriptors.push({ name: key, kind, where, slot });
+      }
+    } else {
+      this.descriptors = [];
+      this.inObjectCount = 0;
+      this.usesBackingStore = false;
+    }
+    this.reindex();
+  }
+
+  reindex() {
+    this.index = new Map();
+    let n = 0;
+    for (let i = 0; i &lt; this.descriptors.length; i++) {
+      const d = this.descriptors[i];
+      if (d.where === 'inobject') d.slot = n++;
+      else d.slot = -1;
+      this.index.set(d.name, i);
+    }
+    this.inObjectCount = n;
+    if (n &gt;= IN_OBJECT_CAPACITY) this.usesBackingStore = true;
+  }
+
+  find(name) {
+    const i = this.index.get(name);
+    return i === undefined ? null : this.descriptors[i];
+  }
+
+  deprecate(reason) {
+    if (!this.deprecated) {
+      this.deprecated = true;
+      this.deprecatedReason = reason;
+    }
+  }
+
+  addTransition(name, kind) {
+    const tk = name + '\u0000' + kind;
+    let m = this.transitions.get(tk);
+    if (!m) {
+      m = new HiddenClass(this, name, kind);
+      this.transitions.set(tk, m);
+    }
+    return m;
+  }
+
+  deleteTransition(name) {
+    let m = this.deleteTransitions.get(name);
+    if (!m) {
+      const kept = this.descriptors
+        .filter((d) =&gt; d.name !== name)
+        .map((d) =&gt; ({ ...d }));
+      m = new HiddenClass(null);
+      m.descriptors = kept;
+      m.parent = this;
+      m.deleteOf = name;
+      m.reindex();
+      this.deleteTransitions.set(name, m);
+      this.deprecate('delete:' + name);
+    }
+    return m;
+  }
+}
+
+let ROOT = new HiddenClass(null);
+
+function resetWorld() {
+  nextMapId = 1;
+  nextHandlerId = 1;
+  ROOT = new HiddenClass(null);
+  ALL_CACHES.clear();
+  retiredHandlers.clear();
+}
+
+// ---------------------------------------------------------------------------
+// JSObject storage: fixed in-object slots + backing store.
+// ---------------------------------------------------------------------------
+class JSObject {
+  constructor(map) {
+    this.map = map;
+    this.slots = new Array(IN_OBJECT_CAPACITY).fill(EMPTY);
+    this.backing = new Map();
+  }
+}
+
+function storeRaw(obj, desc, raw) {
+  if (desc.where === 'inobject') obj.slots[desc.slot] = raw;
+  else obj.backing.set(desc.name, raw);
+}
+
+function addProp(obj, name, kind, value) {
+  const raw = unbox(value);
+  let desc = obj.map.find(name);
+  if (desc) {
+    if (desc.kind !== kind) throw new Error('kind change unsupported: ' + name);
+    storeRaw(obj, desc, raw);
+    return obj;
+  }
+  obj.map = obj.map.addTransition(name, kind);
+  desc = obj.map.find(name);
+  storeRaw(obj, desc, raw);
+  return obj;
+}
+
+function readAllRaw(obj) {
+  const out = {};
+  for (const d of obj.map.descriptors) {
+    out[d.name] = d.where === 'inobject' ? obj.slots[d.slot] : obj.backing.get(d.name);
+  }
+  return out;
+}
+
+function deleteProp(obj, name) {
+  const oldMap = obj.map;
+  const desc = oldMap.find(name);
+  if (!desc) return false;
+
+  const snapshot = readAllRaw(obj);
+  delete snapshot[name];
+
+  const newMap = oldMap.deleteTransition(name); // deprecates oldMap
+  obj.map = newMap;
+  obj.slots = new Array(IN_OBJECT_CAPACITY).fill(EMPTY);
+  obj.backing = new Map();
+  for (const d of newMap.descriptors) {
+    storeRaw(obj, d, snapshot[d.name]);
+  }
+  invalidateMap(oldMap);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Inline cache with explicit state machine and byte-exact transition log.
+// ---------------------------------------------------------------------------
+class InlineCache {
+  constructor(label) {
+    this.label = label;
+    this.state = 'uninitialized';
+    this.entries = []; // [{ map, handler }]
+    this.log = [];
+    ALL_CACHES.add(this);
+  }
+
+  transitionTo(state, reason) {
+    if (this.state !== state) {
+      this.log.push(`${this.label}:${this.state}-&gt;${state} [${reason}]`);
+      this.state = state;
+    }
+  }
+}
+
+function icLoadRaw(ic, obj, name) {
+  const map = obj.map;
+
+  if (ic.state === 'megamorphic') {
+    const desc = map.find(name);
+    return desc ? loadRawDesc(obj, desc) : undefined;
+  }
+
+  const entry = ic.entries.find((e) =&gt; e.map === map &amp;&amp; e.handler.valid);
+  if (entry) return entry.handler.loadRaw(obj);
+
+  const desc = map.find(name);
+  if (!desc) return undefined; // missing property: no handler installed
+
+  const handler = new Handler(map, desc);
+
+  if (ic.entries.length &gt;= POLY_MAX) {
+    retiresEntries(ic);
+    ic.transitionTo('megamorphic', `map ${map.id} exceeds POLY_MAX=${POLY_MAX}`);
+    return handler.loadRaw(obj);
+  }
+
+  ic.entries.push({ map, handler });
+  if (ic.entries.length === 1) {
+    ic.transitionTo('monomorphic', `map ${map.id}`);
+  } else {
+    ic.transitionTo('polymorphic', `map ${map.id} (${ic.entries.length} maps)`);
+  }
+  return handler.loadRaw(obj);
+}
+
+function loadRawDesc(obj, desc) {
+  return desc.where === 'inobject' ? obj.slots[desc.slot] : obj.backing.get(desc.name);
+}
+
+function retiresEntries(ic) {
+  for (const e of ic.entries) {
+    e.handler.valid = false;
+    retiredHandlers.add(e.handler.id);
+  }
+  ic.entries = [];
+}
+
+// Invalidate every cache entry keyed by a deprecated map. This is what makes
+// deletion safe: no stale handler can ever be reused.
+function invalidateMap(map) {
+  for (const ic of ALL_CACHES) {
+    let hit = false;
+    for (const e of ic.entries) {
+      if (e.map === map) {
+        e.handler.valid = false;
+        retiredHandlers.add(e.handler.id);
+        hit = true;
+      }
+    }
+    if (!hit) continue;
+    ic.entries = ic.entries.filter((e) =&gt; e.map !== map);
+    if (ic.state === 'megamorphic') continue;
+    if (ic.entries.length === 0) {
+      ic.transitionTo('uninitialized', `invalidated map ${map.id}`);
+    } else if (ic.entries.length === 1) {
+      ic.transitionTo('monomorphic', `reduced after invalidate map ${map.id}`);
+    } else {
+      ic.transitionTo('polymorphic', `reduced after invalidate map ${map.id}`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tiny IR function + interpreter.
+// ---------------------------------------------------------------------------
+function makeFunction() {
+  return {
+    name: 'f',
+    params: ['obj', 'mut'],
+    regs: { a: 'double', b: 'double', s: 'double', t: 'tagged', res: 'tagged' },
+    sites: [
+      new InlineCache('f.load.x'),
+      new InlineCache('f.load.y'),
+      new InlineCache('f.load.tag'),
+    ],
+    code: [
+      { op: 'load', site: 0, name: 'x', dest: 'a' },
+      { op: 'load', site: 1, name: 'y', dest: 'b' },
+      { op: 'add', a: 'a', b: 'b', dest: 's' },
+      { op: 'callMut' },
+      { op: 'load', site: 2, name: 'tag', dest: 't' },
+      { op: 'makeResult', sum: 's', tag: 't', dest: 'res' },
+      { op: 'ret', src: 'res' },
+    ],
+    compiled: null,
+  };
+}
+
+function makeFrame(func, obj, mut) {
+  return { func, obj, mut, pc: 0, regs: {}, boxes: {}, ret: undefined };
+}
+
+function cloneFrame(frame) {
+  const regs = {};
+  const boxes = {};
+  for (const [k, v] of Object.entries(frame.regs)) {
+    regs[k] = v instanceof Box ? new Box(v.value) : v;
+    boxes[k] = !!frame.boxes[k];
+  }
+  return { pc: frame.pc, regs, boxes };
+}
+
+function execIns(frame, ins) {
+  const func = frame.func;
+  switch (ins.op) {
+    case 'load': {
+      const raw = icLoadRaw(func.sites[ins.site], frame.obj, ins.name);
+      if (func.regs[ins.dest] === 'double') {
+        frame.regs[ins.dest] = box(raw);
+        frame.boxes[ins.dest] = true;
+      } else {
+        frame.regs[ins.dest] = raw;
+        frame.boxes[ins.dest] = false;
+      }
+      break;
+    }
+    case 'add': {
+      frame.regs[ins.dest] = box(unbox(frame.regs[ins.a]) + unbox(frame.regs[ins.b]));
+      frame.boxes[ins.dest] = true;
+      break;
+    }
+    case 'callMut': {
+      if (typeof frame.mut === 'function') frame.mut(frame.obj);
+      break;
+    }
+    case 'makeResult': {
+      frame.regs[ins.dest] = {
+        sum: unbox(frame.regs[ins.sum]),
+        tag: unbox(frame.regs[ins.tag]),
+      };
+      frame.boxes[ins.dest] = false;
+      break;
+    }
+    case 'ret': {
+      frame.ret = unbox(frame.regs[ins.src]);
+      break;
+    }
+    default:
+      throw new Error('bad op ' + ins.op);
+  }
+}
+
+function interpRun(frame, opts = {}) {
+  const { snapshotAt = -1, snapshots = null } = opts;
+  const func = frame.func;
+  while (frame.pc &lt; func.code.length) {
+    if (frame.pc === snapshotAt &amp;&amp; snapshots) snapshots.push(cloneFrame(frame));
+    execIns(frame, func.code[frame.pc]);
+    frame.pc++;
+  }
+  return { result: frame.ret };
+}
+
+// ---------------------------------------------------------------------------
+// Simulated optimizing tier.
+// ---------------------------------------------------------------------------
+function optimize(func) {
+  const expected = [];
+  for (const site of func.sites) {
+    if (site.state !== 'monomorphic' || site.entries.length !== 1) return false;
+    expected.push(site.entries[0]);
+  }
+  func.compiled = { ready: true, expected };
+  return true;
+}
+
+function makeDeopt(func, pc, raw) {
+  const regs = {};
+  for (const [k, v] of Object.entries(raw)) regs[k] = v;
+  return { __deopt: true, pc, regs };
+}
+
+function optimizedRun(func, obj, mut) {
+  const opt = func.compiled;
+  const raw = {};
+  for (let pc = 0; pc &lt; func.code.length; pc++) {
+    const ins = func.code[pc];
+    if (ins.op === 'load') {
+      const exp = opt.expected[ins.site];
+      if (obj.map !== exp.map) throw makeDeopt(func, pc, raw); // map-identity guard
+      raw[ins.dest] = exp.handler.loadRaw(obj);
+    } else if (ins.op === 'add') {
+      raw[ins.dest] = raw[ins.a] + raw[ins.b];
+    } else if (ins.op === 'callMut') {
+      if (typeof mut === 'function') mut(obj);
+    } else if (ins.op === 'makeResult') {
+      raw[ins.dest] = { sum: raw[ins.sum], tag: raw[ins.tag] };
+    } else if (ins.op === 'ret') {
+      return { result: raw[ins.src], mode: 'optimized', deopted: false };
+    }
+  }
+  return { result: undefined, mode: 'optimized', deopted: false };
+}
+
+function reconstructFrame(func, obj, mut, deopt) {
+  const frame = makeFrame(func, obj, mut);
+  frame.pc = deopt.pc;
+  for (const [k, v] of Object.entries(deopt.regs)) {
+    if (func.regs[k] === 'double') {
+      frame.regs[k] = box(v); // materialize HeapNumber for a spilled double
+      frame.boxes[k] = true;
+    } else {
+      frame.regs[k] = v;
+      frame.boxes[k] = false;
+    }
+  }
+  return frame;
+}
+
+function runFunction(func, obj, mut) {
+  if (func.compiled &amp;&amp; func.compiled.ready) {
+    try {
+      return optimizedRun(func, obj, mut);
+    } catch (e) {
+      if (e &amp;&amp; e.__deopt) {
+        const frame = reconstructFrame(func, obj, mut, e);
+        const deoptFrame = cloneFrame(frame); // exact state AT the deopt point
+        const r = interpRun(frame);
+        return { result: r.result, mode: 'deopt', deopt: e, frame, deoptFrame };
+      }
+      throw e;
+    }
+  }
+  const frame = makeFrame(func, obj, mut);
+  const r = interpRun(frame);
+  return { result: r.result, mode: 'interp', frame };
+}
+
+// ---------------------------------------------------------------------------
+// Corpus helpers
+// ---------------------------------------------------------------------------
+function valueFor(name, kind) {
+  if (kind === 'double') {
+    if (name === 'x') return 1.5;
+    if (name === 'y') return 2.5;
+    return 10 + (name.charCodeAt(0) % 7);
+  }
+  return 'v:' + name;
+}
+
+function buildObject(seq) {
+  const o = new JSObject(ROOT);
+  for (const [name, kind] of seq) addProp(o, name, kind, valueFor(name, kind));
+  return o;
+}
+
+function permutations(arr) {
+  if (arr.length &lt;= 1) return [arr.slice()];
+  const out = [];
+  for (let i = 0; i &lt; arr.length; i++) {
+    const rest = arr.slice(0, i).concat(arr.slice(i + 1));
+    for (const p of permutations(rest)) out.push([arr[i]].concat(p));
+  }
+  return out;
+}
+
+function deepEq(a, b) {
+  if (a instanceof Box) a = a.value;
+  if (b instanceof Box) b = b.value;
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a == null || b == null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) if (!deepEq(a[k], b[k])) return false;
+  return true;
+}
+
+function canon(x) {
+  if (x instanceof Box) return '#(' + x.value + ')';
+  if (Array.isArray(x)) return '[' + x.map(canon).join(',') + ']';
+  if (x &amp;&amp; typeof x === 'object') {
+    return '{' + Object.keys(x).sort().map((k) =&gt; k + ':' + canon(x[k])).join(',') + '}';
+  }
+  return String(x);
+}
+
+// ---------------------------------------------------------------------------
+// Test harness
+// ---------------------------------------------------------------------------
+let failures = 0;
+function check(name, cond, extra) {
+  if (cond) {
+    console.log('  PASS  ' + name);
+  } else {
+    failures++;
+    console.log('  FAIL  ' + name + (extra ? ' -&gt; ' + extra : ''));
+  }
+}
+
+function eqFrame(a, b) {
+  if (a.pc !== b.pc) return 'pc ' + a.pc + ' != ' + b.pc;
+  const ka = Object.keys(a.regs).sort();
+  const kb = Object.keys(b.regs).sort();
+  if (ka.join(',') !== kb.join(',')) return 'reg keys ' + ka + ' != ' + kb;
+  for (const k of ka) {
+    if (!deepEq(a.regs[k], b.regs[k])) {
+      return `reg ${k}: ${canon(a.regs[k])} != ${canon(b.regs[k])}`;
+    }
+    if (!!a.boxes[k] !== !!b.boxes[k]) return `reg ${k} boxed ${a.boxes[k]} != ${b.boxes[k]}`;
+  }
+  return null;
+}
+
+// ---- Test 1: insertion order produces distinct maps -----------------------
+console.log('\n[1] Hidden-class transition chains / distinct maps');
+{
+  resetWorld();
+  const m1 = buildObject([['x', 'double'], ['y', 'double'], ['tag', 'tagged']]).map;
+  const m2 = buildObject([['y', 'double'], ['x', 'double'], ['tag', 'tagged']]).map;
+  const m1b = buildObject([['x', 'double'], ['y', 'double'], ['tag', 'tagged']]).map;
+  check('x,y,tag vs y,x,tag are distinct maps', m1.id !== m2.id, `${m1.id} vs ${m2.id}`);
+  check('same order shares one map', m1 === m1b);
+  check('descriptor order differs', m1.descriptors.map(d =&gt; d.name).join(',') !== m2.descriptors.map(d =&gt; d.name).join(','));
+}
+
+// ---- Test 2: capacity boundary / out-of-object overflow -------------------
+console.log('\n[2] Out-of-object overflow split on capacity boundary');
+{
+  resetWorld();
+  const o = new JSObject(ROOT);
+  for (const n of ['a', 'b', 'c', 'd']) addProp(o, n, 'tagged', 'v' + n);
+  const m4 = o.map;
+  check('4th property still in-object', m4.find('d').where === 'inobject');
+  check('in-object count == capacity', m4.inObjectCount === IN_OBJECT_CAPACITY, String(m4.inObjectCount));
+
+  addProp(o, 'e', 'tagged', 've');
+  const m5 = o.map;
+  check('5th property is out-of-object', m5.find('e').where === 'backing');
+  check('map split on boundary (new map identity)', m5.id !== m4.id, `${m4.id} vs ${m5.id}`);
+  check('overflow map uses backing store', m5.usesBackingStore === true);
+  check('overflow value readable from backing store', m5.find('e') &amp;&amp; o.backing.get('e') === 've');
+
+  const mA = buildObject([['a', 'tagged'], ['b', 'tagged'], ['c', 'tagged'], ['d', 'tagged'], ['e', 'tagged']]).map;
+  const mB = buildObject([['a', 'tagged'], ['b', 'tagged'], ['c', 'tagged'], ['e', 'tagged'], ['d', 'tagged']]).map;
+  check('overflow landed on different key =&gt; distinct map', mA.id !== mB.id, `${mA.id} vs ${mB.id}`);
+}
+
+// ---- Test 3: deletion invalidates dependent caches ------------------------
+console.log('\n[3] Deletion invalidates every dependent cache / no stale handlers');
+{
+  resetWorld();
+  const f = makeFunction();
+  const seq = [['x', 'double'], ['y', 'double'], ['tag', 'tagged']];
+  const o = buildObject(seq);
+  runFunction(f, o, () =&gt; {}); // populate ICs (all monomorphic)
+
+  const oldMapId = f.sites[2].entries[0].map.id;
+  const oldHandlerIds = f.sites.map((s) =&gt; s.entries[0].handler.id);
+  check('pre-delete tag site monomorphic', f.sites[2].state === 'monomorphic');
+
+  deleteProp(o, 'y');
+
+  check('all sites cleared of stale map', f.sites.every((s) =&gt; s.entries.every((e) =&gt; e.map.id !== oldMapId)));
+  check('old handlers marked invalid', oldHandlerIds.every((id) =&gt; retiredHandlers.has(id)));
+  check('sites reset to uninitialized', f.sites.every((s) =&gt; s.state === 'uninitialized'));
+
+  runFunction(f, o, () =&gt; {}); // tag still exists, loads on the new map
+  const tagSite = f.sites[2];
+  check('tag site installed fresh monomorphic handler', tagSite.state === 'monomorphic' &amp;&amp; tagSite.entries.length === 1);
+  const freshId = tagSite.entries[0].handler.id;
+  check('fresh handler id not from retired set', !retiredHandlers.has(freshId));
+  check('fresh handler id is new', !oldHandlerIds.includes(freshId), `${oldHandlerIds} then ${freshId}`);
+}
+
+// ---- Test 4: map-transition deopt + exact frame reconstruction ------------
+console.log('\n[4] Optimizing tier: monomorphic guard + deopt frame reconstruction');
+{
+  resetWorld();
+  const seq = [['x', 'double'], ['y', 'double'], ['tag', 'tagged']];
+
+  // Train a function until its ICs are monomorphic, then optimize.
+  const fast = makeFunction();
+  runFunction(fast, buildObject(seq), () =&gt; {});
+  check('all sites monomorphic before optimize', fast.sites.every((s) =&gt; s.state === 'monomorphic'));
+  check('optimize() succeeds', optimize(fast) === true);
+  check('compiled code captured mono guard by map identity',
+    fast.compiled.expected.every((e) =&gt; e.map === fast.sites[0].entries[0].map));
+
+  // mut adds a property, transitioning the map after the speculative loads.
+  const mutAddW = (o) =&gt; addProp(o, 'w', 'tagged', 'w-val');
+  const obj = buildObject(seq);
+  const res = runFunction(fast, obj, mutAddW);
+  check('guard failed =&gt; deopt', res.mode === 'deopt', res.mode);
+  check('deopt happened at the guarded tag load (pc=4)', res.deopt.pc === 4, String(res.deopt.pc));
+
+  // Baseline: pure interpreter on a fresh identical input.
+  const base = makeFunction();
+  const baseFrame = makeFrame(base, buildObject(seq), mutAddW);
+  const snapshots = [];
+  interpRun(baseFrame, { snapshotAt: 4, snapshots });
+  const baseline = snapshots[0];
+
+  // Reconstructed frame must match the interpreter frame exactly.
+  const diff = eqFrame(res.deoptFrame, baseline);
+  check('deopt frame exact vs interpreter frame', diff === null, diff);
+  check('spilled a,b,s materialized as boxes',
+    ['a', 'b', 's'].every((k) =&gt; res.frame.regs[k] instanceof Box &amp;&amp; res.frame.boxes[k]),
+    Object.keys(res.frame.regs).map((k) =&gt; k + ':' + canon(res.frame.regs[k])).join(' '));
+  check('baseline had the same boxes', ['a', 'b', 's'].every((k) =&gt; baseline.regs[k] instanceof Box &amp;&amp; baseline.boxes[k]));
+  check('deopt result equals interpreter result', deepEq(res.result, baseFrame.ret),
+    canon(res.result) + ' vs ' + canon(baseFrame.ret));
+  check('object mutation applied exactly once', obj.map.find('w') !== null);
+}
+
+// ---- Test 5: differential harness over a corpus of shape sequences --------
+console.log('\n[5] Differential harness: optimized vs unoptimized over corpus');
+{
+  const keyKinds = { x: 'double', y: 'double', z: 'double', tag: 'tagged', p: 'tagged', q: 'tagged' };
+  const corpus = [];
+  for (const p of permutations(['x', 'y', 'tag'])) corpus.push(p);
+  corpus.push(['z', 'x', 'y', 'tag']);
+  corpus.push(['x', 'z', 'y', 'tag']);
+  corpus.push(['x', 'y', 'z', 'tag']);
+  corpus.push(['x', 'y', 'tag', 'z']);
+  corpus.push(['p', 'x', 'y', 'tag']); // 4 props, tag in-object
+  corpus.push(['p', 'q', 'x', 'y', 'tag']); // 5 props, tag overflows
+  corpus.push(['x', 'y', 'tag', 'p', 'q']); // 5 props, p/q overflow
+
+  const muts = {
+    noop: () =&gt; {},
+    addW: (o) =&gt; addProp(o, 'w', 'tagged', 'w-val'),
+    delTag: (o) =&gt; deleteProp(o, 'tag'),
+  };
+
+  let total = 0;
+  let deopts = 0;
+  const problems = [];
+  for (const names of corpus) {
+    const seq = names.map((n) =&gt; [n, keyKinds[n]]);
+    for (const [mname, mut] of Object.entries(muts)) {
+      resetWorld();
+
+      // Unoptimized reference.
+      const refFn = makeFunction();
+      const refObj = buildObject(seq);
+      const ref = runFunction(refFn, refObj, mut);
+
+      // Same shape, but train + optimize first.
+      const optFn = makeFunction();
+      runFunction(optFn, buildObject(seq), () =&gt; {});
+      const ok = optimize(optFn);
+      const optObj = buildObject(seq);
+      const got = runFunction(optFn, optObj, mut);
+
+      total++;
+      if (got.mode === 'deopt') deopts++;
+      if (!ok) problems.push(`${names}/${mname}: not optimizable`);
+      if (!deepEq(ref.result, got.result)) {
+        problems.push(`${names}/${mname}: ${canon(ref.result)} != ${canon(got.result)}`);
+      }
+      if (got.mode === 'deopt') {
+        const canonRef = canon(ref.result);
+        const canonGot = canon(got.result);
+        if (canonRef !== canonGot) problems.push(`${names}/${mname}: DEOPT mismatch`);
+      }
+    }
+  }
+  check(`corpus of ${total} (shape, mutation) pairs agrees`, problems.length === 0, problems.slice(0, 5).join('; '));
+  check('deopt path exercised', deopts &gt; 0, String(deopts));
+  console.log(`        ${total} pairs, ${deopts} deopt executions`);
+}
+
+// ---- Test 6: byte-exact mono/poly/mega cache-state transitions ------------
+console.log('\n[6] Cache-state transitions (byte-exact)');
+{
+  resetWorld();
+  const f = makeFunction();
+  const orders = [
+    [['x', 'double'], ['y', 'double'], ['tag', 'tagged']],
+    [['y', 'double'], ['x', 'double'], ['tag', 'tagged']],
+    [['x', 'double'], ['tag', 'tagged'], ['y', 'double']],
+    [['tag', 'tagged'], ['x', 'double'], ['y', 'double']],
+  ];
+  for (const seq of orders) runFunction(f, buildObject(seq), () =&gt; {});
+
+  const expected = [
+    'f.load.x:uninitialized-&gt;monomorphic [map 4]',
+    'f.load.x:monomorphic-&gt;polymorphic [map 7 (2 maps)]',
+    'f.load.x:polymorphic-&gt;megamorphic [map 12 exceeds POLY_MAX=3]',
+    'f.load.y:uninitialized-&gt;monomorphic [map 4]',
+    'f.load.y:monomorphic-&gt;polymorphic [map 7 (2 maps)]',
+    'f.load.y:polymorphic-&gt;megamorphic [map 12 exceeds POLY_MAX=3]',
+    'f.load.tag:uninitialized-&gt;monomorphic [map 4]',
+    'f.load.tag:monomorphic-&gt;polymorphic [map 7 (2 maps)]',
+    'f.load.tag:polymorphic-&gt;megamorphic [map 12 exceeds POLY_MAX=3]',
+  ];
+  const actual = f.sites.flatMap((s) =&gt; s.log);
+  console.log('        observed transitions:');
+  for (const line of actual) console.log('          ' + line);
+  check('transition log byte-exact', actual.join('\n') === expected.join('\n'),
+    '\n--- actual ---\n' + actual.join('\n') + '\n--- expected ---\n' + expected.join('\n'));
+  check('all sites megamorphic at end', f.sites.every((s) =&gt; s.state === 'megamorphic'));
+}
+
+console.log('\n========================================');
+console.log(failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED');
+console.log('========================================');
+process.exitCode = failures === 0 ? 0 : 1;
+</code></pre>
+<hr />
+<h2>Verification</h2>
+<p>Run:</p>
+<pre><code class="language-bash">node v8-model.js
+</code></pre>
+<p>Observed output (exit code <code>0</code>):</p>
+<pre><code>[1] Hidden-class transition chains / distinct maps
+  PASS  x,y,tag vs y,x,tag are distinct maps
+  PASS  same order shares one map
+  PASS  descriptor order differs
+
+[2] Out-of-object overflow split on capacity boundary
+  PASS  4th property still in-object
+  PASS  in-object count == capacity
+  PASS  5th property is out-of-object
+  PASS  map split on boundary (new map identity)
+  PASS  overflow map uses backing store
+  PASS  overflow value readable from backing store
+  PASS  overflow landed on different key =&gt; distinct map
+
+[3] Deletion invalidates every dependent cache / no stale handlers
+  PASS  pre-delete tag site monomorphic
+  PASS  all sites cleared of stale map
+  PASS  old handlers marked invalid
+  PASS  sites reset to uninitialized
+  PASS  tag site installed fresh monomorphic handler
+  PASS  fresh handler id not from retired set
+  PASS  fresh handler id is new
+
+[4] Optimizing tier: monomorphic guard + deopt frame reconstruction
+  PASS  all sites monomorphic before optimize
+  PASS  optimize() succeeds
+  PASS  compiled code captured mono guard by map identity
+  PASS  guard failed =&gt; deopt
+  PASS  deopt happened at the guarded tag load (pc=4)
+  PASS  deopt frame exact vs interpreter frame
+  PASS  spilled a,b,s materialized as boxes
+  PASS  baseline had the same boxes
+  PASS  deopt result equals interpreter result
+  PASS  object mutation applied exactly once
+
+[5] Differential harness: optimized vs unoptimized over corpus
+  PASS  corpus of 39 (shape, mutation) pairs agrees
+  PASS  deopt path exercised
+        39 pairs, 26 deopt executions
+
+[6] Cache-state transitions (byte-exact)
+        observed transitions:
+          f.load.x:uninitialized-&gt;monomorphic [map 4]
+          f.load.x:monomorphic-&gt;polymorphic [map 7 (2 maps)]
+          f.load.x:polymorphic-&gt;megamorphic [map 12 exceeds POLY_MAX=3]
+          f.load.y:uninitialized-&gt;monomorphic [map 4]
+          f.load.y:monomorphic-&gt;polymorphic [map 7 (2 maps)]
+          f.load.y:polymorphic-&gt;megamorphic [map 12 exceeds POLY_MAX=3]
+          f.load.tag:uninitialized-&gt;monomorphic [map 4]
+          f.load.tag:monomorphic-&gt;polymorphic [map 7 (2 maps)]
+          f.load.tag:polymorphic-&gt;megamorphic [map 12 exceeds POLY_MAX=3]
+  PASS  transition log byte-exact
+  PASS  all sites megamorphic at end
+
+========================================
+ALL CHECKS PASSED
+========================================
+</code></pre>
+<h3>How each check proves the requirement</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Check</th>
+<th>Evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Different insertion orders ⇒ distinct maps</td>
+<td>Test 1</td>
+<td><code>m1.id !== m2.id</code>, descriptor order differs; identical order reuses one map</td>
+</tr>
+<tr>
+<td>Overflow splits maps on a capacity boundary</td>
+<td>Test 2</td>
+<td>4th prop <code>inobject</code>, 5th <code>backing</code>, map identity changes, <code>usesBackingStore=true</code>, order-dependent overflow maps differ</td>
+</tr>
+<tr>
+<td>Deletion invalidates every dependent cache, no stale handler reuse</td>
+<td>Test 3</td>
+<td>all sites shed the old map, old handlers in <code>retiredHandlers</code>, sites return to <code>uninitialized</code>, fresh handler id is new</td>
+</tr>
+<tr>
+<td>Monomorphic cache guarded by map identity + forced transition deopt</td>
+<td>Test 4</td>
+<td><code>optimize()</code> requires all sites mono; guard fires at <code>pc=4</code> with <code>mode:'deopt'</code></td>
+</tr>
+<tr>
+<td>Exact interpreter-frame reconstruction, spilled values, boxed doubles</td>
+<td>Test 4</td>
+<td><code>eqFrame(deoptFrame, baseline) === null</code> including per-register box flags; result equality; mutation applied once</td>
+</tr>
+<tr>
+<td>Differential optimized vs unoptimized over shape corpus</td>
+<td>Test 5</td>
+<td>39/39 pairs agree, 26 executions actually take the deopt path</td>
+</tr>
+<tr>
+<td>Byte-exact mono/poly/mega transition reporting</td>
+<td>Test 6</td>
+<td>exact string equality against the expected log</td>
+</tr>
+</tbody>
+</table>
+<p>The key soundness argument is Test 5: because optimized execution is only allowed when all IC sites are monomorphic, and any map-identity mismatch forces a deopt that reconstructs the interpreter frame from the deopt record (re-boxing spilled doubles) before resuming, the optimized path is semantically indistinguishable from untraced interpretation across every shape/mutation pair.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: js-hidden-class-transition-map-inline-cache-deopt-exactness
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-30T04:27:18.271Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Build a minimal V8-style object model with hidden-class (shape) transition chains and polymorphic inline caches: inserting properties in different orders must yield distinct maps, out-of-object property overflow must split maps on a capacity boundary, and deleting a property must invalidate every dependent cache without reusing stale handlers. Layer a simulated optimizing tier that installs a monomorphic cache guarded by map identity, then force a map-transition deoptimization and reconstruct the interpreter frame exactly, including values spilled into the deopt record and boxes materialized for double fields. Verify with a differential harness comparing optimized and unoptimized execution over a corpus of shape sequences, and report mono/poly/mega cache-state transitions byte-exactly.&quot;, &quot;environment&quot;: &quot;node20&quot;, &quot;language&quot;: &quot;js&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;js-hidden-class-transition-map-inline-cache-deopt-exactness&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-30T04:27:18.271Z&quot;, &quot;version&quot;: &quot;20&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><h1>Fixing a V8-style Hidden-Class / Inline-Cache / Deopt Model</h1>
 <p><strong>Artifact:</strong> <code>~/v8-model.js</code> (self-contained, <code>node v8-model.js</code>) — exits non-zero on any failed check.</p>
 <hr />
 <h2>Root-cause analysis</h2>

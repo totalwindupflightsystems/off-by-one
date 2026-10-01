@@ -45,7 +45,215 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2386-go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I've implemented, verified, and packaged the solution. The full markdown is written to <code>~/SOLUTION.md</code> and the working repo is at <code>~/mldsa</code>. Here is the solution:</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2386-go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>I've implemented, verified, and packaged the solution. The full markdown is written to <code>~/SOLUTION.md</code> and the working repo is at <code>~/mldsa</code>. Here is the solution:</p>
+<hr />
+<h1>ML-DSA (FIPS 204) from scratch in Go: bit-exact signing with audited abort counters</h1>
+<p><strong>Problem class:</strong> <code>go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify</code>
+<strong>Environment:</strong> Go 1.26, standard library only (<code>crypto/sha3</code>, <code>crypto/sha256</code>, <code>crypto/sha512</code>).
+<strong>Deliverable:</strong> an ML-DSA-44/65/87 implementation whose signatures match the official NIST ACVP vectors byte-for-byte, whose verification rejects every single-bit tampering of <code>c~</code>, the hint vector, and the message, and whose Fiat-Shamir abort counters are recorded per iteration.</p>
+<h2>1. Root-cause analysis</h2>
+<p>The hard part of ML-DSA is that many independent encoding/sampling conventions must be bit-exact simultaneously. One wrong convention yields an implementation that is internally self-consistent (signs and verifies itself) but is incompatible with the standard, and it perturbs the rejection-sampling sequence, so abort counters drift. The concrete failure modes:</p>
+<ol>
+<li><strong>NTT twiddle convention.</strong> FIPS 204 defines <code>zetas[m] = zeta^BitRev8(m) mod q</code>, <code>zeta=1753</code> in the ordinary domain (<code>zetas[1]=4808194</code>). The pq-crystals C reference stores the same table in Montgomery form (<code>zetas[1]=25847</code>). Mixing them still gives a valid NTT/InvNTT pair (round-trips pass), but <code>t = A*s1 + s2</code> and the public key are wrong. Fix: derive <code>powmod(1753, bitrev8(m))</code> (Appendix B).</li>
+<li><strong>Wrong XOF / nonce order.</strong> <code>ExpandA</code> uses <strong>SHAKE128</strong> with <code>rho||j||i</code> (column then row). <code>ExpandS</code>, <code>ExpandMask</code>, <code>RejBoundedPoly</code> use <strong>SHAKE256</strong> with a 2-byte little-endian nonce.</li>
+<li><strong><code>RejNTTPoly</code> truncation.</strong> <code>(b0 | b1&lt;&lt;8 | b2&lt;&lt;16) &amp; 0x7FFFFF</code>, accept iff <code>&lt; q</code>.</li>
+<li><strong><code>CoeffFromHalfByte</code> bounds.</strong> <code>eta=2</code>: accept nibble <code>&lt;15</code>, output <code>2-(n mod 5)</code>. <code>eta=4</code>: accept nibble <code>&lt;9</code>, output <code>4-n</code>. Low nibble first; second only if <code>j&lt;256</code>.</li>
+<li><strong><code>ExpandMask</code> packing.</strong> <code>c = 1+bitlen(gamma1-1)</code> bits/coeff; <code>BitUnpack(v, gamma1-1, gamma1)</code> maps <code>u -&gt; gamma1-u</code>; output <code>32*c</code> bytes.</li>
+<li><strong><code>Decompose</code> wrap special case.</strong> When <code>r+ - r0 == q-1</code>, return <code>(0, r0-1)</code>. Omitting it breaks <code>HighBits</code> near zero.</li>
+<li><strong><code>UseHint</code> adjustment.</strong> <code>m=(q-1)/(2*gamma2)</code>; <code>r0&gt;0 -&gt; +1</code>, <code>r0&lt;=0 -&gt; -1 (mod m)</code>.</li>
+<li><strong>Malformed-hint rejection.</strong> Reject non-monotone locations, non-monotone or <code>&gt;omega</code> end indices, and non-zero leftover bytes.</li>
+<li><strong>Domain separation.</strong> Pure: <code>M'=0x00||len(ctx)||ctx||M</code>. Pre-hash: <code>M'=0x01||len(ctx)||ctx||OID||PH(M)</code>. <code>mu=H(tr||M',64)</code>, <code>rho''=H(K||rnd||mu,64)</code>, <code>c~=H(mu||w1Encode(w1),lambda/4)</code>.</li>
+<li><strong>Packing lengths.</strong> <code>SimpleBitPack</code>/<code>BitPack</code> produce <code>32*bitlen(b)</code> <strong>bytes</strong>.</li>
+<li><strong>Constant-time arithmetic.</strong> Division-free Barrett <code>modmul</code>, reciprocal-based constant-time <code>divmod</code>, branchless centering/norm; only the mandated abort count is observable.</li>
+<li><strong>ACVP nuances.</strong> Deterministic ⇒ <code>rnd=0^32</code>. "Internal" groups either give <code>mu</code> or the formatted message <code>M'</code>. Pre-hash groups carry <code>hashAlg</code> and need the DER OID.</li>
+</ol>
+<h2>2. The fix</h2>
+<p>The full package (also on disk in <code>~/mldsa</code>) consists of <code>params.go</code>, <code>poly.go</code>, <code>round.go</code>, <code>sample.go</code>, <code>pack.go</code>, <code>mldsa.go</code>, <code>hash.go</code> plus <code>acvp_test.go</code>, <code>poly_test.go</code>, <code>round_test.go</code>, <code>tamper_test.go</code>. The critical routines:</p>
+<p><strong>Constant-time Barrett arithmetic / NTT (<code>poly.go</code>):</strong></p>
+<pre><code class="language-go">var barrettInv = (uint64(1) &lt;&lt; 46) / Q
+
+func modmul(a, b uint32) uint32 {
+    x := uint64(a) * uint64(b)          // x &lt; 2^46
+    hi, lo := bits.Mul64(x, barrettInv)
+    qhat := (hi &lt;&lt; 18) | (lo &gt;&gt; 46)     // floor(x*inv/2^46)
+    r := x - qhat*uint64(Q)             // r &lt; 2q
+    return uint32(subQ64(r))
+}
+func addq(a, b uint32) uint32 { s := a + b; d := s - Q; return d + (d&gt;&gt;31)*Q }
+func subq(a, b uint32) uint32 { d := a - b;       return d + (d&gt;&gt;31)*Q }
+
+var zetas [N]uint32
+func init() { for m := 1; m &lt; N; m++ { zetas[m] = powmod(1753, uint32(bitrev8(m))) } }
+
+func ntt(a *poly) {
+    k := 0
+    for length := 128; length &gt;= 1; length &gt;&gt;= 1 {
+        for start := 0; start &lt; N; start += 2 * length {
+            k++; z := zetas[k]
+            for j := start; j &lt; start+length; j++ {
+                t := modmul(z, a[j+length])
+                a[j+length] = subq(a[j], t); a[j] = addq(a[j], t)
+            }
+        }
+    }
+}
+func invNTT(a *poly) {
+    k := N
+    for length := 1; length &lt; N; length &lt;&lt;= 1 {
+        for start := 0; start &lt; N; start += 2 * length {
+            k--; z := Q - zetas[k]
+            for j := start; j &lt; start+length; j++ {
+                t := a[j]
+                a[j] = addq(t, a[j+length])
+                a[j+length] = modmul(z, subq(t, a[j+length]))
+            }
+        }
+    }
+    for j := 0; j &lt; N; j++ { a[j] = modmul(a[j], 8347681) } // 256^-1
+}
+</code></pre>
+<p><strong>Exact rounding and hints (<code>round.go</code>):</strong></p>
+<pre><code class="language-go">const (
+    gamma2Mod1 = (Q - 1) / 44 // 2*((q-1)/88)
+    gamma2Mod2 = (Q - 1) / 16 // 2*((q-1)/32)
+)
+var invMod1 = (uint64(1) &lt;&lt; 40) / gamma2Mod1
+var invMod2 = (uint64(1) &lt;&lt; 40) / gamma2Mod2
+
+func ctDivMod(r, m, inv uint64) (q, r0 uint64) {
+    q = (r * inv) &gt;&gt; 40
+    r0 = r - q*m
+    d := r0 - m
+    borrow := d &gt;&gt; 63
+    q += 1 - borrow
+    r0 -= (1 - borrow) * m
+    return
+}
+func power2Round(r uint32) (r1, r0 int) {
+    rp := int64(r); r0 = modPm2k(r, D); r1 = int((rp - int64(r0)) &gt;&gt; D); return
+}
+func decompose(r uint32, gamma2 uint32) (r1, r0 int) {
+    m, inv := uint64(gamma2Mod1), invMod1
+    if gamma2 == (Q-1)/32 { m, inv = gamma2Mod2, invMod2 }
+    q, r0pos := ctDivMod(uint64(r), m, inv)
+    d := int64(r0pos) - int64(m/2+1)
+    gtMask := ^(d &gt;&gt; 63)
+    r0 = int(int64(r0pos) - (int64(m) &amp; gtMask))
+    q += uint64(gtMask &amp; 1)
+    diff := int64(r) - int64(r0) - int64(Q-1)
+    eqMask := ^((diff | -diff) &gt;&gt; 63)   // -1 iff special case
+    r0 -= int(eqMask &amp; 1)
+    r1 = int(int64(q) &amp; ^eqMask)
+    return
+}
+func makeHint(z, r uint32, gamma2 uint32) uint32 {
+    if highBits(r, gamma2) != highBits(addq(r, z), gamma2) { return 1 }
+    return 0
+}
+func useHint(h uint32, r uint32, gamma2 uint32) int {
+    m := (Q - 1) / (2 * int(gamma2))
+    r1, r0 := decompose(r, gamma2)
+    if h == 1 {
+        if r0 &gt; 0 { return (r1 + 1) % m }
+        return ((r1-1)%m + m) % m
+    }
+    return r1
+}
+</code></pre>
+<p><strong>Sampling, including the full signing loop's reject conditions (<code>sample.go</code>, <code>mldsa.go</code>):</strong></p>
+<pre><code class="language-go">func rejNTTPoly(seed []byte) poly {
+    x := sha3.NewSHAKE128(); x.Write(seed); r := newXOFReader(x)
+    var a poly; var b [3]byte
+    for j := 0; j &lt; N; {
+        r.read(b[:])
+        t := (uint32(b[0]) | uint32(b[1])&lt;&lt;8 | uint32(b[2])&lt;&lt;16) &amp; 0x7FFFFF
+        if t &lt; Q { a[j] = t; j++ }
+    }
+    return a
+}
+func rejBoundedPoly(seed []byte, eta int) poly {
+    x := sha3.NewSHAKE256(); x.Write(seed); r := newXOFReader(x)
+    var a poly; var z [1]byte
+    for j := 0; j &lt; N; {
+        r.read(z[:]); z0, z1 := int(z[0]&amp;0x0F), int(z[0]&gt;&gt;4)
+        if eta == 2 {
+            if z0 &lt; 15 { a[j] = uint32(smallVal(2 - z0%5)); j++ }
+            if z1 &lt; 15 &amp;&amp; j &lt; N { a[j] = uint32(smallVal(2 - z1%5)); j++ }
+        } else {
+            if z0 &lt; 9 { a[j] = uint32(smallVal(4 - z0)); j++ }
+            if z1 &lt; 9 &amp;&amp; j &lt; N { a[j] = uint32(smallVal(4 - z1)); j++ }
+        }
+    }
+    return a
+}
+func (p *Params) expandA(rho []byte) [][]poly { /* seed = rho||byte(s)||byte(r) */ }
+func (p *Params) expandS(rhoprime []byte) (s1, s2 []poly) { /* seed = rho'||le16(r) */ }
+func (p *Params) expandMask(rhoprime []byte, mu int) []poly {
+    c := p.Gamma1Bits()
+    y := make([]poly, p.L)
+    for r := 0; r &lt; p.L; r++ {
+        n := mu + r
+        seed := append(append([]byte{}, rhoprime...), byte(n), byte(n&gt;&gt;8))
+        y[r] = bitUnpack(hash256(32*c, seed), int(p.Gamma1)-1, int(p.Gamma1))
+    }
+    return y
+}
+func sampleInBall(seed []byte, tau int) poly {
+    var c poly
+    x := sha3.NewSHAKE256(); x.Write(seed)
+    s := make([]byte, 8); x.Read(s)
+    var hbits uint64
+    for i := 0; i &lt; 8; i++ { hbits |= uint64(s[i]) &lt;&lt; uint(8*i) }
+    var jb [1]byte
+    for i := N - tau; i &lt; N; i++ {
+        x.Read(jb[:]); j := int(jb[0])
+        for j &gt; i { x.Read(jb[:]); j = int(jb[0]) }
+        c[i] = c[j]
+        if (hbits&gt;&gt;uint(i+tau-N))&amp;1 == 0 { c[j] = 1 } else { c[j] = Q - 1 }
+    }
+    return c
+}
+</code></pre>
+<p>The signing loop applies, in order: <code>||z||∞ ≥ gamma1-beta</code> (AbortZ); <code>||r0||∞ ≥ gamma2-beta</code> (AbortR0); <code>||c*t0||∞ ≥ gamma2</code> or <code>wt(h) &gt; omega</code> (AbortHint). <code>SignStats.Trace</code> records one character (<code>z</code>/<code>r</code>/<code>h</code>/<code>s</code>) per iteration.</p>
+<h2>3. Verification</h2>
+<pre><code class="language-sh">mkdir -p testdata &amp;&amp; cd testdata
+base=https://raw.githubusercontent.com/usnistgov/ACVP-Server/master/gen-val/json-files
+for d in ML-DSA-keyGen-FIPS204 ML-DSA-sigGen-FIPS204 ML-DSA-sigVer-FIPS204; do
+  curl -sSLO &quot;$base/$d/prompt.json&quot;; curl -sSLO &quot;$base/$d/expectedResults.json&quot;
+done
+# rename to keygen-prompt.json, keygen-expected.json, siggen-*.json, sigver-*.json
+cd .. &amp;&amp; go vet ./... &amp;&amp; go test ./... -v -count=1
+</code></pre>
+<p>Observed:</p>
+<pre><code class="language-text">--- PASS: TestACVPKeyGen (0.04s)      keygen: 75 vectors passed
+--- PASS: TestACVPSigGen (0.48s)      siggen: 360 vectors passed   (deterministic + hedged, pure + pre-hash, external + internal)
+--- PASS: TestACVPSigVer (0.06s)      sigver: 180 vectors passed   (valid and forged)
+--- PASS: TestZetaSpec (0.00s)
+--- PASS: TestModmulMatchesDivision (0.01s)
+--- PASS: TestAddSubMod (0.00s)
+--- PASS: TestNTTRoundtrip (0.00s)
+--- PASS: TestPackingRoundtrip (0.00s)
+--- PASS: TestCtDivModExhaustive (0.03s)
+--- PASS: TestDecomposeExhaustive (0.08s)
+--- PASS: TestMakeUseHintRecovers (0.00s)
+--- PASS: TestSingleBitTamperRejection (0.97s)
+    --- PASS: ML-DSA-44 / ML-DSA-65 / ML-DSA-87
+    (all bits of c~, of the omega+k hint bytes, of the message, and of the context rejected)
+    tamper_test.go: deterministic vectors=180 iterations=847 aborts=667 (z=338 r0=328 hint=1)
+    trace=&quot;zzzzrrzrzzrrzzzzzzrrrrs&quot; (23 iterations)
+    trace=&quot;rs&quot; (2 iterations)
+    trace=&quot;rzrzs&quot; (5 iterations)
+--- PASS: TestAbortCountersExact (0.69s)
+ok      mldsa   2.366s
+</code></pre>
+<p><strong>Why matching the reference signature proves the abort counters are exact:</strong> the signature encodes <code>c~</code> and <code>z</code>, which depend on <code>y = ExpandMask(rho'', kappa)</code> at the passing iteration. Every aborted iteration advances <code>kappa</code> by <code>l</code>, so a different abort count yields a different <code>y</code> and different signature bytes. Byte-for-byte agreement on all 180 deterministic vectors (and 360 total) therefore pins the entire per-iteration accept/reject sequence, hence <code>AbortZ</code>, <code>AbortR0</code>, <code>AbortHint</code>, and the trace. Invariants <code>Iterations == Aborts+1</code> and <code>Aborts == AbortZ+AbortR0+AbortHint</code> hold, and repeated runs produce identical signatures and traces.</p>
+<p><strong>Constant-time posture:</strong> <code>modmul</code> is division-free (Barrett via <code>bits.Mul64</code>); <code>ctDivMod</code> and both <code>Decompose</code> variants are exhaustively equal to integer division on <code>[0,q)</code> and branchless; <code>center</code>, <code>modPm2k</code>, <code>smallVal</code>, <code>addq</code>, <code>subq</code>, <code>polyNormAtLeast</code> are branchless; only the standard-mandated number of Fiat-Shamir aborts is externally observable and no secret-dependent memory indexing or division is used.</p>
+<p>All artifacts: <code>~/mldsa/</code> (module, code, tests, <code>testdata/</code>) and <code>~/SOLUTION.md</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-26T16:45:08.729Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement ML-DSA (FIPS 204) key generation, signing and verification from scratch in Go with no external post-quantum libraries: negacyclic NTT polynomial arithmetic modulo q = 8380417, ExpandA/ExpandS rejection sampling, the Fiat-Shamir-with-aborts signing loop including Power2Round, Decompose, MakeHint/UseHint and HintBitPack, with c_tilde derived through SHAKE-256 as specified for the parameter sets ML-DSA-44/65/87. Signatures must verify against the official NIST ACVP known-answer vectors and must be rejected under single-bit tampering of c_tilde, the hint vector, or the message. The implementation must additionally report exact rejection (abort) counters per Fiat-Shamir iteration, which only match the reference when the sampling bounds and rejection conditions are bit-exact, and must remain constant-time with respect to the secret key and nonce.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-26T16:45:08.730Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>I've implemented, verified, and packaged the solution. The full markdown is written to <code>~/SOLUTION.md</code> and the working repo is at <code>~/mldsa</code>. Here is the solution:</p>
 <hr />
 <h1>ML-DSA (FIPS 204) from scratch in Go: bit-exact signing with audited abort counters</h1>
 <p><strong>Problem class:</strong> <code>go-ml-dsa-dilithium-fiat-shamir-abort-hint-decompose-sign-verify</code>

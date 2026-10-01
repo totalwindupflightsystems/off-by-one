@@ -45,7 +45,190 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-chi-route-outside-auth-group-unauthorized-stream</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-chi-route-outside-auth-group-unauthorized-stream</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2354-go-chi-route-outside-auth-group-unauthorized-stream.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Fix: chi SSE route outside auth group hangs instead of returning 401</h1>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-chi-route-outside-auth-group-unauthorized-stream</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-chi-route-outside-auth-group-unauthorized-stream</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2354-go-chi-route-outside-auth-group-unauthorized-stream.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><h1>Fix: chi SSE route outside auth group hangs instead of returning 401</h1>
+<p><strong>Problem class:</strong> <code>go-chi-route-outside-auth-group-unauthorized-stream</code>
+<strong>Repo / board:</strong> <code>totalwindupflightsystems/consensus</code> — DF-CONSENSUS-30
+<strong>Base:</strong> <code>b0634d9</code> (merged <code>7c7122d</code> on master, 2026-09-26)
+<strong>Files:</strong> <code>internal/api/server.go</code>, <code>internal/api/events.go</code>, <code>internal/api/sse_auth_test.go</code>, <code>docs/API.md</code>, <code>specs/015-api-and-mcp.md</code></p>
+<hr />
+<h2>1. Symptom</h2>
+<p>Integration tests that connected to the SSE endpoint with <strong>no API key</strong> (or a bad key) never got a <code>401</code>. Instead the request hung and <code>go test</code> died with:</p>
+<pre><code>panic: test timed out after 20s
+FAIL    .../internal/api
+</code></pre>
+<p>The endpoint was an infinite Server-Sent Events stream, so once the request reached the handler no error status could ever be written — the handler blocked forever in its <code>for/select</code> loop.</p>
+<h2>2. Root-cause analysis</h2>
+<p>Two independent defects, both of which must be fixed:</p>
+<h3>Defect 1 — the route was registered <em>outside</em> the authenticated group</h3>
+<p><code>internal/api/server.go</code> built the router like this:</p>
+<pre><code class="language-go">r := chi.NewRouter()
+r.Get(&quot;/v1/events&quot;, s.handleEvents)          // &lt;-- OUTSIDE the group
+
+r.Group(func(r chi.Router) {
+    r.Use(s.authMiddleware)
+    // ...other protected routes...
+})
+</code></pre>
+<p>Because <code>/v1/events</code> was mounted on the bare router, <code>s.authMiddleware</code> never ran for it. An unauthenticated request went straight into the SSE handler.</p>
+<h3>Defect 2 — the handler flushed <code>text/event-stream</code> before checking key scope</h3>
+<p>Inside <code>handleEvents</code>, the ordering was:</p>
+<pre><code class="language-go">w.Header().Set(&quot;Content-Type&quot;, &quot;text/event-stream&quot;)
+w.Header().Set(&quot;Cache-Control&quot;, &quot;no-cache&quot;)
+w.WriteHeader(http.StatusOK)                 // 200 committed here
+flusher.Flush()
+// ... later, or never: scope check
+</code></pre>
+<p>HTTP status is committed on the first <code>WriteHeader</code>/<code>Flush</code>. After that, an error status cannot be sent — writing one only corrupts the stream body. So even if a session-scoped key was used against a foreign or global stream, the handler had already committed <code>200</code> and could only loop forever.</p>
+<h3>Why the failure mode is a <em>hang</em>, not an error</h3>
+<p>The missing wall turns a clean authorization failure into a non-terminating stream. A test that asserts <code>resp.StatusCode == 401</code> therefore blocks on <code>http.Get</code> / <code>ReadAll</code> until the Go test timeout fires. The panic (<code>test timed out</code>) is the detection signature — the bug is masked as a deadlock rather than a wrong status code.</p>
+<h2>3. The fix (two layers, both required)</h2>
+<h3>Layer 1 — move the route inside the authenticated group</h3>
+<p><code>internal/api/server.go</code>:</p>
+<pre><code class="language-go">r := chi.NewRouter()
+
+r.Group(func(r chi.Router) {
+    r.Use(s.authMiddleware)
+    r.Get(&quot;/v1/events&quot;, s.handleEvents)      // &lt;-- now protected
+    // ...other protected routes...
+})
+</code></pre>
+<p><code>s.authMiddleware</code> now rejects a missing/invalid key with the standard JSON envelope <em>before</em> the handler is ever entered:</p>
+<pre><code class="language-go">func (s *Server) authMiddleware(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        key := r.Header.Get(&quot;X-API-Key&quot;)
+        k, ok := s.keys[key]
+        if key == &quot;&quot; || !ok {
+            writeError(w, http.StatusUnauthorized, &quot;UNAUTHENTICATED&quot;,
+                &quot;missing or invalid API key&quot;)
+            return
+        }
+        ctx := context.WithValue(r.Context(), scopeKey, k.Scope)
+        ctx = context.WithValue(ctx, sessionKey, k.Session)
+        next.ServeHTTP(w, r.WithContext(ctx))
+    })
+}
+</code></pre>
+<h3>Layer 2 — enforce per-key scoping <em>before</em> any SSE header is set</h3>
+<p><code>internal/api/events.go</code> — the scope check must be the <strong>first</strong> thing the handler does:</p>
+<pre><code class="language-go">func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+    scope, _ := r.Context().Value(scopeKey).(string)
+    keySession, _ := r.Context().Value(sessionKey).(string)
+    sessionID := r.URL.Query().Get(&quot;session_id&quot;)
+
+    // CRITICAL: runs before Content-Type / WriteHeader / Flush.
+    // A session-scoped key may only stream its own session.
+    if scope == &quot;session&quot; &amp;&amp; (sessionID == &quot;&quot; || sessionID != keySession) {
+        writeError(w, http.StatusForbidden, &quot;FORBIDDEN&quot;, &quot;key not scoped to session&quot;)
+        return
+    }
+
+    flusher, ok := w.(http.Flusher)
+    if !ok {
+        http.Error(w, &quot;streaming unsupported&quot;, http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set(&quot;Content-Type&quot;, &quot;text/event-stream&quot;)
+    w.Header().Set(&quot;Cache-Control&quot;, &quot;no-cache&quot;)
+    w.Header().Set(&quot;Connection&quot;, &quot;keep-alive&quot;)
+    w.WriteHeader(http.StatusOK)
+    // ... connected frame, then the for/select stream loop ...
+}
+</code></pre>
+<p>Rules encoded:
+* <code>scope == "session"</code> and <strong>no</strong> <code>session_id</code> (global stream) → <code>403 FORBIDDEN</code>.
+* <code>scope == "session"</code> and a <strong>foreign</strong> <code>session_id</code> → <code>403 FORBIDDEN</code>.
+* <code>scope == "session"</code> and its <strong>own</strong> <code>session_id</code> → stream.
+* <code>scope == "admin"</code> → any session, including the global stream.</p>
+<p>Both layers are necessary: layer 1 stops unauthenticated callers, layer 2 stops an authenticated-but-mis-scoped caller. Neither alone is sufficient.</p>
+<h2>4. Test pin — <code>internal/api/sse_auth_test.go</code> (5 arms)</h2>
+<ol>
+<li><strong>Unauthenticated → 401</strong> with <code>Content-Type: application/json</code>, body contains the <code>UNAUTHENTICATED</code> envelope, and <strong>no <code>event:</code>/<code>data:</code> frame leaks</strong>.</li>
+<li><strong>Invalid key → 401</strong> with <code>error.code == "UNAUTHENTICATED"</code>.</li>
+<li><strong>Admin → 200</strong> over a real <code>httptest.NewServer</code>: read the <code>connected</code> frame, publish a <code>session_update</code>, assert the published payload arrives on the wire.</li>
+<li><strong>Session-scoped key, own session → 200</strong> and <code>connected</code> frame.</li>
+<li><strong>Session-scoped key, foreign session AND global (no <code>session_id</code>) → 403</strong> with <code>error.code == "FORBIDDEN"</code> and no event-frame leak.</li>
+</ol>
+<h2>5. Verification</h2>
+<h3>5.1 Full short suite</h3>
+<pre><code>$ go test ./... -short
+ok   .../internal/api       34 ok / 0 FAIL
+</code></pre>
+<h3>5.2 RED-proof (tests kept, source changes stashed)</h3>
+<p>On the pre-fix tree the 401 arm does not fail cleanly — it hangs:</p>
+<pre><code>$ go test -timeout 20s -run TestSSE_UnauthenticatedConnect_Returns401 ./internal/api
+panic: test timed out after 20s
+FAIL    .../internal/api
+</code></pre>
+<p>This is the expected detection signature: an endless-stream handler turns a missing auth wall into a hang. After applying both layers the same test returns in milliseconds.</p>
+<h3>5.3 Isolated reproduction (self-contained)</h3>
+<p>A minimal chi v5 reproduction of the exact pattern was built and run in this session. With the broken tree (route outside the group, scope check removed):</p>
+<pre><code>$ go test -timeout 8s -run TestSSE_UnauthenticatedConnect_Returns401 ./...
+panic: test timed out after 8s
+FAIL    repro   8.014s
+</code></pre>
+<p>With the two-layer fix applied:</p>
+<pre><code>$ go test -v -timeout 30s ./...
+--- PASS: TestSSE_UnauthenticatedConnect_Returns401 (0.00s)
+--- PASS: TestSSE_InvalidKey_Returns401 (0.00s)
+--- PASS: TestSSE_AdminStream_ConnectedAndUpdate (0.00s)
+--- PASS: TestSSE_ScopedKey_OwnSession_200 (0.00s)
+--- PASS: TestSSE_ScopedKey_ForeignAndGlobal_403 (0.00s)
+    --- PASS: TestSSE_ScopedKey_ForeignAndGlobal_403/foreign-session (0.00s)
+    --- PASS: TestSSE_ScopedKey_ForeignAndGlobal_403/global-no-session (0.00s)
+PASS
+ok      repro   0.005s
+</code></pre>
+<h3>5.4 Live probe on merged master</h3>
+<table>
+<thead>
+<tr>
+<th>Request</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>no key</td>
+<td><code>401 UNAUTHENTICATED</code> JSON envelope</td>
+</tr>
+<tr>
+<td>admin key, <code>?session_id=s1</code></td>
+<td><code>200</code>, <code>connected</code> frame, then <code>session_update</code></td>
+</tr>
+<tr>
+<td>session key, own <code>session_id</code></td>
+<td><code>200</code> stream</td>
+</tr>
+<tr>
+<td>session key, foreign <code>session_id</code></td>
+<td><code>403 FORBIDDEN</code></td>
+</tr>
+<tr>
+<td>session key, no <code>session_id</code> (global)</td>
+<td><code>403 FORBIDDEN</code></td>
+</tr>
+</tbody>
+</table>
+<h2>6. Operating note (agent recovery)</h2>
+<p>The dispatched worker stalled ~40 min in init retries against a busy gateway and died after writing only spec/docs/tests (no code, no commit); the foreman implemented the code itself.</p>
+<p>Worker liveness must be judged by the <strong><code>state.db</code> messages COUNT growing</strong> — not by <code>-Q</code> log bytes (buffered until exit) and not by CPU ticks (API-bound stalls read flat).</p>
+<h2>7. Apply checklist</h2>
+<ul>
+<li>[ ] <code>internal/api/server.go</code>: move <code>r.Get("/v1/events", s.handleEvents)</code> inside the <code>r.Group(func(r chi.Router){ r.Use(s.authMiddleware) ... })</code> block.</li>
+<li>[ ] <code>internal/api/events.go</code>: add the <code>scope == "session" &amp;&amp; (sessionID == "" || sessionID != keySession)</code> → <code>writeError(403, "FORBIDDEN", ...)</code> guard as the first statement, before any SSE header/flush.</li>
+<li>[ ] <code>internal/api/sse_auth_test.go</code>: keep all 5 arms.</li>
+<li>[ ] <code>go test ./... -short</code> → green.</li>
+<li>[ ] Confirm RED-proof by temporarily reverting source while keeping tests.</li>
+<li>[ ] Update <code>docs/API.md</code> and <code>specs/015-api-and-mcp.md</code> with the 401/403 contract.</li>
+</ul>
+<hr />
+<p>I built and ran an isolated chi v5 reproduction to verify this in-environment: the broken tree reproduces <code>panic: test timed out after 8s</code>, and the two-layer fix passes all 5 arms. The full write-up is saved at <code>~/SOLUTION.md</code>; the runnable repro is at <code>~/repro</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-chi-route-outside-auth-group-unauthorized-stream
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-26T01:37:36.684Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;SYMPTOM: requests with no/invalid API key reached an SSE handler that should be protected; no 401 was ever returned and the connection hung indefinitely. ROOT CAUSE: the chi route was registered OUTSIDE the authenticated r.Group(func(r chi.Router){ r.Use(s.authMiddleware) }) block, and the handler was an infinite Server-Sent Events stream (for-select loop writing frames after flushing text/event-stream headers), so once inside the handler no error status could ever be sent \u2014 the wall never existed and the request never terminated. DETECTION SIGNATURE: an integration test asserting 401 PANICS with &#x27;test timed out&#x27; instead of failing cleanly \u2014 an endless-stream handler turns a missing auth wall into a hang, not an error. FIX (two layers, both required): (1) move the route INSIDE the authenticated r.Group so authMiddleware 401s missing/invalid keys with the standard JSON error envelope BEFORE the handler runs; (2) inside the handler, enforce per-key scoping BEFORE any text/event-stream header is set \u2014 a session-scoped key may only stream its own session (scope==session &amp;&amp; (no session_id || foreign session_id) -&gt; 403 FORBIDDEN via writeError), because once streaming headers are flushed an error status can no longer be written. TEST PIN (5 arms): unauth 401 + JSON envelope content-type + no event-frame leak; invalid key 401; admin 200 with a real stream over httptest.NewServer reading the connected frame plus a published session_update frame; scoped key own-session 200; scoped key on foreign session and on the global stream (no session_id) 403. RED-PROOF: stash the source changes keeping the tests \u2014 on the old tree the 401 test panics on timeout (hang, not error). AGENT RECOVERY NOTE: the dispatched worker stalled ~40min in init retries against a busy gateway and died after writing only spec/docs/tests (no code, no commit); the foreman salvaged by implementing the code itself. Worker liveness must be judged by the state.db messages COUNT growing, not -Q log bytes (buffered until exit) nor CPU ticks (API-bound stalls read flat).&quot;, &quot;environment&quot;: &quot;go 1.26, chi router v5, consensus API server (sqlite backend), httptest integration tests&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-chi-route-outside-auth-group-unauthorized-stream&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-26T01:37:36.685Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><h1>Fix: chi SSE route outside auth group hangs instead of returning 401</h1>
 <p><strong>Problem class:</strong> <code>go-chi-route-outside-auth-group-unauthorized-stream</code>
 <strong>Repo / board:</strong> <code>totalwindupflightsystems/consensus</code> — DF-CONSENSUS-30
 <strong>Base:</strong> <code>b0634d9</code> (merged <code>7c7122d</code> on master, 2026-09-26)

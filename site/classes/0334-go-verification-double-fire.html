@@ -45,7 +45,7 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-verification-double-fire</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-verification-double-fire</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/0334-go-verification-double-fire.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p><strong>Root cause:</strong> the &lt;project&gt; ran its verification pipeline and wrote a board entry without first checking a durable, single-writer claim registry — so when a sibling foreman had already committed tick 39 (<code>083750d</code>), a second full verification and second board entry fired.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-verification-double-fire</h1><div class='meta'><span class='badge'>3 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>go-verification-double-fire</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/0334-go-verification-double-fire.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p><strong>Root cause:</strong> the &lt;project&gt; ran its verification pipeline and wrote a board entry without first checking a durable, single-writer claim registry — so when a sibling foreman had already committed tick 39 (<code>083750d</code>), a second full verification and second board entry fired.</p>
 <p><strong>Fix (<code>~/&amp;lt;project&amp;gt;/</code>):</strong> a <code>&amp;lt;project&amp;gt;.Store</code> enforcing one committed board entry per tick number, plus a <code>VerifyOnce</code> entry point that implements the protocol:</p>
 <ol>
 <li><strong>Claim before run</strong> — <code>Acquire</code> checks the durable ledger first; only if the tick is absent does it claim an in-progress token via <code>O_CREATE|O_EXCL</code> (atomic across processes, no lock server). Live leases are never stolen; stale leases (crashed owner) are stolen only via compare-and-delete.</li>
@@ -236,7 +236,62 @@ go test -race -count=1 ./... -&gt; ok gvf/gate 1.033s   tests+race: 17/17 PASS
 
 **Edge cases tested (17/17 pass):** Forgejo up on real port; 200 from wrong service caught by content sniff (`ErrWrongService`); 404 is down; URL without pinned port rejected; cooldown pin 900 from fleet.toml; missing fleet.toml falls back to pins; stale file value honoured but stale claim ignored by construction; bad cooldown errors; missing verdict.json → hard error (never green); pass → green; fail → red; skip without `skip_why` → red, with reason → green; incomplete verdict (no commit) rejected; first claim OK + sibling duplicate rejected + new tick never blocked; refire inside 900s window blocked; claim key deterministic across sessions; second DuckBrain record for tick 60 refused.
 
-**Protocol compliance:** commit NOTHING (no repository was touched); exactly one DuckBrain record written for tick 60 (`forgejo: &quot;up&quot;`, `cooldown: 900`, `verdict: pass`, `event_id: 4`, `commit: 6012714`). Deliverables written to `/workspace/solution.md`, `/workspace/evidence.md`, `/workspace/signatures.json`.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-verification-double-fire&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 17}</pre></div>
+**Protocol compliance:** commit NOTHING (no repository was touched); exactly one DuckBrain record written for tick 60 (`forgejo: &quot;up&quot;`, `cooldown: 900`, `verdict: pass`, `event_id: 4`, `commit: 6012714`). Deliverables written to `/workspace/solution.md`, `/workspace/evidence.md`, `/workspace/signatures.json`.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-verification-double-fire&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 17}</pre></div><div class='answer'><h2>Answer 3</h2><p><strong>Root cause:</strong> the &lt;project&gt; ran its verification pipeline and wrote a board entry without first checking a durable, single-writer claim registry — so when a sibling foreman had already committed tick 39 (<code>083750d</code>), a second full verification and second board entry fired.</p>
+<p><strong>Fix (<code>~/&amp;lt;project&amp;gt;/</code>):</strong> a <code>&amp;lt;project&amp;gt;.Store</code> enforcing one committed board entry per tick number, plus a <code>VerifyOnce</code> entry point that implements the protocol:</p>
+<ol>
+<li><strong>Claim before run</strong> — <code>Acquire</code> checks the durable ledger first; only if the tick is absent does it claim an in-progress token via <code>O_CREATE|O_EXCL</code> (atomic across processes, no lock server). Live leases are never stolen; stale leases (crashed owner) are stolen only via compare-and-delete.</li>
+</ol>
+<pre><code class="language-go">// &amp;lt;project&amp;gt;.go
+func (s *Store) Acquire(tick int, owner string, now time.Time) (bool, error) {
+    // 1. Already on the board? → ErrDuplicate, never run again.
+    if _, ok, err := s.GetEntry(tick); err != nil { return false, err } else if ok {
+        return false, ErrDuplicate
+    }
+    // 2. Atomic per-tick claim: only one process wins.
+    claimed, err := s.tryClaim(s.tokenPath(tick), Token{Tick: tick, Owner: owner, LeaseUntil: now.Add(s.lease)})
+    ...
+}
+</code></pre>
+<ol>
+<li><strong>One entry, never two</strong> — <code>Commit</code> serializes with <code>flock</code> and refuses a second entry: identical evidence → <code>ErrDuplicate</code>; differing evidence → <code>ErrConflict</code> (original preserved, escalated to humans, never overwritten). The ledger is written temp-file + fsync + atomic rename.</li>
+</ol>
+<pre><code class="language-go">want := HashEvidence(e.Commit, e.Evidence)      // canonical digest, computed here
+if cur, ok := entries[e.Tick]; ok {
+    if cur.EvidenceSHA == want &amp;&amp; cur.Commit == e.Commit {
+        return fmt.Errorf(&quot;%w: ... identical — second entry refused&quot;, ErrDuplicate)
+    }
+    return fmt.Errorf(&quot;%w: ... refusing to overwrite&quot;, ErrConflict)
+}
+</code></pre>
+<ol>
+<li>
+<p><strong>Reconcile, don't re-run-and-publish</strong> — the losing/sibling path independently re-runs the gates (build, vet, 8+8 tests, guard, govulncheck, hilo-stats, gitreins-count, CI-runs), hashes them canonically (sorted <code>key=commit:result</code> lines, so map order can't alter the digest), compares against the sibling's committed hash, and writes only an <strong>attestation sidecar</strong> — never a second board entry.</p>
+</li>
+<li>
+<p><strong>No duplicate workers</strong> — <code>ClaimWorker</code> registers worker IDs with <code>O_EXCL</code> (duplicate IDs refused) and additionally refuses to spawn <em>any</em> worker for an already-committed tick. Only the single acquiring process ever reaches the spawn step.</p>
+</li>
+</ol>
+<p>The &lt;project&gt; loop collapses to one call:</p>
+<pre><code class="language-go">outcome, err := &amp;lt;project&amp;gt;.VerifyOnce(s, tick, owner, commit, gates, now)
+// outcome: ran-and-committed | duplicate-confirmed | conflict-escalated
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>`go vet`, `gofmt`, and `go test -race` all pass; 10/10 tests green:
+
+| Test | Verifies |
+|---|---|
+| `TestIncident_AlreadyCommitted_SiblingWins` | Regression for the exact incident: `Acquire` → `ErrDuplicate`, second `Commit` refused, worker spawn refused, board has **exactly 1** entry owned by `foreman-a` |
+| `TestIncident_VerifyOnceReconciles` | My run re-runs gates, matches sibling claims exactly, writes 1 attestation, board untouched |
+| `TestRace_ManyCriersOneBoardEntry` | 8 racing &lt;project&gt;s on tick 39 → exactly 1 `ran`, 7 `duplicate-confirmed`, 1 board entry |
+| `TestConflict_DifferentEvidenceNeverOverwrites` | Differing evidence → `ErrConflict`, original entry intact |
+| `TestVerifyOnce_ConflictEscalated` | Conflict path through public API; board not clobbered |
+| `TestLeaseExpiry_StaleTokenStolen` | Live token not stealable; expired (crashed) owner&#x27;s token stolen; still 1 entry |
+| `TestHashEvidence_Deterministic` | Digest order-independent; sensitive to gate result and commit sha |
+| `TestWorkers_NoDuplicateSpawns` | Duplicate worker ID refused; committed tick closed to new workers |
+| `TestDistinctTicks_Independent` | Different tick numbers proceed independently |
+| `TestCorruptLedger_ErrorsNotSilenced` | Torn board errors loudly, never silently double-fires |
+
+Example run (replays incident): `foreman-a → ran-and-committed`; `&lt;project&gt;-b → duplicate-confirmed`; `ci-recheck → duplicate-confirmed`; worker dup refused; **1** board entry for tick 39, sha `9e3f6693e0…`.
+
+Edge cases covered: same-tick races, genuine conflicts (escalate, never overwrite), crashed-owner leases, duplicate worker processes, corrupt/torn ledger, and distinct-tick independence.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;go-verification-double-fire&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 10}</pre></div>
 <div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
 </div>
 </body>

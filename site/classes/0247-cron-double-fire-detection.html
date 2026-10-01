@@ -45,7 +45,7 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>cron-double-fire-detection</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>cron-double-fire-detection</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/0247-cron-double-fire-detection.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>The fix is a detector + foreman policy that turns "likely cron double-fire" into an explicit, auditable classification while deliberately <strong>never</strong> letting the redundancy assumption skip work. Files: <code>~/solution/double_fire.py</code>, <code>~/solution/test_double_fire.py</code>.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>cron-double-fire-detection</h1><div class='meta'><span class='badge'>3 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>cron-double-fire-detection</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/0247-cron-double-fire-detection.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>The fix is a detector + foreman policy that turns "likely cron double-fire" into an explicit, auditable classification while deliberately <strong>never</strong> letting the redundancy assumption skip work. Files: <code>~/solution/double_fire.py</code>, <code>~/solution/test_double_fire.py</code>.</p>
 <p><strong>1. Canonical fingerprint of the tick's <em>work input</em> (not run metadata):</strong></p>
 <pre><code class="language-python">def fingerprint(payload: dict[str, Any]) -&gt; str:
     blob = json.dumps(_canon(payload), sort_keys=True, default=str)
@@ -174,7 +174,62 @@ Edge cases tested:
 - **Contention artifact:** `tests` fails in parallel pass, passes isolated (42.3s) → artifact, not a verdict; `vet`/`build` unaffected; lint RED only for SPEC-GAP-002 scope.
 - **Counter advanced (177) for the same work:** deduped via `cause=work_key`, logical tick corrected to 176, no second worker.
 - **Sibling foreman race:** two `Foreman` instances on one state root firing tick 176 → exactly one `processed`, one `duplicate`, one worker (O_EXCL sentinel).
-- **Distinct work not over-deduped:** `e45b287::SPEC-GAP-001::vet` proceeds normally → 2 workers, still 1 registration.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;cron-double-fire-detection&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 5}</pre></div>
+- **Distinct work not over-deduped:** `e45b287::SPEC-GAP-001::vet` proceeds normally → 2 workers, still 1 registration.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;cron-double-fire-detection&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 5}</pre></div><div class='answer'><h2>Answer 3</h2><p>The fix is a detector + foreman policy that turns "likely cron double-fire" into an explicit, auditable classification while deliberately <strong>never</strong> letting the redundancy assumption skip work. Files: <code>~/solution/double_fire.py</code>, <code>~/solution/test_double_fire.py</code>.</p>
+<p><strong>1. Canonical fingerprint of the tick's <em>work input</em> (not run metadata):</strong></p>
+<pre><code class="language-python">def fingerprint(payload: dict[str, Any]) -&gt; str:
+    blob = json.dumps(_canon(payload), sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode(&quot;utf-8&quot;)).hexdigest()
+</code></pre>
+<p><code>_canon</code> sorts dict keys recursively and rounds floats to 6 places, so <code>05:26</code> vs <code>05:26.000001</code>, or different key orders, don't break "same state" detection. <code>tick_id</code>/<code>collected_at</code> live on <code>TickInput</code>, outside the payload — a re-fire is the <em>same job with the same input</em>, not the same run name.</p>
+<p><strong>2. Detection — double-fire requires BOTH rapid interval AND identical state:</strong></p>
+<pre><code class="language-python">class DoubleFireDetector:
+    def classify(self, current, prior):
+        fp = fingerprint(current.payload)
+        if prior is None:
+            return &quot;normal&quot;, fp, []                       # first tick can't re-fire
+        delta = current.collected_at - prior.collected_at
+        if delta &lt; 0:                                     # clock skew / replay
+            return &quot;normal&quot;, fp, [&quot;out-of-order tick ...&quot;]
+        same_state = fp == prior.fingerprint
+        if delta &lt;= self.config.double_fire_window_s and same_state:
+            return &quot;probable_double_fire&quot;, fp, [f&quot;rapid re-fire {delta:.0f}s after {prior.tick_id} ...&quot;]
+        return &quot;normal&quot;, fp, []                           # changed input = real event
+</code></pre>
+<p>Window is 360s (T68 landed 180s after T67). Either condition failing means it's a genuine event, not redundancy.</p>
+<p><strong>3. Foreman handling — audit always runs, gates never skipped:</strong></p>
+<pre><code class="language-python">class Foreman:
+    def process(self, tick):
+        classification, fp, notes = self.detector.classify(tick, prior)
+        audit_result = self.audit.run(tick.payload)            # FULL audit, always executed
+        gate_results = run_gates(tick.payload, self.gates, self.live)  # identical gate set
+        ...
+        if classification == &quot;probable_double_fire&quot;:
+            rec.board_notes.append(
+                &quot;board entry: probable cron double-fire flagged; &quot;
+                &quot;full audit executed (cache-backed); gates NOT skipped&quot;)
+</code></pre>
+<p>The <code>Audit</code> is cache-backed by fingerprint (T68 hits T67's cache — that's the "cheap" part) but is <em>invoked every tick</em>; a miss is computed fresh. Gates receive <code>(work_input, live)</code> — live probes like <code>sources_fresh</code> can fail on the re-fire tick (a source went stale between 05:26 and 05:29) without changing the fingerprint, so a real failure is never masked by the double-fire label.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre>Verified by running the full suite (`pytest`, Python 3.14.4): **11/11 passed**. Direct replay of the incident:
+
+```
+T67: normal              | gates: {&#x27;sources_fresh&#x27;: True, &#x27;invariants_hold&#x27;: True, &#x27;board_consistent&#x27;: True}
+T68: probable_double_fire
+  fingerprint identical: True
+  audit_ran: True        | cache: 1 compute / 1 hit
+  note: rapid re-fire 180s after T67 with identical fingerprint 7de1dd8fea21 — probable cron double-fire
+  note: board entry: probable cron double-fire flagged; full audit executed (cache-backed); gates NOT skipped
+```
+
+Edge cases tested:
+- **Exact incident** — T68 180s after T67, identical input → flagged; audit ran (cache hit, 1 compute/1 hit); all 3 gates evaluated, identical set.
+- **Rapid fire + state change** (rows 42→43) → `normal` + &quot;real event&quot; note; redundancy assumption never applied.
+- **Slow no-op rerun** (10 min later, same state) → `normal`, no double-fire note.
+- **First-ever tick** → `normal` (nothing to re-fire).
+- **Out-of-order clock / replay** (negative interval) → `normal` with explicit note.
+- **Window boundary** — exactly 360s → flagged; 361s → not.
+- **Fingerprint robustness** — dict key order and float noise don&#x27;t change the hash.
+- **Failing live gate on a double-fire tick** — classified double-fire *and* gate `sources_fresh: False` surfaces (`ok` is False); nothing masked.
+- **Audit failure** — board note present on both the original and the double-fire tick.
+- **3-tick cycle** — normal → double-fire → normal.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;cron-double-fire-detection&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 11}</pre></div>
 <div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
 </div>
 </body>

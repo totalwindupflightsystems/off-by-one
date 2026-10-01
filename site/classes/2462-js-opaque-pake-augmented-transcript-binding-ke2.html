@@ -45,7 +45,111 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>js-opaque-pake-augmented-transcript-binding-ke2</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>js</span><span class='badge v'>node20</span></div><div class='desc'><p>A naive OPRF + 3DH collapses the augmented-PAKE security properties. The failure modes this solution fixes:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2462-js-opaque-pake-augmented-transcript-binding-ke2.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is complete and verified. Files are in <code>~/opaque/</code>: <code>opaque.mjs</code> (implementation), <code>test.mjs</code> (tests), <code>SOLUTION.md</code> (full self-contained write-up with both files embedded), and <code>package.json</code>.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>js-opaque-pake-augmented-transcript-binding-ke2</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>js</span><span class='badge v'>node20</span><span class='badge g'>js</span><span class='badge v'>node20</span></div><div class='desc'><p>A naive OPRF + 3DH collapses the augmented-PAKE security properties. The failure modes this solution fixes:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2462-js-opaque-pake-augmented-transcript-binding-ke2.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>The solution is complete and verified. Files are in <code>~/opaque/</code>: <code>opaque.mjs</code> (implementation), <code>test.mjs</code> (tests), <code>SOLUTION.md</code> (full self-contained write-up with both files embedded), and <code>package.json</code>.</p>
+<p>Here is the solution write-up:</p>
+<h1>OPAQUE-3DH (RFC 9807) in Node.js — transcript binding, key schedule, and augmented-PAKE failure semantics</h1>
+<h2>Root-cause analysis</h2>
+<p>A naive <code>OPRF + 3DH</code> collapses the augmented-PAKE security properties. The failure modes this solution fixes:</p>
+<ol>
+<li>
+<p><strong>OPRF "twist" + randomized password.</strong> RFC 9497 <code>Finalize</code> does not return just the unblinded point — it hashes the <em>original input</em> back in:
+   <code>oprf_output = Hash(I2OSP(len(input),2)||input || I2OSP(len(unblinded),2)||unblinded || "Finalize")</code>. OPAQUE then uses
+   <code>randomized_password = Extract("", oprf_output || Stretch(oprf_output))</code> (<code>Extract</code>, not <code>Expand</code>; 128-byte IKM → 64-byte output). Using the raw OPRF output as the seed removes the password/OPRF binding.</p>
+</li>
+<li>
+<p><strong>Per-credential OPRF key.</strong> The server must derive
+   <code>seed = Expand(oprf_seed, credential_identifier || "OprfKey", Nok)</code> then <code>DeriveKeyPair(seed, "OPAQUE-DeriveKeyPair")</code>. Evaluating with the global <code>oprf_seed</code> shares OPRF keys across users (enumeration).</p>
+</li>
+<li>
+<p><strong>Envelope / key recovery.</strong> <code>masking_key</code>, <code>auth_key</code>, <code>export_key</code>, and the client AKE <code>seed</code> are all <code>Expand(randomized_password, nonce||"…")</code> with distinct labels. The envelope <code>auth_tag = MAC(auth_key, nonce || server_pk || len(sid)||sid || len(cid)||cid)</code>. Deriving the AKE key from <code>oprf_output</code> instead of the nonce-bound <code>seed</code>, or omitting identities, breaks key recovery and identity binding.</p>
+</li>
+<li>
+<p><strong>Transcript order and key schedule.</strong> Preamble =
+   <code>"OPAQUEv1-" || ctx || client_identity || KE1 || server_identity || CredentialResponse || server_nonce || server_keyshare</code>. Then
+   <code>prk = Extract("", ikm);  handshake_secret = Derive-Secret(prk,"HandshakeSecret",Hash(preamble))
+   session_key = Derive-Secret(prk,"SessionKey",Hash(preamble))
+   Km2 = Derive-Secret(handshake_secret,"ServerMAC","")   // empty context
+   Km3 = Derive-Secret(handshake_secret,"ClientMAC","")
+   server_mac = MAC(Km2, Hash(preamble))
+   expected_client_mac = MAC(Km3, Hash(preamble || server_mac))</code>
+   <code>Derive-Secret = Expand-Label</code> with the TLS-1.3 <code>HkdfLabel</code> encoding and the <code>"OPAQUE-"</code> prefix.</p>
+</li>
+<li>
+<p><strong>3DH operand ordering.</strong> Both sides must multiply the <em>same scalar by the same point</em> in the fixed list <code>(eph·eph, eph·static, static·eph)</code>. Mismatched operands/order yields different <code>ikm</code>.</p>
+</li>
+<li>
+<p><strong>Uniform auth failure.</strong> Wrong password → wrong OPRF → wrong <code>randomized_password</code> → envelope MAC fails. The client must surface one indistinguishable error, otherwise it becomes an oracle revealing whether the server's OPRF evaluation was valid — destroying pre-computation resistance.</p>
+</li>
+</ol>
+<blockquote>
+<p>Note: RFC 9807 defines <strong>KE1/KE2/KE3</strong>; there is no wire KE4. The exchange terminates in <code>AuthServerFinalize</code> (server computes the session key after verifying KE3). The implementation provides the complete 3-message flow.</p>
+</blockquote>
+<h2>Exact fix</h2>
+<pre><code class="language-bash">mkdir opaque &amp;&amp; cd opaque &amp;&amp; npm init -y
+npm install @noble/curves @noble/hashes
+# package.json: &quot;type&quot;: &quot;module&quot;
+node test.mjs
+</code></pre>
+<p>Full source is <code>~/opaque/opaque.mjs</code> and tests are <code>~/opaque/test.mjs</code>. The critical pieces:</p>
+<p><strong>OPRF + randomized password (the twist):</strong></p>
+<pre><code class="language-js">export function deriveOprfKey(oprfSeed, credentialIdentifier) {
+  const seed = Expand(oprfSeed, concat(credentialIdentifier, ascii('OprfKey')), Params.Nok);
+  return ristretto255_oprf.oprf.deriveKeyPair(seed, ascii('OPAQUE-DeriveKeyPair')).secretKey;
+}
+// ...
+const oprfOutput = oprfFinalize(password, blind, evaluatedElement);
+const randomizedPassword = Extract('', concat(oprfOutput, Stretch(oprfOutput)));
+</code></pre>
+<p><strong>Identical DH ordering:</strong></p>
+<pre><code class="language-js">// client
+const dh1 = DiffieHellman(clientState.client_secret, ar.server_public_keyshare);
+const dh2 = DiffieHellman(clientState.client_secret, cc.serverPublicKey);
+const dh3 = DiffieHellman(clientPrivateKey, ar.server_public_keyshare);
+// server — same scalars, same points
+const dh1 = DiffieHellman(serverPrivateKeyshare, ke1.auth_request.client_public_keyshare);
+const dh2 = DiffieHellman(serverPrivateKey,    ke1.auth_request.client_public_keyshare);
+const dh3 = DiffieHellman(serverPrivateKeyshare, clientPublicKey);
+</code></pre>
+<p><strong>Key schedule (label-sensitive):</strong></p>
+<pre><code class="language-js">export function deriveKeys(ikm, preambleBytes, labels = {}) {
+  const serverLabel = labels.serverLabel ?? 'ServerMAC';
+  const clientLabel = labels.clientLabel ?? 'ClientMAC';
+  const prk = Extract('', ikm);
+  const hash = Hash(preambleBytes);
+  const handshakeSecret = deriveSecret(prk, 'HandshakeSecret', hash);
+  const sessionKey      = deriveSecret(prk, 'SessionKey', hash);
+  const Km2 = deriveSecret(handshakeSecret, serverLabel, new Uint8Array(0));
+  const Km3 = deriveSecret(handshakeSecret, clientLabel, new Uint8Array(0));
+  return { Km2, Km3, sessionKey };
+}
+</code></pre>
+<p><strong>Uniform failure (no OPRF oracle):</strong></p>
+<pre><code class="language-js">if (!ctEqual(authTag, expectedTag)) throw new OPAQUEError('authentication failed');
+// ...and identically in authClientFinalize / authServerFinalize
+</code></pre>
+<h2>Verification</h2>
+<p><code>npm test</code> → <strong>10 passed, 0 failed</strong>:</p>
+<pre><code>[1] RFC 9807 Appendix C.1.1 -- Real Test Vector 1 (ristretto255-SHA512)
+  ok  - registration: request/response/oprf_key/upload/export_key all match
+  ok  - AKE: KE1/KE2/KE3/session_key/intermediates all match
+[2] Randomised end-to-end round trip
+  ok  - registration + login agree on session_key and export_key (with identities)
+  ok  - login works with default-to-public-key identities (no identities)
+[3] Negative tests
+  ok  - swapped key-schedule labels change Km2/Km3 and are rejected
+  ok  - replay of a stale KE1 cannot be combined with an old KE2 (transcript binds KE1)
+  ok  - replayed KE1 gets a fresh KE2; the stale KE3 then fails
+  ok  - reflection: server_mac used as client_mac is rejected
+  ok  - wrong password: KE2 fails MAC verification with a uniform error (no OPRF oracle)
+  ok  - transcript tamper: MITM changing the client nonce in KE1 is rejected
+</code></pre>
+<p>The first test reproduces <strong>every</strong> RFC 9807 Appendix C.1.1 intermediate byte-for-byte — <code>oprf_key</code>, <code>auth_key</code>, <code>randomized_password</code>, <code>envelope</code>, <code>handshake_secret</code>, <code>server_mac_key</code>, <code>client_mac_key</code>, <code>registration_request/response/upload</code>, <code>KE1/KE2/KE3</code>, <code>export_key</code>, <code>session_key</code> — which independently confirms the transcript order, <code>Derive-Secret</code> labels, DH ordering, and envelope derivation.</p>
+<p>The negative tests assert the single uniform <code>OPAQUEError("authentication failed")</code> and that a <em>valid</em> OPRF evaluation with a tampered envelope is indistinguishable from a wrong-password attempt, satisfying the key-recovery- and pre-computation-resistance requirement.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: js-opaque-pake-augmented-transcript-binding-ke2
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-29T22:27:34.266Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement RFC 9807 OPAQUE augmented PAKE end to end in Node: OPRF blind/evaluate/finalize with the twist, randomized-password envelope derivation, KE1/KE2/KE3/KE4 message flow, the 3DH AKE sharing the exact same Diffie-Hellman operand ordering on both sides, and HMAC transcript binding over all prior messages. The hard parts are the exact transcript hashing order, the Derive-Secret label key schedule, and keeping the client key-recovery- and pre-computation-resistant property that a malicious server cannot test a password guess offline without a full AKE exchange. Include negative tests for swapped key-schedule labels, replay of a stale KE1, reflection of a server message back to itself, and a wrong-password KE2 that must fail MAC verification without revealing whether the OPRF evaluation was valid.&quot;, &quot;environment&quot;: &quot;node20&quot;, &quot;language&quot;: &quot;js&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;js-opaque-pake-augmented-transcript-binding-ke2&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-29T22:27:34.266Z&quot;, &quot;version&quot;: &quot;20&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>The solution is complete and verified. Files are in <code>~/opaque/</code>: <code>opaque.mjs</code> (implementation), <code>test.mjs</code> (tests), <code>SOLUTION.md</code> (full self-contained write-up with both files embedded), and <code>package.json</code>.</p>
 <p>Here is the solution write-up:</p>
 <h1>OPAQUE-3DH (RFC 9807) in Node.js — transcript binding, key schedule, and augmented-PAKE failure semantics</h1>
 <h2>Root-cause analysis</h2>

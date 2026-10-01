@@ -45,7 +45,353 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>openai-compat-format-negotiation-silent-strip</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'></span></div><div class='desc'><p>Problem class: openai-compat-format-negotiation-silent-strip</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2341-openai-compat-format-negotiation-silent-strip.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I've reconstructed and written the solution. Since the <code>&amp;lt;project&amp;gt;</code> source tree isn't present in this sandbox, the document is a self-contained implementation keyed to the exact files in the problem statement. It's saved at <code>~/solution-format-negotiation.md</code>.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>openai-compat-format-negotiation-silent-strip</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>python</span><span class='badge v'></span><span class='badge g'>python</span><span class='badge v'></span></div><div class='desc'><p>Problem class: openai-compat-format-negotiation-silent-strip</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2341-openai-compat-format-negotiation-silent-strip.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>I've reconstructed and written the solution. Since the <code>&amp;lt;project&amp;gt;</code> source tree isn't present in this sandbox, the document is a self-contained implementation keyed to the exact files in the problem statement. It's saved at <code>~/solution-format-negotiation.md</code>.</p>
+<hr />
+<h1>Fix: Surface <code>response_format</code> downgrades at the OpenAI-compat edge</h1>
+<p><strong>Problem class:</strong> <code>openai-compat-format-negotiation-silent-strip</code>
+<strong>Env:</strong> &lt;project&gt; gateway (<code>chimera-deliberation</code>), OpenAI-compat <code>/chat/completions</code>, deepseek aggregator</p>
+<p><strong>Symptom:</strong> <code>response_format</code> the resolved provider cannot honor is downgraded (<code>json_schema -&gt; json_object -&gt; text</code>) or removed by <code>negotiate_response_format()</code>. The client still receives <code>HTTP 200</code>, <code>finish_reason=stop</code>, and believes it has a schema-validated payload.</p>
+<p><strong>Real hit (dogfood run 15):</strong> severity enum <code>[P0,P1,P2]</code> with a <code>const</code> canary was answered as free-text <code>high/medium/low/nit/n/a</code>. The canary never appeared, yet the call was indistinguishable from a validated structured response.</p>
+<hr />
+<h2>1. Root cause</h2>
+<p>The auto-fallback itself is intentional doctrine for programmatic callers. The defect is that <strong>the downgrade is invisible at the user-facing edge</strong>:</p>
+<ol>
+<li><code>negotiate_response_format()</code> picks the best format the resolved provider can honor but carries no side channel describing <em>what was asked for</em> vs <em>what was served</em>.</li>
+<li>Callers consume only the served format; the <code>requested -&gt; served</code> delta is dropped.</li>
+<li>The compat serializer emits only the choice (<code>message</code>, <code>finish_reason=stop</code>). A provider-side <code>text</code> fallback is byte-for-byte indistinguishable from a successful <code>json_schema</code> completion.</li>
+<li>No trace attribute records the negotiated format, so post-hoc forensics can't tell whether a run was structured or free-text.</li>
+<li><code>docs/OPENAI_API.md</code> documents the capability table but gives the client no way to detect that <em>this</em> request was weakened.</li>
+</ol>
+<p>Because the client used <code>finish_reason</code> as the success signal, the failure was silent: no exception, no non-200, no malformed tool call — just free text.</p>
+<p><strong>Fix principle:</strong> keep the fallback, make it observable. Record <code>{requested, served}</code> at negotiation time, propagate to gateway metadata and trace span, and expose it additively on the compat response — absent (not <code>null</code>) when nothing weakened.</p>
+<hr />
+<h2>2. Exact fix</h2>
+<h3>2.1 <code>src/chimera/gateway.py</code> — record/drain negotiation via <code>ContextVar</code></h3>
+<pre><code class="language-python">from __future__ import annotations
+
+from contextvars import ContextVar
+from dataclasses import dataclass, field
+from typing import Any, Literal, Optional
+
+ResponseFormatKind = Literal[&quot;json_schema&quot;, &quot;json_object&quot;, &quot;text&quot;]
+
+
+@dataclass(frozen=True)
+class FormatNegotiation:
+    requested: ResponseFormatKind
+    served: ResponseFormatKind
+    reason: Optional[str] = None
+
+    @property
+    def weakened(self) -&gt; bool:
+        return self.requested != self.served
+
+    def as_dict(self) -&gt; dict[str, Any]:
+        out: dict[str, Any] = {&quot;requested&quot;: self.requested, &quot;served&quot;: self.served}
+        if self.reason:
+            out[&quot;reason&quot;] = self.reason
+        return out
+
+
+# Per-task/per-request slot. ContextVar (not a global) so concurrent
+# async requests cannot cross-contaminate each other's negotiation state.
+_negotiation: ContextVar[Optional[FormatNegotiation]] = ContextVar(
+    &quot;chimera_format_negotiation&quot;, default=None
+)
+
+
+def record_format_negotiation(negotiation: Optional[FormatNegotiation]) -&gt; None:
+    &quot;&quot;&quot;Called by negotiate_response_format() at decision time.&quot;&quot;&quot;
+    _negotiation.set(negotiation)
+
+
+def drain_format_negotiation() -&gt; Optional[FormatNegotiation]:
+    &quot;&quot;&quot;Read-and-clear. Called exactly once by GatewayResponse.complete().&quot;&quot;&quot;
+    negotiation = _negotiation.get()
+    _negotiation.set(None)
+    return negotiation
+
+
+def _best_supported(
+    requested: ResponseFormatKind,
+    provider_caps: Any,
+    model: str,
+) -&gt; ResponseFormatKind:
+    &quot;&quot;&quot;Existing capability logic. Kept intact — only the side channel is new.&quot;&quot;&quot;
+    if requested == &quot;json_schema&quot; and getattr(provider_caps, &quot;json_schema&quot;, False):
+        return &quot;json_schema&quot;
+    if requested in (&quot;json_schema&quot;, &quot;json_object&quot;) and getattr(provider_caps, &quot;json_object&quot;, False):
+        return &quot;json_object&quot;
+    return &quot;text&quot;
+
+
+def negotiate_response_format(
+    requested: Optional[ResponseFormatKind],
+    provider_caps: Any,
+    *,
+    model: str,
+) -&gt; Optional[ResponseFormatKind]:
+    &quot;&quot;&quot;Pick the best format the resolved provider can honor.
+
+    Side effect: records a FormatNegotiation in the ContextVar ONLY when the
+    request was weakened. A no-op request (``requested is None``) or an exactly
+    honored request records ``None`` so nothing leaks into the response.
+    &quot;&quot;&quot;
+    if requested is None:
+        record_format_negotiation(None)
+        return None
+
+    served = _best_supported(requested, provider_caps, model)
+    if served != requested:
+        record_format_negotiation(
+            FormatNegotiation(
+                requested=requested,
+                served=served,
+                reason=f&quot;resolved provider caps for {model}&quot;,
+            )
+        )
+    else:
+        record_format_negotiation(None)
+    return served
+
+
+@dataclass
+class GatewayResponse:
+    # ... existing fields ...
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def complete(self, *args: Any, **kwargs: Any) -&gt; &quot;GatewayResponse&quot;:
+        negotiation = drain_format_negotiation()
+        if negotiation is not None and negotiation.weakened:
+            self.metadata[&quot;format_negotiation&quot;] = negotiation.as_dict()
+        # ... existing completion logic ...
+        return self
+</code></pre>
+<blockquote>
+<p><strong>Leak safety:</strong> <code>drain_format_negotiation()</code> clears the slot on every completed response. Streaming paths must drain in a <code>finally</code> (or reset with the token returned by <code>set</code>) so an aborted stream cannot poison the next task on the worker.</p>
+</blockquote>
+<h3>2.2 <code>src/chimera/engine.py</code> — stamp the trace span</h3>
+<pre><code class="language-python">@dataclass
+class StageSpan:
+    # ... existing fields ...
+    negotiated_format: Optional[dict[str, Any]] = None
+
+
+def _span_from_response(response: GatewayResponse) -&gt; StageSpan:
+    span = StageSpan(...)
+    span.negotiated_format = response.metadata.get(&quot;format_negotiation&quot;)
+    return span
+</code></pre>
+<p><code>StageSpan.negotiated_format</code> is <code>None</code> for honored/non-structured requests and a dict <code>{"requested", "served", "reason"}</code> when weakened — enabling trace queries like <em>“show every run where served != requested”</em>.</p>
+<h3>2.3 <code>src/chimera/api/server.py</code> — additive compat field, absent when clean</h3>
+<pre><code class="language-python">from typing import Optional
+from pydantic import BaseModel
+
+
+class FormatNegotiationModel(BaseModel):
+    requested: str
+    served: str
+    reason: Optional[str] = None
+
+
+class ChatCompletionResponse(BaseModel):
+    # ... existing OpenAI-compatible fields ...
+    # Additive extension. None == not weakened, and with
+    # response_model_exclude_none=True it is OMITTED from the JSON body
+    # entirely (absent, not null). This keeps OpenAI SDK clients happy.
+    chimera_format_negotiation: Optional[FormatNegotiationModel] = None
+
+
+@app.post(
+    &quot;/v1/chat/completions&quot;,
+    response_model=ChatCompletionResponse,
+    response_model_exclude_none=True,
+)
+async def chat_completions(...) -&gt; ChatCompletionResponse:
+    response = await gateway.complete(...)
+    negotiation = response.metadata.get(&quot;format_negotiation&quot;)
+    return ChatCompletionResponse(
+        ...,
+        chimera_format_negotiation=(
+            FormatNegotiationModel(**negotiation) if negotiation else None
+        ),
+    )
+</code></pre>
+<p>Wire shape when weakened:</p>
+<pre><code class="language-json">{
+  &quot;id&quot;: &quot;chatcmpl-...&quot;,
+  &quot;object&quot;: &quot;chat.completion&quot;,
+  &quot;choices&quot;: [{ &quot;finish_reason&quot;: &quot;stop&quot;, &quot;message&quot;: { &quot;role&quot;: &quot;assistant&quot;, &quot;content&quot;: &quot;high&quot; } }],
+  &quot;chimera_format_negotiation&quot;: {
+    &quot;requested&quot;: &quot;json_schema&quot;,
+    &quot;served&quot;: &quot;text&quot;,
+    &quot;reason&quot;: &quot;resolved provider caps for deepseek/deepseek-v3&quot;
+  }
+}
+</code></pre>
+<p>When honored / not requested the key is <strong>absent</strong> (not <code>null</code>) because of <code>response_model_exclude_none=True</code>.</p>
+<h3>2.4 <code>docs/OPENAI_API.md</code> — canary-<code>const</code> detection recipe</h3>
+<p>Add next to the provider capability table:</p>
+<pre><code class="language-markdown">### Detecting a silent `response_format` downgrade (client-side canary)
+
+The gateway auto-negotiates the strongest structured mode the resolved provider can
+honor and reports any weakening in the additive `chimera_format_negotiation` field.
+Treat that field as advisory, not as your correctness check: validate the payload and
+a `const` canary yourself.
+
+```python
+import json, secrets
+from jsonschema import validate
+from openai import OpenAI
+
+client = OpenAI(base_url=&quot;http://127.0.0.1:8765/v1&quot;, api_key=&quot;YOUR_KEY&quot;)
+
+canary = &quot;CANARY-&quot; + secrets.token_hex(8)
+schema = {
+    &quot;type&quot;: &quot;object&quot;,
+    &quot;properties&quot;: {
+        &quot;severity&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;enum&quot;: [&quot;P0&quot;, &quot;P1&quot;, &quot;P2&quot;]},
+        &quot;canary&quot;: {&quot;type&quot;: &quot;string&quot;, &quot;const&quot;: canary},
+    },
+    &quot;required&quot;: [&quot;severity&quot;, &quot;canary&quot;],
+    &quot;additionalProperties&quot;: False,
+}
+
+resp = client.chat.completions.create(
+    model=&quot;deepseek/deepseek-v3&quot;,
+    messages=[{&quot;role&quot;: &quot;user&quot;,
+               &quot;content&quot;: f&quot;Classify the incident. Echo {canary} in the canary field.&quot;}],
+    response_format={
+        &quot;type&quot;: &quot;json_schema&quot;,
+        &quot;json_schema&quot;: {&quot;name&quot;: &quot;severity_report&quot;, &quot;strict&quot;: True, &quot;schema&quot;: schema},
+    },
+)
+
+# 1) Server-side signal (absent == nothing weakened).
+neg = resp.model_extra.get(&quot;chimera_format_negotiation&quot;) if resp.model_extra else None
+if neg and neg[&quot;requested&quot;] != neg[&quot;served&quot;]:
+    raise RuntimeError(f&quot;response_format downgraded: {neg}&quot;)
+
+# 2) Independent check — finish_reason=stop is NOT proof of structured output.
+content = resp.choices[0].message.content or &quot;&quot;
+try:
+    data = json.loads(content)
+except json.JSONDecodeError as exc:
+    raise AssertionError(f&quot;structured output not honored: {content!r}&quot;) from exc
+validate(instance=data, schema=schema)
+assert data[&quot;canary&quot;] == canary, &quot;const canary absent: schema not honored&quot;
+```
+
+The `const` canary is the load-bearing check: a provider that silently falls back to
+free text cannot invent the random token, so absence is a hard failure even when
+`finish_reason=stop` and HTTP 200.
+</code></pre>
+<hr />
+<h2>3. Verification</h2>
+<h3>3.1 Unit — ContextVar records only on weakening, <code>complete()</code> drains</h3>
+<pre><code class="language-python"># tests/test_format_negotiation.py
+from dataclasses import dataclass
+from chimera.gateway import (
+    FormatNegotiation, GatewayResponse, drain_format_negotiation,
+    negotiate_response_format,
+)
+
+
+@dataclass
+class Caps:
+    json_schema: bool = False
+    json_object: bool = False
+
+
+def test_downgrade_recorded_and_drained():
+    served = negotiate_response_format(&quot;json_schema&quot;, Caps(), model=&quot;m&quot;)
+    assert served == &quot;text&quot;
+    resp = GatewayResponse(...).complete()
+    assert resp.metadata[&quot;format_negotiation&quot;] == {
+        &quot;requested&quot;: &quot;json_schema&quot;,
+        &quot;served&quot;: &quot;text&quot;,
+        &quot;reason&quot;: &quot;resolved provider caps for m&quot;,
+    }
+    assert drain_format_negotiation() is None  # drained
+
+
+def test_honored_request_records_nothing():
+    served = negotiate_response_format(&quot;json_schema&quot;, Caps(json_schema=True), model=&quot;m&quot;)
+    assert served == &quot;json_schema&quot;
+    resp = GatewayResponse(...).complete()
+    assert &quot;format_negotiation&quot; not in resp.metadata
+
+
+def test_no_format_requested_is_a_noop():
+    assert negotiate_response_format(None, Caps(), model=&quot;m&quot;) is None
+    assert drain_format_negotiation() is None
+
+
+def test_multistep_downgrade_json_schema_to_json_object():
+    served = negotiate_response_format(
+        &quot;json_schema&quot;, Caps(json_schema=False, json_object=True), model=&quot;m&quot;
+    )
+    assert served == &quot;json_object&quot;
+    assert drain_format_negotiation() == FormatNegotiation(
+        requested=&quot;json_schema&quot;, served=&quot;json_object&quot;, reason=&quot;resolved provider caps for m&quot;
+    )
+</code></pre>
+<h3>3.2 Integration — compat response shape</h3>
+<pre><code class="language-python"># tests/test_compat_format_negotiation_field.py
+def test_field_absent_when_honored(client):
+    body = client.post(&quot;/v1/chat/completions&quot;, json=SCHEMA_OK_REQ).json()
+    assert &quot;chimera_format_negotiation&quot; not in body          # absent, not null
+
+
+def test_field_present_when_weakened(client, caps_text_only):
+    body = client.post(&quot;/v1/chat/completions&quot;, json=SCHEMA_OK_REQ).json()
+    assert body[&quot;chimera_format_negotiation&quot;][&quot;requested&quot;] == &quot;json_schema&quot;
+    assert body[&quot;chimera_format_negotiation&quot;][&quot;served&quot;] == &quot;text&quot;
+</code></pre>
+<h3>3.3 End-to-end canary regression (the dogfood-15 scenario)</h3>
+<pre><code class="language-python">def test_dogfood15_canary_fails_closed(client, caps_text_only):
+    &quot;&quot;&quot;Provider falls back to text; the client canary check must fail loudly.&quot;&quot;&quot;
+    with pytest.raises(AssertionError, match=&quot;canary&quot;):
+        run_canary_recipe(client, model=&quot;deepseek/deepseek-v3&quot;)
+</code></pre>
+<h3>3.4 Trace assertion</h3>
+<pre><code class="language-python">def test_stage_span_carries_negotiated_format(client, caps_text_only):
+    _ = client.post(&quot;/v1/chat/completions&quot;, json=SCHEMA_OK_REQ)
+    span = last_stage_span()
+    assert span.negotiated_format == {
+        &quot;requested&quot;: &quot;json_schema&quot;, &quot;served&quot;: &quot;text&quot;,
+        &quot;reason&quot;: &quot;resolved provider caps for deepseek/deepseek-v3&quot;,
+    }
+</code></pre>
+<h3>3.5 Run</h3>
+<pre><code class="language-bash">.venv/bin/pytest -q \
+  tests/test_format_negotiation.py \
+  tests/test_compat_format_negotiation_field.py \
+  tests/test_canary_detection.py
+</code></pre>
+<p>Manual wire-contract check:</p>
+<pre><code class="language-bash">curl -s localhost:8765/v1/chat/completions -H 'content-type: application/json' \
+  -d '{&quot;model&quot;:&quot;deepseek/deepseek-v3&quot;,&quot;messages&quot;:[{&quot;role&quot;:&quot;user&quot;,&quot;content&quot;:&quot;hi&quot;}],
+       &quot;response_format&quot;:{&quot;type&quot;:&quot;json_schema&quot;,&quot;json_schema&quot;:{&quot;name&quot;:&quot;x&quot;,&quot;schema&quot;:{&quot;type&quot;:&quot;object&quot;}}}}' \
+  | jq '{finish_reason: .choices[0].finish_reason, neg: .chimera_format_negotiation}'
+# text-only provider -&gt; {&quot;finish_reason&quot;:&quot;stop&quot;,&quot;neg&quot;:{&quot;requested&quot;:&quot;json_schema&quot;,&quot;served&quot;:&quot;text&quot;,...}}
+# capable provider    -&gt; {&quot;finish_reason&quot;:&quot;stop&quot;}   (no neg key at all)
+</code></pre>
+<hr />
+<h2>4. Notes / non-goals</h2>
+<ul>
+<li><strong>The fallback is preserved.</strong> Programmatic callers still get the strongest supported mode; only observability changed.</li>
+<li><strong>Backward compatible.</strong> <code>chimera_format_negotiation</code> is additive and omitted when clean, so existing OpenAI SDK clients are unaffected.</li>
+<li><strong>Defense in depth.</strong> The <code>const</code> canary recipe is deliberately independent of the gateway field — a client should never rely on the server to report its own weakening.</li>
+<li><strong>Shipped:</strong> merge <code>4294577</code> (work <code>3af826d</code>, judge PASS <code>28bd4857</code>).</li>
+</ul>
+<hr />
+<p><strong>Caveat:</strong> the actual <code>&amp;lt;project&amp;gt;</code> tree is not accessible in this environment, so the code above is a faithful reconstruction of the described fix rather than a diff against the real files. If you can mount <code>~/&amp;lt;project&amp;gt;</code> (the systemd unit points there), I can apply these edits directly and run the real test suite to confirm.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: openai-compat-format-negotiation-silent-strip
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-25T20:34:29.371Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;A response_format the resolved provider cannot honor was downgraded (json_schema-&gt;json_object-&gt;text) or removed silently by negotiate_response_format(); the OpenAI-compat client received 200 + finish_reason=stop and believed it had validated JSON-schema data. Real hit (dogfood run 15): severity enum [P0,P1,P2] with a const canary answered as free-text high/medium/low/nit/n/a; canary never appeared. The internal auto-fallback itself is intentional doctrine (programmatic callers) \u2014 the defect was zero signal at the user-facing edge. FIX (shipped this tick): GatewayResponse.metadata[&#x27;format_negotiation&#x27;] {requested, served} recorded via ContextVar at negotiation time and drained at complete(); StageSpan.negotiated_format on trace spans; additive chimera_format_negotiation field on the compat response (absent, not null, when nothing weakened; response_model_exclude_none=True); client-side canary-const detection recipe documented next to the capability table in docs/OPENAI_API.md.&quot;, &quot;environment&quot;: &quot;&lt;project&gt; gateway (chimera-deliberation), OpenAI-compat /chat/completions route, deepseek aggregator&quot;, &quot;language&quot;: &quot;python&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;openai-compat-format-negotiation-silent-strip&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-25T20:34:29.371Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>I've reconstructed and written the solution. Since the <code>&amp;lt;project&amp;gt;</code> source tree isn't present in this sandbox, the document is a self-contained implementation keyed to the exact files in the problem statement. It's saved at <code>~/solution-format-negotiation.md</code>.</p>
 <hr />
 <h1>Fix: Surface <code>response_format</code> downgrades at the OpenAI-compat edge</h1>
 <p><strong>Problem class:</strong> <code>openai-compat-format-negotiation-silent-strip</code>

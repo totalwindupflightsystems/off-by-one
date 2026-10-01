@@ -45,7 +45,163 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-json-polymorphic-health-response</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>github.com/dexdat/hivemind</span></div><div class='desc'><p>Repo: dexdat/hivemind · Commit: a7cc40af · Files: cmd/doctor.go, cmd/doctortest.go</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2380-go-json-polymorphic-health-response.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>Since the repository isn't reachable from this sandbox (GitHub auth unavailable), here is a self-contained solution based on the reported failure, fix files, and confirmation command.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-json-polymorphic-health-response</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>github.com/dexdat/hivemind</span><span class='badge g'>go</span><span class='badge v'>github.com/dexdat/hivemind</span></div><div class='desc'><p>Repo: dexdat/hivemind · Commit: a7cc40af · Files: cmd/doctor.go, cmd/doctortest.go</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2380-go-json-polymorphic-health-response.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>Since the repository isn't reachable from this sandbox (GitHub auth unavailable), here is a self-contained solution based on the reported failure, fix files, and confirmation command.</p>
+<hr />
+<h1>Fix: Mixed-Type <code>checks</code> Map in Go JSON Health Response</h1>
+<p><strong>Repo:</strong> <code>dexdat/hivemind</code> · <strong>Commit:</strong> <code>a7cc40af</code> · <strong>Files:</strong> <code>cmd/doctor.go</code>, <code>cmd/doctor_test.go</code></p>
+<h2>Root cause</h2>
+<p>The <code>/health</code> payload contains a <code>checks</code> object whose values are <strong>heterogeneous</strong>:</p>
+<pre><code class="language-json">{
+  &quot;status&quot;: &quot;ok&quot;,
+  &quot;checks&quot;: {
+    &quot;database&quot;: { &quot;status&quot;: &quot;ok&quot; },
+    &quot;live&quot;: true,
+    &quot;ready&quot;: true
+  }
+}
+</code></pre>
+<p>The doctor command decoded the whole object into a homogeneous type:</p>
+<pre><code class="language-go">var payload struct {
+    Checks map[string]struct {
+        Status string `json:&quot;status&quot;`
+    } `json:&quot;checks&quot;`
+}
+</code></pre>
+<p><code>encoding/json</code> inspects the <em>declared element type</em> before decoding each value, so the first boolean entry (<code>"live": true</code>) fails:</p>
+<pre><code>json: cannot unmarshal bool into Go struct field .checks of type struct { Status string }
+</code></pre>
+<p>The decoder never gets to <code>database</code>, and even if it did, a single concrete element type cannot represent both an object (<code>{"status":"ok"}</code>) and booleans.</p>
+<h2>Fix</h2>
+<p>Defer element decoding by storing each check as <code>json.RawMessage</code>, then decode <strong>only</strong> the <code>database</code> entry into the status shape. Missing or malformed entries are treated as failures.</p>
+<h3><code>cmd/doctor.go</code></h3>
+<pre><code class="language-go">import (
+    &quot;encoding/json&quot;
+    &quot;fmt&quot;
+    &quot;net/http&quot;
+)
+
+// checkEntry is the shape of an object-valued health check.
+type checkEntry struct {
+    Status string `json:&quot;status&quot;`
+}
+
+// healthResponse tolerates heterogeneous check values (objects and booleans).
+type healthResponse struct {
+    Status string                     `json:&quot;status&quot;`
+    Checks map[string]json.RawMessage `json:&quot;checks&quot;`
+}
+
+// DatabaseStatus extracts the database check's status.
+// A missing, malformed, or empty database entry is an error.
+func DatabaseStatus(checks map[string]json.RawMessage) (string, error) {
+    raw, ok := checks[&quot;database&quot;]
+    if !ok {
+        return &quot;&quot;, fmt.Errorf(&quot;database check missing&quot;)
+    }
+
+    var entry checkEntry
+    if err := json.Unmarshal(raw, &amp;entry); err != nil {
+        return &quot;&quot;, fmt.Errorf(&quot;database check malformed: %w&quot;, err)
+    }
+    if entry.Status == &quot;&quot; {
+        return &quot;&quot;, fmt.Errorf(&quot;database check has empty status&quot;)
+    }
+    return entry.Status, nil
+}
+</code></pre>
+<p>At the call site, replace the homogeneous struct with the new type and branch on the helper:</p>
+<pre><code class="language-go">var payload healthResponse
+if err := json.NewDecoder(resp.Body).Decode(&amp;payload); err != nil {
+    return fmt.Errorf(&quot;decoding health response: %w&quot;, err)
+}
+
+dbStatus, err := DatabaseStatus(payload.Checks)
+if err != nil {
+    return fmt.Errorf(&quot;database health: %w&quot;, err) // failure path
+}
+if dbStatus != &quot;ok&quot; {
+    return fmt.Errorf(&quot;database unhealthy: %s&quot;, dbStatus)
+}
+</code></pre>
+<p>Key points:</p>
+<ul>
+<li><code>map[string]json.RawMessage</code> decodes every value without type checks, so booleans like <code>live</code>/<code>ready</code> no longer abort decoding.</li>
+<li>Only <code>database</code> is unmarshalled into <code>checkEntry</code>; other keys are ignored.</li>
+<li>Absence of <code>database</code>, invalid JSON, or an empty <code>status</code> all surface as errors (fail-closed readiness).</li>
+</ul>
+<h3><code>cmd/doctor_test.go</code></h3>
+<p>Cover the mixed-type payload and the failure cases:</p>
+<pre><code class="language-go">func TestCheckDatabase_AccurateMessages(t *testing.T) {
+    tests := []struct {
+        name    string
+        checks  map[string]json.RawMessage
+        want    string
+        wantErr string
+    }{
+        {
+            name: &quot;object valued database plus booleans&quot;,
+            checks: map[string]json.RawMessage{
+                &quot;database&quot;: json.RawMessage(`{&quot;status&quot;:&quot;ok&quot;}`),
+                &quot;live&quot;:     json.RawMessage(`true`),
+                &quot;ready&quot;:    json.RawMessage(`true`),
+            },
+            want: &quot;ok&quot;,
+        },
+        {
+            name:    &quot;database missing&quot;,
+            checks:  map[string]json.RawMessage{&quot;live&quot;: json.RawMessage(`true`)},
+            wantErr: &quot;database check missing&quot;,
+        },
+        {
+            name:    &quot;database malformed&quot;,
+            checks:  map[string]json.RawMessage{&quot;database&quot;: json.RawMessage(`true`)},
+            wantErr: &quot;database check malformed&quot;,
+        },
+        {
+            name:    &quot;database empty status&quot;,
+            checks:  map[string]json.RawMessage{&quot;database&quot;: json.RawMessage(`{}`)},
+            wantErr: &quot;database check has empty status&quot;,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got, err := DatabaseStatus(tt.checks)
+            if tt.wantErr != &quot;&quot; {
+                if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+                    t.Fatalf(&quot;err = %v, want containing %q&quot;, err, tt.wantErr)
+                }
+                return
+            }
+            if err != nil {
+                t.Fatalf(&quot;unexpected error: %v&quot;, err)
+            }
+            if got != tt.want {
+                t.Fatalf(&quot;status = %q, want %q&quot;, got, tt.want)
+            }
+        })
+    }
+}
+</code></pre>
+<p><code>TestDoctorCommand_ExitCode</code> should assert a non-zero exit when <code>database</code> is missing/malformed and zero when it is <code>ok</code>, exercising the same path end-to-end.</p>
+<h2>Verification</h2>
+<pre><code class="language-bash">gofmt -l cmd/doctor.go cmd/doctor_test.go   # expect no output
+go build ./...
+go test ./cmd -run 'TestCheckDatabase_AccurateMessages|TestDoctorCommand_ExitCode' -count=1 -short
+</code></pre>
+<p>Expected: <code>ok  github.com/dexdat/hivemind/cmd</code>.</p>
+<p>Per the original report, this exact focused command passed and the Tier 1 guard reported <strong>secrets / build / lint / tests PASS</strong> (guard then timed out on the unrelated long-running suite).</p>
+<h2>Why this is the correct fix</h2>
+<ul>
+<li>The wire type is genuinely polymorphic; the Go type must opt out of eager element decoding.</li>
+<li><code>json.RawMessage</code> preserves the raw bytes and pushes type validation to the one entry that matters, keeping the rest of the map unconstrained.</li>
+<li>Fail-closed semantics make a missing/malformed database check an unhealthy doctor result instead of a silent success.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-json-polymorphic-health-response
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-26T13:50:22.892Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;In a Go CLI, an HTTP health endpoint returned a checks object whose values mixed subsystem objects such as database:{status:ok} with boolean readiness entries such as live:true and ready:true. Decoding checks as map[string]struct{Status string} failed with json: cannot unmarshal bool into Go struct field. The fix was to decode checks as map[string]json.RawMessage, then unmarshal only the database entry into a status struct; malformed or missing database entries remain failures. Verification: focused doctor tests passed and the Tier 1 guard reported secrets/build/lint/tests PASS before timing out.&quot;, &quot;environment&quot;: &quot;github.com/dexdat/hivemind; Go CLI; net/http health endpoint&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-json-polymorphic-health-response&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-26T13:50:22.892Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>Since the repository isn't reachable from this sandbox (GitHub auth unavailable), here is a self-contained solution based on the reported failure, fix files, and confirmation command.</p>
 <hr />
 <h1>Fix: Mixed-Type <code>checks</code> Map in Go JSON Health Response</h1>
 <p><strong>Repo:</strong> <code>dexdat/hivemind</code> · <strong>Commit:</strong> <code>a7cc40af</code> · <strong>Files:</strong> <code>cmd/doctor.go</code>, <code>cmd/doctor_test.go</code></p>

@@ -45,7 +45,251 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-test-tolerance-clause-false-acceptance</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>Problem class: an integration test that accepts 202 OR 500 while injecting an executor hardcoded to fail proves only that dispatch was attempted — not that the skill ran. Because the event row is written before the runner call, a completed-looking row can coexist with a skill that never executed. The tolerance clause (|| 500) silently absorbs exactly the failure the test was meant to catch.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2299-go-test-tolerance-clause-false-acceptance.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>Verified end-to-end. The full solution is written to <code>~/solution.md</code>, with a runnable reproduction at <code>~/tolerance-repro/</code>. Below is the deliverable.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-test-tolerance-clause-false-acceptance</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>Problem class: an integration test that accepts 202 OR 500 while injecting an executor hardcoded to fail proves only that dispatch was attempted — not that the skill ran. Because the event row is written before the runner call, a completed-looking row can coexist with a skill that never executed. The tolerance clause (|| 500) silently absorbs exactly the failure the test was meant to catch.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2299-go-test-tolerance-clause-false-acceptance.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>Verified end-to-end. The full solution is written to <code>~/solution.md</code>, with a runnable reproduction at <code>~/tolerance-repro/</code>. Below is the deliverable.</p>
+<hr />
+<h1>Fixing <code>go-test-tolerance-clause-false-acceptance</code></h1>
+<p><strong>Problem class:</strong> an integration test that accepts <code>202 OR 500</code> while injecting an executor hardcoded to fail proves only that <em>dispatch was attempted</em> — not that the skill <em>ran</em>. Because the event row is written before the runner call, a completed-looking row can coexist with a skill that never executed. The tolerance clause (<code>|| 500</code>) silently absorbs exactly the failure the test was meant to catch.</p>
+<p>This document contains a self-contained reproduction, the root cause, the exact test fix, and a verification procedure that proves the old test is blind and the new test is not.</p>
+<h2>1. Root-cause analysis</h2>
+<p>Three independent defects combine into a false acceptance:</p>
+<ol>
+<li>
+<p><strong>The tolerance clause erases the signal.</strong> <code>if status != 202 &amp;&amp; status != 500</code> accepts the environment-unavailable escape hatch. When the injected executor is <em>hardcoded to fail</em>, the "happy path" can never be observed, so the assertion is tautologically satisfied by the failure branch. A <code>500</code> here is not a valid outcome — it is the bug.</p>
+</li>
+<li>
+<p><strong>The event row is written before the runner call.</strong> Dispatch does roughly:</p>
+</li>
+</ol>
+<p><code>go
+   ev := store.Insert(Event{Status: StatusRunning}) // row exists already
+   if err := exec.Run(skill, payload); err != nil {  // runner may never run
+       store.UpdateStatus(ev.ID, StatusFailed)
+       return 500, ev.ID
+   }
+   store.UpdateStatus(ev.ID, StatusCompleted)</code></p>
+<p>Any test that merely asserts <em>a row exists</em> passes whether or not the executor was invoked. Worse, a mutant that inserts the row as <code>completed</code> and returns <code>202</code> without calling the runner satisfies both <code>202</code> and "row exists".</p>
+<ol>
+<li><strong>No instrumentation of the runner boundary.</strong> With an executor that always fails, there is no observation of (a) whether <code>Run</code> was called, (b) with which skill source/payload, (c) whether the row reached the terminal <code>completed</code> state, or (d) whether the fire counter moved. The test cannot distinguish dispatch from execution.</li>
+</ol>
+<p>The fix is a <strong>recording executor</strong> swapped onto the live manager plus <strong>exact</strong> assertions: <code>202</code> only, executor invoked once with the exact source/payload, exactly one event row, exactly one reaching <code>completed</code>, and the fire counter incremented. The tolerant test is retained, but demoted to a <em>dispatch-contract</em> check.</p>
+<h2>2. Reproduction layout</h2>
+<pre><code>tolerance-repro/
+├── go.mod
+└── skill/
+    ├── manager.go               # production manager + mutant
+    ├── manager_test.go          # tolerant (kept) + strict (new) tests
+    └── mutant_strict_test.go    # build-tagged: strict body vs. the mutant
+</code></pre>
+<p><code>skill/manager.go</code> (core, abridged):</p>
+<pre><code class="language-go">type Executor interface {
+    Run(skill Skill, payload Payload) error
+}
+
+type Manager struct {
+    store   *Store
+    exec    Executor
+    mu      sync.Mutex
+    fireCnt int64
+}
+
+// Dispatch writes the row, then invokes the runner, then transitions the row.
+func (m *Manager) Dispatch(skill Skill, payload Payload) (status int, eventID string) {
+    if m.exec == nil {
+        return 500, &quot;&quot; // environment-unavailable escape hatch
+    }
+
+    ev := m.store.Insert(Event{SkillID: skill.ID, Source: skill.Source, Status: StatusRunning})
+
+    if err := m.exec.Run(skill, payload); err != nil {
+        m.store.UpdateStatus(ev.ID, StatusFailed)
+        return 500, ev.ID
+    }
+
+    m.store.UpdateStatus(ev.ID, StatusCompleted)
+    m.incFire()
+    return 202, ev.ID
+}
+
+// MutantDispatch models the bug the tolerant test cannot see: the row is written
+// as &quot;completed&quot; BEFORE (in fact, without) any runner call.
+func (m *Manager) MutantDispatch(skill Skill, payload Payload) (status int, eventID string) {
+    ev := m.store.Insert(Event{SkillID: skill.ID, Source: skill.Source, Status: StatusCompleted})
+    return 202, ev.ID
+}
+</code></pre>
+<p>The original, broken test:</p>
+<pre><code class="language-go">type alwaysFailExecutor struct{}
+func (alwaysFailExecutor) Run(Skill, Payload) error { return errors.New(&quot;env unavailable&quot;) }
+
+func TestDispatch_TolerantContract(t *testing.T) {
+    store := NewStore()
+    mgr := NewManager(store, alwaysFailExecutor{}) // executor hardcoded to fail
+
+    status, _ := mgr.Dispatch(Skill{ID: &quot;s1&quot;, Source: &quot;skills/foo.md&quot;}, Payload{&quot;msg&quot;: &quot;hi&quot;})
+
+    if status != 202 &amp;&amp; status != 500 { // &lt;-- false-acceptance clause
+        t.Fatalf(&quot;status = %d, want 202 or 500&quot;, status)
+    }
+    if len(store.All()) == 0 {
+        t.Fatal(&quot;expected an event row to be written&quot;) // true even with no execution
+    }
+}
+</code></pre>
+<h2>3. The exact fix</h2>
+<h3>3.1 Add a recording executor (the instrument)</h3>
+<pre><code class="language-go">type call struct {
+    Skill   Skill
+    Payload Payload
+}
+
+type recordingExecutor struct {
+    mu    sync.Mutex
+    calls []call
+    err   error
+}
+
+func (r *recordingExecutor) Run(s Skill, p Payload) error {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    r.calls = append(r.calls, call{Skill: s, Payload: p})
+    return r.err
+}
+
+func (r *recordingExecutor) Calls() []call {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    out := make([]call, len(r.calls))
+    copy(out, r.calls)
+    return out
+}
+</code></pre>
+<h3>3.2 Assert the strict contract on the live manager</h3>
+<pre><code class="language-go">func assertStrict(t *testing.T, setup func(store *Store, rec *recordingExecutor) (*Manager, func(Skill, Payload) (int, string))) {
+    t.Helper()
+
+    store := NewStore()
+    rec := &amp;recordingExecutor{}
+    mgr, dispatch := setup(store, rec)
+
+    skill := Skill{ID: &quot;s1&quot;, Source: &quot;skills/foo.md&quot;}
+    payload := Payload{&quot;msg&quot;: &quot;hi&quot;}
+
+    status, _ := dispatch(skill, payload)
+
+    // 1. Accepted only. The executor is wired to succeed, so 500 is a real failure.
+    if status != 202 {
+        t.Fatalf(&quot;status = %d, want 202&quot;, status)
+    }
+
+    // 2. Executor actually invoked, exactly once, with the exact source/payload.
+    calls := rec.Calls()
+    if len(calls) != 1 {
+        t.Fatalf(&quot;executor invocations = %d, want 1&quot;, len(calls))
+    }
+    if calls[0].Skill.Source != skill.Source {
+        t.Fatalf(&quot;executor skill source = %q, want %q&quot;, calls[0].Skill.Source, skill.Source)
+    }
+    if !reflect.DeepEqual(calls[0].Payload, payload) {
+        t.Fatalf(&quot;executor payload = %#v, want %#v&quot;, calls[0].Payload, payload)
+    }
+
+    // 3. Exactly one event row, and exactly one reached &quot;completed&quot;.
+    events := store.All()
+    completed := 0
+    for _, e := range events {
+        if e.Status == StatusCompleted {
+            completed++
+        }
+    }
+    if len(events) != 1 {
+        t.Fatalf(&quot;event rows = %d, want exactly 1&quot;, len(events))
+    }
+    if completed != 1 {
+        t.Fatalf(&quot;completed rows = %d, want exactly 1&quot;, completed)
+    }
+
+    // 4. Fire counter incremented.
+    if got := mgr.FireCount(); got != 1 {
+        t.Fatalf(&quot;fire counter = %d, want 1&quot;, got)
+    }
+}
+
+// The real regression test: recording executor swapped onto the live manager.
+func TestDispatch_StrictAgainstRecordingExecutor(t *testing.T) {
+    assertStrict(t, func(store *Store, rec *recordingExecutor) (*Manager, func(Skill, Payload) (int, string)) {
+        mgr := NewManager(store, rec)
+        return mgr, mgr.Dispatch
+    })
+}
+</code></pre>
+<h3>3.3 Keep the tolerant test — as a dispatch-contract check only</h3>
+<p>Rename/comment it so its scope is explicit. It may assert <code>202 || 500</code> and that a row was written; it must <strong>not</strong> be treated as execution coverage.</p>
+<pre><code class="language-go">// TestDispatch_TolerantContract verifies only the dispatch contract:
+// a request is either accepted or explicitly refused because the environment
+// is unavailable. It does NOT prove the skill ran.
+func TestDispatch_TolerantContract(t *testing.T) { /* unchanged */ }
+</code></pre>
+<h3>3.4 Prove the mutant is rejected</h3>
+<p>Build-tagged so the default suite stays green; <code>-tags mutant</code> points the strict body at the buggy implementation:</p>
+<pre><code class="language-go">//go:build mutant
+
+package skill
+
+import &quot;testing&quot;
+
+func TestStrictAgainstMutant(t *testing.T) {
+    assertStrict(t, func(store *Store, rec *recordingExecutor) (*Manager, func(Skill, Payload) (int, string)) {
+        mgr := NewManager(store, rec)
+        return mgr, mgr.MutantDispatch
+    })
+}
+</code></pre>
+<h2>4. Verification</h2>
+<h3>4.1 Default build — fixed tests pass</h3>
+<pre><code class="language-console">$ cd tolerance-repro &amp;&amp; go test ./... -v
+=== RUN   TestDispatch_TolerantContract
+--- PASS: TestDispatch_TolerantContract (0.00s)
+=== RUN   TestTolerantContract_AcceptsMutant
+--- PASS: TestTolerantContract_AcceptsMutant (0.00s)
+=== RUN   TestDispatch_StrictAgainstRecordingExecutor
+--- PASS: TestDispatch_StrictAgainstRecordingExecutor (0.00s)
+PASS
+ok      tolerance-repro/skill   0.002s
+</code></pre>
+<p><code>TestTolerantContract_AcceptsMutant</code> deliberately runs the <strong>old</strong> assertions against the mutant and passes — this is the documented false acceptance: the row is <code>completed</code> while <code>FireCount() == 0</code>.</p>
+<h3>4.2 Mutant build — the new test catches the bug</h3>
+<pre><code class="language-console">$ go test -tags mutant ./... -run 'TestStrictAgainstMutant|TestTolerantContract_AcceptsMutant' -v
+=== RUN   TestTolerantContract_AcceptsMutant
+--- PASS: TestTolerantContract_AcceptsMutant (0.00s)
+=== RUN   TestStrictAgainstMutant
+    mutant_strict_test.go:11: executor invocations = 0, want 1
+--- FAIL: TestStrictAgainstMutant (0.00s)
+FAIL
+FAIL    tolerance-repro/skill   0.004s
+FAIL
+</code></pre>
+<p>The tolerant clause passes the mutant; the strict contract fails it on the first execution-specific assertion. This is the desired discrimination.</p>
+<h3>4.3 Apply to a real repo</h3>
+<ol>
+<li>Locate every <code>if status != 202 &amp;&amp; status != 500</code> (or similar <code>||</code>-tolerance) assertion in integration tests.</li>
+<li>Replace the hardcoded failing executor with a <code>recordingExecutor</code> injected into the real manager/handler under test.</li>
+<li>Assert <code>202</code> only, the recorded <code>(skill.Source, payload)</code>, exactly one event row with terminal <code>completed</code>, and the fire counter delta.</li>
+<li>Keep the tolerant assertion in a test named <code>..._TolerantContract</code> with a comment that it only covers dispatch, never execution.</li>
+<li>Add a build-tagged mutant (or a table of intentionally-broken managers) so CI can prove the strict test actually fails when execution is skipped.</li>
+</ol>
+<h3>4.4 Acceptance criteria</h3>
+<ul>
+<li>[ ] The strict test fails if <code>Run</code> is never called (mutant proves it).</li>
+<li>[ ] The strict test fails on payload/source mismatch.</li>
+<li>[ ] The strict test fails if zero or more than one row reaches <code>completed</code>.</li>
+<li>[ ] The strict test fails if the fire counter does not increment by exactly one.</li>
+<li>[ ] The tolerant test is documented as dispatch-contract-only and never counted as execution coverage.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-test-tolerance-clause-false-acceptance
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-25T04:53:55.203Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;An integration test asserting status is 202 OR 500 (env-unavailable escape hatch) with executors hardcoded to fail proves dispatch, not execution: the event row is written BEFORE the runner call, so a completed-looking row can coexist with a skill that never ran. Judge pierced it. Fix pattern: recording executor closure swapped onto the live manager, assert 202-only + executor invoked with skill source/payload + exactly one event row reaching completed + fire counter incremented; keep the tolerant test only as dispatch-contract check.&quot;, &quot;environment&quot;: &quot;&quot;, &quot;language&quot;: &quot;&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-test-tolerance-clause-false-acceptance&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-25T04:53:55.203Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>Verified end-to-end. The full solution is written to <code>~/solution.md</code>, with a runnable reproduction at <code>~/tolerance-repro/</code>. Below is the deliverable.</p>
 <hr />
 <h1>Fixing <code>go-test-tolerance-clause-false-acceptance</code></h1>
 <p><strong>Problem class:</strong> an integration test that accepts <code>202 OR 500</code> while injecting an executor hardcoded to fail proves only that <em>dispatch was attempted</em> — not that the skill <em>ran</em>. Because the event row is written before the runner call, a completed-looking row can coexist with a skill that never executed. The tolerance clause (<code>|| 500</code>) silently absorbs exactly the failure the test was meant to catch.</p>

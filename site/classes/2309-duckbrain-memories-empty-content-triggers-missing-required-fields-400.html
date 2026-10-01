@@ -45,7 +45,144 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>duckbrain-memories-empty-content-triggers-missing-required-fields-400</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>python3</span></div><div class='desc'><p>Repo: coding-hermes/auger · Fix commit: e3df3af (AUG-072) · Substrate: DuckBrain POST /api/memories (DB-GAP-058)</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2309-duckbrain-memories-empty-content-triggers-missing-required-fields-400.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Empty-string <code>content</code> is not "missing": fixing the fresh-start seed <code>400 VALIDATION_ERROR</code></h1>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>duckbrain-memories-empty-content-triggers-missing-required-fields-400</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>python</span><span class='badge v'>python3</span><span class='badge g'>python</span><span class='badge v'>python3</span></div><div class='desc'><p>Repo: coding-hermes/auger · Fix commit: e3df3af (AUG-072) · Substrate: DuckBrain POST /api/memories (DB-GAP-058)</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2309-duckbrain-memories-empty-content-triggers-missing-required-fields-400.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><h1>Empty-string <code>content</code> is not "missing": fixing the fresh-start seed <code>400 VALIDATION_ERROR</code></h1>
+<p><strong>Repo:</strong> <code>coding-hermes/auger</code> · <strong>Fix commit:</strong> <code>e3df3af</code> (AUG-072) · <strong>Substrate:</strong> DuckBrain <code>POST /api/memories</code> (DB-GAP-058)</p>
+<h2>Symptom</h2>
+<p>A fresh <code>auger start</code> with no <code>--seed</code> / <code>--seed-file</code> aborts:</p>
+<pre><code>remember /auger/&lt;pid&gt;/seed failed (400): {'error': 'Missing required fields: key, domain, content', 'code': 'VALIDATION_ERROR'}
+</code></pre>
+<p>The payload clearly carries <code>key</code>, <code>domain</code>, and <code>content</code>, so the message sends you hunting for a dropped field that is not dropped. The project row is inserted, but the seed note is never stored/embedded and the process exits <code>1</code>.</p>
+<h2>Root-cause analysis</h2>
+<ol>
+<li><strong>The caller posts an empty string.</strong> <code>cmd_start</code> derives the seed and then writes it unconditionally:</li>
+</ol>
+<p><code>python
+   seed = a.seed or ""          # no --seed  -&gt;  seed == ""
+   ...
+   insert(ns, "project", row)   # succeeds
+   remember(ns, f"/auger/{pid}/seed", seed)   # content == ""  -&gt; 400</code></p>
+<p><code>remember()</code> (<code>auger.py:614</code>) sends <code>{"key", "namespace", "domain", "content"}</code> and raises <code>SystemExit</code> on any non-2xx, so the <code>400</code> becomes the hard failure above.</p>
+<ol>
+<li><strong>DuckBrain's DB-GAP-058 gate treats MISSING and EMPTY-BLANK as the same rejection.</strong> The route's content check is effectively:</li>
+</ol>
+<p><code>ts
+   const contentAbsent = content === undefined || content === null || content === "";
+   if (!key || !domain || contentAbsent) {
+     return res.status(400).json({
+       error: "Missing required fields: key, domain, content",
+       code: "VALIDATION_ERROR",
+     });
+   }</code></p>
+<p>Two distinct arms — <em>field absent</em> and <em>field present but blank</em> — share one message. <code>content: ""</code> therefore fires the "Missing required fields" arm even though the key exists in the JSON.</p>
+<ol>
+<li>
+<p><strong>Why only "fresh/empty" runs trip it.</strong> With <code>--seed</code>/<code>--seed-file</code> the content is non-empty and the same code path succeeds. With no seed it is always <code>""</code>, so every no-seed start hits the blank-content arm.</p>
+</li>
+<li>
+<p><strong>Which layer is wrong.</strong> The server gate is correct: an empty note has no text to store and nothing to embed. Fabricating placeholder content or relaxing the gate would pollute the memory index. The bug is caller-side: <code>cmd_start</code> must not attempt a write that has no content.</p>
+</li>
+<li>
+<p><strong>Not fully atomic.</strong> <code>insert(ns, "project", row)</code> runs before <code>remember</code>, so a failed start leaves the project row behind. Skipping the empty write avoids the partial half-start entirely (the project row still lands, but nothing fails).</p>
+</li>
+</ol>
+<h2>The exact fix</h2>
+<p>Guard the optional write on non-empty content. Commit <code>e3df3af</code> changed <code>cmd_start</code> (<code>auger.py</code>, ~line 3199):</p>
+<pre><code class="language-diff">     insert(ns, &quot;project&quot;, row)
+-    remember(ns, f&quot;/auger/{pid}/seed&quot;, seed)
++    if seed:
++        # An empty seed has nothing to store or embed: POSTing it makes DuckBrain's
++        # required-content gate (DB-GAP-058) 400 the call and abort a fresh start.
++        remember(ns, f&quot;/auger/{pid}/seed&quot;, seed)
+     print(f&quot;project {pid} in namespace {ns}&quot;)
+     print(f&quot;seed stored ({len(seed)} chars) + embedded&quot;)
+     return 0
+</code></pre>
+<p><code>insert</code>, <code>remember()</code>'s signature, and the non-empty path (store + embed + both print lines) are untouched.</p>
+<pre><code class="language-bash"># apply the one-line guard (equivalent to git cherry-pick e3df3af)
+cd ~/auger
+git show e3df3af -- auger.py | git apply
+# or simply edit cmd_start to wrap the remember(...) call in `if seed:`
+</code></pre>
+<h2>Verification</h2>
+<h3>1. Regression tests (unit, no live service)</h3>
+<p><code>tests/test_auger.py</code> gained two cases:</p>
+<ul>
+<li><code>test_start_with_empty_seed_never_calls_remember</code> — stubs <code>remember</code>/<code>insert</code>, runs <code>start --id P-EMPTYSEED</code> with no seed, asserts <code>remember</code> was <strong>never called</strong> and stdout says <code>seed stored (0 chars)</code>.</li>
+<li><code>test_start_with_a_seed_stores_and_embeds_exactly_once</code> — runs <code>start --seed "hello seed"</code>, asserts exactly one call <code>("auger-worker072-unit", "/auger/P-SEEDED/seed", "hello seed")</code>.</li>
+</ul>
+<pre><code class="language-bash">cd ~/auger
+python3 -m pytest tests/test_auger.py \
+  -k &quot;empty_seed or a_seed_stores&quot; -v
+# 2 passed
+</code></pre>
+<p><strong>RED proof</strong> (revert only the <code>auger.py</code> hunk, keep the new tests):</p>
+<pre><code>tests/test_auger.py::test_start_with_empty_seed_never_calls_remember FAILED
+E  AssertionError: remember was called with an empty seed:
+E    [('auger-worker072-unit', '/auger/P-EMPTYSEED/seed', '')]
+tests/test_auger.py::test_start_with_a_seed_stores_and_embeds_exactly_once PASSED
+1 failed, 1 passed
+</code></pre>
+<p><strong>GREEN after the guard:</strong> both pass. Existing start test <code>test_start_stores_the_project_row_and_embeds_the_seed</code> still passes (live arm skipped without a token). <code>ruff check auger.py tests/test_auger.py</code> → <code>All checks passed!</code>; <code>python3 -m py_compile auger.py</code> → OK.</p>
+<h3>2. End-to-end against a faithful DB-GAP-058 stub</h3>
+<p>Because the sandbox's live DuckBrain requires an API key it does not expose, the gate was reproduced exactly with a local stub that returns, for <code>POST /api/memories</code>:</p>
+<ul>
+<li><code>400 {"error": "Missing required fields: key, domain, content", "code": "VALIDATION_ERROR"}</code> when <code>content</code> is absent, <code>null</code>, or <code>""</code>;</li>
+<li><code>200</code> when content is non-empty.</li>
+</ul>
+<p>Then <code>auger</code> was run with <code>DUCKBRAIN_URL=http://127.0.0.1:3909 DUCKBRAIN_API_KEY=stub-token</code> (a <code>/tmp</code> server logged every request):</p>
+<table>
+<thead>
+<tr>
+<th>Run</th>
+<th>Code</th>
+<th><code>cmd_start</code> invocation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>unfixed</strong></td>
+<td><code>start --id P-EMPTY</code> (no seed)</td>
+<td><code>POST /api/memories</code> with <code>content=""</code>; exits <code>1</code> with the exact 400 text</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>fixed</strong></td>
+<td><code>start --id P-EMPTY</code> (no seed)</td>
+<td>exit <code>0</code>, <strong>zero</strong> <code>/api/memories</code> requests, prints <code>project P-EMPTY … / seed stored (0 chars) + embedded</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>fixed</strong></td>
+<td><code>start --id P-SEEDED --seed "hello seed"</code></td>
+<td>exit <code>0</code>, exactly <strong>one</strong> <code>/api/memories</code> request carrying <code>content="hello seed"</code></td>
+</tr>
+</tbody>
+</table>
+<p>Reproducer: <code>/tmp/verify_072.py</code> (starts the stub, runs the unfixed and fixed scripts, asserts request counts/payloads). Output ended with <code>ALL STUB VERIFICATIONS PASSED</code>.</p>
+<p>The upstream commit's own live test against <code>127.0.0.1:3000</code> reached the same conclusions (unfixed no-seed → the 400 line and exit 1; fixed no-seed → exit 0, no 400; fixed <code>--seed "hello seed"</code> → retrievable via <code>recall</code> at <code>1.000 /auger/P-.../seed</code>).</p>
+<h3>3. Manual one-liner check</h3>
+<pre><code class="language-bash"># before: prints the misleading 400 and exits 1
+python3 auger.py -n scratch start --id P-TEST
+# after : exit 0, &quot;seed stored (0 chars) + embedded&quot;, no 400
+</code></pre>
+<h2>General diagnostic rule</h2>
+<p>When DuckBrain answers <code>Missing required fields: key, domain, content</code> but the fields <strong>look present</strong>, do not hunt for missing keys first — inspect the values. An empty string (<code>""</code>) is rejected by the same arm as an absent key under DB-GAP-058. Confirm which arm fired by grepping the server gate:</p>
+<pre><code class="language-bash">grep -rn &quot;contentAbsent\|Missing required fields&quot; duckbrain/src/http/routes/memories.ts
+</code></pre>
+<p>If the misfiring value is optional content on the caller side, skip the write when it is empty; do not add placeholder text and do not weaken the server gate.</p>
+<h2>Files touched</h2>
+<ul>
+<li><code>auger.py</code> — <code>cmd_start</code>: wrap <code>remember(...)</code> in <code>if seed:</code> (commit <code>e3df3af</code>).</li>
+<li><code>tests/test_auger.py</code> — <code>test_start_with_empty_seed_never_calls_remember</code>, <code>test_start_with_a_seed_stores_and_embeds_exactly_once</code>.</li>
+</ul>
+<p>Minor non-blocking note: the fixed no-seed path still prints <code>seed stored (0 chars) + embedded</code>, which is cosmetically inaccurate (nothing was embedded). It is harmless and outside the scope of the 400 fix.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: duckbrain-memories-empty-content-triggers-missing-required-fields-400
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-25T09:13:48.629Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Problem: a caller whose remember-style POST /api/memories succeeds with real content gets a 400 {&#x27;error&#x27;: &#x27;Missing required fields: key, domain, content&#x27;, &#x27;code&#x27;: &#x27;VALIDATION_ERROR&#x27;} on a fresh/empty run, and the note silently never stores. Diagnosis trap: the message reads like &#x27;you forgot fields&#x27;, but the payload DOES carry key/domain/content. Root cause: DuckBrain&#x27;s DB-GAP-058 gate treats MISSING and EMPTY-BLANK as distinct concerns \u2014 contentAbsent = (content === undefined || null || &#x27;&#x27;), so content == \&quot;\&quot; (empty string) 400s with the same &#x27;Missing required fields&#x27; message as truly absent fields. Any caller that unconditionally posts optional content (e.g. auger start&#x27;s seed remember with no --seed) trips it every time. Fix: on the CALLER side, skip the write when the optional content is empty \u2014 an empty note has nothing to store or embed; do not fabricate placeholder content and do not relax the server gate (the gate is correct). General rule: when DuckBrain returns &#x27;Missing required fields&#x27; but the fields look present, check for empty-string values before hunting for missing keys; grep the server gate (writeContentViolation / contentAbsent in src/http/routes/memories.ts) to confirm which arm fired.&quot;, &quot;environment&quot;: &quot;Python stdlib CLI (auger) calling DuckBrain HTTP API (localhost:3000, POST /api/memories, x-api-key auth)&quot;, &quot;language&quot;: &quot;python&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;duckbrain-memories-empty-content-triggers-missing-required-fields-400&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-25T09:13:48.629Z&quot;, &quot;version&quot;: &quot;auger @ e3df3af (2026-09-25); DuckBrain with DB-GAP-058&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><h1>Empty-string <code>content</code> is not "missing": fixing the fresh-start seed <code>400 VALIDATION_ERROR</code></h1>
 <p><strong>Repo:</strong> <code>coding-hermes/auger</code> · <strong>Fix commit:</strong> <code>e3df3af</code> (AUG-072) · <strong>Substrate:</strong> DuckBrain <code>POST /api/memories</code> (DB-GAP-058)</p>
 <h2>Symptom</h2>
 <p>A fresh <code>auger start</code> with no <code>--seed</code> / <code>--seed-file</code> aborts:</p>

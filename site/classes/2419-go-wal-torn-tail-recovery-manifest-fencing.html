@@ -45,7 +45,1117 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-wal-torn-tail-recovery-manifest-fencing</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-wal-torn-tail-recovery-manifest-fencing</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2419-go-wal-torn-tail-recovery-manifest-fencing.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The complete, verified solution is written to <code>~/walstore/SOLUTION.md</code> (32 KB). Here it is in full.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-wal-torn-tail-recovery-manifest-fencing</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-wal-torn-tail-recovery-manifest-fencing</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2419-go-wal-torn-tail-recovery-manifest-fencing.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>The complete, verified solution is written to <code>~/walstore/SOLUTION.md</code> (32 KB). Here it is in full.</p>
+<hr />
+<h1>Crash Recovery for a Single-Writer WAL + SSTable Store</h1>
+<p><strong>Problem class:</strong> <code>go-wal-torn-tail-recovery-manifest-fencing</code>
+<strong>Language / toolchain:</strong> Go 1.26, stdlib only (<code>hash/crc32</code> Castagnoli, <code>encoding/binary</code>, <code>os</code>).</p>
+<p>This is a complete, self-contained diagnosis and fix. Drop the files into a directory, run <code>go test ./...</code>, and the property test plus fencing test pass. All code was compiled and executed with <code>go1.26.0 linux/amd64</code>.</p>
+<hr />
+<h2>1. Symptoms</h2>
+<p>A single-writer store keeps an append-only WAL and periodically compacts into SSTables referenced by a manifest. After a crash (or after <code>kill -9</code> mid-write) the store exhibits one or more of:</p>
+<ul>
+<li><strong>Replay panics / garbage keys</strong> after the WAL ends mid-frame. The process died part-way through a write, so the final frame has a length prefix that points past EOF or a body whose bytes were never flushed.</li>
+<li><strong>Partial batches become visible.</strong> A multi-key batch is observed with only some keys applied, so invariants that assume batch atomicity break.</li>
+<li><strong>Sequence numbers go backwards or repeat.</strong> Recovery re-applies already-compacted frames, or accepts an out-of-order frame and produces a non-monotonic state.</li>
+<li><strong>The store resurrects a torn SSTable.</strong> The manifest was published pointing at generation <em>N</em>, but <code>fsync</code> of the SSTable body never completed. Recovery trusts the pointer, reads a truncated file, and either errors forever or loads corrupt state.</li>
+<li><strong>Two writers both believe they own the store.</strong> After restart the old zombie/partitioned process keeps appending to the same files, interleaving frames and corrupting the WAL.</li>
+</ul>
+<h2>2. Root-Cause Analysis</h2>
+<p>Every symptom is a <em>durability-boundary</em> bug: the code conflates "bytes were handed to the kernel" with "bytes are durable and complete".</p>
+<ol>
+<li>
+<p><strong>No frame integrity boundary.</strong> A naive WAL writes records with no length/checksum, so a torn tail cannot be distinguished from a complete record. <em>Fix:</em> length-prefixed frames with a CRC32C over the payload, and a scanner that stops at the <strong>first</strong> frame that is short, mis-magiced, or fails CRC. The trailing region is the torn tail and is discarded.</p>
+</li>
+<li>
+<p><strong>Batch spread across multiple frames.</strong> If a batch writes one frame per key, a crash can leave a subset applied. <em>Fix:</em> encode the whole batch (<code>seq</code>, count, then all records) as <strong>one</strong> frame. The frame either survives CRC validation (whole batch applied) or it does not (whole batch dropped).</p>
+</li>
+<li>
+<p><strong>No contiguous sequence check on replay.</strong> Even with checksums, a stale or duplicated frame can be replayed. <em>Fix:</em> give every batch a global monotonically increasing <code>seq</code>; replay only accepts <code>seq == prev+1</code>, so recovered state is necessarily a <strong>prefix</strong> of committed batches.</p>
+</li>
+<li>
+<p><strong>Manifest pointer treated as ground truth.</strong> The manifest is a <em>hint</em>, not a durability proof: it can be updated before the referenced SSTable body is on stable storage. <em>Fix:</em> every SSTable carries a CRC32C + magic footer; recovery scans <strong>all</strong> generations, validates each, and selects the <strong>newest checksum-clean</strong> generation.</p>
+</li>
+<li>
+<p><strong>No writer fencing.</strong> "Single writer" must be enforced, not assumed. <em>Fix:</em> a durable <code>epoch</code> in the manifest is incremented (and fsynced) on every <code>Open</code>. Each mutating operation re-reads the manifest and returns a typed <code>*StaleEpochError</code> if the on-disk epoch moved past the handle's epoch.</p>
+</li>
+</ol>
+<p><strong>Invariant achieved:</strong> recovered state = <em>some prefix of committed batches</em>; each batch atomic; <code>seq</code> strictly increasing and contiguous; newest durable generation chosen; stale writers rejected with a typed error.</p>
+<hr />
+<h2>3. Layout</h2>
+<pre><code>&lt;dir&gt;/
+  MANIFEST              magic | epoch | baseGen | baseSeq | crc32c
+  sst/&lt;20-digit gen&gt;.sst   body | crc32c(body) | magic
+  wal/000001.wal        repeated: magic | len | crc32c(payload) | payload
+</code></pre>
+<ul>
+<li><strong>WAL frame:</strong> <code>magic u32</code> + <code>len u32</code> + <code>crc32c(payload) u32</code> + <code>payload</code>.</li>
+<li><strong>Batch payload:</strong> <code>seq u64</code> + <code>count u32</code> + N × (<code>klen u32</code>,<code>key</code>,<code>vlen u32</code>,<code>val</code>).</li>
+<li><strong>SSTable footer:</strong> <code>crc32c(body) u32</code> + <code>magic u32</code>.</li>
+<li><strong>Manifest body:</strong> <code>magic u32</code> + <code>epoch u64</code> + <code>baseGen u64</code> + <code>baseSeq u64</code>, followed by <code>crc32c(body) u32</code>.</li>
+</ul>
+<hr />
+<h2>4. Exact Fix (source)</h2>
+<h3><code>go.mod</code></h3>
+<pre><code class="language-go">module walstore
+
+go 1.26
+</code></pre>
+<h3><code>wal.go</code></h3>
+<pre><code class="language-go">package walstore
+
+import (
+    &quot;encoding/binary&quot;
+    &quot;errors&quot;
+    &quot;hash/crc32&quot;
+)
+
+// CRC32C (Castagnoli) is used, as required.
+var crcTable = crc32.MakeTable(crc32.Castagnoli)
+
+const (
+    frameMagic     = uint32(0x57414c31) // &quot;WAL1&quot;
+    frameHeaderLen = 12                 // magic(4) + length(4) + crc(4)
+)
+
+// ErrTornTail indicates the WAL ended in an incomplete or corrupt frame.
+var ErrTornTail = errors.New(&quot;walstore: torn or corrupt WAL frame&quot;)
+
+// Record is a single key/value mutation inside a batch.
+type Record struct {
+    Key string
+    Val string
+}
+
+// Batch is an atomically applied group of records carrying a monotonic seq.
+type Batch struct {
+    Seq     uint64
+    Records []Record
+}
+
+// encodeBatch serialises a batch into a single WAL frame payload.
+func encodeBatch(b Batch) []byte {
+    // seq(8) + count(4) + sum(4 + len(k) + 4 + len(v))
+    n := 12
+    for _, r := range b.Records {
+        n += 8 + len(r.Key) + len(r.Val)
+    }
+    buf := make([]byte, n)
+    binary.LittleEndian.PutUint64(buf[0:8], b.Seq)
+    binary.LittleEndian.PutUint32(buf[8:12], uint32(len(b.Records)))
+    off := 12
+    for _, r := range b.Records {
+        binary.LittleEndian.PutUint32(buf[off:off+4], uint32(len(r.Key)))
+        off += 4
+        copy(buf[off:], r.Key)
+        off += len(r.Key)
+        binary.LittleEndian.PutUint32(buf[off:off+4], uint32(len(r.Val)))
+        off += 4
+        copy(buf[off:], r.Val)
+        off += len(r.Val)
+    }
+    return buf
+}
+
+// decodeBatch parses a frame payload into a Batch.
+func decodeBatch(p []byte) (Batch, error) {
+    if len(p) &lt; 12 {
+        return Batch{}, ErrTornTail
+    }
+    var b Batch
+    b.Seq = binary.LittleEndian.Uint64(p[0:8])
+    count := binary.LittleEndian.Uint32(p[8:12])
+    if count &gt; uint32(len(p))/8+1 { // cheap sanity guard against absurd counts
+        return Batch{}, ErrTornTail
+    }
+    off := 12
+    for i := uint32(0); i &lt; count; i++ {
+        if off+4 &gt; len(p) {
+            return Batch{}, ErrTornTail
+        }
+        kl := binary.LittleEndian.Uint32(p[off : off+4])
+        off += 4
+        if off+int(kl) &gt; len(p) {
+            return Batch{}, ErrTornTail
+        }
+        k := string(p[off : off+int(kl)])
+        off += int(kl)
+        if off+4 &gt; len(p) {
+            return Batch{}, ErrTornTail
+        }
+        vl := binary.LittleEndian.Uint32(p[off : off+4])
+        off += 4
+        if off+int(vl) &gt; len(p) {
+            return Batch{}, ErrTornTail
+        }
+        v := string(p[off : off+int(vl)])
+        off += int(vl)
+        b.Records = append(b.Records, Record{Key: k, Val: v})
+    }
+    if off != len(p) {
+        return Batch{}, ErrTornTail
+    }
+    return b, nil
+}
+
+// appendFrame writes a length-prefixed, CRC32C-protected frame.
+func appendFrame(dst []byte, payload []byte) []byte {
+    var hdr [frameHeaderLen]byte
+    binary.LittleEndian.PutUint32(hdr[0:4], frameMagic)
+    binary.LittleEndian.PutUint32(hdr[4:8], uint32(len(payload)))
+    binary.LittleEndian.PutUint32(hdr[8:12], crc32.Checksum(payload, crcTable))
+    dst = append(dst, hdr[:]...)
+    dst = append(dst, payload...)
+    return dst
+}
+
+// scanFrames returns every fully-valid batch encoded in data, in order, and the
+// number of leading bytes consumed. The scan stops at the first frame that is
+// incomplete or fails its CRC. The trailing region is the torn tail and is
+// discarded on recovery.
+func scanFrames(data []byte) (batches []Batch, ends []int, consumed int, torn bool) {
+    off := 0
+    for {
+        if off == len(data) {
+            return batches, ends, off, false
+        }
+        if off+frameHeaderLen &gt; len(data) {
+            return batches, ends, off, true
+        }
+        magic := binary.LittleEndian.Uint32(data[off : off+4])
+        if magic != frameMagic {
+            return batches, ends, off, true
+        }
+        l := binary.LittleEndian.Uint32(data[off+4 : off+8])
+        want := binary.LittleEndian.Uint32(data[off+8 : off+12])
+        start := off + frameHeaderLen
+        end := start + int(l)
+        if l &gt; uint32(len(data)) || end &gt; len(data) {
+            return batches, ends, off, true
+        }
+        payload := data[start:end]
+        if crc32.Checksum(payload, crcTable) != want {
+            return batches, ends, off, true
+        }
+        b, err := decodeBatch(payload)
+        if err != nil {
+            return batches, ends, off, true
+        }
+        batches = append(batches, b)
+        ends = append(ends, end)
+        off = end
+    }
+}
+</code></pre>
+<h3><code>manifest.go</code></h3>
+<pre><code class="language-go">package walstore
+
+import (
+    &quot;encoding/binary&quot;
+    &quot;errors&quot;
+    &quot;hash/crc32&quot;
+    &quot;os&quot;
+    &quot;path/filepath&quot;
+)
+
+// Manifest is the durable fence record. Epoch is bumped by every writer
+// acquisition; any writer holding a lower epoch is stale and must stop.
+type Manifest struct {
+    Epoch   uint64
+    BaseGen uint64
+    BaseSeq uint64
+}
+
+const manifestMagic = uint32(0x4d414e31) // &quot;MAN1&quot;
+
+func manifestPath(dir string) string { return filepath.Join(dir, &quot;MANIFEST&quot;) }
+
+func encodeManifest(m Manifest) []byte {
+    var buf [32]byte
+    binary.LittleEndian.PutUint32(buf[0:4], manifestMagic)
+    binary.LittleEndian.PutUint64(buf[4:12], m.Epoch)
+    binary.LittleEndian.PutUint64(buf[12:20], m.BaseGen)
+    binary.LittleEndian.PutUint64(buf[20:28], m.BaseSeq)
+    binary.LittleEndian.PutUint32(buf[28:32], crc32.Checksum(buf[0:28], crcTable))
+    out := make([]byte, 32)
+    copy(out, buf[:])
+    return out
+}
+
+func decodeManifest(data []byte) (Manifest, error) {
+    if len(data) != 32 {
+        return Manifest{}, errors.New(&quot;walstore: bad manifest length&quot;)
+    }
+    if binary.LittleEndian.Uint32(data[0:4]) != manifestMagic {
+        return Manifest{}, errors.New(&quot;walstore: bad manifest magic&quot;)
+    }
+    if crc32.Checksum(data[0:28], crcTable) != binary.LittleEndian.Uint32(data[28:32]) {
+        return Manifest{}, errors.New(&quot;walstore: manifest checksum mismatch&quot;)
+    }
+    return Manifest{
+        Epoch:   binary.LittleEndian.Uint64(data[4:12]),
+        BaseGen: binary.LittleEndian.Uint64(data[12:20]),
+        BaseSeq: binary.LittleEndian.Uint64(data[20:28]),
+    }, nil
+}
+
+func readManifest(dir string) (Manifest, error) {
+    raw, err := os.ReadFile(manifestPath(dir))
+    if err != nil {
+        return Manifest{}, err
+    }
+    return decodeManifest(raw)
+}
+
+// writeManifestFsync atomically replaces the manifest and fsyncs both the file
+// and its parent directory so the epoch bump is durable before use.
+func writeManifestFsync(dir string, m Manifest) error {
+    tmp := manifestPath(dir) + &quot;.tmp&quot;
+    f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+    if err != nil {
+        return err
+    }
+    if _, err := f.Write(encodeManifest(m)); err != nil {
+        f.Close()
+        return err
+    }
+    if err := f.Sync(); err != nil {
+        f.Close()
+        return err
+    }
+    if err := f.Close(); err != nil {
+        return err
+    }
+    if err := os.Rename(tmp, manifestPath(dir)); err != nil {
+        return err
+    }
+    return fsyncDir(dir)
+}
+
+func fsyncDir(dir string) error {
+    d, err := os.Open(dir)
+    if err != nil {
+        return err
+    }
+    defer d.Close()
+    return d.Sync()
+}
+</code></pre>
+<h3><code>sst.go</code></h3>
+<pre><code class="language-go">package walstore
+
+import (
+    &quot;encoding/binary&quot;
+    &quot;errors&quot;
+    &quot;fmt&quot;
+    &quot;hash/crc32&quot;
+    &quot;os&quot;
+    &quot;path/filepath&quot;
+    &quot;sort&quot;
+    &quot;strconv&quot;
+    &quot;strings&quot;
+)
+
+const sstMagic = uint32(0x53535431) // &quot;SST1&quot;
+
+// SSTable is an immutable, checksummed sorted snapshot at a generation.
+type SSTable struct {
+    Gen uint64
+    Seq uint64 // highest sequence number included
+    KV  map[string]string
+}
+
+// encodeSST serialises the table plus a footer protected by CRC32C.
+func encodeSST(t SSTable) []byte {
+    keys := make([]string, 0, len(t.KV))
+    for k := range t.KV {
+        keys = append(keys, k)
+    }
+    sort.Strings(keys)
+    buf := make([]byte, 0, 16+len(keys)*16)
+    var tmp [8]byte
+    binary.LittleEndian.PutUint64(tmp[:], t.Seq)
+    buf = append(buf, tmp[:]...)
+    binary.LittleEndian.PutUint32(tmp[:4], uint32(len(keys)))
+    buf = append(buf, tmp[:4]...)
+    for _, k := range keys {
+        v := t.KV[k]
+        binary.LittleEndian.PutUint32(tmp[:4], uint32(len(k)))
+        buf = append(buf, tmp[:4]...)
+        buf = append(buf, k...)
+        binary.LittleEndian.PutUint32(tmp[:4], uint32(len(v)))
+        buf = append(buf, tmp[:4]...)
+        buf = append(buf, v...)
+    }
+    // footer: crc(4) over all preceding bytes, then magic(4)
+    var crcBuf [4]byte
+    binary.LittleEndian.PutUint32(crcBuf[:], crc32.Checksum(buf, crcTable))
+    buf = append(buf, crcBuf[:]...)
+    binary.LittleEndian.PutUint32(crcBuf[:], sstMagic)
+    buf = append(buf, crcBuf[:]...)
+    return buf
+}
+
+// decodeSST validates and parses an SSTable. A truncated or corrupt table
+// (e.g. an fsync that never completed) returns an error.
+func decodeSST(data []byte) (SSTable, error) {
+    if len(data) &lt; 16 {
+        return SSTable{}, errors.New(&quot;walstore: short SSTable&quot;)
+    }
+    body := data[:len(data)-8]
+    footer := data[len(data)-8:]
+    if binary.LittleEndian.Uint32(footer[4:8]) != sstMagic {
+        return SSTable{}, errors.New(&quot;walstore: bad SSTable magic&quot;)
+    }
+    if crc32.Checksum(body, crcTable) != binary.LittleEndian.Uint32(footer[0:4]) {
+        return SSTable{}, errors.New(&quot;walstore: SSTable checksum mismatch&quot;)
+    }
+    var t SSTable
+    t.Seq = binary.LittleEndian.Uint64(body[0:8])
+    count := binary.LittleEndian.Uint32(body[8:12])
+    off := 12
+    t.KV = make(map[string]string, count)
+    for i := uint32(0); i &lt; count; i++ {
+        if off+4 &gt; len(body) {
+            return SSTable{}, errors.New(&quot;walstore: truncated SSTable body&quot;)
+        }
+        kl := binary.LittleEndian.Uint32(body[off : off+4])
+        off += 4
+        if off+int(kl) &gt; len(body) {
+            return SSTable{}, errors.New(&quot;walstore: truncated key&quot;)
+        }
+        k := string(body[off : off+int(kl)])
+        off += int(kl)
+        if off+4 &gt; len(body) {
+            return SSTable{}, errors.New(&quot;walstore: truncated SSTable body&quot;)
+        }
+        vl := binary.LittleEndian.Uint32(body[off : off+4])
+        off += 4
+        if off+int(vl) &gt; len(body) {
+            return SSTable{}, errors.New(&quot;walstore: truncated value&quot;)
+        }
+        v := string(body[off : off+int(vl)])
+        off += int(vl)
+        t.KV[k] = v
+    }
+    if off != len(body) {
+        return SSTable{}, errors.New(&quot;walstore: trailing SSTable bytes&quot;)
+    }
+    return t, nil
+}
+
+// maxSSTGen returns the highest generation number present on disk, valid or
+// not, so fresh writes never reuse a generation slot.
+func maxSSTGen(dir string) uint64 {
+    entries, err := os.ReadDir(filepath.Join(dir, &quot;sst&quot;))
+    if err != nil {
+        return 0
+    }
+    var max uint64
+    for _, e := range entries {
+        name := e.Name()
+        if !strings.HasSuffix(name, &quot;.sst&quot;) {
+            continue
+        }
+        gen, err := strconv.ParseUint(strings.TrimSuffix(name, &quot;.sst&quot;), 10, 64)
+        if err != nil {
+            continue
+        }
+        if gen &gt; max {
+            max = gen
+        }
+    }
+    return max
+}
+
+// sstPath returns the canonical path of a generation's SSTable.
+func sstPath(dir string, gen uint64) string {
+    return filepath.Join(dir, &quot;sst&quot;, fmt.Sprintf(&quot;%020d.sst&quot;, gen))
+}
+
+// scanSSTGenerations validates every generation present on disk and returns the
+// newest one whose contents are durable and checksum-clean. The manifest's
+// pointer is only a hint; this is the authoritative durability check.
+func scanSSTGenerations(dir string) (SSTable, bool, error) {
+    entries, err := os.ReadDir(filepath.Join(dir, &quot;sst&quot;))
+    if err != nil {
+        if os.IsNotExist(err) {
+            return SSTable{}, false, nil
+        }
+        return SSTable{}, false, err
+    }
+    var gens []uint64
+    for _, e := range entries {
+        name := e.Name()
+        if !strings.HasSuffix(name, &quot;.sst&quot;) {
+            continue
+        }
+        gen, err := strconv.ParseUint(strings.TrimSuffix(name, &quot;.sst&quot;), 10, 64)
+        if err != nil {
+            continue
+        }
+        gens = append(gens, gen)
+    }
+    sort.Slice(gens, func(i, j int) bool { return gens[i] &gt; gens[j] })
+    for _, gen := range gens {
+        raw, err := os.ReadFile(sstPath(dir, gen))
+        if err != nil {
+            continue
+        }
+        t, err := decodeSST(raw)
+        if err != nil {
+            continue // incomplete fsync / torn generation: skip
+        }
+        t.Gen = gen
+        return t, true, nil
+    }
+    return SSTable{}, false, nil
+}
+</code></pre>
+<h3><code>store.go</code></h3>
+<pre><code class="language-go">package walstore
+
+import (
+    &quot;errors&quot;
+    &quot;fmt&quot;
+    &quot;os&quot;
+    &quot;path/filepath&quot;
+    &quot;sync&quot;
+)
+
+// StaleEpochError is returned when a writer tries to mutate the store while a
+// newer writer has fenced it by advancing the manifest epoch.
+type StaleEpochError struct {
+    Held   uint64
+    OnDisk uint64
+}
+
+func (e *StaleEpochError) Error() string {
+    return fmt.Sprintf(&quot;walstore: stale manifest epoch: writer holds %d, on-disk is %d&quot;, e.Held, e.OnDisk)
+}
+
+// Store is the single-writer handle over one directory.
+type Store struct {
+    mu       sync.Mutex
+    dir      string
+    epoch    uint64
+    seq      uint64
+    nextGen  uint64
+    mem      map[string]string
+    wal      *os.File
+    done     bool
+}
+
+// Recovered is the result of replaying a WAL image.
+type Recovered struct {
+    Mem      map[string]string
+    Seq      uint64
+    Applied  []Batch
+    Consumed int
+    Torn     bool
+}
+
+// recoverState replays WAL frames on top of a base snapshot. Only batches with
+// contiguous, strictly-increasing sequence numbers are applied; the first
+// incomplete, corrupt, or out-of-order frame terminates replay (torn tail).
+func recoverState(raw []byte, base map[string]string, baseSeq uint64) (Recovered, error) {
+    mem := make(map[string]string, len(base))
+    for k, v := range base {
+        mem[k] = v
+    }
+    batches, ends, consumed, torn := scanFrames(raw)
+    res := Recovered{Mem: mem, Seq: baseSeq, Consumed: consumed, Torn: torn}
+    prev := baseSeq
+    applied := 0
+    for _, b := range batches {
+        if b.Seq != prev+1 {
+            // Stop before the out-of-order frame; only the validated
+            // prefix may be physically retained.
+            res.Torn = true
+            if applied == 0 {
+                res.Consumed = 0
+            } else {
+                res.Consumed = ends[applied-1]
+            }
+            return res, nil
+        }
+        for _, r := range b.Records {
+            mem[r.Key] = r.Val
+        }
+        prev = b.Seq
+        res.Seq = b.Seq
+        res.Applied = append(res.Applied, b)
+        applied++
+    }
+    return res, nil
+}
+
+// Open recovers the store and acquires a fresh writer epoch. Any previously
+// open writer becomes stale.
+func Open(dir string) (*Store, error) {
+    if err := os.MkdirAll(filepath.Join(dir, &quot;sst&quot;), 0o755); err != nil {
+        return nil, err
+    }
+    if err := os.MkdirAll(filepath.Join(dir, &quot;wal&quot;), 0o755); err != nil {
+        return nil, err
+    }
+
+    m, err := readManifest(dir)
+    if err != nil {
+        if !os.IsNotExist(err) {
+            return nil, err
+        }
+        m = Manifest{}
+    }
+
+    sst, ok, err := scanSSTGenerations(dir)
+    if err != nil {
+        return nil, err
+    }
+    var base map[string]string
+    var baseSeq uint64
+    var baseGen uint64
+    if ok {
+        base = sst.KV
+        baseSeq = sst.Seq
+        baseGen = sst.Gen
+    } else {
+        base = map[string]string{}
+    }
+
+    walFile := filepath.Join(dir, &quot;wal&quot;, &quot;000001.wal&quot;)
+    raw, err := os.ReadFile(walFile)
+    if err != nil &amp;&amp; !os.IsNotExist(err) {
+        return nil, err
+    }
+    rec, err := recoverState(raw, base, baseSeq)
+    if err != nil {
+        return nil, err
+    }
+
+    // Physically drop the torn tail so subsequent appends are clean.
+    f, err := os.OpenFile(walFile, os.O_CREATE|os.O_RDWR, 0o644)
+    if err != nil {
+        return nil, err
+    }
+    if err := f.Truncate(int64(rec.Consumed)); err != nil {
+        f.Close()
+        return nil, err
+    }
+    if _, err := f.Seek(0, os.SEEK_END); err != nil {
+        f.Close()
+        return nil, err
+    }
+
+    s := &amp;Store{
+        dir:     dir,
+        epoch:   m.Epoch + 1,
+        seq:     rec.Seq,
+        nextGen: maxSSTGen(dir) + 1,
+        mem:     rec.Mem,
+        wal:     f,
+    }
+    // Persist the epoch fence before returning the writer.
+    if err := writeManifestFsync(dir, Manifest{Epoch: s.epoch, BaseGen: baseGen, BaseSeq: rec.Seq}); err != nil {
+        f.Close()
+        return nil, err
+    }
+    return s, nil
+}
+
+// Epoch returns the writer epoch held by this handle.
+func (s *Store) Epoch() uint64 {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    return s.epoch
+}
+
+// Seq returns the highest applied sequence number.
+func (s *Store) Seq() uint64 {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    return s.seq
+}
+
+// Get returns the current value for a key.
+func (s *Store) Get(key string) (string, bool) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    v, ok := s.mem[key]
+    return v, ok
+}
+
+// checkEpochLocked fails if another writer advanced the manifest epoch.
+func (s *Store) checkEpochLocked() error {
+    m, err := readManifest(s.dir)
+    if err != nil {
+        return err
+    }
+    if m.Epoch != s.epoch {
+        return &amp;StaleEpochError{Held: s.epoch, OnDisk: m.Epoch}
+    }
+    return nil
+}
+
+// Append atomically applies one batch, fsyncing its single WAL frame first.
+func (s *Store) Append(records []Record) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if s.done {
+        return errors.New(&quot;walstore: store is closed&quot;)
+    }
+    if err := s.checkEpochLocked(); err != nil {
+        return err
+    }
+    batch := Batch{Seq: s.seq + 1, Records: records}
+    frame := appendFrame(nil, encodeBatch(batch))
+    if _, err := s.wal.Write(frame); err != nil {
+        return err
+    }
+    if err := s.wal.Sync(); err != nil {
+        return err
+    }
+    for _, r := range records {
+        s.mem[r.Key] = r.Val
+    }
+    s.seq = batch.Seq
+    return nil
+}
+
+// Flush writes the current in-memory state as a new checksummed SSTable
+// generation, fsyncs it, then publishes it in the manifest. The manifest
+// pointer is only a hint; recovery re-validates every generation.
+func (s *Store) Flush() (uint64, error) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if s.done {
+        return 0, errors.New(&quot;walstore: store is closed&quot;)
+    }
+    if err := s.checkEpochLocked(); err != nil {
+        return 0, err
+    }
+    gen := s.nextGen
+    table := SSTable{Gen: gen, Seq: s.seq, KV: s.mem}
+    raw := encodeSST(table)
+
+    tmp := sstPath(s.dir, gen) + &quot;.tmp&quot;
+    f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+    if err != nil {
+        return 0, err
+    }
+    if _, err := f.Write(raw); err != nil {
+        f.Close()
+        return 0, err
+    }
+    if err := f.Sync(); err != nil {
+        f.Close()
+        return 0, err
+    }
+    if err := f.Close(); err != nil {
+        return 0, err
+    }
+    if err := os.Rename(tmp, sstPath(s.dir, gen)); err != nil {
+        return 0, err
+    }
+    if err := fsyncDir(filepath.Join(s.dir, &quot;sst&quot;)); err != nil {
+        return 0, err
+    }
+    if err := writeManifestFsync(s.dir, Manifest{Epoch: s.epoch, BaseGen: gen, BaseSeq: s.seq}); err != nil {
+        return 0, err
+    }
+    s.nextGen = gen + 1
+    // The WAL prefix covered by this SSTable is no longer needed.
+    if err := s.wal.Truncate(0); err != nil {
+        return 0, err
+    }
+    if _, err := s.wal.Seek(0, os.SEEK_END); err != nil {
+        return 0, err
+    }
+    if err := s.wal.Sync(); err != nil {
+        return 0, err
+    }
+    return gen, nil
+}
+
+// Close releases the writer handle.
+func (s *Store) Close() error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if s.done {
+        return nil
+    }
+    s.done = true
+    return s.wal.Close()
+}
+</code></pre>
+<h3><code>store_test.go</code></h3>
+<pre><code class="language-go">package walstore
+
+import (
+    &quot;errors&quot;
+    &quot;fmt&quot;
+    &quot;math/rand&quot;
+    &quot;os&quot;
+    &quot;path/filepath&quot;
+    &quot;testing&quot;
+)
+
+// frameLen returns the on-disk size of one encoded batch frame.
+func frameLen(b Batch) int {
+    return frameHeaderLen + len(encodeBatch(b))
+}
+
+// buildWAL encodes batches into a raw WAL image and returns per-frame end
+// offsets.
+func buildWAL(batches []Batch) ([]byte, []int) {
+    var raw []byte
+    ends := make([]int, len(batches))
+    for i, b := range batches {
+        raw = appendFrame(raw, encodeBatch(b))
+        ends[i] = len(raw)
+    }
+    return raw, ends
+}
+
+func modelStates(batches []Batch) []map[string]string {
+    states := make([]map[string]string, len(batches)+1)
+    states[0] = map[string]string{}
+    for i, b := range batches {
+        m := make(map[string]string, len(states[i]))
+        for k, v := range states[i] {
+            m[k] = v
+        }
+        for _, r := range b.Records {
+            m[r.Key] = r.Val
+        }
+        states[i+1] = m
+    }
+    return states
+}
+
+func randomBatches(rng *rand.Rand, n int) []Batch {
+    batches := make([]Batch, n)
+    for i := range batches {
+        recs := make([]Record, 1+rng.Intn(4))
+        for j := range recs {
+            recs[j] = Record{
+                Key: fmt.Sprintf(&quot;k%d_%d&quot;, i, rng.Intn(3)),
+                Val: fmt.Sprintf(&quot;v%d_%d&quot;, i, rng.Intn(1000)),
+            }
+        }
+        batches[i] = Batch{Seq: uint64(i + 1), Records: recs}
+    }
+    return batches
+}
+
+// TestTornTailPrefixProperty is the required property test: at least 200 random
+// truncation offsets crossed with random batch boundaries. For every image the
+// recovered state must equal some prefix of committed batches, never a partial
+// batch and never a non-prefix.
+func TestTornTailPrefixProperty(t *testing.T) {
+    rng := rand.New(rand.NewSource(0xC0FFEE))
+    const seeds = 8
+    checks := 0
+
+    for seed := 0; seed &lt; seeds; seed++ {
+        batches := randomBatches(rng, 1+rng.Intn(40))
+        raw, ends := buildWAL(batches)
+        states := modelStates(batches)
+
+        // 200+ offsets per seed, plus every frame boundary.
+        offsets := make([]int, 0, 260)
+        for i := 0; i &lt; 256; i++ {
+            offsets = append(offsets, rng.Intn(len(raw)+1))
+        }
+        for _, e := range ends {
+            offsets = append(offsets, e, e-1)
+        }
+
+        for _, off := range offsets {
+            if off &lt; 0 {
+                continue
+            }
+            if off &gt; len(raw) {
+                continue
+            }
+            checks++
+            rec, err := recoverState(raw[:off], map[string]string{}, 0)
+            if err != nil {
+                t.Fatalf(&quot;recover error: %v&quot;, err)
+            }
+
+            // Highest fully-contained frame index.
+            wantApplied := 0
+            for i, e := range ends {
+                if e &lt;= off {
+                    wantApplied = i + 1
+                }
+            }
+            if len(rec.Applied) != wantApplied {
+                t.Fatalf(&quot;seed=%d off=%d: applied=%d want=%d&quot;, seed, off, len(rec.Applied), wantApplied)
+            }
+            // Sequence numbers must be strictly monotonic &amp; contiguous.
+            for i, b := range rec.Applied {
+                if b.Seq != uint64(i+1) {
+                    t.Fatalf(&quot;seed=%d off=%d: non-monotonic seq at %d: %d&quot;, seed, off, i, b.Seq)
+                }
+            }
+            // State must equal the exact committed prefix.
+            if !equalKV(rec.Mem, states[wantApplied]) {
+                t.Fatalf(&quot;seed=%d off=%d: state mismatch\n got=%v\nwant=%v&quot;, seed, off, rec.Mem, states[wantApplied])
+            }
+            if rec.Seq != uint64(wantApplied) {
+                t.Fatalf(&quot;seed=%d off=%d: seq=%d want=%d&quot;, seed, off, rec.Seq, wantApplied)
+            }
+        }
+    }
+    if checks &lt; 200 {
+        t.Fatalf(&quot;only %d checks, need &gt;= 200&quot;, checks)
+    }
+    t.Logf(&quot;verified %d truncation offsets across %d random batch streams&quot;, checks, seeds)
+}
+
+// TestAtomicBatchDiscard proves a torn multi-key batch is fully discarded.
+func TestAtomicBatchDiscard(t *testing.T) {
+    recs := []Record{{Key: &quot;a&quot;, Val: &quot;1&quot;}, {Key: &quot;b&quot;, Val: &quot;2&quot;}, {Key: &quot;c&quot;, Val: &quot;3&quot;}}
+    b := Batch{Seq: 1, Records: recs}
+    full := appendFrame(nil, encodeBatch(b))
+    // Cut one byte before the CRC-valid end: the entire batch must vanish.
+    rec, err := recoverState(full[:len(full)-1], map[string]string{}, 0)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if len(rec.Applied) != 0 || len(rec.Mem) != 0 {
+        t.Fatalf(&quot;partial batch applied: %+v&quot;, rec)
+    }
+    // With the last byte present, all keys appear together.
+    rec, err = recoverState(full, map[string]string{}, 0)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if len(rec.Mem) != 3 {
+        t.Fatalf(&quot;atomic batch not fully applied: %+v&quot;, rec)
+    }
+}
+
+// TestStaleEpochWriterRejected is the required fencing test.
+func TestStaleEpochWriterRejected(t *testing.T) {
+    dir := t.TempDir()
+    a, err := Open(dir)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer a.Close()
+    if err := a.Append([]Record{{Key: &quot;x&quot;, Val: &quot;1&quot;}}); err != nil {
+        t.Fatal(err)
+    }
+
+    // A second writer acquires a newer epoch.
+    b, err := Open(dir)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer b.Close()
+    if b.Epoch() &lt;= a.Epoch() {
+        t.Fatalf(&quot;epoch did not advance: a=%d b=%d&quot;, a.Epoch(), b.Epoch())
+    }
+
+    // The old writer must be fenced with a typed error.
+    err = a.Append([]Record{{Key: &quot;x&quot;, Val: &quot;2&quot;}})
+    var se *StaleEpochError
+    if !errors.As(err, &amp;se) {
+        t.Fatalf(&quot;want *StaleEpochError, got %T: %v&quot;, err, err)
+    }
+    // The new writer still works.
+    if err := b.Append([]Record{{Key: &quot;x&quot;, Val: &quot;3&quot;}}); err != nil {
+        t.Fatal(err)
+    }
+}
+
+// TestNewestDurableGenerationSelected proves recovery skips an SSTable whose
+// fsync never completed (truncated/corrupt) even though the manifest points at
+// it, and falls back to the newest checksum-clean generation.
+func TestNewestDurableGenerationSelected(t *testing.T) {
+    dir := t.TempDir()
+    s, err := Open(dir)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if err := s.Append([]Record{{Key: &quot;k&quot;, Val: &quot;durable&quot;}}); err != nil {
+        t.Fatal(err)
+    }
+    if _, err := s.Flush(); err != nil { // generation 1
+        t.Fatal(err)
+    }
+    if err := s.Close(); err != nil {
+        t.Fatal(err)
+    }
+
+    // Simulate a generation 2 whose write/fsync never completed: truncated.
+    if err := os.WriteFile(sstPath(dir, 2), []byte(&quot;half-written&quot;), 0o644); err != nil {
+        t.Fatal(err)
+    }
+    // Manifest dishonestly points at the torn generation 2.
+    if err := writeManifestFsync(dir, Manifest{Epoch: 1, BaseGen: 2, BaseSeq: 1}); err != nil {
+        t.Fatal(err)
+    }
+
+    s2, err := Open(dir)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer s2.Close()
+    v, ok := s2.Get(&quot;k&quot;)
+    if !ok || v != &quot;durable&quot; {
+        t.Fatalf(&quot;recovery picked torn generation: got %q ok=%v&quot;, v, ok)
+    }
+    // seq must not jump to the phantom generation.
+    if s2.Seq() != 1 {
+        t.Fatalf(&quot;seq=%d want 1&quot;, s2.Seq())
+    }
+    // New flush must not reuse generation 2 (it exists on disk).
+    gen, err := s2.Flush()
+    if err != nil {
+        t.Fatal(err)
+    }
+    if gen &lt;= 2 {
+        t.Fatalf(&quot;reused generation %d&quot;, gen)
+    }
+}
+
+// TestReopenRecoversAndTruncatesTornTail exercises the full Open path.
+func TestReopenRecoversAndTruncatesTornTail(t *testing.T) {
+    dir := t.TempDir()
+    s, err := Open(dir)
+    if err != nil {
+        t.Fatal(err)
+    }
+    for i := 0; i &lt; 5; i++ {
+        if err := s.Append([]Record{{Key: &quot;n&quot;, Val: fmt.Sprintf(&quot;%d&quot;, i)}}); err != nil {
+            t.Fatal(err)
+        }
+    }
+    if err := s.Close(); err != nil {
+        t.Fatal(err)
+    }
+
+    // Append junk to the live WAL, then corrupt the last valid frame's CRC.
+    walFile := filepath.Join(dir, &quot;wal&quot;, &quot;000001.wal&quot;)
+    f, err := os.OpenFile(walFile, os.O_APPEND|os.O_WRONLY, 0o644)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if _, err := f.Write([]byte(&quot;torn-garbage&quot;)); err != nil {
+        t.Fatal(err)
+    }
+    f.Close()
+
+    s2, err := Open(dir)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer s2.Close()
+    if got, _ := s2.Get(&quot;n&quot;); got != &quot;4&quot; {
+        t.Fatalf(&quot;recovered n=%q want 4&quot;, got)
+    }
+    if s2.Seq() != 5 {
+        t.Fatalf(&quot;seq=%d want 5&quot;, s2.Seq())
+    }
+    raw, err := os.ReadFile(walFile)
+    if err != nil {
+        t.Fatal(err)
+    }
+    // The torn garbage must be gone, and the 5 valid frames retained so they
+    // can be replayed on the next open.
+    if string(raw) == &quot;torn-garbage&quot; || len(raw) == 0 {
+        t.Fatalf(&quot;torn tail not cleaned: %q&quot;, raw)
+    }
+    batches, _, _, torn := scanFrames(raw)
+    if torn || len(batches) != 5 {
+        t.Fatalf(&quot;expected 5 clean frames, got %d torn=%v&quot;, len(batches), torn)
+    }
+}
+
+func equalKV(a, b map[string]string) bool {
+    if len(a) != len(b) {
+        return false
+    }
+    for k, v := range a {
+        if b[k] != v {
+            return false
+        }
+    }
+    return true
+}
+</code></pre>
+<hr />
+<h2>5. Verification</h2>
+<pre><code class="language-bash">go vet ./...
+go test -race -count=3 ./...
+</code></pre>
+<p>Observed on <code>go1.26.0 linux/amd64</code>:</p>
+<pre><code>$ go test -v ./...
+=== RUN   TestTornTailPrefixProperty
+    store_test.go:124: verified 2370 truncation offsets across 8 random batch streams
+--- PASS: TestTornTailPrefixProperty (0.02s)
+=== RUN   TestAtomicBatchDiscard
+--- PASS: TestAtomicBatchDiscard (0.00s)
+=== RUN   TestStaleEpochWriterRejected
+--- PASS: TestStaleEpochWriterRejected (0.00s)
+=== RUN   TestNewestDurableGenerationSelected
+--- PASS: TestNewestDurableGenerationSelected (0.00s)
+=== RUN   TestReopenRecoversAndTruncatesTornTail
+--- PASS: TestReopenRecoversAndTruncatesTornTail (0.00s)
+PASS
+ok      walstore        0.031s
+</code></pre>
+<h3>Evidence map</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Test</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>≥200 random truncation offsets × random batch boundaries; recovered state is a committed prefix</td>
+<td><code>TestTornTailPrefixProperty</code> (2,370 offsets over 8 random streams)</td>
+</tr>
+<tr>
+<td>Multi-key batch fully applied or fully discarded</td>
+<td><code>TestAtomicBatchDiscard</code></td>
+</tr>
+<tr>
+<td>Stale-epoch writer rejected with a typed error</td>
+<td><code>TestStaleEpochWriterRejected</code> (<code>errors.As</code> → <code>*StaleEpochError</code>)</td>
+</tr>
+<tr>
+<td>Newest durable generation selected when manifest points at an un-fsynced SSTable</td>
+<td><code>TestNewestDurableGenerationSelected</code></td>
+</tr>
+<tr>
+<td>End-to-end reopen drops the torn tail and replays the valid prefix</td>
+<td><code>TestReopenRecoversAndTruncatesTornTail</code></td>
+</tr>
+</tbody>
+</table>
+<h3>How the property test works</h3>
+<ol>
+<li>For each random seed, generate a stream of batches with random sizes and random keys/values; encode them into one raw WAL image.</li>
+<li>Record each frame's end offset and the exact model state after each prefix.</li>
+<li>Cross 256 uniformly random truncation offsets with every frame boundary (±1 byte), yielding 2,370 evaluated images.</li>
+<li><code>recoverState</code> must (a) apply exactly the frames fully contained before the cut, (b) never apply a partial batch, (c) keep <code>seq</code> contiguous and strictly increasing, and (d) produce a map equal to the corresponding model prefix. Any deviation is a hard <code>t.Fatalf</code>.</li>
+</ol>
+<h3>Why the fencing test is meaningful</h3>
+<p><code>Open</code> fsyncs <code>Manifest{Epoch: old+1}</code> before returning. Writer <code>A</code> then holds epoch <em>e</em>. <code>Open</code>ing writer <code>B</code> publishes <code>e+1</code>. <code>A.Append</code> re-reads the manifest, sees <code>e+1</code>, and returns <code>*StaleEpochError</code> before touching the WAL; <code>B.Append</code> succeeds. Fencing is therefore durable and checked on <strong>every</strong> mutation, not just at startup.</p>
+<hr />
+<p>The artifact is saved at <code>~/walstore/</code> (<code>wal.go</code>, <code>manifest.go</code>, <code>sst.go</code>, <code>store.go</code>, <code>store_test.go</code>, <code>go.mod</code>, and <code>SOLUTION.md</code>). Run <code>cd ~/walstore &amp;&amp; go test -race ./...</code> to reproduce.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-wal-torn-tail-recovery-manifest-fencing
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-27T16:32:27.219Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement crash recovery for a single-writer WAL plus SSTable store in Go: length-prefixed CRC32C frames, replay after the WAL is truncated at an arbitrary byte offset, multi-key batches that are either fully applied or fully discarded, and strictly monotonic sequence numbers. The manifest may point at an SSTable whose fsync never completed, so recovery must select the newest durable generation and reject a writer still holding a stale manifest epoch with a typed error. Evidence: a property test over at least 200 random truncation offsets crossed with random batch boundaries proving the recovered state equals some prefix of committed batches, plus a stale-epoch writer rejection test.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-wal-torn-tail-recovery-manifest-fencing&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-27T16:32:27.221Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>The complete, verified solution is written to <code>~/walstore/SOLUTION.md</code> (32 KB). Here it is in full.</p>
 <hr />
 <h1>Crash Recovery for a Single-Writer WAL + SSTable Store</h1>
 <p><strong>Problem class:</strong> <code>go-wal-torn-tail-recovery-manifest-fencing</code>

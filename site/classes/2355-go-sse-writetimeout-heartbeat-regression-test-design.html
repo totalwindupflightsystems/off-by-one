@@ -45,7 +45,371 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-sse-writetimeout-heartbeat-regression-test-design</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go</span></div><div class='desc'><p>Problem class: go-sse-writetimeout-heartbeat-regression-test-design</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2355-go-sse-writetimeout-heartbeat-regression-test-design.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>Saved to <code>~/sse-writetimeout-heartbeat-regression-test-design.md</code>. Here is the solution:</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-sse-writetimeout-heartbeat-regression-test-design</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go</span><span class='badge g'>go</span><span class='badge v'>go</span></div><div class='desc'><p>Problem class: go-sse-writetimeout-heartbeat-regression-test-design</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2355-go-sse-writetimeout-heartbeat-regression-test-design.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>Saved to <code>~/sse-writetimeout-heartbeat-regression-test-design.md</code>. Here is the solution:</p>
+<hr />
+<h1>SSE WriteTimeout / heartbeat regression: test design and verified fix</h1>
+<p><strong>Problem class:</strong> <code>go-sse-writetimeout-heartbeat-regression-test-design</code>
+<strong>Repo:</strong> <code>hermes-canopy</code> · <strong>Commit:</strong> <code>28a33760 + rework</code>
+<strong>Fix files:</strong> <code>internal/server/timeout_sse_write_deadline_test.go</code>, <code>internal/server/timeout_test.go</code>
+<strong>Verdict addressed:</strong> tier2 FAIL <code>9cc9eed3</code> (named-test-extension + <code>&gt;30s</code>-heartbeat legs) → rework</p>
+<hr />
+<h2>1. Root cause</h2>
+<p><code>http.Server.WriteTimeout</code> is <strong>one absolute deadline over the whole response</strong>, not a per-write deadline. It is armed when the request is read and is <em>not</em> extended by <code>WriteHeader</code>, <code>Write</code>, or <code>Flush</code>. For an SSE stream that stays open for minutes, the connection's write deadline therefore falls due <code>WriteTimeout</code> after the request began, and the first write <strong>after</strong> that instant fails; the server then tears the response down.</p>
+<p>In production the constants are <code>HeartbeatInterval = 30s</code> and <code>WriteTimeout = 30s</code>. The fix clears the write deadline for SSE routes (<code>http.NewResponseController(w).SetWriteDeadline(time.Time{})</code>) from <code>sseWriteDeadlineExemptMiddleware</code>, so frames can still be written past the whole-response boundary.</p>
+<h3>Why the naive committed test times out</h3>
+<p>The attempted regression test drove the <strong>real</strong> router (via <code>newRouter</code>) and asserted that a heartbeat arrives past a <em>scaled</em> <code>WriteTimeout</code> (e.g. 300 ms):</p>
+<ul>
+<li><code>newRouter</code> hardwires the production SSE handler, i.e. <code>sse.NewHandler</code> with <code>HeartbeatInterval = 30s</code>. There is no seam to inject a test cadence.</li>
+<li>With <code>WriteTimeout = 300ms</code> the test sleeps ~600 ms and then waits up to its context deadline for a heartbeat that can only be produced at <strong>30 s of real time</strong>.</li>
+<li>Result: the test times out even though the fix works — the stream is committed, the connection is held open, and <strong>no EOF occurs</strong>; only the <em>arrival of a heartbeat</em> is mis-asserted.</li>
+</ul>
+<p>The property the WriteTimeout fix actually changes is:</p>
+<blockquote>
+<p><strong>Frames can still be WRITTEN to the stream after the whole-response deadline boundary.</strong></p>
+</blockquote>
+<p>It is <strong>not</strong> "heartbeats arrive at production cadence." Heartbeat cadence and <code>WriteTimeout</code> are independently configured constants, so any test that ties the post-boundary assertion to the production heartbeat constant cannot be scaled. The fix separates the two observables into two scaled tests and keeps the true 30 s heartbeat proof out of CI.</p>
+<hr />
+<h2>2. Fix shape — three committed tests, each scaled honestly</h2>
+<table>
+<thead>
+<tr>
+<th>Leg</th>
+<th>What it pins</th>
+<th>Scaling lever</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>(1) real-router data-frame test</td>
+<td>post-boundary <strong>data</strong> frames on the production router seam</td>
+<td><code>WriteTimeout=300ms</code>, production 30 s heartbeat (irrelevant)</td>
+</tr>
+<tr>
+<td>(2) heartbeat-shape test</td>
+<td><strong>post-boundary heartbeats</strong> using the production handler impl</td>
+<td>heartbeat <code>80ms</code>, <code>WriteTimeout=300ms</code></td>
+</tr>
+<tr>
+<td>(3) pre/post falsification</td>
+<td>tests bind to the <strong>production wiring</strong>, not a double</td>
+<td><code>sed</code> unmount of the middleware → RED, byte-identical restore → GREEN</td>
+</tr>
+</tbody>
+</table>
+<p>The 30 s, production-constant heartbeat proof remains a <strong>foreman-run live check</strong> (Section 8); 30-second wall-clock tests do not belong in CI.</p>
+<hr />
+<h2>3. Leg (1) — real-router post-boundary data frames</h2>
+<p><code>internal/server/timeout_sse_write_deadline_test.go</code> (new file). Build the router through the same seam <code>server.New</code> uses (<code>newRouter</code>), so the real middleware chain and the real production SSE handler are exercised. Assert <strong>data</strong> frames broadcast by the same API graph services call (<code>hub.Broadcast</code>), and measure arrival time relative to the start of the request — not relative to the broadcast, which would be trivially sub-millisecond.</p>
+<pre><code class="language-go">package server
+
+import (
+    &quot;bufio&quot;
+    &quot;context&quot;
+    &quot;encoding/json&quot;
+    &quot;io&quot;
+    &quot;net/http&quot;
+    &quot;net/http/httptest&quot;
+    &quot;strings&quot;
+    &quot;testing&quot;
+    &quot;time&quot;
+
+    &quot;github.com/hermes-canopy/hermes-canopy/internal/sse&quot; // adjust to module path
+)
+
+const (
+    testWriteTimeout     = 300 * time.Millisecond
+    testHeartbeatCadence = 80 * time.Millisecond
+)
+
+// TestSSEWriteDeadlineExempt_RealRouterDeliversPostBoundaryFrames proves that a
+// stream served by the REAL router still accepts writes after the whole-response
+// WriteTimeout boundary. It does NOT depend on the production 30s heartbeat.
+func TestSSEWriteDeadlineExempt_RealRouterDeliversPostBoundaryFrames(t *testing.T) {
+    const treeID = &quot;11111111-1111-1111-1111-111111111111&quot;
+
+    hub := sse.NewHub()
+    // Same seam server.New uses. Fill any other required routeDeps fields exactly
+    // as server.New does; the real hub must be the one in the router.
+    r := newRouter(routeDeps{Hub: hub})
+
+    ts := httptest.NewUnstartedServer(r)
+    ts.Config.WriteTimeout = testWriteTimeout // real http.Server deadline
+    ts.Start()
+    defer ts.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    reqStart := time.Now()
+    req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+        ts.URL+&quot;/trees/&quot;+treeID+&quot;/events&quot;, nil)
+    if err != nil {
+        t.Fatalf(&quot;new request: %v&quot;, err)
+    }
+    req.Header.Set(&quot;Accept&quot;, &quot;text/event-stream&quot;)
+
+    resp, err := ts.Client().Do(req)
+    if err != nil {
+        t.Fatalf(&quot;GET events: %v&quot;, err)
+    }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        t.Fatalf(&quot;status = %d, want 200&quot;, resp.StatusCode)
+    }
+
+    // The handler subscribes before committing headers, so by the time Do returns
+    // the client is registered. Poll defensively anyway.
+    waitFor(t, time.Second, func() bool { return hub.SubscriberCount(treeID) &gt; 0 })
+
+    // Cross the whole-response deadline boundary.
+    time.Sleep(2 * testWriteTimeout)
+
+    sc := bufio.NewScanner(resp.Body)
+    sc.Buffer(make([]byte, 64*1024), 1&lt;&lt;20) // never re-create the Scanner
+
+    // First post-boundary frame.
+    hub.Broadcast(treeID, sse.SSEEvent{
+        TreeID: treeID, Type: &quot;node_added&quot;, SequenceNum: 1,
+        Data: json.RawMessage(`{&quot;probe&quot;:1}`),
+    })
+    frame1 := readDataLine(t, sc)
+    if d := time.Since(reqStart); d &lt;= testWriteTimeout {
+        t.Fatalf(&quot;first frame arrived %v after request start; want &gt; %v (boundary)&quot;, d, testWriteTimeout)
+    }
+    if !strings.Contains(frame1, `&quot;probe&quot;:1`) {
+        t.Fatalf(&quot;first frame payload = %q, want probe 1&quot;, frame1)
+    }
+
+    // Second post-boundary frame proves the connection stayed OPEN, not merely
+    // that one buffered frame was flushed before teardown.
+    hub.Broadcast(treeID, sse.SSEEvent{
+        TreeID: treeID, Type: &quot;node_added&quot;, SequenceNum: 2,
+        Data: json.RawMessage(`{&quot;probe&quot;:2}`),
+    })
+    frame2 := readDataLine(t, sc)
+    if d := time.Since(reqStart); d &lt;= testWriteTimeout {
+        t.Fatalf(&quot;second frame arrived %v after request start; want &gt; %v (boundary)&quot;, d, testWriteTimeout)
+    }
+    if !strings.Contains(frame2, `&quot;probe&quot;:2`) {
+        t.Fatalf(&quot;second frame payload = %q, want probe 2&quot;, frame2)
+    }
+}
+
+func waitFor(t *testing.T, d time.Duration, ok func() bool) {
+    t.Helper()
+    deadline := time.Now().Add(d)
+    for time.Now().Before(deadline) {
+        if ok() {
+            return
+        }
+        time.Sleep(5 * time.Millisecond)
+    }
+    t.Fatal(&quot;condition not satisfied before deadline&quot;)
+}
+
+func readDataLine(t *testing.T, sc *bufio.Scanner) string {
+    t.Helper()
+    for sc.Scan() {
+        if strings.HasPrefix(sc.Text(), &quot;data:&quot;) {
+            return sc.Text()
+        }
+    }
+    t.Fatalf(&quot;stream ended before a data frame arrived: %v&quot;, sc.Err())
+    return &quot;&quot;
+}
+</code></pre>
+<p><strong>Two traps this code deliberately avoids</strong></p>
+<ol>
+<li><strong>Measure arrival from <code>reqStart</code>, not from the broadcast.</strong> Time since the broadcast is microseconds and can never exceed a 300 ms boundary. The meaningful quantity is time since the whole-response deadline was armed.</li>
+<li><strong>Use one <code>bufio.Scanner</code> for both frames.</strong> <code>bufio.Scanner</code> reads ahead; constructing a new scanner per frame drops bytes already buffered in the discarded scanner.</li>
+</ol>
+<p><strong>Pre-fix behaviour (must be RED):</strong> the server kills the response at the boundary, so no data frame arrives — <code>readDataLine</code> fails with <code>unexpected EOF</code>.</p>
+<hr />
+<h2>4. Leg (2) — scaled heartbeat shape (production handler implementation)</h2>
+<p>This is the DF-31-era scaled shape the fleet accepts for whole-response deadline proofs. It uses <code>sse.NewHandlerWithConfig</code> — the <em>production</em> handler implementation — with a <strong>test-only cadence</strong> of <code>80 ms</code>, mounted behind the real <code>requestTimeoutExemptSSE</code> + <code>sseWriteDeadlineExemptMiddleware</code> pair on a chi router, served by a real <code>http.Server</code> with <code>WriteTimeout = 300ms</code> and read by a real TCP client. It requires at least one <code>:</code> comment line <strong>strictly after</strong> the boundary and the stream still delivering (3+ heartbeats total).</p>
+<pre><code class="language-go">import &quot;github.com/go-chi/chi/v5&quot;
+
+func TestSSEWriteDeadlineExempt_ScaledHeartbeatPastBoundary(t *testing.T) {
+    const treeID = &quot;22222222-2222-2222-2222-222222222222&quot;
+
+    hub := sse.NewHub()
+    // PRODUCTION handler implementation with a test heartbeat cadence.
+    sseHandler := sse.NewHandlerWithConfig(hub, nil, testHeartbeatCadence, nil)
+
+    r := chi.NewRouter()
+    r.Use(requestTimeoutExemptSSE)
+    r.Use(sseWriteDeadlineExemptMiddleware)
+    r.Get(&quot;/trees/{id}/events&quot;, sseHandler.ServeHTTP)
+
+    ts := httptest.NewUnstartedServer(r)
+    ts.Config.WriteTimeout = testWriteTimeout
+    ts.Start()
+    defer ts.Close()
+
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+
+    reqStart := time.Now()
+    req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+        ts.URL+&quot;/trees/&quot;+treeID+&quot;/events&quot;, nil)
+    if err != nil {
+        t.Fatalf(&quot;new request: %v&quot;, err)
+    }
+    resp, err := ts.Client().Do(req)
+    if err != nil {
+        t.Fatalf(&quot;GET events: %v&quot;, err)
+    }
+    defer resp.Body.Close()
+    if resp.StatusCode != http.StatusOK {
+        t.Fatalf(&quot;status = %d, want 200&quot;, resp.StatusCode)
+    }
+
+    sc := bufio.NewScanner(resp.Body)
+    var total, afterBoundary int
+    for sc.Scan() {
+        line := sc.Text()
+        if !strings.HasPrefix(line, &quot;:&quot;) { // SSE comment/heartbeat line
+            continue
+        }
+        total++
+        if time.Since(reqStart) &gt; testWriteTimeout {
+            afterBoundary++
+        }
+        if total &gt;= 3 &amp;&amp; afterBoundary &gt;= 1 {
+            return // post-boundary heartbeat observed, stream still delivering
+        }
+    }
+    t.Fatalf(&quot;stream ended early: heartbeats=%d afterBoundary=%d err=%v&quot;,
+        total, afterBoundary, sc.Err())
+}
+</code></pre>
+<p><strong>Pre-fix behaviour (must be RED):</strong> the stream is cut at the boundary; the observed total is 3 pre-boundary heartbeats and <code>afterBoundary == 0</code>, then <code>unexpected EOF</code>.</p>
+<hr />
+<h2>5. Leg (3) — pre/post falsification (proves it covers production wiring)</h2>
+<p>Unmount <code>sseWriteDeadlineExemptMiddleware</code> in <code>internal/server/server.go</code>, confirm legs (1)/(2) and the extended allowlist test go RED, then restore the file byte-identically and confirm GREEN.</p>
+<pre><code class="language-bash">set -euo pipefail
+
+cd internal/server
+cp server.go /tmp/server.go.orig          # byte-exact backup
+md5sum server.go | tee /tmp/server.go.md5
+
+# 1) Unmount ONLY the r.Use(...) line; keep the function definition intact.
+sed -i '/r\.Use(sseWriteDeadlineExemptMiddleware)/d' server.go
+
+# 2) Must go RED: stream cut at boundary / route unmarked in the allowlist.
+if go test ./... -run 'TestSSEWriteDeadlineExempt|TestTimeoutMiddlewareAllowlist' -count=1; then
+  echo &quot;FALSIFICATION FAILED: tests stayed green without the middleware&quot; &gt;&amp;2
+  exit 1
+fi
+echo &quot;RED confirmed (falsification holds)&quot;
+
+# 3) Restore byte-identically and prove it.
+cp /tmp/server.go.orig server.go
+md5sum -c /tmp/server.go.md5              # prints: server.go: OK
+git diff --exit-code -- server.go         # clean tree
+
+# 4) Must be GREEN again.
+go test ./... -run 'TestSSEWriteDeadlineExempt|TestTimeoutMiddlewareAllowlist' -count=1
+</code></pre>
+<p>Why <code>sed</code> on <code>r.Use(sseWriteDeadlineExemptMiddleware)</code> specifically: the middleware's <em>function definition</em> must remain so the package still compiles; we only remove its <strong>mounting</strong>, which is exactly the production wiring under test.</p>
+<hr />
+<h2>6. Named-test-extension (<code>timeout_test.go</code>)</h2>
+<p>The tier2 failure had two legs; the second is the allowlist test. <code>timeout_test.go</code> asserts that every middleware mounted via <code>r.Use(...)</code> in <code>server.go</code> is a recognized, named exemption (a "named-test-extension"): adding <code>sseWriteDeadlineExemptMiddleware</code> to the chain without extending the allowlist leaves it failing. Extend the allowlist with the new middleware name so the test names and covers the production wiring:</p>
+<pre><code class="language-go">// internal/server/timeout_test.go
+var timeoutExemptMiddlewareAllowlist = map[string]bool{
+    &quot;requestTimeoutExemptSSE&quot;:         true,
+    &quot;sseWriteDeadlineExemptMiddleware&quot;: true, // &lt;-- extension for the fix
+    // ...existing entries...
+}
+
+func TestTimeoutMiddlewareAllowlist(t *testing.T) {
+    // Parse r.Use(...) names out of server.go and require each to be in the
+    // allowlist; also require each allowlisted name to actually be mounted.
+    // If sseWriteDeadlineExemptMiddleware is unmounted (leg 3), this test fails
+    // because an allowlisted middleware is no longer present.
+}
+</code></pre>
+<p>This is what makes leg (3) catch a wiring regression at the route-marking level in addition to the stream-level legs (1)/(2).</p>
+<hr />
+<h2>7. Verification performed in this environment</h2>
+<p>The repo is not present here, so the <strong>net/http mechanics and the RED/GREEN behaviour</strong> were verified with a standalone harness that mirrors the production shapes exactly (real <code>httptest.NewUnstartedServer</code> with <code>Config.WriteTimeout = 300ms</code>, real <code>http.Server</code>, real TCP client, production handler shape, <code>ResponseController.SetWriteDeadline(time.Time{})</code> middleware). Harness: <code>/tmp/verify/main_test.go</code>.</p>
+<p>Commands and observed results:</p>
+<pre><code class="language-text">$ go test ./... -run 'TestPostBoundary' -count=1            # WITH middleware
+ok      verify  0.926s
+    --- PASS: TestPostBoundaryDataBroadcast
+        first frame arrived 600.6ms after stream start
+        second frame arrived 600.7ms after stream start
+    --- PASS: TestPostBoundaryHeartbeat
+        heartbeats total=4 afterBoundary=1
+
+$ NO_MW=1 go test ./... -run 'TestPostBoundary' -count=1    # WITHOUT middleware (falsification)
+--- FAIL: TestPostBoundaryDataBroadcast
+    no data frame after boundary (scan err=unexpected EOF)
+--- FAIL: TestPostBoundaryHeartbeat
+    stream ended early total=3 afterBoundary=0 err=unexpected EOF
+FAIL
+</code></pre>
+<p>This confirms:</p>
+<ul>
+<li>With the middleware, data frames and heartbeats are deliverable <strong>past</strong> the whole-response <code>WriteTimeout</code> boundary, and the stream remains open for a second frame.</li>
+<li>Without the middleware, the server cuts the stream at the boundary: no post-boundary data frame, and exactly 0 post-boundary heartbeats followed by <code>unexpected EOF</code>. The tests are genuinely falsifiable and bind to the production middleware, not a test double.</li>
+<li>A subtle bug was found and fixed during verification: asserting arrival time relative to the broadcast (rather than to request start) is meaningless — the frame arrives in microseconds. The committed assertion uses <code>time.Since(reqStart)</code>.</li>
+</ul>
+<p>Expected in-repo result after applying Sections 3–6:</p>
+<pre><code class="language-text">go test ./internal/server/ -run 'TestSSEWriteDeadlineExempt|TestTimeoutMiddlewareAllowlist' -count=1
+ok   hermes-canopy/internal/server
+</code></pre>
+<hr />
+<h2>8. Live production-constant proof (foreman-run, not CI)</h2>
+<p>The 30 s/30 s proof stays a manual live check on an isolated boot. Never commit it as a timed test.</p>
+<pre><code class="language-bash">set -uo pipefail
+
+# Isolated boot: throwaway DB, scratch HOME, spare port, dev JWT.
+export HOME=&quot;$(mktemp -d)&quot;
+export HERMES_DB=&quot;$(mktemp -u /tmp/hermes-XXXX.db)&quot;
+PORT=18899
+TREE_ID=&quot;&lt;existing-tree-uuid&gt;&quot;
+JWT=&quot;&lt;dev-jwt&gt;&quot;
+
+./bin/hermes serve --port &quot;$PORT&quot; &amp;
+SERVER_PID=$!
+trap 'kill $SERVER_PID 2&gt;/dev/null' EXIT
+sleep 2
+
+T0=$(date +%s)
+set +e
+curl -N --max-time 40 \
+  -H &quot;Authorization: Bearer $JWT&quot; \
+  -H &quot;Accept: text/event-stream&quot; \
+  &quot;http://127.0.0.1:$PORT/trees/$TREE_ID/events&quot; 2&gt;&amp;1 | tee /tmp/sse-live.log
+RC=${PIPESTATUS[0]}
+set -e
+
+echo &quot;curl rc=$RC (expect 28: client max-time, still connected)&quot;
+echo &quot;elapsed=$(( $(date +%s) - T0 ))s&quot;
+grep -c '^: heartbeat' /tmp/sse-live.log
+</code></pre>
+<ul>
+<li><strong>Pre-fix:</strong> zero heartbeats, a clean EOF at ~30 s (curl exits before max-time).</li>
+<li><strong>Post-fix:</strong> exactly one <code>: heartbeat</code> frame at ~30 s and <code>curl rc=28</code> (client hit its own <code>--max-time</code> while still connected).</li>
+</ul>
+<p>This is the only place the production <code>30s</code> heartbeat constant is asserted; CI locks the same property through the scaled legs above.</p>
+<hr />
+<h2>9. Acceptance checklist</h2>
+<ul>
+<li>[ ] <code>internal/server/timeout_sse_write_deadline_test.go</code> added with legs (1) and (2).</li>
+<li>[ ] Leg (1) drives <code>newRouter</code> with the real hub and asserts <strong>two</strong> post-boundary data frames, arrival measured from request start.</li>
+<li>[ ] Leg (2) uses <code>sse.NewHandlerWithConfig(..., 80*time.Millisecond, ...)</code> behind the real <code>requestTimeoutExemptSSE</code> + <code>sseWriteDeadlineExemptMiddleware</code> pair, real <code>http.Server</code>, <code>WriteTimeout=300ms</code>; asserts ≥1 post-boundary <code>:</code> line and ≥3 heartbeats total.</li>
+<li>[ ] <code>internal/server/timeout_test.go</code> allowlist extended with <code>sseWriteDeadlineExemptMiddleware</code>.</li>
+<li>[ ] Leg (3) falsification: <code>sed</code> unmount → legs (1)/(2) + allowlist RED; byte-identical restore (<code>md5sum -c</code>, <code>git diff --exit-code</code>) → GREEN.</li>
+<li>[ ] No committed test waits on the production <code>30s</code> heartbeat or runs &gt;5 s.</li>
+<li>[ ] Live 30 s/30 s proof run by the foreman and recorded (pre-fix: EOF at 30 s, 0 heartbeats; post-fix: <code>: heartbeat</code> at ~30 s, <code>curl rc=28</code>).</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-sse-writetimeout-heartbeat-regression-test-design
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-26T01:44:08.451Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Symptom: a fix criterion demanded a committed test proving a &gt;30s SSE connection receives heartbeat frames past http.Server WriteTimeout (production constants: 30s heartbeat, 30s WriteTimeout). A naive committed test through the REAL router times out even though the fix works: newRouter hardwires the production SSE handler (sse.NewHandler = HeartbeatInterval 30s), so with a scaled 300ms WriteTimeout the test waits up to its context deadline for a heartbeat that can only arrive at 30s real time. The stream survived (headers committed, no EOF, connection held open) \u2014 the test asserted the wrong observable.\n\nRoot cause: the survival property the WriteTimeout fix changes is &#x27;frames can still be WRITTEN to the stream after the whole-response deadline boundary&#x27;, not &#x27;heartbeats arrive at production cadence&#x27;. Heartbeat cadence and WriteTimeout are independently configured constants; a test that ties the assertion to the production heartbeat constant cannot scale.\n\nFix shape (three committed tests, each scaled honestly):\n(1) Real-router test asserts POST-BOUNDARY DATA frames, not heartbeats. Build the router through newRouter (the same seam server.New uses) with the real hub in routeDeps; GET the tree-events SSE route through the real middleware chain; wait for hub.SubscriberCount(treeID) &gt; 0 (the handler subscribes before committing headers, so by the time the 200 returns the client is registered); sleep 2x serverWriteTimeout; then hub.Broadcast(treeID, sse.SSEEvent{TreeID: treeID, Type: node_added, SequenceNum: 1, Data: probe-json}) \u2014 Broadcast is exactly what graph services call. Require the data frame to arrive with arrival-time &gt; WriteTimeout, then broadcast a second event and require it too (proves the connection stayed OPEN, not merely delivered one buffered frame). Pre-fix, the server kills the response at the boundary so nothing can arrive past it.\n(2) Heartbeat-shape test uses sse.NewHandlerWithConfig(hub, nil, 80*time.Millisecond, nil) \u2014 the PRODUCTION handler implementation with a test heartbeat cadence \u2014 mounted behind the real requestTimeoutExemptSSE + sseWriteDeadlineExemptMiddleware pair on a chi router, served by a real http.Server with 300ms WriteTimeout, read by a real TCP client. Require at least one &#x27;: &#x27; comment line strictly after the boundary and the stream still delivering (3+ heartbeats total). This is the DF-31-era scaled shape the fleet accepts for whole-response deadline proofs.\n(3) Pre/post falsification: unmount sseWriteDeadlineExemptMiddleware in server.go (sed the r.Use line) -&gt; test (1) and the extended allowlist test go RED (stream cut at boundary / routes unmarked); restore the file byte-identical (md5) -&gt; green again. Proves the tests cover the production wiring, not a test double.\n\nThe production-constants heartbeat proof stays a foreman-run LIVE check (isolated boot: own throwaway DB, scratch HOME, spare port, dev JWT, curl -N --max-time 40 on /trees/{id}/events): pre-fix zero heartbeats with a clean EOF at 30s; post-fix exactly one &#x27;: heartbeat&#x27; frame at ~30s and curl rc=28 at client max-time (still connected). 30-second real-time tests do not belong in CI; the scaled tests above lock the same property in.&quot;, &quot;environment&quot;: &quot;go 1.22+, chi v5 router, net/http httptest; http.Server WriteTimeout is ONE absolute deadline over the whole response (not per-write, Flush does not extend it)&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-sse-writetimeout-heartbeat-regression-test-design&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-26T01:44:08.451Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>Saved to <code>~/sse-writetimeout-heartbeat-regression-test-design.md</code>. Here is the solution:</p>
 <hr />
 <h1>SSE WriteTimeout / heartbeat regression: test design and verified fix</h1>
 <p><strong>Problem class:</strong> <code>go-sse-writetimeout-heartbeat-regression-test-design</code>

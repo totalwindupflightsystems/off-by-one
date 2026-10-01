@@ -45,7 +45,491 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bash-concurrent-job-timeout-kill-escalation-exit-code-capture</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>A supervisor that runs N jobs concurrently, gives each an independent deadline, escalates SIGTERM → grace → SIGKILL, captures both output streams without deadlocking, reports true 128+signal exit status, and leaves no orphaned grandchildren. It is free of the three named races and the per-job deadline is enforced by an independent watchdog, so a fork/exec storm cannot delay it.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2426-bash-concurrent-job-timeout-kill-escalation-exit-code-capture.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is complete and verified. The full markdown is saved at <code>~/jobs/SOLUTION.md</code> (and the working files at <code>~/jobs/supervisor.sh</code>, <code>~/jobs/stress.sh</code>). Here it is:</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bash-concurrent-job-timeout-kill-escalation-exit-code-capture</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>A supervisor that runs N jobs concurrently, gives each an independent deadline, escalates SIGTERM → grace → SIGKILL, captures both output streams without deadlocking, reports true 128+signal exit status, and leaves no orphaned grandchildren. It is free of the three named races and the per-job deadline is enforced by an independent watchdog, so a fork/exec storm cannot delay it.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2426-bash-concurrent-job-timeout-kill-escalation-exit-code-capture.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>The solution is complete and verified. The full markdown is saved at <code>~/jobs/SOLUTION.md</code> (and the working files at <code>~/jobs/supervisor.sh</code>, <code>~/jobs/stress.sh</code>). Here it is:</p>
+<hr />
+<h1>A Race-Free Concurrent Job Supervisor in Pure Bash 5.2+</h1>
+<p>A supervisor that runs N jobs concurrently, gives each an independent deadline, escalates <code>SIGTERM</code> → grace → <code>SIGKILL</code>, captures both output streams without deadlocking, reports true <code>128+signal</code> exit status, and leaves no orphaned grandchildren. It is free of the three named races and the per-job deadline is enforced by an independent watchdog, so a fork/exec storm cannot delay it.</p>
+<hr />
+<h2>1. Root-cause analysis</h2>
+<h3>1.1 Reaping race and the <code>wait -n</code> trap</h3>
+<p>The textbook race is a <code>trap ... CHLD</code> handler that calls <code>wait</code>, racing a later <code>wait $pid</code> on the already-reaped pid. The usual "modern" answer is <code>wait -n -p var</code>. <strong>But <code>wait -n</code> is not reliable when a child is killed by a signal.</strong> Once the asynchronous notifier has collected a <code>SIGKILL</code>ed child, <code>wait -n</code> returns <code>127</code> ("no unwaited-for children") and never reports that pid, while an explicit <code>wait &lt;pid&gt;</code> still returns the stored <code>128+signal</code> status:</p>
+<pre><code class="language-bash">$ for i in 1 2 3; do setsid bash -c 'trap &quot;&quot; TERM; while :; do :; done' &amp; pids+=($!); done
+$ # ... kill -KILL each group ...
+$ for i in 1 2 3; do wait -n -p dp; echo &quot;rc=$? dp=${dp:-&lt;unset&gt;}&quot;; done
+rc=127 dp=&lt;unset&gt;
+rc=127 dp=&lt;unset&gt;
+rc=127 dp=&lt;unset&gt;
+$ for p in &quot;${pids[@]}&quot;; do wait &quot;$p&quot;; echo &quot;rc=$?&quot;; done
+rc=137
+rc=137
+rc=137
+</code></pre>
+<p>Any design depending on <code>wait -n</code> both hangs (missing children) and loses their statuses.</p>
+<h3>1.2 Zombies make <code>kill -0</code> lie</h3>
+<p>A zombie still exists, so <code>kill -0 $pid</code> succeeds after the process is dead. A poll loop keyed only on <code>kill -0</code> waits for <em>bash</em> to reap, not for the process to die. Completion must be detected from the kernel: <code>/proc/&lt;pid&gt;/stat</code> state <code>Z</code> (or absence).</p>
+<h3>1.3 A single post-spawn enforcement loop is starved</h3>
+<p>Spawning 200 jobs serially (each a fork/exec, some starting CPU-heavy pipelines) takes seconds. If enforcement only starts after all spawns, early jobs are killed far too late, and a <code>sleep 5</code> job with a 0.4 s timeout can even <strong>finish normally</strong> before the first pass — reporting <code>rc=0</code> instead of <code>143</code>. Measured: the spawn phase alone ran ~1.3 s, and the first enforcement pass ran ~1.5 s after the first job was already dead.</p>
+<h3>1.4 The timer starts before the child is <code>exec</code>'d</h3>
+<p><code>deadline=$(( now + timeout ))</code> computed in the parent before <code>&amp;</code> starts the clock during fork/exec. The start time must be owned by the child, recorded after it is actually running.</p>
+<h3>1.5 Pipe deadlock and lost pipeline status</h3>
+<p><code>out=$(cmd)</code> (or draining only stdout) blocks once the other stream fills its pipe buffer. <code>cmd | tee f; rc=$?</code> yields <code>tee</code>'s status, not <code>cmd</code>'s. Avoid the pipe: redirect each stream to its own regular file and take the status from <code>wait</code>.</p>
+<h3>1.6 Orphaned grandchildren</h3>
+<p>Signalling only the direct child leaves its children behind. Each job must run in its own process group/session and be signalled as a group (<code>kill -- -pgid</code>).</p>
+<h3>1.7 Fork-per-sleep overhead</h3>
+<p>A watchdog that sleeps in increments by invoking <code>/bin/sleep</code> forks every tick. Under 200 watchdogs this adds enough load to <em>increase</em> kill latency. Bash's <code>read -t</code> performs a <code>select()</code> timeout with <strong>no child</strong>; a never-written FIFO is a fork-free clock.</p>
+<h3>1.8 Overloaded state (implementation pitfall)</h3>
+<p>Using one <code>killed</code> flag for both "I sent <code>SIGKILL</code>" and "reaped by signal" makes the collector skip live-but-killing jobs and loop forever. Use <code>termed</code> → <code>killing</code> while alive, and a distinct final <code>killed</code> state.</p>
+<hr />
+<h2>2. The design that closes every hole</h2>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Independent deadlines</td>
+<td>one <strong>watchdog process per job</strong></td>
+</tr>
+<tr>
+<td>Timer starts at exec, not fork</td>
+<td>child writes <code>EPOCHREALTIME</code> to <code>ready</code>; watchdog arms from it</td>
+</tr>
+<tr>
+<td>Enforce during spawn storm</td>
+<td>watchdog is a separate process</td>
+</tr>
+<tr>
+<td><code>SIGTERM</code> → grace → <code>SIGKILL</code></td>
+<td>watchdog signals the job's process group</td>
+</tr>
+<tr>
+<td>No orphaned grandchildren</td>
+<td><code>setsid</code> (or <code>set -m</code>); <code>kill -- -pgid</code></td>
+</tr>
+<tr>
+<td>No pipe deadlock</td>
+<td>per-stream regular files</td>
+</tr>
+<tr>
+<td>No lost pipeline status</td>
+<td>no pipeline; status from <code>wait &lt;pid&gt;</code></td>
+</tr>
+<tr>
+<td>No double reap</td>
+<td>no <code>SIGCHLD</code> trap; exactly one <code>wait &lt;pid&gt;</code> per job</td>
+</tr>
+<tr>
+<td>Prompt completion detection</td>
+<td><code>/proc/&lt;pid&gt;/stat</code> <code>Z</code> / absence</td>
+</tr>
+<tr>
+<td>Fork-free timing</td>
+<td><code>read -t</code> on a never-written FIFO</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>3. The fix — <code>supervisor.sh</code></h2>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# =====================================================================
+# supervisor.sh - concurrent job supervisor for bash 5.2+
+#
+# Design goals and how each classic race is closed:
+#
+#   * N concurrent jobs, each with its own independent deadline.
+#   * SIGTERM -&gt; (grace) -&gt; SIGKILL escalation delivered to the whole
+#     process group of the job, so grandchildren cannot be orphaned.
+#   * stdout/stderr go to independent regular files, so a full pipe
+#     buffer can never deadlock the supervisor.
+#   * True status is obtained with one explicit `wait &lt;pid&gt;` per job;
+#     a signal-killed job reports 128+signal (TERM=143, KILL=137).
+#     Nothing is piped, so a subshell's status is never replaced by a
+#     pipeline's last command.
+#   * No SIGCHLD trap ever calls wait(), so the reap/wait double-reap
+#     race cannot happen; each child is collected exactly once.
+#   * A per-job watchdog process starts the deadline clock only after
+#     the child itself writes a &quot;ready&quot; timestamp as its first action.
+#     The watchdog runs concurrently with (and independently of) the
+#     supervisor's spawn loop, so a slow fork/exec storm cannot delay
+#     an early job's kill.  (This is the &quot;timer starts before exec&quot;
+#     race: the child owns the start time and an independent process
+#     owns the timer.)
+#
+# Usage:  supervisor.sh JOBS_FILE
+#   JOBS_FILE lines:  &lt;id&gt; &lt;timeout_sec&gt; &lt;grace_sec&gt; &lt;command...&gt;
+#     Fields separated by whitespace; the command is the rest of the line.
+#
+# Output: one TSV line per job on stdout:
+#   id pid rc state start_us term_us kill_us dead_us end_us out_bytes
+#   err_bytes timeout_us grace_us
+#   start is written by the child; term/kill/dead by the watchdog; end is
+#   when the supervisor collected the status.
+#
+# Env:
+#   SUP_WORKDIR  dir for per-job out/err + timestamps (default: mktemp -d)
+#   SUP_CLEANUP  1 = delete SUP_WORKDIR on exit (default: 0)
+#   SUP_SETSID   auto|0|1  (default auto: use setsid if available)
+# =====================================================================
+
+set -u
+
+declare -A JOB_CMD JOB_TIMEOUT_US JOB_GRACE_US
+declare -A JOB_PID JOB_RC JOB_STATE JOB_END_US
+declare -a JOB_IDS=()
+
+SUP_WORKDIR=${SUP_WORKDIR:-$(mktemp -d)}
+SUP_CLEANUP=${SUP_CLEANUP:-0}
+SUP_SETSID=${SUP_SETSID:-auto}
+
+# Create one process group per job.
+#   setsid (util-linux): no job control, no async shell notices.
+#   set -m (pure bash):  same process-group semantics; bash may print a
+#                        &quot;Killed&quot; notice to stderr for a SIGKILLed job.
+if [[ $SUP_SETSID == auto ]]; then
+  if command -v setsid &gt;/dev/null 2&gt;&amp;1; then SUP_SETSID=1; else SUP_SETSID=0; fi
+fi
+(( SUP_SETSID )) || set -m
+
+_cleanup() { (( SUP_CLEANUP )) &amp;&amp; rm -rf -- &quot;$SUP_WORKDIR&quot;; return 0; }
+trap _cleanup EXIT
+
+# A never-written FIFO gives us a fork-free sleep primitive: bash's
+# `read -t` uses select() internally and needs no child.  All watchdogs
+# inherit the read/write fd; with no writer ever sending data, every
+# read simply times out.
+mkdir -p -- &quot;$SUP_WORKDIR&quot;
+SUP_TICK=$SUP_WORKDIR/.tick
+rm -f -- &quot;$SUP_TICK&quot;
+mkfifo -- &quot;$SUP_TICK&quot;
+exec {SUP_TICK_FD}&lt;&gt;&quot;$SUP_TICK&quot;
+
+# ---- pure-bash time helpers -----------------------------------------
+
+# decimal seconds -&gt; integer microseconds
+_us() {
+  local x=$1 i f
+  if [[ $x == *.* ]]; then
+    i=${x%%.*}; f=${x#*.}; f=${f}000000
+    printf '%s' $(( i * 1000000 + 10#${f:0:6} ))
+  else
+    printf '%s' $(( x * 1000000 ))
+  fi
+}
+# wall clock -&gt; integer microseconds (EPOCHREALTIME is bash 5.1+)
+_now_us() { local t=$EPOCHREALTIME; printf '%s' &quot;${t/./}&quot;; }
+
+# fork-free sleep of exactly &lt;us&gt; microseconds (one select() timeout).
+# Callers cap the duration themselves when they need to re-check state.
+_sleep_us() {
+  local us=$1
+  local secs=&quot;$(( us / 1000000 )).$(printf '%06d' $(( us % 1000000 )))&quot;
+  IFS= read -r -t &quot;$secs&quot; -u &quot;$SUP_TICK_FD&quot; _ 2&gt;/dev/null || true
+}
+
+# true if the job process is gone (reaped) or a zombie -- independent
+# of whether bash has collected its status yet
+_job_gone() {
+  local pid=$1 line
+  kill -0 &quot;$pid&quot; 2&gt;/dev/null || return 0
+  read -r line &lt; &quot;/proc/$pid/stat&quot; 2&gt;/dev/null || return 0
+  [[ $line == *&quot;) Z &quot;* ]]
+}
+
+# read a microsecond timestamp previously written by a child/watchdog
+_read_ts() {
+  local f=$1 v
+  if [[ -s $f ]]; then read -r v &lt; &quot;$f&quot;; printf '%s' &quot;${v/./}&quot;; else printf 0; fi
+}
+# read the start timestamp (2nd field) from a job's ready file
+_read_start() {
+  local f=$1 _ s
+  if [[ -s $f ]]; then read -r _ s &lt; &quot;$f&quot;; printf '%s' &quot;${s/./}&quot;; else printf 0; fi
+}
+
+# ---- spec / spawn ----------------------------------------------------
+
+sup_add() {                       # sup_add &lt;id&gt; &lt;timeout_s&gt; &lt;grace_s&gt; &lt;command...&gt;
+  local id=$1 to=$2 gr=$3; shift 3
+  JOB_CMD[$id]=$*
+  JOB_TIMEOUT_US[$id]=$(_us &quot;$to&quot;)
+  JOB_GRACE_US[$id]=$(_us &quot;$gr&quot;)
+  JOB_IDS+=(&quot;$id&quot;)
+}
+
+# The per-job watchdog owns this job's deadline and escalation.
+# It is a separate process, so it keeps ticking while the supervisor is
+# still busy fork/exec'ing other jobs.
+sup_watchdog() {
+  local id=$1 pid=$2 to=$3 gr=$4 d=$SUP_WORKDIR/$id
+  local start now deadline killat rem
+
+  # Wait until the job has actually started (child wrote its own start
+  # timestamp as its first action).  Until then, no timer is armed.
+  while [[ ! -s $d/ready ]]; do
+    kill -0 &quot;$pid&quot; 2&gt;/dev/null || return 0
+    _sleep_us 10000
+  done
+  read -r _ start &lt; &quot;$d/ready&quot;
+  start=${start/./}
+  deadline=$(( start + to ))
+
+  # Wait out the deadline (retiring early if the job exits on its own).
+  # The final chunk is exactly the remainder, so TERM lands on time.
+  while :; do
+    now=$(_now_us)
+    (( now &gt;= deadline )) &amp;&amp; break
+    kill -0 &quot;$pid&quot; 2&gt;/dev/null || return 0
+    rem=$(( deadline - now ))
+    (( rem &gt; 100000 )) &amp;&amp; rem=100000
+    _sleep_us &quot;$rem&quot;
+  done
+
+  # SIGTERM the whole process group.
+  kill -0 &quot;$pid&quot; 2&gt;/dev/null || return 0
+  now=$(_now_us)
+  printf '%s\n' &quot;$now&quot; &gt; &quot;$d/term&quot;
+  kill -TERM -- &quot;-$pid&quot; 2&gt;/dev/null
+
+  # Grace period.  Re-check every &lt;=20ms so that a job which dies on TERM
+  # is noticed quickly; the final chunk is exact, so KILL lands on time.
+  killat=$(( now + gr ))
+  while :; do
+    _job_gone &quot;$pid&quot; &amp;&amp; { printf '%s\n' &quot;$(_now_us)&quot; &gt; &quot;$d/dead&quot;; return 0; }
+    now=$(_now_us)
+    (( now &gt;= killat )) &amp;&amp; break
+    rem=$(( killat - now ))
+    (( rem &gt; 20000 )) &amp;&amp; rem=20000
+    _sleep_us &quot;$rem&quot;
+  done
+  now=$(_now_us)
+  printf '%s\n' &quot;$now&quot; &gt; &quot;$d/kill&quot;
+  kill -KILL -- &quot;-$pid&quot; 2&gt;/dev/null
+  # Wait until the KILL actually took effect, then record death.
+  while ! _job_gone &quot;$pid&quot;; do _sleep_us 5000; done
+  printf '%s\n' &quot;$(_now_us)&quot; &gt; &quot;$d/dead&quot;
+}
+
+sup_spawn() {
+  local id=$1 d=$SUP_WORKDIR/$id
+  mkdir -p -- &quot;$d&quot;
+  if (( SUP_SETSID )); then
+    setsid bash -c '
+      printf &quot;%s %s\n&quot; &quot;$BASHPID&quot; &quot;$EPOCHREALTIME&quot; &gt; &quot;$1/ready&quot;
+      eval &quot;$2&quot;
+    ' _ &quot;$d&quot; &quot;${JOB_CMD[$id]}&quot; &gt;&quot;$d/out&quot; 2&gt;&quot;$d/err&quot; &amp;
+  else
+    (
+      printf '%s %s\n' &quot;$BASHPID&quot; &quot;$EPOCHREALTIME&quot; &gt; &quot;$d/ready&quot;
+      eval &quot;${JOB_CMD[$id]}&quot;
+    ) &gt;&quot;$d/out&quot; 2&gt;&quot;$d/err&quot; &amp;
+  fi
+  local pid=$!
+  JOB_PID[$id]=$pid
+  JOB_STATE[$id]=starting
+
+  sup_watchdog &quot;$id&quot; &quot;$pid&quot; &quot;${JOB_TIMEOUT_US[$id]}&quot; &quot;${JOB_GRACE_US[$id]}&quot; \
+      &gt;/dev/null 2&gt;&amp;1 &amp;
+}
+
+# ---- main: spawn, then collect each job exactly once -----------------
+
+sup_run() {
+  local id pid rc
+  for id in &quot;${JOB_IDS[@]}&quot;; do sup_spawn &quot;$id&quot;; done
+
+  # Every job now has an independent watchdog.  Collect one pid at a
+  # time with an explicit wait; this is the only place any child is
+  # reaped, and it is never called twice for the same pid.
+  for id in &quot;${JOB_IDS[@]}&quot;; do
+    pid=${JOB_PID[$id]}
+    wait &quot;$pid&quot; 2&gt;/dev/null; rc=$?
+    JOB_RC[$id]=$rc
+    JOB_END_US[$id]=$(_now_us)
+    if (( rc &gt;= 128 )); then JOB_STATE[$id]=killed; else JOB_STATE[$id]=exited; fi
+  done
+
+  wait 2&gt;/dev/null          # reap all watchdogs
+}
+
+sup_report() {
+  local id d ob eb
+  for id in &quot;${JOB_IDS[@]}&quot;; do
+    d=$SUP_WORKDIR/$id
+    ob=$(stat -c%s &quot;$d/out&quot; 2&gt;/dev/null || echo 0)
+    eb=$(stat -c%s &quot;$d/err&quot; 2&gt;/dev/null || echo 0)
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+      &quot;$id&quot; &quot;${JOB_PID[$id]}&quot; &quot;${JOB_RC[$id]:-?}&quot; &quot;${JOB_STATE[$id]}&quot; \
+      &quot;$(_read_start &quot;$d/ready&quot;)&quot; \
+      &quot;$(_read_ts &quot;$d/term&quot;)&quot; &quot;$(_read_ts &quot;$d/kill&quot;)&quot; &quot;$(_read_ts &quot;$d/dead&quot;)&quot; \
+      &quot;${JOB_END_US[$id]:-0}&quot; \
+      &quot;$ob&quot; &quot;$eb&quot; &quot;${JOB_TIMEOUT_US[$id]}&quot; &quot;${JOB_GRACE_US[$id]}&quot;
+  done
+}
+
+# ---- CLI -------------------------------------------------------------
+if [[ ${BASH_SOURCE[0]} == &quot;$0&quot; ]]; then
+  spec=${1:?usage: supervisor.sh JOBS_FILE}
+  while read -r id to gr cmd; do
+    [[ -z ${id:-} || $id == \#* ]] &amp;&amp; continue
+    sup_add &quot;$id&quot; &quot;$to&quot; &quot;$gr&quot; &quot;$cmd&quot;
+  done &lt; &quot;$spec&quot;
+  sup_run
+  sup_report
+fi
+</code></pre>
+<hr />
+<h2>4. Verification</h2>
+<h3>4.1 The 200-job stress harness</h3>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# stress.sh - 200 contending jobs through supervisor.sh, then verify.
+set -u
+RUN=${1:-$$}
+DIR=~/jobs/stress_$RUN
+rm -rf &quot;$DIR&quot;; mkdir -p &quot;$DIR&quot;
+SPEC=$DIR/jobs.spec; : &gt; &quot;$SPEC&quot;
+mk() { printf '%s %s %s %s\n' &quot;$1&quot; &quot;$2&quot; &quot;$3&quot; &quot;$4&quot; &gt;&gt; &quot;$SPEC&quot;; }
+
+i=0
+# 50 short sleepers killed by SIGTERM
+for (( ; i&lt;50;  i++)); do mk &quot;sleep_$i&quot;  0.40 0.30 'sleep 5'; done
+# 50 CPU spinners killed by SIGTERM
+for (( ; i&lt;100; i++)); do mk &quot;spin_$i&quot;   0.40 0.30 'while :; do :; done'; done
+# 50 high-output pipelines (1 MB to stdout AND 1 MB to stderr)
+for (( ; i&lt;150; i++)); do mk &quot;high_$i&quot;   0.50 0.30 \
+  'head -c 1000000 /dev/zero | tr &quot;\0&quot; a; head -c 1000000 /dev/zero | tr &quot;\0&quot; b 1&gt;&amp;2; sleep 5'; done
+# 25 jobs that ignore SIGTERM -&gt; must be SIGKILLed after grace
+for (( ; i&lt;175; i++)); do mk &quot;ignore_$i&quot; 0.30 0.25 'trap &quot;&quot; TERM; while :; do :; done'; done
+# 25 jobs each with a grandchild -&gt; group kill must not orphan it
+for (( ; i&lt;200; i++)); do mk &quot;grand_$i&quot;  0.40 0.30 'sleep 5 &amp; sleep 5'; done
+
+start=$(date +%s.%N)
+SUP_WORKDIR=$DIR/wd SUP_CLEANUP=1 bash ~/jobs/supervisor.sh &quot;$SPEC&quot; \
+    &gt; &quot;$DIR/report.tsv&quot; 2&gt; &quot;$DIR/sup.err&quot;
+sup_rc=$?
+end=$(date +%s.%N)
+
+echo &quot;== run ==&quot;
+echo &quot;supervisor_rc=$sup_rc  job_lines=$(wc -l &lt; &quot;$DIR/report.tsv&quot;)  wall=$(awk -v a=&quot;$start&quot; -v b=&quot;$end&quot; 'BEGIN{printf &quot;%.3f&quot;, b-a}')s  stderr_bytes=$(stat -c%s &quot;$DIR/sup.err&quot;)&quot;
+
+analyze() {
+  local report=$DIR/report.tsv
+  awk -F'\t' '
+    BEGIN{slack=200000}
+    { id=$1; pid=$2; rc=$3; state=$4; st=$5; tm=$6; kl=$7; dd=$8; en=$9; ob=$10; eb=$11; to=$12; gr=$13;
+      n++; seen_id[id]++; seen_pid[pid]++;
+      if (rc==143) term_ok++; else if (rc==137) kill_ok++; else other_rc++;
+      if (st&gt;0 &amp;&amp; tm&gt;0 &amp;&amp; tm-st &lt; to-slack) early++;
+      if (tm&gt;0 &amp;&amp; dd&gt;0 &amp;&amp; (dd-tm) &gt; gr+slack) slow_death++;
+      if (tm&gt;0 &amp;&amp; dd&gt;0 &amp;&amp; (dd-tm) &lt; 0) neg++;
+      if (kl&gt;0) {
+        d=kl-tm; if (d&gt;gr+slack || d&lt;gr-slack) bad_grace++;
+        if (dd&gt;0 &amp;&amp; dd-kl &gt; slack) slow_kill++;
+      }
+      if (id ~ /^high_/ &amp;&amp; (ob!=1000000 || eb!=1000000)) bad_out++;
+    }
+    END{
+      printf &quot;jobs=%d unique_ids=%d unique_pids=%d\n&quot;, n, length(seen_id), length(seen_pid);
+      printf &quot;rc143(SIGTERM)=%d rc137(SIGKILL)=%d other_rc=%d\n&quot;, term_ok, kill_ok, other_rc;
+      printf &quot;deadline_started_early=%d death_after_grace_window=%d kill_not_in_grace=%d kill_to_death_slow=%d neg=%d high_out_mismatch=%d\n&quot;,
+             early+0, slow_death+0, bad_grace+0, slow_kill+0, neg+0, bad_out+0;
+      if (n!=200 || length(seen_id)!=200 || length(seen_pid)!=200 || other_rc&gt;0 || early&gt;0 || slow_death&gt;0 || bad_grace&gt;0 || slow_kill&gt;0 || neg&gt;0 || bad_out&gt;0)
+        print &quot;VERDICT=FAIL&quot;;
+      else print &quot;VERDICT=PASS&quot;;
+    }' &quot;$report&quot;
+}
+
+echo &quot;== report analysis ==&quot;
+analyze
+
+echo &quot;== process-group leak check (each reported job pid doubles as its pgid) ==&quot;
+leaks=0
+while IFS=$'\t' read -r id pid rc state st tm kl dd en ob eb to gr; do
+  if kill -0 -- &quot;-$pid&quot; 2&gt;/dev/null; then
+    echo &quot;  LEAK id=$id pgid=$pid&quot;; leaks=$((leaks+1))
+  fi
+done &lt; &quot;$DIR/report.tsv&quot;
+echo &quot;immediate leaks=$leaks&quot;
+
+echo &quot;waiting 5s for stragglers ...&quot;
+sleep 5
+leaks2=0
+while IFS=$'\t' read -r id pid rc state st tm kl dd en ob eb to gr; do
+  if kill -0 -- &quot;-$pid&quot; 2&gt;/dev/null; then
+    echo &quot;  LEAK id=$id pgid=$pid&quot;; leaks2=$((leaks2+1))
+  fi
+done &lt; &quot;$DIR/report.tsv&quot;
+echo &quot;leaks_after_5s=$leaks2&quot;
+
+echo &quot;== raw report head ==&quot;
+head -3 &quot;$DIR/report.tsv&quot;
+echo &quot;== supervisor stderr (first 5) ==&quot;
+head -5 &quot;$DIR/sup.err&quot;
+
+if (( sup_rc == 0 &amp;&amp; leaks == 0 &amp;&amp; leaks2 == 0 )); then echo &quot;OVERALL=PASS&quot;; else echo &quot;OVERALL=FAIL&quot;; fi
+</code></pre>
+<p>Run it:</p>
+<pre><code class="language-bash">bash stress.sh final
+</code></pre>
+<h3>4.2 Observed result (real run)</h3>
+<pre><code>== run ==
+supervisor_rc=0  job_lines=200  wall=5.211s  stderr_bytes=5400
+== report analysis ==
+jobs=200 unique_ids=200 unique_pids=200
+rc143(SIGTERM)=175 rc137(SIGKILL)=25 other_rc=0
+deadline_started_early=0 death_after_grace_window=0 kill_not_in_grace=0 kill_to_death_slow=0 neg=0 high_out_mismatch=0
+VERDICT=PASS
+== process-group leak check (each reported job pid doubles as its pgid) ==
+immediate leaks=0
+waiting 5s for stragglers ...
+leaks_after_5s=0
+== raw report head ==
+sleep_0 82789   143 killed  1790548349156886    1790548349572619    0   1790548349610581    1790548351368322    0   0   400000  300000
+sleep_1 82794   143 killed  1790548349160013    1790548349565997    0   1790548349596759    1790548351369337    0   0   400000  300000
+sleep_2 82799   143 killed  1790548349163122    1790548349568579    0   1790548349606678    1790548351370255    0   0   400000  300000
+== supervisor stderr (first 5) ==
+...
+OVERALL=PASS
+</code></pre>
+<p>Repeat runs (<code>s7</code>–<code>s10</code>, <code>final</code>) all produced <code>VERDICT=PASS</code>. The pure-bash <code>set -m</code> fallback (<code>SUP_SETSID=0</code>) on the same mix also produced <code>FALLBACK_VERDICT=PASS</code> with <code>leaks=0</code>.</p>
+<h3>4.3 What each counter proves</h3>
+<ul>
+<li><code>unique_ids=200 unique_pids=200</code> — every job reported exactly once; no duplicate reaping, no lost jobs.</li>
+<li><code>rc143(SIGTERM)=175</code>, <code>rc137(SIGKILL)=25</code> — the 25 <code>trap '' TERM</code> jobs escalated and died with <code>128+9</code>; the other 175 died with <code>128+15</code>. True statuses are preserved (nothing piped, no <code>wait -n</code>).</li>
+<li><code>deadline_started_early=0</code> — no <code>TERM</code> was sent before <code>start + timeout</code>; the clock is owned by the child.</li>
+<li><code>kill_not_in_grace=0</code> and <code>kill_to_death_slow=0</code> — every <code>SIGKILL</code> was sent within <code>grace ± slack</code> of <code>SIGTERM</code>, and death followed promptly.</li>
+<li><code>death_after_grace_window=0</code> — every job's recorded death fell inside the grace window after <code>TERM</code>.</li>
+<li><code>high_out_mismatch=0</code> — all 50 high-output jobs captured exactly 1,000,000 bytes on <strong>each</strong> stream, proving no pipe-buffer deadlock.</li>
+<li><code>immediate leaks=0</code>, <code>leaks_after_5s=0</code> — after the supervisor exits (and after a further 5 s) no process remains in any job's process group, including the <code>sleep 5 &amp; sleep 5</code> grandchildren.</li>
+</ul>
+<h3>4.4 Diagnostic used to find the <code>wait -n</code> defect</h3>
+<pre><code class="language-bash">pids=()
+for i in 1 2 3; do setsid bash -c 'trap &quot;&quot; TERM; while :; do :; done' &amp; pids+=($!); done
+sleep 0.3
+for p in &quot;${pids[@]}&quot;; do kill -KILL -- &quot;-$p&quot;; done
+sleep 0.1
+for i in 1 2 3; do wait -n -p dp; echo &quot;wait -n rc=$? dp=${dp:-&lt;unset&gt;}&quot;; done   # all 127
+for p in &quot;${pids[@]}&quot;; do wait &quot;$p&quot;; echo &quot;wait $p rc=$?&quot;; done                  # 137,137,137
+</code></pre>
+<p>This is why the final implementation uses polling for liveness plus one explicit <code>wait</code> per pid, and never <code>wait -n</code>.</p>
+<hr />
+<h2>5. Usage in your own code</h2>
+<pre><code class="language-bash"># jobs spec (id, timeout seconds, grace seconds, command to end of line)
+fast    2.0 0.5  exit 0
+slow    1.0 0.5  sleep 60
+stubborn 1.0 0.25 trap '' TERM; while :; do :; done
+noisy   0.5 0.5  head -c 5000000 /dev/zero | tr '\0' x; head -c 5000000 /dev/zero | tr '\0' y &gt;&amp;2
+
+SUP_WORKDIR=/var/tmp/sup.$$ SUP_CLEANUP=1 bash supervisor.sh jobs.txt | column -t
+</code></pre>
+<p>For a shippable tool, run as-is. If <code>setsid</code> is unavailable, the script automatically falls back to pure-bash <code>set -m</code> process groups; bash will then print a cosmetic <code>Killed &lt;cmd&gt;</code> notice to <strong>stderr</strong> for <code>SIGKILL</code>ed jobs (stdout, the report, is unaffected — redirect stderr if you want it silent).</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: bash-concurrent-job-timeout-kill-escalation-exit-code-capture
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-09-27T22:33:22.544Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Write a pure bash 5.2 job supervisor that runs N concurrent jobs with independent deadlines, escalating SIGTERM to SIGKILL after a grace period, capturing each job&#x27;s stdout and stderr without deadlocking when a pipe buffer fills, and reporting the true exit status (128+signal for killed jobs) with no orphaned grandchildren left behind. It must be free of the classic races: SIGCHLD-driven reaping colliding with wait on an already-reaped pid, loss of a subshell&#x27;s exit status when its output is piped, and a deadline timer that starts before the child has actually been exec&#x27;d. Prove it under 200 contending jobs with mixed sleep/spin/high-output payloads: no duplicate reaping, no leaked pids after 5 seconds, and per-job kill latency within the grace window.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;bash-concurrent-job-timeout-kill-escalation-exit-code-capture&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-27T22:33:22.544Z&quot;, &quot;version&quot;: &quot;5.2&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>The solution is complete and verified. The full markdown is saved at <code>~/jobs/SOLUTION.md</code> (and the working files at <code>~/jobs/supervisor.sh</code>, <code>~/jobs/stress.sh</code>). Here it is:</p>
 <hr />
 <h1>A Race-Free Concurrent Job Supervisor in Pure Bash 5.2+</h1>
 <p>A supervisor that runs N jobs concurrently, gives each an independent deadline, escalates <code>SIGTERM</code> → grace → <code>SIGKILL</code>, captures both output streams without deadlocking, reports true <code>128+signal</code> exit status, and leaves no orphaned grandchildren. It is free of the three named races and the per-job deadline is enforced by an independent watchdog, so a fork/exec storm cannot delay it.</p>
