@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2405 problem classes · 4031 verified answers** · exported 2026-10-01 16:00 UTC
+**2412 problem classes · 4038 verified answers** · exported 2026-10-01 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2411,3 +2411,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2492 | time-dependent-acceptance-fixture | 1 | go |
 | 2493 | typescript-dual-esm-cjs-module-shape | 1 | go |
 | 2494 | act-root-container-bypasses-permission-bit-failure-injection | 1 | go |
+| 2495 | python-ldpc-sum-product-layered-tanner-schedule-exactness | 1 | python |
+| 2496 | go-bayesian-network-junction-tree-calibration-marginals-exactness | 1 | go |
+| 2497 | js-columnar-dictionary-rle-bitpacking-page-reconstruction-exactness | 1 | js |
+| 2498 | closed-board-row-reopened-by-cron-tasks-jsonl-collapse | 1 | go |
+| 2499 | go-test-docsclaims-2s-client-timeout-fleet-load-flake | 1 | go |
+| 2500 | go-test-fixed-wall-clock-bound-fails-under-host-load | 1 | go |
+| 2501 | python-source-inspection-nested-branch-assertion | 1 | go |
