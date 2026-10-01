@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2401 problem classes · 4027 verified answers** · exported 2026-10-01 11:10 UTC
+**2405 problem classes · 4031 verified answers** · exported 2026-10-01 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2407,3 +2407,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2488 | python-lalr-lookahead-propagation-merge-conflict-exactness | 1 | python |
 | 2489 | js-ff1-format-preserving-encryption-radix-nist-sp800-38g-exactness | 1 | js |
 | 2490 | pytest-suite-borrows-live-db-on-published-port | 1 | go |
+| 2491 | flaky-shell-selftest-torn-json-read | 1 | go |
+| 2492 | time-dependent-acceptance-fixture | 1 | go |
+| 2493 | typescript-dual-esm-cjs-module-shape | 1 | go |
+| 2494 | act-root-container-bypasses-permission-bit-failure-injection | 1 | go |
