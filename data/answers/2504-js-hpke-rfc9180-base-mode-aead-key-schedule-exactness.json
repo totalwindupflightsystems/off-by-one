@@ -1,0 +1,28 @@
+{
+  "class_id": 2504,
+  "title": "js-hpke-rfc9180-base-mode-aead-key-schedule-exactness",
+  "description": "js-hpke-rfc9180-base-mode-aead-key-schedule-exactness",
+  "created_at": "2026-10-01 22:15:18",
+  "answers": [
+    {
+      "answer_id": 4233,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "## Solution\n\nI implemented and verified it in `~/hpke/` (full write-up in **`~/hpke/SOLUTION.md`**). All RFC 9180 A.1 + A.3 base-mode vectors reproduce byte-for-byte.\n\n### Root-cause analysis\n\nTwo byte-exactness bugs break the vectors while `seal`/`open` still \"work\":\n\n**1. HPKE `suite_id` must include the KEM id (10 bytes, not 8).**\nRFC 9180 §5.1:\n```\nsuite_id     = \"HPKE\" || I2OSP(kem_id,2) || I2OSP(kdf_id,2) || I2OSP(aead_id,2)\nkem_suite_id = \"KEM\"  || I2OSP(kem_id,2)\n```\nOmitting `kem_id` makes `shared_secret` match (it uses `kem_suite_id`) but corrupts `key_schedule_context`, `secret`, `key`, `base_nonce`, `exporter_secret`. A.1 `key_schedule_context` came out `0015c264…` instead of `00725611…`.\n\n**2. `Export` uses label `\"sec\"`, not `\"exp\"`.**\nThe key schedule *derives* the exporter secret with `\"exp\"`:\n```\nexporter_secret = LabeledExpand(secret, \"exp\", key_schedule_context, Nh)\n```\nbut the §5.3 Export API uses `\"sec\"`:\n```\nContext.Export(ctx, L) = LabeledExpand(exporter_secret, \"sec\", ctx, L)\n```\nWith `\"exp\"`, the first A.1 export is `73006be5…`; with `\"sec\"` it is the expected `3853fe2b…`.\n\n(Also: A.3 is P-256, not X25519, so the code additionally implements DHKEM(P-256) with the counter-based `candidate` DeriveKeyPair.)\n\n### Exact fix (core of `hpke.js`)\n\n```js\nthis.suiteId = concat(                       // 10 bytes\n  Buffer.from('HPKE'), i2osp(kemId,2), i2osp(kdfId,2), i2osp(aeadId,2));\n\nthis.suiteId = concat(Buffer.from('KEM'), i2osp(kemId,2));  // DHKEM\n\n// key schedule\nconst secret         = labeledExtract(suiteId, sharedSecret, 'secret',     psk);\nconst key            = labeledExpand (suiteId, secret, 'key',        ksc, Nk);\nconst baseNonce      = labeledExpand (suiteId, secret, 'base_nonce', ksc, Nn);\nconst exporterSecret = labeledExpand (suiteId, secret, 'exp',        ksc, Nh);\n\n// Export API -> \"sec\"\nexport(exporterSecret, ctx, L) {\n  return labeledExpand(this.suiteId, exporterSecret, 'sec', ctx, L);\n}\n\n// nonce = base_nonce XOR I2OSP(seq, Nn), reject seq >= 2^(8*Nn)\nif (s >= 1n << BigInt(8 * Nn)) throw new SequenceOverflowError(...);\n```\n\n`open` wraps `decipher.final()` in `try/catch`, throws `AEADAuthenticationError`, and never returns/logs partial plaintext.\n\n### Verification\n\n```\n$ node verify.js\nok  RFC 9180 Appendix A.1\nok  RFC 9180 Appendix A.3\nok  sequence overflow + AEAD auth errors + 100 round-trips\nALL VERIFICATION TESTS PASSED\n\n$ node test-cfrg.js\nok   CFRG 2 base-mode suite vectors (X25519 + P-256) reproduced byte-for-byte\n```\n\nVerified: A.1/A.3 `shared_secret`, `key_schedule_context`, `secret`, `key`, `base_nonce`, `exporter_secret`; all nonces/ciphertexts at seq `0,1,2,4,255,256`; all exported values for contexts `\"\"`, `00`, `TestContext`; nonce overflow at `2^96` → `SequenceOverflowError`; tampered tag/AAD/short ct → `AEADAuthenticationError` with `undefined` plaintext; 100+ randomized round-trips.\n\nFiles: `hpke.js` (implementation), `verify.js` (self-contained vector+error test), `test-cfrg.js` + `tv.json`, and the complete write-up `SOLUTION.md`.\n",
+      "evidence": "# Evidence\n- Problem class: js-hpke-rfc9180-base-mode-aead-key-schedule-exactness\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-01T22:15:18.523Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement RFC 9180 HPKE base mode in JavaScript on Node 20 for KEM X25519-HKDF-SHA256, KDF HKDF-SHA256 and AEAD AES-128-GCM, including labeled_extract and labeled_expand with suite_id 'HPKE' and the exact labels (eae_prk, shared_secret, key, base_nonce, secret, exp), DHKEM Encap/Decap with kem_suite_id and the 0x00 || 0x01 || Nsecret context string, and seal/open with the RFC nonce = base_nonce XOR I2OSP(seq, Nn). The implementation must reproduce the RFC 9180 Appendix A.1 and A.3 test vectors byte-for-byte and must export export(exporter_context, L) under the 'exp' label. It must reject a sequence number that overflows the nonce width and any AEAD authentication failure with a typed error, without ever returning or logging plaintext on failure.",
+        "environment": "node20",
+        "language": "js",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "js-hpke-rfc9180-base-mode-aead-key-schedule-exactness",
+        "provider": "openrouter",
+        "solved_at": "2026-10-01T22:15:18.525Z",
+        "version": "20"
+      },
+      "status": "verified",
+      "created_at": "2026-10-01 22:15:18"
+    }
+  ]
+}

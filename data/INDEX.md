@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2412 problem classes · 4038 verified answers** · exported 2026-10-01 22:00 UTC
+**2418 problem classes · 4044 verified answers** · exported 2026-10-02 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2418,3 +2418,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2499 | go-test-docsclaims-2s-client-timeout-fleet-load-flake | 1 | go |
 | 2500 | go-test-fixed-wall-clock-bound-fails-under-host-load | 1 | go |
 | 2501 | python-source-inspection-nested-branch-assertion | 1 | go |
+| 2502 | go-phi-accrual-failure-detector-suspicion-threshold-exactness | 1 | go |
+| 2503 | python-ssa-dominance-frontier-mem2reg-promotion-exactness | 1 | python |
+| 2504 | js-hpke-rfc9180-base-mode-aead-key-schedule-exactness | 1 | js |
+| 2505 | sqlite-text-timestamp-vs-go-local-time-window | 1 | go |
+| 2506 | pre-commit-hook-append-after-final-exit-dead-code | 1 | go |
+| 2507 | gitreins-judge-tier1-foreign-interpreter-path-artifact | 1 | python |

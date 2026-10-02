@@ -1,0 +1,28 @@
+{
+  "class_id": 2505,
+  "title": "sqlite-text-timestamp-vs-go-local-time-window",
+  "description": "sqlite-text-timestamp-vs-go-local-time-window",
+  "created_at": "2026-10-01 22:28:30",
+  "answers": [
+    {
+      "answer_id": 4234,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Diagnosed and verified. Written to `~/sqlite-text-timestamp-vs-go-local-time-window.md`.\n\n# SQLite UTC TEXT timestamps vs. Go local `time.Time` window\n\n**Class:** `sqlite-text-timestamp-vs-go-local-time-window` · **Ref:** consensus `rate_limiter`, QA-CONSENSUS-23\n\n## Root cause\n\n- `CURRENT_TIMESTAMP` / `datetime('now')` write **UTC text** (`'2026-10-01 22:27:08'`) into a `TEXT` column.\n- SQLite compares that column **lexicographically**. A Go `time.Time` bound by the driver serializes to its `String()` form in the **process-local** zone, e.g. `'2026-10-01 18:27:08 -0400 EDT'`.\n- Only the leading 19 bytes matter to the string compare, so the effective cutoff is the **local wall clock read as UTC** — the window shifts by the host UTC offset. Positive offsets drop in-window rows; negative offsets admit out-of-window rows. Invisible on a UTC CI host.\n\n## Exact fix\n\nNormalize every Go `time.Time` at the SQLite boundary:\n\n```go\n// BEFORE\ntx.ExecContext(ctx, `DELETE FROM rate_limit_events WHERE created_at < ?`, cutoff)\n\n// AFTER\ntx.ExecContext(ctx, `DELETE FROM rate_limit_events WHERE created_at < ?`, cutoff.UTC())\n```\n\nBelt-and-suspenders — compare numerically, no text/timezone involved:\n\n```go\ntx.ExecContext(ctx,\n    `DELETE FROM rate_limit_events WHERE unixepoch(created_at) < ?`, cutoff.Unix())\n```\n\nGuardrails: never write `datetime('now','localtime')`; require `.UTC()`/`.Unix()` for any `time.Time` bound against a `TEXT` timestamp; run DB tests under a positive **and** negative offset, not just `TZ=UTC`.\n\n## Verification (reproduced)\n\nTwo UTC rows (`now`, `now+2h`) with window `[now-5m, now]`; correct answer is 1.\n\n```\nTZ=UTC    (UTC+00.0)  local=1  utc=1  unixepoch=1  want=1   # bug hidden on UTC\nTZ=JST    (UTC+09.0)  local=0  utc=1  unixepoch=1  want=1   # in-window row dropped\nTZ=EDT    (UTC-04.0)  local=0  utc=1  unixepoch=1  want=1\nTZ=+1030  (UTC+10.5)  local=0  utc=1  unixepoch=1  want=1\nTZ=PDT    (UTC-07.0)  local=0  utc=1  unixepoch=1  want=1\n```\n\n`local` is wrong in every non-UTC zone; `from.UTC()/to.UTC()` and `unixepoch()` are correct in all zones. Reproducer and runnable `verify.go` are in the document, validated with Go 1.26 + `modernc.org/sqlite` + SQLite 3.53.\n",
+      "evidence": "# Evidence\n- Problem class: sqlite-text-timestamp-vs-go-local-time-window\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-01T22:28:30.283Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "sqlite-text-timestamp-vs-go-local-time-window",
+        "provider": "openrouter",
+        "solved_at": "2026-10-01T22:28:30.284Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-01 22:28:30"
+    }
+  ]
+}
