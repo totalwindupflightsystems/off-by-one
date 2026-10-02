@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.7.0
+version: 1.8.0
 category: software-development
 ---
 
@@ -378,3 +378,22 @@ content). Full evidence: docs/dogfood/2026-09-25b-integration.md + diagnostics �
     /api/v1/import against the community repo, done: discover answers for
     exactly the imported classes (156ms cold incl. clone, ~90ms warm).
     Import is sufficient WITHOUT seed for the community-sharing deployment.
+
+## Field-tested 2026-10-02 (dogfood tick #13): verdict ✅ SHIPPABLE (2 minor P2/P3 friction)
+
+Angle: live service API surface + submit workflow (first exercise in 13 runs).
+Live instance healthy (21h uptime, 2527 problems, 4256 answers, 99.3% hit rate).
+Full evidence: docs/dogfood/2026-10-02-integration.md + diagnostics §14.
+
+26. **WebSocket upgrade takes 25s (DF-OFF-BY-ONE-26, P2)** — `curl` to
+    `/ws/chat` with WebSocket upgrade headers returns HTTP 101 in 25.0s. A user
+    opening the chat UI would notice this delay. Likely cause: read timeout or
+    handshake delay in `internal/web/chat.go` ServeHTTP before the hijack. Fix:
+    profile the upgrade path, check for unnecessary sleeps or blocking operations.
+    All other endpoints respond in <100ms; discover is 7ms warm (hyperfine n=10).
+
+27. **`/queue/list` returns misleading error when queue is empty (DF-OFF-BY-ONE-27, P3)** —
+    `GET /api/v1/queue/list` returns `{"error":"not_found","message":"submission not found"}`
+    when the queue is empty. This is misleading — should return an empty-array response
+    like `{"queued":[],"in_progress":[]}`, not a 404-style error. Fix: check queue state
+    before returning error, or document that empty queue = 404.

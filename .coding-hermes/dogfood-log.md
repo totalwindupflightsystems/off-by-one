@@ -153,3 +153,11 @@ Chronological record of dogfood field-test runs (real-use value checks, not test
   Install: SKIPPED — las-bunker-03 unreachable (ssh timeouts ×10+, ping 100% loss, ~20 min); release-binary path proven on that host 24h prior.
   Perf: no PERF row — import 87-101ms warm/156ms cold; export 89-107ms (3 answers)/933ms (200 answers/600 files); discover 12-18ms. Nothing user-noticeable.
   Artifacts: docs/dogfood/2026-09-25b-integration.md, diagnostics.md §13, board DF-OFF-BY-ONE-22..25 + SKIPPED-install-bunker row + LIVE-VERIFIED row, skills/off-by-one-usage/SKILL.md v1.7.0 (pitfalls 22-25), this log.
+
+2026-10-02 | SHIPPABLE (2 minor P2/P3 friction) | t2fs 10ms (live instance discover) | friction 2 (WebSocket 25s, queue/list error) | 2 findings (26/27)
+  Angle (first exercise in 13 runs): live service API surface + submit workflow. Service healthy (21h uptime, 2527 problems, 4256 answers, 99.3% hit rate).
+  Promise: "converts idle compute cycles into pre-verified answers". HELD: discover returns comprehensive solutions with evidence, submit queues correctly with position + ETA, all core endpoints work.
+  What failed: WebSocket upgrade takes 25s (DF-26, P2 — user-noticeable); /queue/list returns misleading "submission not found" error when queue is empty (DF-27, P3).
+  Install: SKIPPED — live service already running. Prior runs proved install paths.
+  Perf: no PERF row — discover 7ms warm, submit <100ms, stats/taxonomy <50ms. Only user-noticeable wait is 25s WebSocket upgrade (DF-26).
+  Artifacts: docs/dogfood/2026-10-02-integration.md, diagnostics.md §14, board DF-OFF-BY-ONE-26/27, skills/off-by-one-usage/SKILL.md v1.8.0 (pitfalls 26-27), this log.

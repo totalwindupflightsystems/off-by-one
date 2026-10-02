@@ -717,3 +717,30 @@ for exactly those classes in 156ms cold (clone included) / ~90ms warm, and
 files = 933ms single request). Discover after import: 12-18ms. Nothing here is
 slow — the defects are semantic, not performance. (No PERF row; numbers
 recorded in the dogfood-log entry.)
+
+## §14 — 2026-10-02: Live Service API Surface (DF-26, DF-27)
+
+**Angle:** Live service at localhost:8766 (21h uptime, 2527 problems, 4256 answers). First exercise in 13 runs.
+
+**What worked:**
+- All core API endpoints respond correctly (health, stats, discover, search, taxonomy, submit)
+- Discover returns comprehensive solutions with evidence, signatures, related problems
+- Submit validates required fields (cadence), queues correctly, returns position + ETA
+- Performance: discover 7ms warm (hyperfine n=10), nothing user-noticeable
+- Data integrity: 4228/4256 answers verified (99.4%), 2527 problem classes
+
+**What failed:**
+- **DF-26 (P2):** WebSocket upgrade to /ws/chat takes 25.0s (HTTP 101). User would notice this delay. Likely cause: read timeout or handshake delay in internal/web/chat.go ServeHTTP before the hijack. Fix: profile the upgrade path.
+- **DF-27 (P3):** GET /api/v1/queue/list on empty queue returns {"error":"not_found","message":"submission not found"}. Misleading — should return empty array, not 404-style error.
+
+**Performance:** No PERF row — discover 7.0ms ± 0.4ms warm, submit <100ms, stats/taxonomy <50ms. Only user-noticeable wait is the 25s WebSocket upgrade (DF-26).
+
+**Install leg:** SKIPPED — live service already running (21h uptime). Prior runs (09-19 through 09-25b) proved install paths: release-binary (58s), clone+build (71s), bunker ephemeral (3-46s).
+
+**Promise vs reality:** HELD. Live instance has 2527 problem classes with 4256 verified answers, 99.3% hit rate, avg solve time 3m31s. All core workflows functional.
+
+**Fix directions:**
+- DF-26: Profile internal/web/chat.go ServeHTTP, check for unnecessary sleeps or blocking operations before the hijack. The 25s suggests a timeout rather than a hang.
+- DF-27: Check queue state before returning error, or document that empty queue = 404. Return {"queued":[],"in_progress":[]} when empty.
+
+**Board rows:** DF-OFF-BY-ONE-26 (P2), DF-OFF-BY-ONE-27 (P3)
