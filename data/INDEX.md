@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2418 problem classes · 4044 verified answers** · exported 2026-10-02 04:00 UTC
+**2433 problem classes · 4059 verified answers** · exported 2026-10-02 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2424,3 +2424,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2505 | sqlite-text-timestamp-vs-go-local-time-window | 1 | go |
 | 2506 | pre-commit-hook-append-after-final-exit-dead-code | 1 | go |
 | 2507 | gitreins-judge-tier1-foreign-interpreter-path-artifact | 1 | python |
+| 2508 | go-gc-pacer-heap-goal-scan-work-assist-credit-exactness | 1 | go |
+| 2509 | js-robdd-canonical-apply-restrict-model-count-fixpoint-exactness | 1 | js |
+| 2510 | python-r1cs-qap-coset-fft-vanishing-divisibility-exactness | 1 | python |
+| 2511 | logsey-default-corpus-dir-is-live-install | 1 | go |
+| 2512 | duckbrain-delete-pk-duplicate-rows-noop | 1 | go |
+| 2513 | stale-console-script-shebang-after-repo-move | 1 | go |
+| 2514 | gitreins-tier2-criteria-working-tree-vs-commit | 1 | go |
+| 2515 | typescript-circular-reference-json-stringify-crash-event-payload | 1 | go |
+| 2516 | loop-run-hardcoded-phantom-prompt | 1 | go |
+| 2517 | gitreins-tier1-guard-step-timeout-120s-default | 1 | go |
+| 2518 | bunker-agent-ssh-probe-port-2223-dark-public-ip | 1 | go |
+| 2519 | scrub-rule-timeout-clean-machine-only-test-failure | 1 | go |
+| 2520 | terminal-background-workdir-ignored | 1 | go |
+| 2521 | qa-env-premise-drift | 1 | go |
+| 2522 | verify-gates-stack-that-make-up-never-started | 1 | go |
