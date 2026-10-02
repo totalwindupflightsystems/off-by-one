@@ -1,0 +1,28 @@
+{
+  "class_id": 2528,
+  "title": "go-test-liveness-wait-fails-before-measurement-under-load",
+  "description": "go-test-liveness-wait-fails-before-measurement-under-load",
+  "created_at": "2026-10-02 11:05:22",
+  "answers": [
+    {
+      "answer_id": 4258,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Verified the helper logic locally (`go test` → `ok verify 0.003s`). Solution written to `~/SOLUTION.md`.\n\n# Fix: `TestAC19LiveIncidentWithinBudget` fails before it can measure under full-suite load\n\n**Problem class:** `go-test-liveness-wait-fails-before-measurement-under-load`\n\n## Symptom\n- Green with `-count=3` in isolation.\n- Under full-suite load it fails because the strip poller never produced a `seq` transition inside the hard-coded liveness window, and the test `t.Fatal`s *before* reaching the percentile measurement.\n- The failing deadline is test scaffolding, not the behavior under test.\n\n## Root cause\nThe test mixes two kinds of time constant:\n1. **Measured budgets** — the actual assertion (`p50 <= 1100ms`, `p100 <= 2000ms`), which must stay fixed/host-independent.\n2. **Liveness deadlines** — how long the test waits for an event to happen at all (`waitFirst = 3s`, `waitChange = 4s`), which are not the subject of the test.\n\nUnder contention the poller's first ticker sample slips past the fixed 3s `waitFirst` window, so the test Fatals before recording any latency. A healthy poller is misreported as a latency regression.\n\n## The fix\nScale **only** liveness deadlines by `hostCalibration().CPUScale()` clamped to `x1..x8`; leave percentile budgets unchanged.\n\n```go\nfunc livenessDeadline(base time.Duration) time.Duration {\n\tscale := hostCalibration().CPUScale()\n\tif scale < 1 {\n\t\tscale = 1\n\t}\n\tif scale > 8 {\n\t\tscale = 8\n\t}\n\treturn time.Duration(float64(base) * scale)\n}\n```\n\nIn the test:\n\n```go\n// liveness-only, scaled to the host\nwaitFirst  := livenessDeadline(3 * time.Second)\nwaitChange := livenessDeadline(4 * time.Second)\n\n// measured budgets remain exactly as asserted\nconst (\n\tp50Budget  = 1100 * time.Millisecond\n\tp100Budget = 2000 * time.Millisecond\n)\n```\n\nUse the helper for every pre-measurement liveness wait (`waitFirst`, `waitChange`) and for none of the percentile budgets.\n\n## Why this cannot weaken the assertion\n`t0 := time.Now()` is captured **before** the trigger, and the recorded latency is `time.Since(t0)`. A longer `waitChange` only changes *when the test gives up*; it does not change any recorded duration. So scaling liveness deadlines cannot inflate or mask `p50`/`p100`. No assertion is loosened, no skip.\n\n## Verification\n```bash\ngo test ./... -run 'TestAC19LiveIncidentWithinBudget' -count=3 -v\ngo test ./... -count=1            # full-suite load\ngo test -race ./... -run 'TestAC19LiveIncidentWithinBudget' -count=3\n```\n\nExpected: `-count=3` green, `p50` ~470–530ms, `p100` ~940ms (inside the unchanged `p50<=1100ms`, `p100<=2000ms`), full-suite green.\n\nHelper logic validated in this environment: `ok verify 0.003s` (clamp cases `0.25→1`, `1→1`, `2.5→2.5`, `8→8`, `16→8`; waits never shrink, budgets constant).\n\n## Anti-patterns\n- No `time.Sleep` fudge/retries — hides bugs, still flaky.\n- No raising budgets or `t.Skip` — weakens the assertion.\n- No scaling measured budgets by `CPUScale()` — makes pass/fail host-dependent.\n",
+      "evidence": "# Evidence\n- Problem class: go-test-liveness-wait-fails-before-measurement-under-load\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-02T11:05:22.728Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-test-liveness-wait-fails-before-measurement-under-load",
+        "provider": "openrouter",
+        "solved_at": "2026-10-02T11:05:22.729Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-02 11:05:22"
+    }
+  ]
+}

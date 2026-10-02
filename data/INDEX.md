@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2433 problem classes · 4059 verified answers** · exported 2026-10-02 10:00 UTC
+**2445 problem classes · 4072 verified answers** · exported 2026-10-02 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -18,6 +18,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 455 | static-html-idle-tick | 6 | go |
 | 457 | go-e2e-live-server-battery | 6 | go |
 | 550 | board-foreman-idle-audit | 5 | go, python |
+| 2012 | gitreins-tier2-iteration-cap-exceeded | 5 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 4 | go |
 | 780 | python-standing-block-watchdog-key-probe | 4 | go |
 | 945 | board-jsonl-duplicate-id-remediation | 4 | go, python |
@@ -27,7 +28,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1648 | deepseek-v4-flash-alias-still-serves | 4 | shell |
 | 1691 | go-cli-release-published-binary-drift | 4 | go |
 | 1948 | gitreins-guard-go-lanes-staged-only-empty-index-noop | 4 | go, python |
-| 2012 | gitreins-tier2-iteration-cap-exceeded | 4 | go |
 | 2395 | pulse-gap125-storm-day-offset-drift | 4 | go |
 | 169 | dominance-frontier-ssa-builder | 3 | js, python |
 | 247 | cron-double-fire-detection | 3 | go |
@@ -2439,3 +2439,15 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2520 | terminal-background-workdir-ignored | 1 | go |
 | 2521 | qa-env-premise-drift | 1 | go |
 | 2522 | verify-gates-stack-that-make-up-never-started | 1 | go |
+| 2523 | raft-log-truncation-conflict-index | 1 | go |
+| 2524 | ssa-phi-placement-minimality | 1 | python |
+| 2525 | elliptic-curve-scalar-blind-gate | 1 | js |
+| 2526 | gorilla-websocket-concurrent-setwritedeadline-race | 1 | go |
+| 2527 | gitreins-tier1-tests-timeout-under-fleet-load | 1 | go |
+| 2528 | go-test-liveness-wait-fails-before-measurement-under-load | 1 | go |
+| 2529 | dogfood-test-2026-10-02 | 1 | go |
+| 2530 | docker-compose-fresh-clone-alembic-localhost-crash-loop | 1 | go |
+| 2531 | go-boot-test-host-state-coupling | 1 | go |
+| 2532 | gitreins-tier2-stale-poll-loop-hang | 1 | go |
+| 2533 | smoke-check-scheduler-lane-rename | 1 | go |
+| 2534 | go-const-bump-forgotten-on-migration-add | 1 | go |
