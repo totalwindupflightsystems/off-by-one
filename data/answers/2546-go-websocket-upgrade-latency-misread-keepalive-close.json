@@ -1,0 +1,28 @@
+{
+  "class_id": 2546,
+  "title": "go-websocket-upgrade-latency-misread-keepalive-close",
+  "description": "go-websocket-upgrade-latency-misread-keepalive-close",
+  "created_at": "2026-10-02 21:59:18",
+  "answers": [
+    {
+      "answer_id": 4276,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Diagnosed and verified with a working reproduction. The solution is in **`~/SOLUTION.md`**, with runnable artifacts in `~/wsrepro/` (`server.go`, `client.py`).\n\n## Summary\n\n**The ~25 s is not upgrade latency — it's connection lifetime.** The `101` arrives in `0.0005 s`; the probe (curl with upgrade headers) never speaks RFC 6455, so it never answers the keepalive ping. The server closes it at `pingInterval + pongWait = readTimeout/2 + readTimeout/3 = 15 s + 10 s = 25 s`.\n\n**Empirically reproduced** (Go server using the described keepalive model):\n\n```\nhttp_code=101  ttfb=0.000523s  total=25.023880s\n```\n```\n16:57:41.021752 upgraded … (101 sent)\n16:57:56.035588 -> ping sent (opcode 0x9)                 # +15.01s\n16:58:06.044514 client not responding to ping: failed to wait for pong: i/o timeout   # +10.01s\n```\n\n**Control proves the server is fine** — the same endpoint with a compliant, auto-ponging client:\n```\nt=15.01s <- ping, -> pong (#1)\nt=30.01s <- ping, -> pong (#2)\nSTILL CONNECTED after 35.01s\n```\n\n**Fix (probe-side, not code):** measure `time_starttransfer` (TTFB), not `time_total`, and bound the probe so the keepalive teardown can't pollute it. The corrected probe was verified: `code=101 ttfb=0.000518s PROBE_PASS`, with no ping ever sent because it hung up first. Alert on handshake TTFB; only treat a long `time_total` as latency after confirming the client completed the handshake. Correlate with the `failed to wait for pong` journal line before blaming the upgrade path.\n\nThe doc contains the full root-cause table, diagnosis commands, the corrected monitor script, the exact reproduction/verification steps, and acceptance criteria.\n",
+      "evidence": "# Evidence\n- Problem class: go-websocket-upgrade-latency-misread-keepalive-close\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-02T21:59:17.942Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A curl-level WebSocket upgrade probe shows ~25s before HTTP 101 and is misdiagnosed as slow handshake/upgrade latency. Root cause: the probe never completes the RFC 6455 handshake, so it never answers server keepalive pings; the server closes it after ping-interval (readTimeout/2=15s) + pong-wait deadline (readTimeout/3=10s) = 25s. Diagnosis method: decompose with curl timing (TTFB of the 101 is sub-millisecond — the latency is connection LIFETIME, i.e. server-side close), then correlate the journal line (client not responding to ping: failed to wait for pong) with probe timestamps. Verified on off-by-one /ws/chat 2026-10-02: 3/3 attempts 101 @ 25.02-25.04s, ttfb=0.000444s. Real browsers auto-pong per RFC 6455, so no user-visible latency exists. Fix direction: probe diagnosis, not code — any websocket server with keepalive ping + pong deadline exhibits this; measure TTFB/journal before blaming the upgrade path.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-websocket-upgrade-latency-misread-keepalive-close",
+        "provider": "openrouter",
+        "solved_at": "2026-10-02T21:59:17.945Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-02 21:59:18"
+    }
+  ]
+}

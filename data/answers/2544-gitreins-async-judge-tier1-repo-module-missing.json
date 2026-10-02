@@ -1,0 +1,28 @@
+{
+  "class_id": 2544,
+  "title": "gitreins-async-judge-tier1-repo-module-missing",
+  "description": "gitreins-async-judge-tier1-repo-module-missing",
+  "created_at": "2026-10-02 20:38:18",
+  "answers": [
+    {
+      "answer_id": 4274,
+      "language": "python",
+      "environment": "python3",
+      "version": "",
+      "solution": "I diagnosed the issue by installing the actual `gitreins` source (0.15.0, the release containing `judge --async`) and reproducing it end-to-end in a synthetic `chimera` repo. The full writeup is at **`/workspace/SOLUTION.md`**.\n\n## Root cause (verified)\n\nTwo mechanisms combine:\n\n1. **`_cmd_judge_async` detaches the worker with no `env=`**, so the child (`sys.executable -m gitreins.cli judge --run-job …`) inherits the dispatcher's `PATH`. `sys.executable` is the *gitreins* interpreter, not the repo's `.venv`.\n2. **The Tier 1 tests lane resolves `pytest`/`python3` through `PATH`** (`shutil.which` / bare `python3 -m pytest`). Without `.venv/bin` first, a different interpreter runs pytest and can't see the editable install → `ModuleNotFoundError: No module named 'chimera'`.\n\nI reproduced the exact error, and showed the same tree/staged diff flips:\n\n| Run | Tier 1 |\n|---|---|\n| `gitreins guard`, no `.venv` on PATH | **FAIL** — `ModuleNotFoundError: No module named 'chimera'` |\n| `PATH=\"$PWD/.venv/bin:$PATH\" gitreins guard` | **PASS** (exit 0) |\n| `judge --async` dispatched with clean PATH | Tier 1 **FAIL** (verdict `c744d9d6`) |\n| `judge --async` dispatched with `.venv` first | Tier 1 **PASS** (verdict `dec08608`) |\n\n## Fix\n\n**Protocol:** never read async Tier 1 as tree evidence. Cite the explicit `PATH=\"$PWD/.venv/bin:$PATH\" gitreins guard` run (its `.gitreins/logs/guard-*.log`). Use `--async` for the Tier 2 verdict only, and poll with `gitreins judge --status <job>` — never wrap judge in `timeout`.\n\n**Optional upstream patch (verified):** prepend `<workdir>/.venv/bin` to the child `PATH` in `_cmd_judge_async`. After patching, an async dispatch with a deliberately clean `PATH` still gave `tier1_passed=True`.\n\n## Secondary finding (verified)\n\n`timeout 5 gitreins judge` killed mid-tier2 (exit 124) left **0 new verdict dirs** (3 before, 3 after), because `_persist_result` runs only after `evaluate_task` returns. Confirmed structurally and empirically.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-async-judge-tier1-repo-module-missing\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-02T20:38:18.806Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Symptom: a gitreins --async tier2 judge job reports Tier1 Guards FAIL with 'tests (diff: 1 files) — ModuleNotFoundError: No module named <repo-package>' even though a plain 'PATH=<repo>/.venv/bin:$PATH gitreins guard' in the same tree is 5/5 PASS and the full pytest suite is green. Diagnosis: the async job runner executes the tier1 guard lane with a python environment that does NOT carry the repo's editable install (and possibly not the repo venv on PATH), so any staged test file importing the repo package fails collection. It is an env artifact of the async runner, not a tree or code defect. Fix/protocol: never read tier1 FAIL from inside an --async judge job as tree evidence; run 'PATH=\"$PWD/.venv/bin:$PATH\" gitreins guard' explicitly (staged diff graded) for the authoritative tier1, cite that log, and keep the async job only for the tier2 verdict. Secondary finding from the same incident: wrapping 'timeout <N> gitreins judge' (foreground or not) at ~590s can kill tier2 mid-write leaving NO verdict dir — use 'gitreins judge --async <id>' + 'gitreins judge --status <job>' polling, never a hard timeout, on repos whose tier2 runs long (suite ~2min).",
+        "environment": "gitreins v0.11 pipx shim; repo with project venv (.venv) providing an editable install of the repo package; async judge launched via 'gitreins judge --async <id>' from the repo root",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-async-judge-tier1-repo-module-missing",
+        "provider": "openrouter",
+        "solved_at": "2026-10-02T20:38:18.806Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-02 20:38:19"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "class_id": 2535,
+  "title": "go-mvcc-serializable-snapshot-write-skew-scc",
+  "description": "go-mvcc-serializable-snapshot-write-skew-scc",
+  "created_at": "2026-10-02 16:15:27",
+  "answers": [
+    {
+      "answer_id": 4265,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "I diagnosed the problem, implemented a complete solution, and verified it. The full self-contained write-up is at **`~/SOLUTION.md`**, with working code at **`~/ssi/`** (`ssi.go`, `ssi_test.go`, `prop_test.go`).\n\n## Root cause\n\nSI is not serializable because it permits **write skew**. The validator must:\n\n1. **Classify edges correctly** — `rw` = *reader of version `X` → writer of version `X+1`*; `wr` = *writer of version `X` → reader of `X`*; `ww` = *writer of `X` → writer of `X+1`*. Conflating these produces a wrong graph.\n2. **Not abort on non-cycle dangerous structures** — a pivot `T1 -rw-> T2 -rw-> T3` only matters if there is a real return path `T3 →* T1`.\n3. **Be minimal** — aborting every dangerous pivot is safe but not minimal. Cycles often share a pivot, so the required answer is a **minimum feedback vertex set restricted to eligible pivots**.\n\nThe commit-order rule `T3.Commit < T2.Commit` (and `< T1.Commit` when distinct) is what makes the validator abort the **later** pivot, matching SSI runtime behavior.\n\n## The fix (core of `Validate`)\n\n```go\n// Candidate pivots: a -rw-> b -rw-> c, c commits before b (and a), and c ->* a.\nfor _, e1 := range rw {\n    a, b := e1.from, e1.to\n    tb := g.byID[b]\n    for _, e2 := range rw {\n        if e2.from != b { continue }\n        c := e2.to\n        tc := g.byID[c]\n        if tc.Commit >= tb.Commit { continue }          // target must commit first\n        if c != a {\n            if ta := g.byID[a]; ta != nil && tc.Commit >= ta.Commit { continue }\n        }\n        if g.reaches(c, a) { candSet[b] = true }         // real cycle closure\n    }\n}\n// Exact minimum FVS over candidates, branching on a discovered cycle's pivots,\n// tie-breaking in favour of aborting later-committing transactions.\n```\n\nThe store exposes `Begin / Read / Write / TryCommit / Commit / Committed`, and `Validate(committed []Txn) []string` returns the minimal abort set sorted by commit order.\n\n## Verification\n\n```\ngofmt -l .        # clean\ngo vet ./...      # clean\ngo test -count=1 -v ./...\n```\n```\n--- PASS: TestWriteSkew_AbortsLater            (write skew -> [T2], only the later pivot)\n--- PASS: TestNonCycleDangerousStructure_NoAbort (false-positive guard -> [])\n--- PASS: TestWrClosesCycle                    (wr-closed cycle detected)\n--- PASS: TestNoConflict\n--- PASS: TestIndependentWriteSkews            (disjoint pairs -> [T2 T4])\n--- PASS: TestStoreWriteSkew                   (Begin/Read/Write/Commit integration)\n--- PASS: TestRemainingAcyclic                 (graph acyclic after aborts)\n--- PASS: TestPropertyRandomValidSI            (50,000 random valid SI histories)\nok  ssi  0.41s\n```\n\nThe randomized property test generates **valid** SI histories (reads at snapshot, first-committer-wins enforced) and checks two invariants on every one: removing the reported aborts makes the dependency graph acyclic, and every reported abort is necessary (dropping it reintroduces a cycle).\n\nA key correctness detail discovered during testing: the generator must enforce write-write conflicts exactly as real SI does, otherwise `ww` edges form cycles that the SSI theorem explicitly excludes; the final code and property test both model first-committer-wins correctly.\n",
+      "evidence": "# Evidence\n- Problem class: go-mvcc-serializable-snapshot-write-skew-scc\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-02T16:15:27.649Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement Serializable Snapshot Isolation validation for an in-memory MVCC store that hands every transaction a snapshot at begin time. Given committed transaction records (snapshot epoch, read set with versions, write set with versions, commit order), build the rw-antidependency and wr-dependency graph and abort exactly the transactions that participate in a dangerous structure (a pivot with an incoming rw edge from an earlier transaction and an outgoing rw edge to a later one) that closes a cycle under commit order. The answer must expose Begin/Read/Write/Commit/TryCommit primitives plus a Validate(committed []Txn) []string that returns the minimal set of aborted transactions, preserving serializability and throughput by aborting only the later pivot when a cycle is unavoidable.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-mvcc-serializable-snapshot-write-skew-scc",
+        "provider": "openrouter",
+        "solved_at": "2026-10-02T16:15:27.658Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-10-02 16:15:27"
+    }
+  ]
+}

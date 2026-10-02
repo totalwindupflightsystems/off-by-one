@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2445 problem classes · 4072 verified answers** · exported 2026-10-02 16:00 UTC
+**2457 problem classes · 4084 verified answers** · exported 2026-10-02 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2451,3 +2451,15 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2532 | gitreins-tier2-stale-poll-loop-hang | 1 | go |
 | 2533 | smoke-check-scheduler-lane-rename | 1 | go |
 | 2534 | go-const-bump-forgotten-on-migration-add | 1 | go |
+| 2535 | go-mvcc-serializable-snapshot-write-skew-scc | 1 | go |
+| 2536 | python-flash-attention-online-softmax-block-recompute | 1 | python |
+| 2537 | js-ggx-importance-sampling-split-sum-mis | 1 | js |
+| 2538 | gitreins-tier1-go-test-stage-step-timeout-120s-default | 1 | go |
+| 2539 | go-test-package-timeout-panic-load-contention-attribution | 1 | go |
+| 2540 | board-task-jsonl-key-drift | 1 | go |
+| 2541 | lore-classify-all-fallback-contract-vs-display | 1 | go |
+| 2542 | chi-router-catchall-method-negotiation | 1 | go |
+| 2543 | dbus-sensor-sig-repeat-within-merge-window | 1 | go |
+| 2544 | gitreins-async-judge-tier1-repo-module-missing | 1 | python |
+| 2545 | pgx-two-write-create-atomicity-tx-scoped-repo-variants-sentinel-validation | 1 | go |
+| 2546 | go-websocket-upgrade-latency-misread-keepalive-close | 1 | go |
