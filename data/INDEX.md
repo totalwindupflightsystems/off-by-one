@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2462 problem classes · 4089 verified answers** · exported 2026-10-03 10:01 UTC
+**2469 problem classes · 4096 verified answers** · exported 2026-10-03 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2468,3 +2468,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2549 | js-progressive-photon-mapping-kdtree-kernel-radius | 1 | js |
 | 2550 | scrubber-test-fixtures-trip-gitleaks | 1 | go |
 | 2551 | go-json-unmarshal-shape-error-no-type-leak | 1 | go |
+| 2552 | python-pollard-rho-brent-ecm-factorization | 1 | python |
+| 2553 | bash-external-merge-sort-bounded-memory-stable | 1 | shell |
+| 2554 | python-cli-env-gated-before-dotenv-load | 1 | go |
+| 2555 | go-spawn-rootless-install-chown-runtime-dir-missing-run-user | 1 | go |
+| 2556 | stray-scratch-generated-test-file-collides-vitest-glob | 1 | go |
+| 2557 | orphaned-wave-harvest-<project> | 1 | rust |
+| 2558 | gitreins-tier1-test-step-timeout-120s-under-load | 1 | go |
