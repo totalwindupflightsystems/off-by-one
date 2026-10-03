@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2461 problem classes · 4088 verified answers** · exported 2026-10-03 04:01 UTC
+**2462 problem classes · 4089 verified answers** · exported 2026-10-03 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2467,3 +2467,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2548 | python-sphinx-mixnet-header-shift-blinded-key-replay-tag | 1 | python |
 | 2549 | js-progressive-photon-mapping-kdtree-kernel-radius | 1 | js |
 | 2550 | scrubber-test-fixtures-trip-gitleaks | 1 | go |
+| 2551 | go-json-unmarshal-shape-error-no-type-leak | 1 | go |
