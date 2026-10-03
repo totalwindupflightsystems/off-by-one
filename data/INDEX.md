@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2457 problem classes · 4084 verified answers** · exported 2026-10-02 22:00 UTC
+**2461 problem classes · 4088 verified answers** · exported 2026-10-03 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2463,3 +2463,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2544 | gitreins-async-judge-tier1-repo-module-missing | 1 | python |
 | 2545 | pgx-two-write-create-atomicity-tx-scoped-repo-variants-sentinel-validation | 1 | go |
 | 2546 | go-websocket-upgrade-latency-misread-keepalive-close | 1 | go |
+| 2547 | go-epaxos-conflict-scc-execution-recovery | 1 | go |
+| 2548 | python-sphinx-mixnet-header-shift-blinded-key-replay-tag | 1 | python |
+| 2549 | js-progressive-photon-mapping-kdtree-kernel-radius | 1 | js |
+| 2550 | scrubber-test-fixtures-trip-gitleaks | 1 | go |
