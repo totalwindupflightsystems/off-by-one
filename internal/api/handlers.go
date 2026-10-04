@@ -152,6 +152,9 @@ type queueEntryWire struct {
 }
 
 type queueListResponse struct {
+	// Entries is always non-nil so an empty queue serializes as [] and
+	// agent clients can iterate the field without a nil check
+	// (OB-GAP-046 family, OB-GAP-093).
 	Entries []queueEntryWire `json:"entries"`
 	Total   int              `json:"total"`
 }
@@ -666,7 +669,7 @@ func (s *Server) handleListQueue(w http.ResponseWriter, r *http.Request) {
 	// read per entry.
 	perJob, _ := s.Queue.AvgSolveTime(r.Context())
 	pending := s.pendingPositions(r)
-	out := queueListResponse{Total: total}
+	out := queueListResponse{Entries: []queueEntryWire{}, Total: total}
 	for i, e := range entries {
 		wire := queueWireEntry(&e, pending[e.ID], perJob)
 		wire.Position = offset + i + 1

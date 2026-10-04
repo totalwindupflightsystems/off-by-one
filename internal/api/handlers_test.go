@@ -1160,6 +1160,28 @@ func TestListQueue(t *testing.T) {
 	}
 }
 
+// TestListQueue_EmptyEntriesNotNull verifies an empty queue serializes
+// entries as [] and not null (OB-GAP-046 family, OB-GAP-093): agent
+// clients iterate the field without a nil check.
+func TestListQueue_EmptyEntriesNotNull(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	rr := do(t, s, "GET", "/api/v1/queue", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rr.Code)
+	}
+	var raw struct {
+		Entries []json.RawMessage `json:"entries"`
+		Total   int               `json:"total"`
+	}
+	_ = json.Unmarshal(rr.Body.Bytes(), &raw)
+	if raw.Entries == nil {
+		t.Error("entries serialized as null; want non-nil empty slice []")
+	}
+	if raw.Total != 0 {
+		t.Errorf("total = %d, want 0", raw.Total)
+	}
+}
+
 // TestListQueue_ExcludesPlaceholderClasses verifies placeholder-class
 // entries never appear in GET /api/v1/queue, non-placeholder entries are
 // unaffected, and Total/positions reflect the filtered set (OB-GAP-061).
