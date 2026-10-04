@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
+	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
 
@@ -151,6 +152,10 @@ type Config struct {
 	// time.Sleep wrapped in a select on ctx.Done so the loop
 	// can be cancelled mid-wait. Tests use a channel-based stub.
 	Sleep func(ctx context.Context, d time.Duration) error
+
+	// Observer records per-solve metrics and host-pressure skips.
+	// nil disables metrics (no-op).
+	Observer *metrics.Observer
 }
 
 // Queue abstracts the part of the ingest queue the loop needs. The
@@ -351,7 +356,18 @@ func (l *Loop) checkIdle(ctx context.Context) error {
 	}
 	if load >= l.cfg.LoadThreshold {
 		l.metrics.recordIdleSkip()
+		if l.cfg.Observer != nil {
+			l.cfg.Observer.RecordSkip(metrics.HostSnapshot{
+				Load1:  load,
+				Reason: "load",
+			})
+		}
 		return ErrNoIdle
+	}
+	if l.cfg.Observer != nil {
+		l.cfg.Observer.RecordHost(metrics.HostSnapshot{
+			Load1: load,
+		})
 	}
 	return nil
 }
@@ -375,6 +391,14 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 		// provider routing error can originate there.
 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error()))
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
+		if l.cfg.Observer != nil {
+			l.cfg.Observer.RecordSolve(metrics.SolveRecord{
+				SubmissionID: entry.ID,
+				ProblemClass: entry.ProblemClass,
+				WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
+				Success:      false,
+			})
+		}
 		l.cfg.Logger.Printf("cron: solve failed for %s: %v", entry.ID, err)
 		return fmt.Errorf("solve: %w", err)
 	}
@@ -385,16 +409,40 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 		_ = l.cfg.Queue.SetStage(ctx, entry.ID, "commit_failed")
 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, err.Error())
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
+		if l.cfg.Observer != nil {
+			l.cfg.Observer.RecordSolve(metrics.SolveRecord{
+				SubmissionID: entry.ID,
+				ProblemClass: entry.ProblemClass,
+				WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
+				Success:      false,
+			})
+		}
 		l.cfg.Logger.Printf("cron: commit failed for %s: %v", entry.ID, err)
 		return fmt.Errorf("commit: %w", err)
 	}
 
 	if err := l.cfg.Queue.MarkComplete(ctx, entry.ID, answerID); err != nil {
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
+		if l.cfg.Observer != nil {
+			l.cfg.Observer.RecordSolve(metrics.SolveRecord{
+				SubmissionID: entry.ID,
+				ProblemClass: entry.ProblemClass,
+				WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
+				Success:      false,
+			})
+		}
 		l.cfg.Logger.Printf("cron: mark-complete failed for %s: %v", entry.ID, err)
 		return fmt.Errorf("mark complete: %w", err)
 	}
 	l.metrics.recordSuccess(l.cfg.Now().Sub(start))
+	if l.cfg.Observer != nil {
+		l.cfg.Observer.RecordSolve(metrics.SolveRecord{
+			SubmissionID: entry.ID,
+			ProblemClass: entry.ProblemClass,
+			WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
+			Success:      true,
+		})
+	}
 	l.cfg.Logger.Printf("cron: solved %s → answer %d in %s", entry.ID, answerID, l.cfg.Now().Sub(start))
 	return nil
 }
