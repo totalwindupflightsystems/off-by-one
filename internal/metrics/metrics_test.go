@@ -136,3 +136,38 @@ func TestAlertThreshold(t *testing.T) {
 		t.Errorf("AlertThreshold = %d, want %d", obs.AlertThreshold(), 8<<30)
 	}
 }
+
+// TestSnapshotRejected pins the Rejected roll-up (DF-OFF-BY-ONE-31): a
+// record stamped Rejected is counted in Snapshot.Rejected and survives a
+// Recent() round-trip, while a normal record is not.
+func TestSnapshotRejected(t *testing.T) {
+	obs := New(DefaultRSSAlertBytes, log.Default())
+
+	obs.RecordSolve(SolveRecord{
+		SubmissionID: "rej",
+		PeakRSSBytes: 5 << 30,
+		Rejected:     true,
+		Success:      false,
+	})
+	obs.RecordSolve(SolveRecord{
+		SubmissionID: "ok",
+		PeakRSSBytes: 1 << 30,
+		Success:      true,
+	})
+
+	snap := obs.Snapshot()
+	if snap.Rejected != 1 {
+		t.Errorf("Rejected = %d, want 1", snap.Rejected)
+	}
+	if snap.SolveCount != 2 {
+		t.Errorf("SolveCount = %d, want 2", snap.SolveCount)
+	}
+	if snap.LastSolve == nil || snap.LastSolve.Rejected {
+		t.Errorf("LastSolve = %+v, want the non-rejected record", snap.LastSolve)
+	}
+
+	recent := obs.Recent(2)
+	if len(recent) != 2 || !recent[0].Rejected {
+		t.Errorf("Recent = %+v, want the first record stamped Rejected", recent)
+	}
+}

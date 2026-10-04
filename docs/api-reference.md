@@ -22,7 +22,8 @@ All timestamps are RFC 3339 strings. All endpoints return JSON unless otherwise 
 5. [Taxonomy / Stats](#taxonomy--stats)
 6. [System](#system)
 7. [Solve timeouts](#solve-timeouts)
-8. [Deploying the server (deploy rotation)](#deploying-the-server-deploy-rotation)
+8. [Solve memory bounds](#solve-memory-bounds)
+9. [Deploying the server (deploy rotation)](#deploying-the-server-deploy-rotation)
 
 ---
 
@@ -675,6 +676,27 @@ OB1_BWRAP_TIMEOUT=900 ./off-by-one
 ```
 
 Because the bwrap cap is the *outer* limit, raising only `OFF_BY_ONE_SOLVE_TIMEOUT` will not let a solve run past 300s by default — set `OB1_BWRAP_TIMEOUT` above the longest expected solve (and above `OFF_BY_ONE_SOLVE_TIMEOUT` if you intend that solver-level timeout to be the effective one). A repeated `signal: killed` at exactly the configured cap is the sandbox cap doing its job; verify the configured value before treating it as a solver failure.
+
+---
+
+## Solve memory bounds
+
+A solve is bounded in memory as well as in time. Two knobs, both wired from flags + environment variables, and one prompt-side contract:
+
+| Flag | Env var | Default | Meaning |
+|------|---------|---------|---------|
+| `--solve-mem-mb` | `OFF_BY_ONE_SOLVE_MEM_MB` | `0` (unlimited) | Per-solve memory cap in MiB, applied to the sandboxed command through the `oby-memcap` wrapper as `RLIMIT_AS`. `0` = unlimited. |
+| `--solve-reject-rss-mb` | `OFF_BY_ONE_SOLVE_REJECT_RSS_MB` | `-1` (auto) | Reject a solve whose observed peak RSS exceeds this many MiB, **even when the solver returned success**. `-1` = auto (80% of `--solve-mem-mb`); `0` = disabled; `>0` = that threshold in MiB. |
+
+The reject threshold closes the gap between "the solve survived the cap" and "the solve is a trustworthy pre-verified answer". The daemon samples the solve process tree's peak RSS (`VmHWM`) while the solve runs; if the peak **exceeds** the threshold, the submission is marked `failed` and **nothing is committed to the graph**, even though `pi-agent` exited 0. The failure reason names the problem class, the measured peak, and the threshold, e.g.:
+
+```
+rejected: peak RSS 5.012 GiB exceeds reject threshold 4.800 GiB (problem_class=go-bbr-pacing)
+```
+
+The default auto threshold is 80% of the per-solve cap, so a capped deployment (e.g. `--solve-mem-mb 6144`) rejects solves peaking above ~4.8 GiB. With no cap configured there is no wall to approach, so the derived form is disabled. Rejected solves are counted separately from ordinary failures: the cron metrics expose `solve_rejected`, and the metrics endpoint (`GET /metrics`) reports the `rejected` roll-up alongside `over_budget`.
+
+The prompt-side half of the fix is a **bounds contract** in the shipped `pi-agent` wrapper (`scripts/pi-agent`), next to the other solve instructions. For simulation-style problems — anything that simulates, replays, or generates a sequence of events, packets, requests, or ticks — the solution must declare explicit bounds (the maximum number of simulated events/packets/seconds) and aggregate incrementally rather than retaining a record per event. The 2026-10-03 47 GB RAM + swap incident was a generated packet simulator that appended one record per simulated event; the contract plus the reject threshold mean such a run cannot be stored as a verified answer.
 
 ---
 

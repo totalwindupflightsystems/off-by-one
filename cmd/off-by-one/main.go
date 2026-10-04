@@ -172,16 +172,31 @@ func main() {
 	if solverExec != nil {
 		cronCtx, cronCancel = context.WithCancel(context.Background())
 
+		// Harness-side rejection threshold (DF-OFF-BY-ONE-31): default
+		// (flag -1) derives 80% of the per-solve memory cap; an explicit
+		// 0 disables the check; >0 is the threshold in MiB. With no cap
+		// configured there is nothing to approach, so the derived form is
+		// disabled. A solve that returns success above this peak is
+		// marked failed instead of committed.
+		rejectRSSBytes := resolveSolveRejectBytes(*cfg.solveRejectRSSMB, *cfg.solveMemMB)
+
 		loop = cron.NewLoop(cron.Config{
-			Interval:        *cfg.cronInterval,
-			LoadThreshold:   *cfg.loadThreshold,
-			MemoryThreshold: *cfg.memFraction,
-			Solver:          solverExec,
-			Queue:           queue,
-			Observer:        observer,
+			Interval:            *cfg.cronInterval,
+			LoadThreshold:       *cfg.loadThreshold,
+			MemoryThreshold:     *cfg.memFraction,
+			SolveRejectRSSBytes: rejectRSSBytes,
+			Solver:              solverExec,
+			Queue:               queue,
+			Observer:            observer,
 		})
 		go func() {
-			log.Printf("cron loop started: interval=%s loadThreshold=%.1f", *cfg.cronInterval, *cfg.loadThreshold)
+			if rejectRSSBytes > 0 {
+				log.Printf("cron loop started: interval=%s loadThreshold=%.1f solve-mem-mb=%d reject-rss=%d MiB",
+					*cfg.cronInterval, *cfg.loadThreshold, *cfg.solveMemMB, rejectRSSBytes>>20)
+			} else {
+				log.Printf("cron loop started: interval=%s loadThreshold=%.1f solve-rss rejection disabled (no memory cap or explicit 0)",
+					*cfg.cronInterval, *cfg.loadThreshold)
+			}
 			if rerr := loop.Run(cronCtx); rerr != nil && !errors.Is(rerr, context.Canceled) {
 				log.Printf("cron loop exited with error: %v", rerr)
 			}
@@ -317,6 +332,10 @@ type serverConfig struct {
 	exportDir     *string
 	importDir     *string
 	showVersion   *bool
+
+	// solveRejectRSSMB is kept in its own alignment group so adding the
+	// longer field name does not reflow every other declaration.
+	solveRejectRSSMB *int
 }
 
 // registerServerFlags declares the full server flag set on fs and returns its
@@ -339,6 +358,10 @@ func registerServerFlags(fs *flag.FlagSet) *serverConfig {
 		exportDir:     fs.String("export-dir", envString("OFF_BY_ONE_EXPORT_DIR", ""), "Working directory for git export clones (empty = export disabled)"),
 		importDir:     fs.String("import-dir", envString("OFF_BY_ONE_IMPORT_DIR", ""), "Working directory for git import clones (empty = import disabled)"),
 		showVersion:   fs.Bool("version", false, "Print version and exit"),
+
+		// Own alignment group: keeps this longer name from reflowing the
+		// declarations above.
+		solveRejectRSSMB: fs.Int("solve-reject-rss-mb", envInt("OFF_BY_ONE_SOLVE_REJECT_RSS_MB", -1), "Reject a solve whose observed peak RSS exceeds this many MiB even when it returned success (-1 = auto: 80% of -solve-mem-mb; 0 = disabled)"),
 	}
 }
 
@@ -367,6 +390,31 @@ func sandboxTimeout() time.Duration {
 		log.Printf("warning: OB1_BWRAP_TIMEOUT=%q is not a positive integer — using default %s", raw, sandbox.DefaultBwrapTimeout)
 	}
 	return sandbox.DefaultBwrapTimeout
+}
+
+// resolveSolveRejectBytes resolves the peak-RSS reject threshold
+// (DF-OFF-BY-ONE-31) from the -solve-reject-rss-mb value and the
+// per-solve memory cap (-solve-mem-mb):
+//
+//   - rejectMB > 0: the threshold itself, in MiB, verbatim.
+//   - rejectMB == 0: disabled — an explicit opt-out, independent of the cap.
+//   - rejectMB < 0: auto — DefaultSolveRejectFraction of the cap, or 0
+//     (disabled) when no cap is configured: with no cap there is no wall
+//     to approach.
+//
+// The result feeds cron.Config.SolveRejectRSSBytes; 0 there disables the
+// harness-side rejection.
+func resolveSolveRejectBytes(rejectMB, memCapMB int) uint64 {
+	switch {
+	case rejectMB > 0:
+		return uint64(rejectMB) << 20
+	case rejectMB == 0:
+		return 0
+	case memCapMB <= 0:
+		return 0
+	default:
+		return cron.SolveRejectThreshold(uint64(memCapMB) << 20)
+	}
 }
 
 // --- solver model resolution -------------------------------------------

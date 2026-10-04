@@ -465,3 +465,197 @@ func TestSolveFailureLogCarriesPeakRSS(t *testing.T) {
 		t.Fatalf("failure log %q missing peak_rss=", buf.String())
 	}
 }
+
+// -----------------------------------------------------------------------------
+// Harness-side reject threshold (DF-OFF-BY-ONE-31).
+
+// TestSolveRejectThreshold pins the default fraction and the derivation
+// from a per-solve memory cap: 80% of the cap, disabled (0) with no cap.
+func TestSolveRejectThreshold(t *testing.T) {
+	if DefaultSolveRejectFraction != 0.8 {
+		t.Fatalf("DefaultSolveRejectFraction = %v, want 0.8", DefaultSolveRejectFraction)
+	}
+	if got := SolveRejectThreshold(0); got != 0 {
+		t.Errorf("SolveRejectThreshold(0) = %d, want 0 (no cap = no rejection)", got)
+	}
+	capBytes := uint64(6144) << 20 // the deploy unit's -solve-mem-mb 6144
+	got := SolveRejectThreshold(capBytes)
+	if want := uint64(float64(capBytes) * DefaultSolveRejectFraction); got != want {
+		t.Errorf("SolveRejectThreshold(%d) = %d, want %d", capBytes, got, want)
+	}
+	if got == 0 || got >= capBytes {
+		t.Errorf("threshold %d not strictly inside (0, %d)", got, capBytes)
+	}
+}
+
+// TestLoopRejectsNearCapSolve pins acceptance (a): a solve whose sampler
+// reports a peak ABOVE the reject threshold is REJECTED even though Solve
+// returned success — the queue entry is failed with the measured peak in
+// the reason, metrics/observer record a rejection, and nothing is
+// committed to the graph.
+func TestLoopRejectsNearCapSolve(t *testing.T) {
+	const threshold = uint64(4) << 30 // 4 GiB
+	const peak = uint64(5) << 30      // 5 GiB — above the threshold
+
+	obs := metrics.New(metrics.DefaultRSSAlertBytes, nil)
+	s := &stubSampler{byPid: map[int]uint64{os.Getpid(): peak}}
+	saved := childPIDsFn
+	childPIDsFn = func(int) []int { return nil }
+	defer func() { childPIDsFn = saved }()
+
+	sol := &fakeSolver{} // Solve succeeds
+	q := newFakeQueue(makeEntry("rej-1"))
+	l := NewLoop(Config{
+		Queue:               q,
+		Solver:              sol,
+		Interval:            time.Millisecond,
+		LoadThreshold:       -1,
+		RSSSampler:          s,
+		SolveRejectRSSBytes: threshold,
+		Observer:            obs,
+	})
+
+	err := l.Tick(context.Background())
+	if !errors.Is(err, ErrSolveRejected) {
+		t.Fatalf("Tick err = %v, want ErrSolveRejected", err)
+	}
+
+	// The entry is failed (not complete) with a reason naming the problem
+	// class, the measured peak, and the threshold.
+	if got := q.done["rej-1"]; got != ingest.StatusFailed {
+		t.Errorf("entry status = %q, want %q", got, ingest.StatusFailed)
+	}
+	if _, ok := q.answers["rej-1"]; ok {
+		t.Error("entry marked complete with an answer, want failed")
+	}
+	reason := q.failText["rej-1"]
+	for _, want := range []string{"class-rej-1", gibStr(peak), gibStr(threshold)} {
+		if !strings.Contains(reason, want) {
+			t.Errorf("failure reason %q missing %q", reason, want)
+		}
+	}
+
+	// Nothing reached the graph.
+	if n := sol.commitCalls.Load(); n != 0 {
+		t.Errorf("Commit calls = %d, want 0 (a rejected solve must not commit)", n)
+	}
+
+	// Metrics: a rejected solve is a failure AND a rejection, never a success.
+	m := l.Metrics().Snapshot()
+	if m.SolveRejected != 1 {
+		t.Errorf("SolveRejected = %d, want 1", m.SolveRejected)
+	}
+	if m.SolveFailed != 1 {
+		t.Errorf("SolveFailed = %d, want 1", m.SolveFailed)
+	}
+	if m.SolveSuccess != 0 {
+		t.Errorf("SolveSuccess = %d, want 0", m.SolveSuccess)
+	}
+
+	// Observer: the record is stamped Rejected with Success=false and
+	// carries the measured peak.
+	snap := obs.Snapshot()
+	if snap.SolveCount != 1 {
+		t.Fatalf("SolveCount = %d, want 1", snap.SolveCount)
+	}
+	if snap.Rejected != 1 {
+		t.Errorf("Snapshot.Rejected = %d, want 1", snap.Rejected)
+	}
+	if snap.LastSolve == nil {
+		t.Fatal("LastSolve nil")
+	}
+	if !snap.LastSolve.Rejected {
+		t.Error("LastSolve.Rejected = false, want true")
+	}
+	if snap.LastSolve.Success {
+		t.Error("LastSolve.Success = true, want false for a rejected solve")
+	}
+	if snap.LastSolve.PeakRSSBytes != peak {
+		t.Errorf("LastSolve.PeakRSSBytes = %d, want %d", snap.LastSolve.PeakRSSBytes, peak)
+	}
+}
+
+// TestLoopAcceptsBoundedSolveBelowRejectThreshold pins acceptance (b): a
+// solve whose peak is BELOW the reject threshold is committed normally.
+func TestLoopAcceptsBoundedSolveBelowRejectThreshold(t *testing.T) {
+	const threshold = uint64(4) << 30 // 4 GiB
+	const peak = uint64(1) << 30      // 1 GiB — well below
+
+	obs := metrics.New(metrics.DefaultRSSAlertBytes, nil)
+	s := &stubSampler{byPid: map[int]uint64{os.Getpid(): peak}}
+	saved := childPIDsFn
+	childPIDsFn = func(int) []int { return nil }
+	defer func() { childPIDsFn = saved }()
+
+	sol := &fakeSolver{} // Commit returns 42
+	q := newFakeQueue(makeEntry("ok-1"))
+	l := NewLoop(Config{
+		Queue:               q,
+		Solver:              sol,
+		Interval:            time.Millisecond,
+		LoadThreshold:       -1,
+		RSSSampler:          s,
+		SolveRejectRSSBytes: threshold,
+		Observer:            obs,
+	})
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick err = %v, want success", err)
+	}
+	if got := q.done["ok-1"]; got != ingest.StatusComplete {
+		t.Errorf("entry status = %q, want %q", got, ingest.StatusComplete)
+	}
+	if got := q.answers["ok-1"]; got != 42 {
+		t.Errorf("answer id = %d, want 42", got)
+	}
+	if n := sol.commitCalls.Load(); n != 1 {
+		t.Errorf("Commit calls = %d, want 1", n)
+	}
+	m := l.Metrics().Snapshot()
+	if m.SolveSuccess != 1 || m.SolveRejected != 0 {
+		t.Errorf("metrics success=%d rejected=%d, want success=1 rejected=0", m.SolveSuccess, m.SolveRejected)
+	}
+	snap := obs.Snapshot()
+	if snap.LastSolve == nil || snap.LastSolve.Rejected {
+		t.Errorf("LastSolve = %+v, want a non-rejected record", snap.LastSolve)
+	}
+	if snap.Rejected != 0 {
+		t.Errorf("Snapshot.Rejected = %d, want 0", snap.Rejected)
+	}
+}
+
+// TestLoopRejectionDisabledWhenThresholdZero pins the "zero disables"
+// contract: the same near-cap peak is committed when
+// SolveRejectRSSBytes is 0 (the no-cap default).
+func TestLoopRejectionDisabledWhenThresholdZero(t *testing.T) {
+	const peak = uint64(5) << 30
+
+	s := &stubSampler{byPid: map[int]uint64{os.Getpid(): peak}}
+	saved := childPIDsFn
+	childPIDsFn = func(int) []int { return nil }
+	defer func() { childPIDsFn = saved }()
+
+	sol := &fakeSolver{}
+	q := newFakeQueue(makeEntry("nocap-1"))
+	l := NewLoop(Config{
+		Queue:               q,
+		Solver:              sol,
+		Interval:            time.Millisecond,
+		LoadThreshold:       -1,
+		RSSSampler:          s,
+		SolveRejectRSSBytes: 0, // disabled
+	})
+
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick err = %v, want success with rejection disabled", err)
+	}
+	if got := q.done["nocap-1"]; got != ingest.StatusComplete {
+		t.Errorf("entry status = %q, want %q (rejection disabled)", got, ingest.StatusComplete)
+	}
+	if n := sol.commitCalls.Load(); n != 1 {
+		t.Errorf("Commit calls = %d, want 1 with rejection disabled", n)
+	}
+	if got := l.Metrics().Snapshot().SolveRejected; got != 0 {
+		t.Errorf("SolveRejected = %d, want 0", got)
+	}
+}

@@ -44,7 +44,11 @@ const DefaultRSSAlertBytes uint64 = 4 << 30
 // `go test`-style invocations pi-agent made (parsed from its stdout);
 // it is the field that was 47 GB on the incident solve. Killed reports
 // whether the solve died on its memory cap (exec.ExitError) rather
-// than finishing.
+// than finishing. Rejected reports whether the harness refused the
+// solve AFTER it returned success because its observed peak RSS
+// exceeded the configured reject threshold (DF-OFF-BY-ONE-31); a
+// rejected solve is never committed to the graph, so Success is false
+// for it even though the solver exited cleanly.
 type SolveRecord struct {
 	SubmissionID   string `json:"submission_id"`
 	ProblemClass   string `json:"problem_class"`
@@ -54,6 +58,7 @@ type SolveRecord struct {
 	TestRuns       int    `json:"test_runs"`
 	Killed         bool   `json:"killed"`
 	Success        bool   `json:"success"`
+	Rejected       bool   `json:"rejected"`
 	OverBudget     bool   `json:"over_budget"`
 	AlertBytesUsed uint64 `json:"alert_threshold_bytes"`
 }
@@ -193,6 +198,10 @@ type Snapshot struct {
 	SkippedHostPressure int64 `json:"skipped_host_pressure"`
 	// OverBudget solves — peak RSS exceeded the alert threshold.
 	OverBudget int `json:"over_budget"`
+	// Rejected solves — the harness refused the solve because its
+	// observed peak RSS exceeded the reject threshold, even though the
+	// solver returned success (DF-OFF-BY-ONE-31).
+	Rejected int `json:"rejected"`
 	// PeakRSSBytesMax is the largest peak RSS observed; 0 before the
 	// first solve.
 	PeakRSSBytesMax uint64 `json:"peak_rss_bytes_max"`
@@ -224,6 +233,9 @@ func (o *Observer) Snapshot() Snapshot {
 	for _, r := range o.records {
 		if r.OverBudget {
 			snap.OverBudget++
+		}
+		if r.Rejected {
+			snap.Rejected++
 		}
 		if r.PeakRSSBytes > maxRSS {
 			maxRSS = r.PeakRSSBytes

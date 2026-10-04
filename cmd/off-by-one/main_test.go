@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/totalwindupflightsystems/off-by-one/internal/cron"
 	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
@@ -393,4 +394,63 @@ func TestSolverModelFromProcessEnv(t *testing.T) {
 			t.Errorf("Config.ExtraEnv = %v, want nil", cfg.ExtraEnv)
 		}
 	})
+}
+
+// TestResolveSolveRejectBytes pins DF-OFF-BY-ONE-31 acceptance (c): the
+// reject-threshold resolution matrix (auto / disabled / explicit), which
+// is the default the daemon hands the cron loop.
+func TestResolveSolveRejectBytes(t *testing.T) {
+	const capMB = 6144 // the deploy unit's -solve-mem-mb value
+
+	cases := []struct {
+		name     string
+		rejectMB int
+		memCapMB int
+		want     uint64
+	}{
+		{"auto derives 80% of the cap", -1, capMB, cron.SolveRejectThreshold(uint64(capMB) << 20)},
+		{"explicit zero disables", 0, capMB, 0},
+		{"explicit value wins over the cap", 2048, capMB, uint64(2048) << 20},
+		{"auto with no cap disables", -1, 0, 0},
+		{"explicit value works without a cap", 512, 0, uint64(512) << 20},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveSolveRejectBytes(tc.rejectMB, tc.memCapMB); got != tc.want {
+				t.Errorf("resolveSolveRejectBytes(%d, %d) = %d, want %d", tc.rejectMB, tc.memCapMB, got, tc.want)
+			}
+		})
+	}
+
+	// The auto default must be strictly inside (0, cap) — a threshold at
+	// or above the cap would never reject anything the cap survived.
+	capBytes := uint64(capMB) << 20
+	if got := resolveSolveRejectBytes(-1, capMB); got == 0 || got >= capBytes {
+		t.Errorf("auto threshold = %d, want strictly inside (0, %d)", got, capBytes)
+	}
+}
+
+// TestSolveRejectFlagDefaultsToAuto pins the flag default: -1 (auto =
+// 80% of -solve-mem-mb) so the check is armed by default on any capped
+// deployment, and only an explicit 0 disables it.
+func TestSolveRejectFlagDefaultsToAuto(t *testing.T) {
+	if v, ok := os.LookupEnv("OFF_BY_ONE_SOLVE_REJECT_RSS_MB"); ok {
+		if err := os.Unsetenv("OFF_BY_ONE_SOLVE_REJECT_RSS_MB"); err != nil {
+			t.Fatalf("unsetenv: %v", err)
+		}
+		t.Cleanup(func() {
+			if err := os.Setenv("OFF_BY_ONE_SOLVE_REJECT_RSS_MB", v); err != nil {
+				t.Errorf("restore OFF_BY_ONE_SOLVE_REJECT_RSS_MB: %v", err)
+			}
+		})
+	}
+
+	fs := flag.NewFlagSet("reject-default", flag.ContinueOnError)
+	cfg := registerServerFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if got := *cfg.solveRejectRSSMB; got != -1 {
+		t.Errorf("default -solve-reject-rss-mb = %d, want -1 (auto)", got)
+	}
 }
