@@ -142,6 +142,15 @@ type Config struct {
 	// Tests substitute a fake to make the idle check deterministic.
 	IdleProbe func() (float64, error)
 
+	// MemoryProbe checks host memory pressure. Returns (usedFraction, error).
+	// Default: probeMemory. Set to nil to disable memory gating.
+	MemoryProbe func() (float64, error)
+
+	// MemoryThreshold is the maximum memory used fraction (0.0-1.0) at which
+	// the system is considered too busy. Default: 0.85 (85%). Set negative
+	// to disable memory gating.
+	MemoryThreshold float64
+
 	// Logger is the structured logger for loop events. nil → log.Default().
 	Logger *log.Logger
 
@@ -193,6 +202,12 @@ func ResolveConfig(cfg Config) Config {
 	}
 	if cfg.IdleProbe == nil {
 		cfg.IdleProbe = probeLoadavg
+	}
+	if cfg.MemoryProbe == nil {
+		cfg.MemoryProbe = probeMemory
+	}
+	if cfg.MemoryThreshold == 0 {
+		cfg.MemoryThreshold = 0.85 // 85% default
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = log.Default()
@@ -344,29 +359,56 @@ var ErrAlreadyRunning = errors.New("cron: tick already in flight")
 // disables the check entirely (tests and the "always run" mode).
 // Returns ErrNoIdle when the system is busy.
 func (l *Loop) checkIdle(ctx context.Context) error {
-	if l.cfg.LoadThreshold < 0 {
-		return nil
+	var load float64
+	var memUsed float64
+	var skipReason string
+
+	// Check load average
+	if l.cfg.LoadThreshold >= 0 {
+		var err error
+		load, err = l.cfg.IdleProbe()
+		if err != nil {
+			l.cfg.Logger.Printf("cron: idle probe error: %v (proceeding)", err)
+			load = 0 // treat probe error as idle
+		}
+		if load >= l.cfg.LoadThreshold {
+			skipReason = "load"
+		}
 	}
-	load, err := l.cfg.IdleProbe()
-	if err != nil {
-		// If we can't probe, treat as idle — better to solve
-		// a problem than to skip on a transient probe error.
-		l.cfg.Logger.Printf("cron: idle probe error: %v (proceeding)", err)
-		return nil
+
+	// Check memory pressure
+	if l.cfg.MemoryThreshold >= 0 && l.cfg.MemoryProbe != nil {
+		var err error
+		memUsed, err = l.cfg.MemoryProbe()
+		if err != nil {
+			l.cfg.Logger.Printf("cron: memory probe error: %v (proceeding)", err)
+			memUsed = 0 // treat probe error as idle
+		}
+		if memUsed >= l.cfg.MemoryThreshold {
+			if skipReason != "" {
+				skipReason = "load+memory"
+			} else {
+				skipReason = "memory"
+			}
+		}
 	}
-	if load >= l.cfg.LoadThreshold {
+
+	if skipReason != "" {
 		l.metrics.recordIdleSkip()
 		if l.cfg.Observer != nil {
 			l.cfg.Observer.RecordSkip(metrics.HostSnapshot{
-				Load1:  load,
-				Reason: "load",
+				Load1:           load,
+				MemUsedFraction: memUsed,
+				Reason:          skipReason,
 			})
 		}
 		return ErrNoIdle
 	}
+
 	if l.cfg.Observer != nil {
 		l.cfg.Observer.RecordHost(metrics.HostSnapshot{
-			Load1: load,
+			Load1:           load,
+			MemUsedFraction: memUsed,
 		})
 	}
 	return nil

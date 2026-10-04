@@ -40,6 +40,7 @@ import (
 
 	apihttp "github.com/totalwindupflightsystems/off-by-one/internal/api"
 	"github.com/totalwindupflightsystems/off-by-one/internal/cron"
+	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
 	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
@@ -164,11 +165,17 @@ func main() {
 	var cronCancel context.CancelFunc
 	if solverExec != nil {
 		cronCtx, cronCancel = context.WithCancel(context.Background())
+		
+		// Create metrics observer for per-solve observability (DF-OFF-BY-ONE-32)
+		observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())
+		
 		loop = cron.NewLoop(cron.Config{
-			Interval:      *cfg.cronInterval,
-			LoadThreshold: *cfg.loadThreshold,
-			Solver:        solverExec,
-			Queue:         queue,
+			Interval:        *cfg.cronInterval,
+			LoadThreshold:   *cfg.loadThreshold,
+			MemoryThreshold: 0.85, // 85% memory threshold
+			Solver:          solverExec,
+			Queue:           queue,
+			Observer:        observer,
 		})
 		go func() {
 			log.Printf("cron loop started: interval=%s loadThreshold=%.1f", *cfg.cronInterval, *cfg.loadThreshold)

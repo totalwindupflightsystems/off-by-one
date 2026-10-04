@@ -19,6 +19,7 @@ import (
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
+	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
 )
 
 // Server holds the dependencies the HTTP handlers need. The graph
@@ -58,6 +59,10 @@ type Server struct {
 	// submissions will not be processed — surfaced on /api/v1/stats
 	// so users can tell why their submission is stuck.
 	SolverAvailable bool
+
+	// Observer records per-solve metrics and host-pressure skips.
+	// nil disables /metrics endpoint.
+	Observer *metrics.Observer
 
 	// StartedAt is set in New and used by /health to report uptime.
 	StartedAt time.Time
@@ -100,6 +105,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/import", s.handleImport)
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /metrics", s.handleMetrics)
 
 	// In read-only (public catalog) mode, block all mutating endpoints
 	// and the AI chat WebSocket before they reach the mux.
@@ -214,6 +220,17 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"status": "ok",
 		"uptime": time.Since(s.StartedAt).Truncate(time.Second).String(),
 	})
+}
+
+// handleMetrics returns the metrics snapshot from the Observer.
+// Returns 404 if Observer is nil (metrics not configured).
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if s.Observer == nil {
+		writeError(w, http.StatusNotFound, "metrics_disabled", "metrics observer not configured")
+		return
+	}
+	snap := s.Observer.Snapshot()
+	writeJSON(w, http.StatusOK, snap)
 }
 
 // splitPath trims a leading slash and returns the path segments
