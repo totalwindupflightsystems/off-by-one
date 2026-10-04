@@ -197,6 +197,19 @@ A 404 response means the problem class is not in the graph. If `found` is `false
 
 Pass `"include_related": false` to skip the related-problems graph edges.
 
+### Reading discover output through the MusterFlow CLI
+
+The MusterFlow-generated CLI (`musterflow off-by-one discovery discover-solution ...`) renders
+responses as a table that truncates wide fields to ~120 characters, so a discovered
+`solution` shows up as a short `answer {...` line and the actual fix is unreadable.
+Pass `--output json` (or `-r/--raw`) to get the full answer payload. The truncated table
+does not hint at this — the one-line workaround is part of the render, not this API's.
+
+The raw HTTP calls in this document always return the complete answer JSON, so direct
+`curl` consumers are unaffected. Upstream fix tracked on the MusterFlow board
+(DF-038); this note was added as the consumer-side guardrail after the 2026-09-24
+integration run ([docs/dogfood/2026-09-24-integration.md](dogfood/2026-09-24-integration.md)).
+
 ---
 
 ## Browse Taxonomy and Stats
