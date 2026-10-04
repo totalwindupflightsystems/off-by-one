@@ -1,0 +1,103 @@
+{
+  "task_id": "DF-OFF-BY-ONE-32-rework",
+  "task_title": "Fix dead-code metrics: memory gate, peak RSS, /metrics endpoint, wiring, tests",
+  "task_criteria": [
+    "All 6 judge failures resolved: memory gate in checkIdle, PeakRSSBytes populated from sandbox.Sampler, GET /metrics endpoint, Observer constructed in main.go, tests pass, over-budget alert fires"
+  ],
+  "passed": false,
+  "worktree": "/home/kara/off-by-one",
+  "branch": "master",
+  "commit": "b6162bb172c3dfde241c1ca66549ad39a56b06c8",
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 tests: scanners: nice=nice -n 10\n  \u2713 secrets: secrets: harness state excluded from gitleaks scope (.gitreins/**)",
+      "steps": [
+        {
+          "id": "tests",
+          "type": "script",
+          "passed": true,
+          "output": "scanners: nice=nice -n 10\n?   \tgithub.com/totalwindupflightsystems/off-by-one/cmd/oby-memcap\t[no test files]\nok  \tgithub.com/totalwindupflightsystems/off-by-one/cmd/off-by-one\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/api\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/cron\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/export\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/graph\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/import\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/ingest\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/metrics\t0.003s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/muster\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/sandbox\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/seed\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/solver\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/tools\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/web\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/pkg/api\t(cached)\n?   \tgithub.com/totalwindupflightsystems/off-by-one/sql/schema\t[no test files]\n?   \tgithub.com/totalwindupflightsystems/off-by-one/web\t[no test files]\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/off-by-one/.gitreins/logs/guard-20261004T070601.421423Z.log"
+          }
+        },
+        {
+          "id": "secrets",
+          "type": "script",
+          "passed": true,
+          "output": "secrets: harness state excluded from gitleaks scope (.gitreins/**)\nsecrets: scanners=gitleaks+builtin cross-check\nscanners: nice=nice -n 10\n2:07AM INF scanned ~6667178 bytes (6.67 MB) in 990ms\n2:07AM INF no leaks found\nsecrets: gitleaks: clean\nsecrets: builtin cross-check: Scanned 5112 files \u2014 clean (excluded harness state: .gitreins/**)\nsecrets: builtin cross-check status: clean\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/off-by-one/.gitreins/logs/guard-20261004T070601.421423Z.log",
+            "secrets_scanners": [
+              "gitleaks",
+              "builtin"
+            ]
+          }
+        }
+      ],
+      "coverage": "secrets+tests"
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": false,
+      "any_failed": true,
+      "summary": "INCOMPLETE\n  \u2717 All 6 judge failures resolved: memory gate in checkIdle, PeakRSSBytes populated from sandbox.Sampler, GET /metrics endpoint, Observer constructed in main.go, tests pass, over-budget alert fires: 2 of the 6 sub-failures are unresolved. (a) PeakRSSBytes is NOT populated from sandbox.Sampler: no Sampler type exists anywhere \u2014 `grep -rn Sampler internal/sandbox/ internal/solver/ internal/cron/ cmd/` returns 0 hits (GREP_EXIT=1); the only match repo-wide is a doc comment at internal/metrics/metrics.go:43 ('see sandbox.Sampler'). No RSS sampling code (no /proc/<pid>/status, VmHWM, statm) exists. Every cron/loop.go RecordSolve call (lines 437, 455, 469, 481) sets only SubmissionID/ProblemClass/WallTimeMS/Success \u2014 PeakRSSBytes, TestRuns, Killed and Model are always zero, so the field is dead in production. (b) Observer is constructed in main.go (cmd/off-by-one/main.go:170 `observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())`, passed to cron.Config.Observer at :178) but is NEVER wired to the API server: `grep -rn '.Observer =' cmd/ internal/` returns 0 hits, and main.go's only apiServer assignments are ExportLocalDir/ImportLocalDir/ReadOnly/SolverAvailable (lines 194-197). internal/api/server.go:228 therefore always takes the nil branch and GET /metrics returns 404 metrics_disabled in the real binary. (c) Consequently the over-budget alert can never fire in production: internal/metrics/metrics.go:108-126 does log 'ERROR solve ALERT: peak RSS ...' and metrics_test.go TestRecordSolveOverBudget asserts it, but with PeakRSSBytes always 0 the branch is unreachable outside unit tests. (d) No test covers the /metrics endpoint at all \u2014 `grep -n 'metrics|Observer' internal/api/handlers.go internal/api/coverage_test.go internal/api/handlers_test.go internal/api/queue_page_test.go` returns nothing (GREP_EXIT=1). Verified PASS sub-items: memory gate present in checkIdle (internal/cron/loop.go:380-395, MemoryThreshold/MemoryProbe, skipReason load/memory/load+memory, Observer.RecordSkip at :398-404; probeMemory in internal/cron/memory.go:12); GET /metrics route registered (internal/api/server.go:108) with handler at :225-234; tests pass \u2014 `go build ./...` exit 0, `go vet ./...` exit 0, `go test ./... -short -p 1 -count=1 -timeout 180s` exit 0 with 'ok internal/metrics 0.002s', 'ok internal/api 0.553s', 'ok internal/cron 0.081s'.\nThe memory gate, /metrics route and test suite are in place, but PeakRSSBytes is never populated (no sandbox.Sampler exists) and the Observer is never assigned to apiServer in main.go, so /metrics 404s and the over-budget alert cannot fire in production.",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": false,
+          "output": "INCOMPLETE\n  \u2717 All 6 judge failures resolved: memory gate in checkIdle, PeakRSSBytes populated from sandbox.Sampler, GET /metrics endpoint, Observer constructed in main.go, tests pass, over-budget alert fires: 2 of the 6 sub-failures are unresolved. (a) PeakRSSBytes is NOT populated from sandbox.Sampler: no Sampler type exists anywhere \u2014 `grep -rn Sampler internal/sandbox/ internal/solver/ internal/cron/ cmd/` returns 0 hits (GREP_EXIT=1); the only match repo-wide is a doc comment at internal/metrics/metrics.go:43 ('see sandbox.Sampler'). No RSS sampling code (no /proc/<pid>/status, VmHWM, statm) exists. Every cron/loop.go RecordSolve call (lines 437, 455, 469, 481) sets only SubmissionID/ProblemClass/WallTimeMS/Success \u2014 PeakRSSBytes, TestRuns, Killed and Model are always zero, so the field is dead in production. (b) Observer is constructed in main.go (cmd/off-by-one/main.go:170 `observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())`, passed to cron.Config.Observer at :178) but is NEVER wired to the API server: `grep -rn '.Observer =' cmd/ internal/` returns 0 hits, and main.go's only apiServer assignments are ExportLocalDir/ImportLocalDir/ReadOnly/SolverAvailable (lines 194-197). internal/api/server.go:228 therefore always takes the nil branch and GET /metrics returns 404 metrics_disabled in the real binary. (c) Consequently the over-budget alert can never fire in production: internal/metrics/metrics.go:108-126 does log 'ERROR solve ALERT: peak RSS ...' and metrics_test.go TestRecordSolveOverBudget asserts it, but with PeakRSSBytes always 0 the branch is unreachable outside unit tests. (d) No test covers the /metrics endpoint at all \u2014 `grep -n 'metrics|Observer' internal/api/handlers.go internal/api/coverage_test.go internal/api/handlers_test.go internal/api/queue_page_test.go` returns nothing (GREP_EXIT=1). Verified PASS sub-items: memory gate present in checkIdle (internal/cron/loop.go:380-395, MemoryThreshold/MemoryProbe, skipReason load/memory/load+memory, Observer.RecordSkip at :398-404; probeMemory in internal/cron/memory.go:12); GET /metrics route registered (internal/api/server.go:108) with handler at :225-234; tests pass \u2014 `go build ./...` exit 0, `go vet ./...` exit 0, `go test ./... -short -p 1 -count=1 -timeout 180s` exit 0 with 'ok internal/metrics 0.002s', 'ok internal/api 0.553s', 'ok internal/cron 0.081s'.\nThe memory gate, /metrics route and test suite are in place, but PeakRSSBytes is never populated (no sandbox.Sampler exists) and the Observer is never assigned to apiServer in main.go, so /metrics 404s and the over-budget alert cannot fire in production.",
+          "error": "",
+          "data": {
+            "verdict": "INCOMPLETE",
+            "items": [
+              {
+                "criterion": "All 6 judge failures resolved: memory gate in checkIdle, PeakRSSBytes populated from sandbox.Sampler, GET /metrics endpoint, Observer constructed in main.go, tests pass, over-budget alert fires",
+                "status": "FAIL",
+                "detail": "2 of the 6 sub-failures are unresolved. (a) PeakRSSBytes is NOT populated from sandbox.Sampler: no Sampler type exists anywhere \u2014 `grep -rn Sampler internal/sandbox/ internal/solver/ internal/cron/ cmd/` returns 0 hits (GREP_EXIT=1); the only match repo-wide is a doc comment at internal/metrics/metrics.go:43 ('see sandbox.Sampler'). No RSS sampling code (no /proc/<pid>/status, VmHWM, statm) exists. Every cron/loop.go RecordSolve call (lines 437, 455, 469, 481) sets only SubmissionID/ProblemClass/WallTimeMS/Success \u2014 PeakRSSBytes, TestRuns, Killed and Model are always zero, so the field is dead in production. (b) Observer is constructed in main.go (cmd/off-by-one/main.go:170 `observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())`, passed to cron.Config.Observer at :178) but is NEVER wired to the API server: `grep -rn '.Observer =' cmd/ internal/` returns 0 hits, and main.go's only apiServer assignments are ExportLocalDir/ImportLocalDir/ReadOnly/SolverAvailable (lines 194-197). internal/api/server.go:228 therefore always takes the nil branch and GET /metrics returns 404 metrics_disabled in the real binary. (c) Consequently the over-budget alert can never fire in production: internal/metrics/metrics.go:108-126 does log 'ERROR solve ALERT: peak RSS ...' and metrics_test.go TestRecordSolveOverBudget asserts it, but with PeakRSSBytes always 0 the branch is unreachable outside unit tests. (d) No test covers the /metrics endpoint at all \u2014 `grep -n 'metrics|Observer' internal/api/handlers.go internal/api/coverage_test.go internal/api/handlers_test.go internal/api/queue_page_test.go` returns nothing (GREP_EXIT=1). Verified PASS sub-items: memory gate present in checkIdle (internal/cron/loop.go:380-395, MemoryThreshold/MemoryProbe, skipReason load/memory/load+memory, Observer.RecordSkip at :398-404; probeMemory in internal/cron/memory.go:12); GET /metrics route registered (internal/api/server.go:108) with handler at :225-234; tests pass \u2014 `go build ./...` exit 0, `go vet ./...` exit 0, `go test ./... -short -p 1 -count=1 -timeout 180s` exit 0 with 'ok internal/metrics 0.002s', 'ok internal/api 0.553s', 'ok internal/cron 0.081s'.",
+                "resolution_probability": 0.19,
+                "cited_path": "main.go"
+              }
+            ],
+            "summary": "The memory gate, /metrics route and test suite are in place, but PeakRSSBytes is never populated (no sandbox.Sampler exists) and the Observer is never assigned to apiServer in main.go, so /metrics 404s and the over-budget alert cannot fire in production."
+          }
+        }
+      ]
+    }
+  },
+  "summary": "Judge Result: DF-OFF-BY-ONE-32-rework\n\nStage tier1: PASS\n    \u2713 tests: scanners: nice=nice -n 10\n  \u2713 secrets: secrets: harness state excluded from gitleaks scope (.gitreins/**)\n\nStage tier2: FAIL\n  INCOMPLETE\n  \u2717 All 6 judge failures resolved: memory gate in checkIdle, PeakRSSBytes populated from sandbox.Sampler, GET /metrics endpoint, Observer constructed in main.go, tests pass, over-budget alert fires: 2 of the 6 sub-failures are unresolved. (a) PeakRSSBytes is NOT populated from sandbox.Sampler: no Sampler type exists anywhere \u2014 `grep -rn Sampler internal/sandbox/ internal/solver/ internal/cron/ cmd/` returns 0 hits (GREP_EXIT=1); the only match repo-wide is a doc comment at internal/metrics/metrics.go:43 ('see sandbox.Sampler'). No RSS sampling code (no /proc/<pid>/status, VmHWM, statm) exists. Every cron/loop.go RecordSolve call (lines 437, 455, 469, 481) sets only SubmissionID/ProblemClass/WallTimeMS/Success \u2014 PeakRSSBytes, TestRuns, Killed and Model are always zero, so the field is dead in production. (b) Observer is constructed in main.go (cmd/off-by-one/main.go:170 `observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())`, passed to cron.Config.Observer at :178) but is NEVER wired to the API server: `grep -rn '.Observer =' cmd/ internal/` returns 0 hits, and main.go's only apiServer assignments are ExportLocalDir/ImportLocalDir/ReadOnly/SolverAvailable (lines 194-197). internal/api/server.go:228 therefore always takes the nil branch and GET /metrics returns 404 metrics_disabled in the real binary. (c) Consequently the over-budget alert can never fire in production: internal/metrics/metrics.go:108-126 does log 'ERROR solve ALERT: peak RSS ...' and metrics_test.go TestRecordSolveOverBudget asserts it, but with PeakRSSBytes always 0 the branch is unreachable outside unit tests. (d) No test covers the /metrics endpoint at all \u2014 `grep -n 'metrics|Observer' internal/api/handlers.go internal/api/coverage_test.go internal/api/handlers_test.go internal/api/queue_page_test.go` returns nothing (GREP_EXIT=1). Verified PASS sub-items: memory gate present in checkIdle (internal/cron/loop.go:380-395, MemoryThreshold/MemoryProbe, skipReason load/memory/load+memory, Observer.RecordSkip at :398-404; probeMemory in internal/cron/memory.go:12); GET /metrics route registered (internal/api/server.go:108) with handler at :225-234; tests pass \u2014 `go build ./...` exit 0, `go vet ./...` exit 0, `go test ./... -short -p 1 -count=1 -timeout 180s` exit 0 with 'ok internal/metrics 0.002s', 'ok internal/api 0.553s', 'ok internal/cron 0.081s'.\nThe memory gate, /metrics route and test suite are in place, but PeakRSSBytes is never populated (no sandbox.Sampler exists) and the Observer is never assigned to apiServer in main.go, so /metrics 404s and the over-budget alert cannot fire in production.\n\nOverall: FAIL \u2717",
+  "evaluated_at": "2026-10-04T07:08:55.865683",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-10-04T07:08:55.884534+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 1867,
+        "truncated": false,
+        "source": "git show b6162bb172c3"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 1171,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "DF-OFF-BY-ONE-32-rework"
+  }
+}

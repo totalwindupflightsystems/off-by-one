@@ -17,12 +17,15 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
 	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
+	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
 
@@ -142,14 +145,27 @@ type Config struct {
 	// Tests substitute a fake to make the idle check deterministic.
 	IdleProbe func() (float64, error)
 
-	// MemoryProbe checks host memory pressure. Returns (usedFraction, error).
-	// Default: probeMemory. Set to nil to disable memory gating.
-	MemoryProbe func() (float64, error)
+	// MemoryProbe checks host memory pressure (DF-OFF-BY-ONE-32
+	// rework). Returns the full MemReading so the skip snapshot can
+	// carry MemTotalBytes/MemAvailableBytes, not just the fraction.
+	// Default: probeMeminfo. Tests substitute a fake; a probe error
+	// degrades to "no memory signal" (fail-open), exactly like
+	// IdleProbe errors.
+	MemoryProbe func() (MemReading, error)
 
-	// MemoryThreshold is the maximum memory used fraction (0.0-1.0) at which
-	// the system is considered too busy. Default: 0.85 (85%). Set negative
-	// to disable memory gating.
+	// MemoryThreshold is the memory-pressure threshold: the gate
+	// skips when MemUsedFraction EXCEEDS this value. Default:
+	// DefaultMemFraction (0.9, the rework brief's value). Set to a
+	// negative number to disable the memory check (mirrors
+	// LoadThreshold's disable semantics).
 	MemoryThreshold float64
+
+	// RSSSampler samples a pid's peak RSS (VmHWM). While a solve is
+	// in flight the loop polls its own process subtree
+	// (rssPollTracker) and records the observed maximum in
+	// SolveRecord.PeakRSSBytes (judge failure #2). Default:
+	// sandbox.ProcSampler{}. nil disables sampling (PeakRSSBytes 0).
+	RSSSampler sandbox.Sampler
 
 	// Logger is the structured logger for loop events. nil → log.Default().
 	Logger *log.Logger
@@ -204,10 +220,13 @@ func ResolveConfig(cfg Config) Config {
 		cfg.IdleProbe = probeLoadavg
 	}
 	if cfg.MemoryProbe == nil {
-		cfg.MemoryProbe = probeMemory
+		cfg.MemoryProbe = probeMeminfo
 	}
 	if cfg.MemoryThreshold == 0 {
-		cfg.MemoryThreshold = 0.85 // 85% default
+		cfg.MemoryThreshold = DefaultMemFraction // 0.9 — the rework brief's value
+	}
+	if cfg.RSSSampler == nil {
+		cfg.RSSSampler = sandbox.ProcSampler{}
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = log.Default()
@@ -355,12 +374,21 @@ func (l *Loop) Tick(ctx context.Context) error {
 // parallel solves should run multiple Loops with isolated queues.
 var ErrAlreadyRunning = errors.New("cron: tick already in flight")
 
-// checkIdle runs the configured IdleProbe. A negative threshold
-// disables the check entirely (tests and the "always run" mode).
-// Returns ErrNoIdle when the system is busy.
+// checkIdle runs the configured IdleProbe and MemoryProbe (the
+// DF-OFF-BY-ONE-32 rework added the memory half: the 2026-10-03
+// incident tripped no load alarm — it was pure memory pressure).
+// Negative thresholds disable the respective check entirely (tests and
+// the "always run" mode). Returns ErrNoIdle when the system is busy.
+//
+// The snapshot handed to the Observer always carries the full memory
+// reading (fraction + absolute bytes) so a skip line can say HOW much
+// memory the host had left, not just that the gate tripped. Probe
+// errors degrade to "no signal" (fail-open): better to solve a problem
+// than to skip on a transient /proc read — same philosophy as the
+// loadavg probe error path.
 func (l *Loop) checkIdle(ctx context.Context) error {
 	var load float64
-	var memUsed float64
+	var memRead MemReading
 	var skipReason string
 
 	// Check load average
@@ -379,12 +407,12 @@ func (l *Loop) checkIdle(ctx context.Context) error {
 	// Check memory pressure
 	if l.cfg.MemoryThreshold >= 0 && l.cfg.MemoryProbe != nil {
 		var err error
-		memUsed, err = l.cfg.MemoryProbe()
+		memRead, err = l.cfg.MemoryProbe()
 		if err != nil {
 			l.cfg.Logger.Printf("cron: memory probe error: %v (proceeding)", err)
-			memUsed = 0 // treat probe error as idle
+			memRead = MemReading{} // treat probe error as no signal
 		}
-		if memUsed >= l.cfg.MemoryThreshold {
+		if memRead.UsedFraction > l.cfg.MemoryThreshold {
 			if skipReason != "" {
 				skipReason = "load+memory"
 			} else {
@@ -393,23 +421,26 @@ func (l *Loop) checkIdle(ctx context.Context) error {
 		}
 	}
 
+	hostSnap := func(reason string) metrics.HostSnapshot {
+		return metrics.HostSnapshot{
+			Load1:             load,
+			MemUsedFraction:   memRead.UsedFraction,
+			MemTotalBytes:     memRead.TotalBytes,
+			MemAvailableBytes: memRead.AvailableBytes,
+			Reason:            reason,
+		}
+	}
+
 	if skipReason != "" {
 		l.metrics.recordIdleSkip()
 		if l.cfg.Observer != nil {
-			l.cfg.Observer.RecordSkip(metrics.HostSnapshot{
-				Load1:           load,
-				MemUsedFraction: memUsed,
-				Reason:          skipReason,
-			})
+			l.cfg.Observer.RecordSkip(hostSnap(skipReason))
 		}
 		return ErrNoIdle
 	}
 
 	if l.cfg.Observer != nil {
-		l.cfg.Observer.RecordHost(metrics.HostSnapshot{
-			Load1:           load,
-			MemUsedFraction: memUsed,
-		})
+		l.cfg.Observer.RecordHost(hostSnap(""))
 	}
 	return nil
 }
@@ -420,8 +451,41 @@ func (l *Loop) checkIdle(ctx context.Context) error {
 func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 	start := l.cfg.Now()
 
+	// Track the solve's process-tree peak RSS while it runs
+	// (DF-OFF-BY-ONE-32 rework). The sandbox's children are reaped
+	// the moment Solve returns, so the peak can only be observed
+	// during the solve: the tracker polls VmHWM (the kernel's own
+	// high-water mark, monotone per pid) across the daemon's
+	// descendants every rssPollInterval and Stop() returns the max.
+	// A nil sampler (explicitly configured) leaves PeakRSSBytes 0.
+	tracker := startRSSTracker(l.cfg.RSSSampler)
+
 	_ = l.cfg.Queue.SetStage(ctx, entry.ID, "solver_running")
 	sol, err := l.cfg.Solver.Solve(ctx, entry)
+	peakRSS := tracker.Stop()
+
+	// Model attribution comes from the solution when the solve
+	// produced one (it carries the configured model); the failed
+	// paths below have no solution, so they record no model.
+	solveModel := ""
+	killed := false
+	if sol != nil {
+		solveModel = sol.Model
+		killed = isMemoryKill(err)
+	}
+
+	record := func(success bool) metrics.SolveRecord {
+		return metrics.SolveRecord{
+			SubmissionID: entry.ID,
+			ProblemClass: entry.ProblemClass,
+			Model:        solveModel,
+			PeakRSSBytes: peakRSS,
+			WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
+			Killed:       killed,
+			Success:      success,
+		}
+	}
+
 	if err != nil {
 		_ = l.cfg.Queue.SetStage(ctx, entry.ID, "solver_failed")
 		// FailureHint appends an actionable line for the known
@@ -434,14 +498,9 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error()))
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
 		if l.cfg.Observer != nil {
-			l.cfg.Observer.RecordSolve(metrics.SolveRecord{
-				SubmissionID: entry.ID,
-				ProblemClass: entry.ProblemClass,
-				WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
-				Success:      false,
-			})
+			l.cfg.Observer.RecordSolve(record(false))
 		}
-		l.cfg.Logger.Printf("cron: solve failed for %s: %v", entry.ID, err)
+		l.cfg.Logger.Printf("cron: solve failed for %s (peak_rss=%s): %v", entry.ID, gibStr(peakRSS), err)
 		return fmt.Errorf("solve: %w", err)
 	}
 
@@ -452,41 +511,43 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, err.Error())
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
 		if l.cfg.Observer != nil {
-			l.cfg.Observer.RecordSolve(metrics.SolveRecord{
-				SubmissionID: entry.ID,
-				ProblemClass: entry.ProblemClass,
-				WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
-				Success:      false,
-			})
+			l.cfg.Observer.RecordSolve(record(false))
 		}
-		l.cfg.Logger.Printf("cron: commit failed for %s: %v", entry.ID, err)
+		l.cfg.Logger.Printf("cron: commit failed for %s (peak_rss=%s): %v", entry.ID, gibStr(peakRSS), err)
 		return fmt.Errorf("commit: %w", err)
 	}
 
 	if err := l.cfg.Queue.MarkComplete(ctx, entry.ID, answerID); err != nil {
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
 		if l.cfg.Observer != nil {
-			l.cfg.Observer.RecordSolve(metrics.SolveRecord{
-				SubmissionID: entry.ID,
-				ProblemClass: entry.ProblemClass,
-				WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
-				Success:      false,
-			})
+			l.cfg.Observer.RecordSolve(record(false))
 		}
-		l.cfg.Logger.Printf("cron: mark-complete failed for %s: %v", entry.ID, err)
+		l.cfg.Logger.Printf("cron: mark-complete failed for %s (peak_rss=%s): %v", entry.ID, gibStr(peakRSS), err)
 		return fmt.Errorf("mark complete: %w", err)
 	}
 	l.metrics.recordSuccess(l.cfg.Now().Sub(start))
 	if l.cfg.Observer != nil {
-		l.cfg.Observer.RecordSolve(metrics.SolveRecord{
-			SubmissionID: entry.ID,
-			ProblemClass: entry.ProblemClass,
-			WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
-			Success:      true,
-		})
+		l.cfg.Observer.RecordSolve(record(true))
 	}
-	l.cfg.Logger.Printf("cron: solved %s → answer %d in %s", entry.ID, answerID, l.cfg.Now().Sub(start))
+	l.cfg.Logger.Printf("cron: solved %s → answer %d in %s (peak_rss=%s)", entry.ID, answerID, l.cfg.Now().Sub(start), gibStr(peakRSS))
 	return nil
+}
+
+// isMemoryKill reports whether err is a solve death by its memory cap
+// (SIGKILL / "signal: killed" from the RLIMIT_AS enforcement). The
+// sandbox's oby-memcap wrapper + kernel OOM-kill surface this exact
+// string; anything else is an ordinary failure.
+func isMemoryKill(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "signal: killed")
+}
+
+// gibStr renders a byte count as GiB for log lines (3 decimals; 0
+// renders as "0.000").
+func gibStr(b uint64) string {
+	return strconv.FormatFloat(float64(b)/(1<<30), 'f', 3, 64)
 }
 
 // probeLoadavg returns the system's 1-minute load average by

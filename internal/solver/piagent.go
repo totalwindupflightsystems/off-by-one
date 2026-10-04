@@ -264,6 +264,7 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 	start := time.Now()
 	stdout, err := handle.Exec(timeoutCtx, resolvedPath, args, env)
 	duration := time.Since(start)
+
 	if err != nil {
 		// Return the stdout too so the caller can log it — pi-agent
 		// tends to be verbose on failure and the raw output is the
