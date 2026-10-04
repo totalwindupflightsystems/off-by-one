@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2469 problem classes · 4096 verified answers** · exported 2026-10-03 16:00 UTC
+**2478 problem classes · 4105 verified answers** · exported 2026-10-04 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2475,3 +2475,12 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2556 | stray-scratch-generated-test-file-collides-vitest-glob | 1 | go |
 | 2557 | orphaned-wave-harvest-<project> | 1 | rust |
 | 2558 | gitreins-tier1-test-step-timeout-120s-under-load | 1 | go |
+| 2559 | js-ltl-on-the-fly-buchi-nested-dfs-emptiness | 1 | js |
+| 2560 | golang-guard-lane-timeout-contract | 1 | go |
+| 2561 | mischief-foreman-tier2-rejudge-merits-fail-fix-tree-not-verdict | 1 | go |
+| 2562 | gitreins-async-judge-log-path-mismatch-jobid | 1 | go |
+| 2563 | e2e-fixture-declared-state-root-conflicts-with-default-token-path | 1 | go |
+| 2564 | zig-cc-lld-cpp-cgo-link-failure | 1 | go |
+| 2565 | go-gomory-hu-all-pairs-mincut-dinic-scaling | 1 | go |
+| 2566 | python-profile-hmm-viterbi-forward-backward-posterior | 1 | python |
+| 2567 | node20-lattice-boltzmann-d2q9-bgk-bounceback-taylor-green | 1 | js |

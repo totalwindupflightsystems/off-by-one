@@ -54,6 +54,20 @@ type Config struct {
 	// (or the explicit ReadOnlyPaths if set). Use this to add
 	// tool-specific paths without overriding the defaults.
 	ExtraReadOnlyPaths []string
+
+	// MemLimitMB caps the sandboxed command's virtual address space
+	// (RLIMIT_AS), in MiB. 0 (the default) means unlimited — the
+	// historical behaviour. When > 0 the bwrap invocation is routed
+	// through the oby-memcap wrapper (cmd/oby-memcap), which pins the
+	// rlimit and execs bwrap; bwrap itself has no rlimit flag and its
+	// cgroup limits require root (DF-OFF-BY-ONE-30).
+	MemLimitMB int
+
+	// MemCapPath is the path to the oby-memcap wrapper binary, used
+	// only when MemLimitMB > 0. When empty, Create resolves it next to
+	// the running daemon binary, then on PATH, and fails loud when the
+	// wrapper cannot be found.
+	MemCapPath string
 }
 
 // DefaultBwrapTimeout is the spec-recommended 5-minute cap.
@@ -124,6 +138,14 @@ type Executor struct {
 	// read-only bind mounts. Use this for tool-specific paths
 	// (e.g. /home/user/.local/bin for pi-agent).
 	ExtraReadOnlyPaths []string
+
+	// MemLimitMB is the default per-solve memory cap (MiB) for Create()
+	// calls that leave Config.MemLimitMB at 0. 0 means unlimited.
+	MemLimitMB int
+
+	// MemCapPath is the default oby-memcap wrapper path; see
+	// Config.MemCapPath.
+	MemCapPath string
 }
 
 // NewExecutor returns an Executor using the OS-detected bwrap path
@@ -171,6 +193,21 @@ func (e *Executor) Create(ctx context.Context, id string, cfg Config) (*Sandbox,
 	}
 	if cfg.ReadOnlyPaths == nil {
 		cfg.ReadOnlyPaths = append([]string{}, DefaultReadOnlyPaths...)
+	}
+	if cfg.MemLimitMB == 0 {
+		cfg.MemLimitMB = e.MemLimitMB
+	}
+	if cfg.MemCapPath == "" {
+		cfg.MemCapPath = e.MemCapPath
+	}
+	// Resolve the wrapper before creating the workspace so a missing
+	// oby-memcap never leaves an orphan directory behind.
+	if cfg.MemLimitMB > 0 && cfg.MemCapPath == "" {
+		p, err := resolveMemCapPath()
+		if err != nil {
+			return nil, err
+		}
+		cfg.MemCapPath = p
 	}
 	if cfg.ExtraReadOnlyPaths == nil {
 		cfg.ExtraReadOnlyPaths = e.ExtraReadOnlyPaths
@@ -286,9 +323,15 @@ func (s *Sandbox) RunWithEnv(ctx context.Context, name string, args, env []strin
 	bwrapArgs = append(bwrapArgs, "--", name)
 	bwrapArgs = append(bwrapArgs, args...)
 
-	cmd := exec.CommandContext(timeoutCtx, s.cfg.BwrapPath, bwrapArgs...)
+	// DF-OFF-BY-ONE-30: with a per-solve cap configured, the command
+	// becomes [oby-memcap, bwrap, ...] and the wrapper pins RLIMIT_AS
+	// before exec'ing bwrap. The limit travels in envp (MemCapEnvVar),
+	// never in argv, per the same OB-GAP-015 rule as secrets.
+	execPath, argv, memEnv := memCapCommand(s.cfg, bwrapArgs)
+	cmd := exec.CommandContext(timeoutCtx, execPath, argv...)
 	cmd.Env = append(os.Environ(), s.cfg.ExtraEnv...)
 	cmd.Env = append(cmd.Env, env...)
+	cmd.Env = append(cmd.Env, memEnv...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
