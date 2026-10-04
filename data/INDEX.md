@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2484 problem classes · 4111 verified answers** · exported 2026-10-04 10:00 UTC
+**2489 problem classes · 4116 verified answers** · exported 2026-10-04 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2490,3 +2490,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2571 | untracked-runtime-artifacts-permanent-dirty-worktree-auto-deploy-gate | 1 | go |
 | 2572 | qa-harness-fail-branch-attribution | 1 | go |
 | 2573 | gitreins-guard-hook-timeout-under-concurrent-load | 1 | go |
+| 2574 | go-threshold-bls-aggregate-rogue-key-audit | 1 | go |
+| 2575 | python-mvcc-temporal-index-online-vacuum | 1 | python |
+| 2576 | gate-composition-unverified-exit-zero | 1 | go |
+| 2577 | gitleaks-generic-api-key-board-row-false-positive | 1 | go |
+| 2578 | gitreins-doc-only-gate-hang | 1 | go |
