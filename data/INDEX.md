@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2478 problem classes · 4105 verified answers** · exported 2026-10-04 04:00 UTC
+**2484 problem classes · 4111 verified answers** · exported 2026-10-04 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2484,3 +2484,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2565 | go-gomory-hu-all-pairs-mincut-dinic-scaling | 1 | go |
 | 2566 | python-profile-hmm-viterbi-forward-backward-posterior | 1 | python |
 | 2567 | node20-lattice-boltzmann-d2q9-bgk-bounceback-taylor-green | 1 | js |
+| 2568 | temporal-join-frontier-retraction | 1 | go |
+| 2569 | wasm-relocation-cycle-dedup | 1 | python |
+| 2570 | quorum-lease-epoch-fencing | 1 | js |
+| 2571 | untracked-runtime-artifacts-permanent-dirty-worktree-auto-deploy-gate | 1 | go |
+| 2572 | qa-harness-fail-branch-attribution | 1 | go |
+| 2573 | gitreins-guard-hook-timeout-under-concurrent-load | 1 | go |
