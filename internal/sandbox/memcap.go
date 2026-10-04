@@ -35,10 +35,11 @@ const MemCapEnvVar = "OBY_MEM_LIMIT_MB"
 const memCapBinaryName = "oby-memcap"
 
 // ApplyMemLimitMB sets RLIMIT_AS (the virtual address-space cap) of the
-// calling process to mb MiB, with the soft and hard limits both pinned
-// (syscall.Rlimit{Cur: limit, Max: limit}) so the exec'd child cannot
-// raise it. mb <= 0 is rejected: the unlimited case must never reach
-// here (memCapCommand only wraps when MemLimitMB > 0).
+// calling process to mb MiB, pinned (Cur == Max) so the limit cannot be
+// raised again by the sandboxed workload. TestObyMemcapExec_ChildInheritsCap
+// proves the full chain: the cmd/oby-memcap wrapper calls this function and
+// syscall.Exec's the real command, which inherits the pin; mb <= 0 is
+// rejected so the unlimited case never reaches the kernel with a bogus value.
 //
 // Callers must apply this immediately before an exec — lowering the
 // hard limit is irreversible for a non-root process, so applying it to

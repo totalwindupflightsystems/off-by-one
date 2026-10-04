@@ -81,6 +81,29 @@ func TestMemCapHelperProcess(t *testing.T) {
 		_ = syscall.Munmap(buf)
 		fmt.Println("ALLOC-OK")
 		os.Exit(0)
+	case "inherited-check":
+		// Child arm of TestObyMemcapExec_ChildInheritsCap: the parent
+		// execs the REAL cmd/oby-memcap wrapper (which pinned RLIMIT_AS
+		// from OBY_MEM_LIMIT_MB and syscall.Exec'd this process), so this
+		// arm must observe the cap WITHOUT applying it itself. Asserts
+		// both the value (Cur == Max == mb<<20) and the enforcement (a
+		// 256 MiB mmap is refused with ENOMEM).
+		var lim syscall.Rlimit
+		if err := syscall.Getrlimit(syscall.RLIMIT_AS, &lim); err != nil {
+			fmt.Fprintf(os.Stderr, "Getrlimit: %v\n", err)
+			os.Exit(1)
+		}
+		want := uint64(64) << 20
+		if lim.Cur != want || lim.Max != want {
+			fmt.Fprintf(os.Stderr, "inherited RLIMIT_AS = {Cur:%d Max:%d}, want {%d %d}\n", lim.Cur, lim.Max, want, want)
+			os.Exit(1)
+		}
+		if _, err := syscall.Mmap(-1, 0, 256<<20, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE); err == nil {
+			fmt.Fprintln(os.Stderr, "256 MiB mmap SUCCEEDED under inherited 64 MiB cap — cap not inherited")
+			os.Exit(1)
+		}
+		fmt.Println("INHERITED-OK")
+		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown OBY_TEST_MEMCAP_MODE %q\n", os.Getenv("OBY_TEST_MEMCAP_MODE"))
 		os.Exit(2)
@@ -211,5 +234,40 @@ func TestExecutorCreate_MemCapDefaultsAndResolution(t *testing.T) {
 	defer func() { _ = s2.Destroy() }()
 	if s2.cfg.MemCapPath != absent {
 		t.Errorf("MemCapPath = %q, want the explicit %q", s2.cfg.MemCapPath, absent)
+	}
+}
+
+// TestObyMemcapExec_ChildInheritsCap proves the FULL exec chain with the
+// real wrapper binary: cmd/oby-memcap is built, exec'd with OBY_MEM_LIMIT_MB
+// set, and it must syscall.Exec the child, which then observes the pinned
+// RLIMIT_AS (Cur == Max == 64 MiB) WITHOUT applying it itself — plus the
+// cap is actually enforced (a 256 MiB mapping is refused). This is the
+// wrapper's production behaviour; the in-process roundtrip test above only
+// proves sandbox.ApplyMemLimitMB, not the exec inheritance.
+func TestObyMemcapExec_ChildInheritsCap(t *testing.T) {
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Skip("go toolchain not on PATH; cannot build cmd/oby-memcap")
+	}
+	wrapper := filepath.Join(t.TempDir(), "oby-memcap")
+	out, err := exec.Command("go", "build", "-o", wrapper, "github.com/totalwindupflightsystems/off-by-one/cmd/oby-memcap").CombinedOutput()
+	if err != nil {
+		t.Fatalf("go build cmd/oby-memcap: %v\n%s", err, out)
+	}
+
+	// A Go child cannot start under a 64 MiB RLIMIT_AS (the runtime
+	// reserves far more address space than it commits), so the child is
+	// /bin/sh reading /proc/self/limits — the KERNEL's record of the
+	// rlimit this exact process inherited across the wrapper's
+	// syscall.Exec. 64 MiB = 65536 kB.
+	cmd := exec.Command(wrapper, "/bin/sh", "-c", `grep 'Max address space' /proc/self/limits`)
+	cmd.Env = append(os.Environ(), MemCapEnvVar+"=64")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oby-memcap exec chain failed: %v\n%s", err, out)
+	}
+	// Expected line: "Max address space  67108864  67108864  bytes"
+	// (64 MiB in BYTES, soft==hard — /proc/self/limits prints bytes here).
+	if !strings.Contains(string(out), "67108864             67108864") {
+		t.Fatalf("inherited RLIMIT_AS is not pinned soft==hard at 64 MiB (67108864 bytes), got:\n%s", out)
 	}
 }

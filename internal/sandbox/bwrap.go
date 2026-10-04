@@ -121,7 +121,9 @@ func (s *Sandbox) WorkDir() string { return s.workDir }
 
 // Executor creates sandboxes. The zero value uses defaults: a
 // /usr/bin/bwrap path, os.TempDir() as the work parent, and the
-// spec's 5-minute timeout.
+// spec's 5-minute timeout. When a memory cap is configured, the
+// bwrap argv is routed through the oby-memcap exec wrapper
+// (memcap.go; kernel-level proof: TestObyMemcapExec_ChildInheritsCap).
 type Executor struct {
 	// BwrapPath is the default bwrap path for Create() calls that
 	// don't override Config.BwrapPath. When both are empty, returns
@@ -140,7 +142,8 @@ type Executor struct {
 	ExtraReadOnlyPaths []string
 
 	// MemLimitMB is the default per-solve memory cap (MiB) for Create()
-	// calls that leave Config.MemLimitMB at 0. 0 means unlimited.
+	// calls that leave Config.MemLimitMB at 0. 0 means unlimited. The
+	// daemon wires this from the -solve-mem-mb flag (cmd/off-by-one).
 	MemLimitMB int
 
 	// MemCapPath is the default oby-memcap wrapper path; see
