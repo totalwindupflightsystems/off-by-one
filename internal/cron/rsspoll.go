@@ -133,17 +133,6 @@ func (t *rssPollTracker) Stop() uint64 {
 	return t.max
 }
 
-// pollAttempts reports how many polls ran; used by tests to prove the
-// tracker actually polled while the fake solve was in flight.
-func (t *rssPollTracker) pollAttempts() int {
-	if t == nil {
-		return 0
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.minPc
-}
-
 // childPIDs reads /proc/<pid>/task/<pid>/children and returns the
 // child pids. A vanished process or a truncated/partial read returns
 // nil — /proc read races on exiting children are routine and must
