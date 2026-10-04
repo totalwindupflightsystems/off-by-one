@@ -40,9 +40,9 @@ import (
 
 	apihttp "github.com/totalwindupflightsystems/off-by-one/internal/api"
 	"github.com/totalwindupflightsystems/off-by-one/internal/cron"
-	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
+	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
 	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 	"github.com/totalwindupflightsystems/off-by-one/internal/web"
@@ -156,6 +156,12 @@ func main() {
 		log.Printf("sandbox skipped (--skip-sandbox)")
 	}
 
+	// --- 3b. Metrics observer ------------------------------------------
+	// Constructed unconditionally (DF-OFF-BY-ONE-32): /metrics must
+	// answer even without a solver, and the observer is wired to BOTH
+	// the cron loop (producer) and the API server (reader) below.
+	observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())
+
 	// --- 4. Cron loop --------------------------------------------------
 	// The loop is only started when the solver is available (bwrap + pi-agent).
 	// Without a solver, the loop has nothing to do — submissions queue up
@@ -165,14 +171,11 @@ func main() {
 	var cronCancel context.CancelFunc
 	if solverExec != nil {
 		cronCtx, cronCancel = context.WithCancel(context.Background())
-		
-		// Create metrics observer for per-solve observability (DF-OFF-BY-ONE-32)
-		observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())
-		
+
 		loop = cron.NewLoop(cron.Config{
 			Interval:        *cfg.cronInterval,
 			LoadThreshold:   *cfg.loadThreshold,
-			MemoryThreshold: 0.85, // 85% memory threshold
+			MemoryThreshold: *cfg.memFraction,
 			Solver:          solverExec,
 			Queue:           queue,
 			Observer:        observer,
@@ -195,6 +198,9 @@ func main() {
 	apiServer.ImportLocalDir = *cfg.importDir
 	apiServer.ReadOnly = *cfg.readOnly
 	apiServer.SolverAvailable = solverExec != nil
+	// Observer shared with the cron loop (created in 3b): GET /metrics
+	// reads its snapshot.
+	apiServer.Observer = observer
 	apiHandler := apiServer.Handler()
 
 	// --- 6. WebSocket chat handler ------------------------------------
@@ -210,7 +216,12 @@ func main() {
 
 	// --- 7. Compose HTTP handler --------------------------------------
 	// Route priority: /api/* → API server, /ws/* → WebSocket handlers,
-	// /openapi.json + /health → explicit, everything else → web SPA.
+	// /openapi.json + /health + /metrics → explicit, everything else →
+	// web SPA. /metrics is handled by the API server (metrics.Observer)
+	// and MUST be dispatched here explicitly — the default branch serves
+	// the SPA for every unmatched path, so a route that only exists in
+	// the API mux never answers (DF-OFF-BY-ONE-32 rework: the previous
+	// attempt registered the route but the router never routed to it).
 	webHandler := web.Handler()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -224,7 +235,7 @@ func main() {
 			}
 			chatHandler.ServeHTTP(w, r)
 			return
-		case r.URL.Path == "/openapi.json" || r.URL.Path == "/health":
+		case r.URL.Path == "/openapi.json" || r.URL.Path == "/health" || r.URL.Path == "/metrics":
 			apiHandler.ServeHTTP(w, r)
 			return
 		default:
@@ -298,6 +309,7 @@ type serverConfig struct {
 	piAgentPath   *string
 	cronInterval  *time.Duration
 	loadThreshold *float64
+	memFraction   *float64
 	solveTimeout  *time.Duration
 	solveMemMB    *int
 	skipSandbox   *bool
@@ -319,6 +331,7 @@ func registerServerFlags(fs *flag.FlagSet) *serverConfig {
 		piAgentPath:   fs.String("pi-agent", envString("OFF_BY_ONE_PI_AGENT", "pi-agent"), "Path to pi-agent binary"),
 		cronInterval:  fs.Duration("cron-interval", envDuration("OFF_BY_ONE_CRON_INTERVAL", 5*time.Minute), "Cron loop wake interval"),
 		loadThreshold: fs.Float64("load-threshold", envFloat("OFF_BY_ONE_LOAD_THRESHOLD", 1.0), "Max loadavg(1) for idle detection (negative = always idle)"),
+		memFraction:   fs.Float64("mem-fraction", envFloat("OFF_BY_ONE_MEM_FRACTION", cron.DefaultMemFraction), "Max MemUsedFraction (1 - MemAvailable/MemTotal) for idle detection (negative = always idle)"),
 		solveTimeout:  fs.Duration("solve-timeout", envDuration("OFF_BY_ONE_SOLVE_TIMEOUT", solver.DefaultSolveTimeout), "Per-solve timeout cap"),
 		solveMemMB:    fs.Int("solve-mem-mb", envInt("OFF_BY_ONE_SOLVE_MEM_MB", 0), "Per-solve memory cap in MiB, applied to the sandboxed command via the oby-memcap wrapper (RLIMIT_AS); 0 = unlimited"),
 		skipSandbox:   fs.Bool("skip-sandbox", envBool("OFF_BY_ONE_SKIP_SANDBOX", false), "Skip bwrap sandbox (for dev/testing)"),

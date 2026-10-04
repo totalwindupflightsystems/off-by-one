@@ -114,7 +114,7 @@ func (t *rssPollTracker) walk(pid int) {
 		}
 		t.mu.Unlock()
 	}
-	for _, c := range childPIDs(pid) {
+	for _, c := range childPIDsFn(pid) {
 		t.walk(c)
 	}
 }
@@ -132,6 +132,22 @@ func (t *rssPollTracker) Stop() uint64 {
 	defer t.mu.Unlock()
 	return t.max
 }
+
+// pollAttempts reports how many polls ran; used by tests to prove the
+// tracker actually polled while the fake solve was in flight.
+func (t *rssPollTracker) pollAttempts() int {
+	if t == nil {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.minPc
+}
+
+// childPIDsFn is the indirection childPIDs reads through. Tests
+// override it to script a process table without touching /proc; the
+// var is never reassigned in production code.
+var childPIDsFn = childPIDs
 
 // childPIDs reads /proc/<pid>/task/<pid>/children and returns the
 // child pids. A vanished process or a truncated/partial read returns

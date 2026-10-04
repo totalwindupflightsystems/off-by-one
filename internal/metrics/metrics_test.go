@@ -27,7 +27,7 @@ func TestRecordSolve(t *testing.T) {
 		Success:      true,
 	}
 	obs.RecordSolve(rec)
-	
+
 	snap := obs.Snapshot()
 	if snap.SolveCount != 1 {
 		t.Errorf("SolveCount = %d, want 1", snap.SolveCount)
@@ -44,7 +44,7 @@ func TestRecordSolveOverBudget(t *testing.T) {
 	var buf bytes.Buffer
 	logger := log.New(&buf, "", 0)
 	obs := New(DefaultRSSAlertBytes, logger)
-	
+
 	rec := SolveRecord{
 		SubmissionID: "test-2",
 		ProblemClass: "go-bbr-pacing",
@@ -53,7 +53,7 @@ func TestRecordSolveOverBudget(t *testing.T) {
 		Success:      true,
 	}
 	obs.RecordSolve(rec)
-	
+
 	output := buf.String()
 	if !strings.Contains(output, "solve ALERT") {
 		t.Errorf("expected ALERT log, got %q", output)
@@ -69,7 +69,7 @@ func TestRecordSkip(t *testing.T) {
 		Load1:  10.5,
 		Reason: "load",
 	})
-	
+
 	if obs.Skips() != 1 {
 		t.Errorf("Skips = %d, want 1", obs.Skips())
 	}
@@ -81,7 +81,7 @@ func TestRecordHost(t *testing.T) {
 		Load1:           2.5,
 		MemUsedFraction: 0.65,
 	})
-	
+
 	snap := obs.Snapshot()
 	if snap.LastHost == nil {
 		t.Fatal("LastHost is nil after RecordHost")
@@ -96,14 +96,14 @@ func TestRecordHost(t *testing.T) {
 
 func TestSnapshotOverBudget(t *testing.T) {
 	obs := New(DefaultRSSAlertBytes, log.Default())
-	
+
 	// Record one over-budget solve
 	obs.RecordSolve(SolveRecord{
 		SubmissionID: "over-1",
 		PeakRSSBytes: 5 << 30, // 5 GiB > 4 GiB threshold
 		OverBudget:   true,
 	})
-	
+
 	snap := obs.Snapshot()
 	if snap.OverBudget != 1 {
 		t.Errorf("OverBudget = %d, want 1", snap.OverBudget)
@@ -115,7 +115,7 @@ func TestSnapshotOverBudget(t *testing.T) {
 
 func TestSnapshotSolveCount(t *testing.T) {
 	obs := New(DefaultRSSAlertBytes, log.Default())
-	
+
 	// Record 5 solves
 	for i := 0; i < 5; i++ {
 		obs.RecordSolve(SolveRecord{
@@ -123,7 +123,7 @@ func TestSnapshotSolveCount(t *testing.T) {
 			PeakRSSBytes: uint64(i) << 30,
 		})
 	}
-	
+
 	snap := obs.Snapshot()
 	if snap.SolveCount != 5 {
 		t.Errorf("SolveCount = %d, want 5", snap.SolveCount)
@@ -131,7 +131,7 @@ func TestSnapshotSolveCount(t *testing.T) {
 }
 
 func TestAlertThreshold(t *testing.T) {
-	obs := New(8 << 30, log.Default()) // 8 GiB
+	obs := New(8<<30, log.Default()) // 8 GiB
 	if obs.AlertThreshold() != 8<<30 {
 		t.Errorf("AlertThreshold = %d, want %d", obs.AlertThreshold(), 8<<30)
 	}

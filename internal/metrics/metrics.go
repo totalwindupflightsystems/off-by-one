@@ -46,15 +46,15 @@ const DefaultRSSAlertBytes uint64 = 4 << 30
 // whether the solve died on its memory cap (exec.ExitError) rather
 // than finishing.
 type SolveRecord struct {
-	SubmissionID  string `json:"submission_id"`
-	ProblemClass  string `json:"problem_class"`
-	Model         string `json:"model"`
-	PeakRSSBytes  uint64 `json:"peak_rss_bytes"`
-	WallTimeMS    int64  `json:"wall_time_ms"`
-	TestRuns      int    `json:"test_runs"`
-	Killed        bool   `json:"killed"`
-	Success       bool   `json:"success"`
-	OverBudget    bool   `json:"over_budget"`
+	SubmissionID   string `json:"submission_id"`
+	ProblemClass   string `json:"problem_class"`
+	Model          string `json:"model"`
+	PeakRSSBytes   uint64 `json:"peak_rss_bytes"`
+	WallTimeMS     int64  `json:"wall_time_ms"`
+	TestRuns       int    `json:"test_runs"`
+	Killed         bool   `json:"killed"`
+	Success        bool   `json:"success"`
+	OverBudget     bool   `json:"over_budget"`
 	AlertBytesUsed uint64 `json:"alert_threshold_bytes"`
 }
 
@@ -63,11 +63,11 @@ type SolveRecord struct {
 // MemAvailableBytes-derived (1.0 = full). Reason is the gate's skip
 // reason ("load", "memory", "load+memory") for the run that skipped.
 type HostSnapshot struct {
-	Load1            float64 `json:"load1"`
-	MemUsedFraction  float64 `json:"mem_used_fraction"`
-	MemTotalBytes    uint64  `json:"mem_total_bytes"`
-	MemAvailableBytes uint64 `json:"mem_available_bytes"`
-	Reason           string  `json:"reason,omitempty"`
+	Load1             float64 `json:"load1"`
+	MemUsedFraction   float64 `json:"mem_used_fraction"`
+	MemTotalBytes     uint64  `json:"mem_total_bytes"`
+	MemAvailableBytes uint64  `json:"mem_available_bytes"`
+	Reason            string  `json:"reason,omitempty"`
 }
 
 // Observer aggregates per-solve records and host-pressure skips.
