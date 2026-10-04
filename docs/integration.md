@@ -45,6 +45,8 @@ curl -s http://localhost:8766/health
 # {"status":"ok","uptime":"..."}
 ```
 
+> **Fresh-install probes:** assert the `uptime` is seconds (fresh), not just `status: ok`. On shared-host / bunker installs the port is host-global and an orphaned serve from a destroyed agent can still be bound — a long uptime means you are talking to a stale server, not the instance you just installed. See the README's "Port hygiene on shared-host / bunker installs" note (use an agent-unique port; kill the serve before `bunker destroy`).
+
 ---
 
 ## Submit a Problem
