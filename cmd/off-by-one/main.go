@@ -134,6 +134,7 @@ func main() {
 				WorkDir:            os.TempDir(),
 				Timeout:            sandboxTimeout(),
 				ExtraReadOnlyPaths: extraReadOnlyPaths(),
+				MemLimitMB:         *cfg.solveMemMB,
 			}
 			runner := solver.NewBSandboxRunner(sandboxExec)
 			apiKey := os.Getenv("DEEPSEEK_API_KEY")
@@ -291,6 +292,7 @@ type serverConfig struct {
 	cronInterval  *time.Duration
 	loadThreshold *float64
 	solveTimeout  *time.Duration
+	solveMemMB    *int
 	skipSandbox   *bool
 	readOnly      *bool
 	exportDir     *string
@@ -311,6 +313,7 @@ func registerServerFlags(fs *flag.FlagSet) *serverConfig {
 		cronInterval:  fs.Duration("cron-interval", envDuration("OFF_BY_ONE_CRON_INTERVAL", 5*time.Minute), "Cron loop wake interval"),
 		loadThreshold: fs.Float64("load-threshold", envFloat("OFF_BY_ONE_LOAD_THRESHOLD", 1.0), "Max loadavg(1) for idle detection (negative = always idle)"),
 		solveTimeout:  fs.Duration("solve-timeout", envDuration("OFF_BY_ONE_SOLVE_TIMEOUT", solver.DefaultSolveTimeout), "Per-solve timeout cap"),
+		solveMemMB:    fs.Int("solve-mem-mb", envInt("OFF_BY_ONE_SOLVE_MEM_MB", 0), "Per-solve memory cap in MiB, applied to the sandboxed command via the oby-memcap wrapper (RLIMIT_AS); 0 = unlimited"),
 		skipSandbox:   fs.Bool("skip-sandbox", envBool("OFF_BY_ONE_SKIP_SANDBOX", false), "Skip bwrap sandbox (for dev/testing)"),
 		readOnly:      fs.Bool("readonly", envBool("OFF_BY_ONE_READONLY", false), "Public catalog mode: block all mutating endpoints and the AI chat"),
 		exportDir:     fs.String("export-dir", envString("OFF_BY_ONE_EXPORT_DIR", ""), "Working directory for git export clones (empty = export disabled)"),

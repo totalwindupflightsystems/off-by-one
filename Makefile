@@ -9,6 +9,10 @@ LDFLAGS := -X main.version=$(VERSION)
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/off-by-one
+	# oby-memcap: the per-solve memory-cap exec wrapper (DF-OFF-BY-ONE-30).
+	# Built alongside the daemon into the repo root so the sandbox finds it
+	# next to the running binary; it carries no version stamp (no main.version).
+	go build -o oby-memcap ./cmd/oby-memcap
 
 # Guard for the deployed host artifact: ./off-by-one is gitignored but is what
 # systemd runs. Fails (exit 1, "run make build") whenever the on-disk artifact
@@ -262,4 +266,4 @@ connect-muster-dry:
 	bash scripts/connect-muster.sh --dry-run
 
 clean:
-	rm -f $(BINARY)
+	rm -f $(BINARY) oby-memcap
