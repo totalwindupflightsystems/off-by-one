@@ -29,6 +29,9 @@ func TestRecordSolve(t *testing.T) {
 	obs.RecordSolve(rec)
 	
 	snap := obs.Snapshot()
+	if snap.SolveCount != 1 {
+		t.Errorf("SolveCount = %d, want 1", snap.SolveCount)
+	}
 	if snap.LastSolve == nil {
 		t.Fatal("LastSolve is nil after RecordSolve")
 	}
@@ -88,6 +91,25 @@ func TestRecordHost(t *testing.T) {
 	}
 	if snap.LastHost.MemUsedFraction != 0.65 {
 		t.Errorf("LastHost.MemUsedFraction = %f, want 0.65", snap.LastHost.MemUsedFraction)
+	}
+}
+
+func TestSnapshotOverBudget(t *testing.T) {
+	obs := New(DefaultRSSAlertBytes, log.Default())
+	
+	// Record one over-budget solve
+	obs.RecordSolve(SolveRecord{
+		SubmissionID: "over-1",
+		PeakRSSBytes: 5 << 30, // 5 GiB > 4 GiB threshold
+		OverBudget:   true,
+	})
+	
+	snap := obs.Snapshot()
+	if snap.OverBudget != 1 {
+		t.Errorf("OverBudget = %d, want 1", snap.OverBudget)
+	}
+	if snap.PeakRSSBytesMax != 5<<30 {
+		t.Errorf("PeakRSSBytesMax = %d, want %d", snap.PeakRSSBytesMax, 5<<30)
 	}
 }
 
