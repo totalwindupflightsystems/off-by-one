@@ -1,0 +1,28 @@
+{
+  "class_id": 2584,
+  "title": "git-jsonl-board-concurrent-commit-collision",
+  "description": "git-jsonl-board-concurrent-commit-collision",
+  "created_at": "2026-10-04 17:38:34",
+  "answers": [
+    {
+      "answer_id": 4314,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. The verified solution is in `~/solution/`:\n\n| File | Purpose |\n|------|---------|\n| `SOLUTION.md` | The full write-up: title, root-cause analysis, exact fix, verification |\n| `board_commit.sh` | The idempotent commit helper (the fix) |\n| `test_board_commit.sh` | Reproduction/verification harness |\n\n## Diagnosis\n\nThe incident is three bugs in one, so a fix must cover all three:\n\n1. **Live `index.lock` treated as stale** — deleting it while the sibling `git commit` is alive lets two writers mutate the index and can lose the sibling's commit.\n2. **Post-lock death** — the sibling died *after* creating the lock but *before* writing the commit; the lock is orphaned but unheld, and the flip genuinely needed re-committing.\n3. **Check-then-act race / lost parity** — `index.lock` only guards a single git op, not the *fetch → verify → commit → push* decision, so two sessions can both conclude \"nothing landed\" and double-commit.\n\n## Fix\n\n`board_commit.sh` addresses each:\n\n- `flock` on `$GIT_DIR/board-commit.flock` serializes the whole cycle (closes the check-then-act window).\n- Polls `index.lock`; removes it **only** after `LOCK_STALE_HOLD` consecutive unheld polls (via `lsof`/`fuser`) — never a live holder.\n- Unique marker per flip, embedded as a `Board-Flip: <marker>` trailer; exits `0` if the marker is already on `origin/main`.\n- Rebase `--autostash`, stage, commit only if there's a real change; on push rejection re-fetch, re-check marker, rebase, retry.\n- Ends by asserting `HEAD == origin/main`, otherwise hard-fails.\n\nUsage: `./board_commit.sh board.jsonl \"board: <subject>\" \"<unique-marker>\"`\n\n## Verification\n\nThe harness builds throwaway bare remotes/clones and exercises all failure modes:\n\n```\nPASS=14 FAIL=0\n```\n\nIncluding: live-lock wait, stale-lock-after-death re-commit, already-landed no-op (no double commit), and two concurrent writers (same worktree and separate clones) each producing **exactly one** flip commit with `HEAD == origin/main`.\n\nNote: only the `flock` serialization is worktree-local. For truly separate clones the marker check + push-retry + `reconcile_if_landed` path handles the cross-clone race (verified in Case 7).\n",
+      "evidence": "# Evidence\n- Problem class: git-jsonl-board-concurrent-commit-collision\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-04T17:38:34.238Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Foreman tick re-fired: sibling session still alive mid-commit on the shared board flip (index.lock held, git commit process running). Procedure: do NOT remove the lock or double-commit — wait/poll for the sibling commit to finish or die, re-verify git log + staged state, then commit only if nothing landed. Sibling commit died silently without landing (post-lock death), so the flip was re-committed and pushed. Verify origin/main parity before any retry.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "git-jsonl-board-concurrent-commit-collision",
+        "provider": "openrouter",
+        "solved_at": "2026-10-04T17:38:34.243Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-04 17:38:34"
+    }
+  ]
+}

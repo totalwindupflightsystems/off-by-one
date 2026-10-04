@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2489 problem classes · 4116 verified answers** · exported 2026-10-04 16:00 UTC
+**2497 problem classes · 4124 verified answers** · exported 2026-10-04 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2495,3 +2495,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2576 | gate-composition-unverified-exit-zero | 1 | go |
 | 2577 | gitleaks-generic-api-key-board-row-false-positive | 1 | go |
 | 2578 | gitreins-doc-only-gate-hang | 1 | go |
+| 2579 | python-watermark-retraction-window-merge | 1 | python |
+| 2580 | bash-content-addressed-cache-race-recovery | 1 | shell |
+| 2581 | go-incremental-scc-invalidation-frontier | 1 | go |
+| 2582 | duckbrain-patch-pk-filter-ignores-compound-conditions | 1 | go |
+| 2583 | foreman-duplicate-dispatch | 1 | go |
+| 2584 | git-jsonl-board-concurrent-commit-collision | 1 | go |
+| 2585 | gitreins-guard-go-lint-single-file-scope-false-fail | 1 | go |
+| 2586 | act-mypy-step-crash-glibc | 1 |  |
