@@ -1,0 +1,824 @@
+commit 6c35461584f86d86e68c770372974b50d4e5dcc0
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Sun Oct 4 08:20:02 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Sun Oct 4 08:20:02 2026 -0500
+
+    feat(cron): reject near-cap solves; solver bounds contract for sim-style solutions (DF-OFF-BY-ONE-31)
+    
+    Closes the remaining gap from DF-OFF-BY-ONE-30: the per-solve memory cap
+    kills a runaway solve, but a solve that survived the cap while paging near
+    it could still be committed as a "pre-verified" answer. This change adds
+    harness-side rejection plus the prompt-side bounds contract.
+    
+    Harness side (internal/cron/loop.go processOne): after the peak RSS is
+    observed, a solve that returned success but peaked above the reject
+    threshold is REJECTED — the queue entry is marked failed with a reason
+    naming the problem class, the measured peak and the threshold (gibStr),
+    the loop counts it as a failure plus a dedicated SolveRejected counter,
+    and the observer record carries the new Rejected field. Nothing reaches
+    the graph.
+    
+    The threshold is cron.Config.SolveRejectRSSBytes, wired from the new
+    -solve-reject-rss-mb flag (env OFF_BY_ONE_SOLVE_REJECT_RSS_MB): default -1
+    = auto (DefaultSolveRejectFraction, 80% of -solve-mem-mb via
+    SolveRejectThreshold), 0 = disabled, >0 = explicit MiB. With no cap
+    configured the derived form is disabled (nothing to approach).
+    
+    Solver side (scripts/pi-agent): the solve prompt now carries a resource
+    bounds contract for simulation-style problems — declare explicit bounds
+    (max simulated events/packets/seconds) and aggregate incrementally rather
+    than retaining a record per event. This is the fix direction for the
+    2026-10-03 47 GB incident (a generated packet simulator appending once per
+    simulated event).
+    
+    Tests: loop rejection/acceptance/disabled cells driven by a scripted RSS
+    sampler (measured peak present in the reason, zero commits on rejection),
+    the threshold derivation + flag-default matrix, the observer roll-up, and
+    a source assertion that the wrapper contract cannot silently regress.
+    Docs: "Solve memory bounds" section in docs/api-reference.md.
+    
+    Co-Authored-By: totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ cmd/off-by-one/main.go           |  62 +++++++++++--
+ cmd/off-by-one/main_test.go      |  60 ++++++++++++
+ docs/api-reference.md            |  24 ++++-
+ internal/cron/loop.go            |  91 +++++++++++++++++-
+ internal/cron/memgate_test.go    | 194 +++++++++++++++++++++++++++++++++++++++
+ internal/metrics/metrics.go      |  14 ++-
+ internal/metrics/metrics_test.go |  35 +++++++
+ internal/solver/contract_test.go |  49 ++++++++++
+ scripts/pi-agent                 |  16 ++++
+ 9 files changed, 531 insertions(+), 14 deletions(-)
+
+diff --git a/cmd/off-by-one/main.go b/cmd/off-by-one/main.go
+index 551a56b9..4d1186e8 100644
+--- a/cmd/off-by-one/main.go
++++ b/cmd/off-by-one/main.go
+@@ -172,16 +172,31 @@ func main() {
+ 	if solverExec != nil {
+ 		cronCtx, cronCancel = context.WithCancel(context.Background())
+ 
++		// Harness-side rejection threshold (DF-OFF-BY-ONE-31): default
++		// (flag -1) derives 80% of the per-solve memory cap; an explicit
++		// 0 disables the check; >0 is the threshold in MiB. With no cap
++		// configured there is nothing to approach, so the derived form is
++		// disabled. A solve that returns success above this peak is
++		// marked failed instead of committed.
++		rejectRSSBytes := resolveSolveRejectBytes(*cfg.solveRejectRSSMB, *cfg.solveMemMB)
++
+ 		loop = cron.NewLoop(cron.Config{
+-			Interval:        *cfg.cronInterval,
+-			LoadThreshold:   *cfg.loadThreshold,
+-			MemoryThreshold: *cfg.memFraction,
+-			Solver:          solverExec,
+-			Queue:           queue,
+-			Observer:        observer,
++			Interval:            *cfg.cronInterval,
++			LoadThreshold:       *cfg.loadThreshold,
++			MemoryThreshold:     *cfg.memFraction,
++			SolveRejectRSSBytes: rejectRSSBytes,
++			Solver:              solverExec,
++			Queue:               queue,
++			Observer:            observer,
+ 		})
+ 		go func() {
+-			log.Printf("cron loop started: interval=%s loadThreshold=%.1f", *cfg.cronInterval, *cfg.loadThreshold)
++			if rejectRSSBytes > 0 {
++				log.Printf("cron loop started: interval=%s loadThreshold=%.1f solve-mem-mb=%d reject-rss=%d MiB",
++					*cfg.cronInterval, *cfg.loadThreshold, *cfg.solveMemMB, rejectRSSBytes>>20)
++			} else {
++				log.Printf("cron loop started: interval=%s loadThreshold=%.1f solve-rss rejection disabled (no memory cap or explicit 0)",
++					*cfg.cronInterval, *cfg.loadThreshold)
++			}
+ 			if rerr := loop.Run(cronCtx); rerr != nil && !errors.Is(rerr, context.Canceled) {
+ 				log.Printf("cron loop exited with error: %v", rerr)
+ 			}
+@@ -317,6 +332,10 @@ type serverConfig struct {
+ 	exportDir     *string
+ 	importDir     *string
+ 	showVersion   *bool
++
++	// solveRejectRSSMB is kept in its own alignment group so adding the
++	// longer field name does not reflow every other declaration.
++	solveRejectRSSMB *int
+ }
+ 
+ // registerServerFlags declares the full server flag set on fs and returns its
+@@ -339,6 +358,10 @@ func registerServerFlags(fs *flag.FlagSet) *serverConfig {
+ 		exportDir:     fs.String("export-dir", envString("OFF_BY_ONE_EXPORT_DIR", ""), "Working directory for git export clones (empty = export disabled)"),
+ 		importDir:     fs.String("import-dir", envString("OFF_BY_ONE_IMPORT_DIR", ""), "Working directory for git import clones (empty = import disabled)"),
+ 		showVersion:   fs.Bool("version", false, "Print version and exit"),
++
++		// Own alignment group: keeps this longer name from reflowing the
++		// declarations above.
++		solveRejectRSSMB: fs.Int("solve-reject-rss-mb", envInt("OFF_BY_ONE_SOLVE_REJECT_RSS_MB", -1), "Reject a solve whose observed peak RSS exceeds this many MiB even when it returned success (-1 = auto: 80% of -solve-mem-mb; 0 = disabled)"),
+ 	}
+ }
+ 
+@@ -369,6 +392,31 @@ func sandboxTimeout() time.Duration {
+ 	return sandbox.DefaultBwrapTimeout
+ }
+ 
++// resolveSolveRejectBytes resolves the peak-RSS reject threshold
++// (DF-OFF-BY-ONE-31) from the -solve-reject-rss-mb value and the
++// per-solve memory cap (-solve-mem-mb):
++//
++//   - rejectMB > 0: the threshold itself, in MiB, verbatim.
++//   - rejectMB == 0: disabled — an explicit opt-out, independent of the cap.
++//   - rejectMB < 0: auto — DefaultSolveRejectFraction of the cap, or 0
++//     (disabled) when no cap is configured: with no cap there is no wall
++//     to approach.
++//
++// The result feeds cron.Config.SolveRejectRSSBytes; 0 there disables the
++// harness-side rejection.
++func resolveSolveRejectBytes(rejectMB, memCapMB int) uint64 {
++	switch {
++	case rejectMB > 0:
++		return uint64(rejectMB) << 20
++	case rejectMB == 0:
++		return 0
++	case memCapMB <= 0:
++		return 0
++	default:
++		return cron.SolveRejectThreshold(uint64(memCapMB) << 20)
++	}
++}
++
+ // --- solver model resolution -------------------------------------------
+ 
+ // resolveSolverModel returns the model the solver asks Pi Agent for.
+diff --git a/cmd/off-by-one/main_test.go b/cmd/off-by-one/main_test.go
+index 46ceb9ad..6672a455 100644
+--- a/cmd/off-by-one/main_test.go
++++ b/cmd/off-by-one/main_test.go
+@@ -11,6 +11,7 @@ import (
+ 	"testing"
+ 	"time"
+ 
++	"github.com/totalwindupflightsystems/off-by-one/internal/cron"
+ 	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
+ 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
+ )
+@@ -394,3 +395,62 @@ func TestSolverModelFromProcessEnv(t *testing.T) {
+ 		}
+ 	})
+ }
++
++// TestResolveSolveRejectBytes pins DF-OFF-BY-ONE-31 acceptance (c): the
++// reject-threshold resolution matrix (auto / disabled / explicit), which
++// is the default the daemon hands the cron loop.
++func TestResolveSolveRejectBytes(t *testing.T) {
++	const capMB = 6144 // the deploy unit's -solve-mem-mb value
++
++	cases := []struct {
++		name     string
++		rejectMB int
++		memCapMB int
++		want     uint64
++	}{
++		{"auto derives 80% of the cap", -1, capMB, cron.SolveRejectThreshold(uint64(capMB) << 20)},
++		{"explicit zero disables", 0, capMB, 0},
++		{"explicit value wins over the cap", 2048, capMB, uint64(2048) << 20},
++		{"auto with no cap disables", -1, 0, 0},
++		{"explicit value works without a cap", 512, 0, uint64(512) << 20},
++	}
++	for _, tc := range cases {
++		t.Run(tc.name, func(t *testing.T) {
++			if got := resolveSolveRejectBytes(tc.rejectMB, tc.memCapMB); got != tc.want {
++				t.Errorf("resolveSolveRejectBytes(%d, %d) = %d, want %d", tc.rejectMB, tc.memCapMB, got, tc.want)
++			}
++		})
++	}
++
++	// The auto default must be strictly inside (0, cap) — a threshold at
++	// or above the cap would never reject anything the cap survived.
++	capBytes := uint64(capMB) << 20
++	if got := resolveSolveRejectBytes(-1, capMB); got == 0 || got >= capBytes {
++		t.Errorf("auto threshold = %d, want strictly inside (0, %d)", got, capBytes)
++	}
++}
++
++// TestSolveRejectFlagDefaultsToAuto pins the flag default: -1 (auto =
++// 80% of -solve-mem-mb) so the check is armed by default on any capped
++// deployment, and only an explicit 0 disables it.
++func TestSolveRejectFlagDefaultsToAuto(t *testing.T) {
++	if v, ok := os.LookupEnv("OFF_BY_ONE_SOLVE_REJECT_RSS_MB"); ok {
++		if err := os.Unsetenv("OFF_BY_ONE_SOLVE_REJECT_RSS_MB"); err != nil {
++			t.Fatalf("unsetenv: %v", err)
++		}
++		t.Cleanup(func() {
++			if err := os.Setenv("OFF_BY_ONE_SOLVE_REJECT_RSS_MB", v); err != nil {
++				t.Errorf("restore OFF_BY_ONE_SOLVE_REJECT_RSS_MB: %v", err)
++			}
++		})
++	}
++
++	fs := flag.NewFlagSet("reject-default", flag.ContinueOnError)
++	cfg := registerServerFlags(fs)
++	if err := fs.Parse(nil); err != nil {
++		t.Fatalf("parse: %v", err)
++	}
++	if got := *cfg.solveRejectRSSMB; got != -1 {
++		t.Errorf("default -solve-reject-rss-mb = %d, want -1 (auto)", got)
++	}
++}
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index b6d42ad8..03fa3c6e 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -22,7 +22,8 @@ All timestamps are RFC 3339 strings. All endpoints return JSON unless otherwise
+ 5. [Taxonomy / Stats](#taxonomy--stats)
+ 6. [System](#system)
+ 7. [Solve timeouts](#solve-timeouts)
+-8. [Deploying the server (deploy rotation)](#deploying-the-server-deploy-rotation)
++8. [Solve memory bounds](#solve-memory-bounds)
++9. [Deploying the server (deploy rotation)](#deploying-the-server-deploy-rotation)
+ 
+ ---
+ 
+@@ -678,6 +679,27 @@ Because the bwrap cap is the *outer* limit, raising only `OFF_BY_ONE_SOLVE_TIMEO
+ 
+ ---
+ 
++## Solve memory bounds
++
++A solve is bounded in memory as well as in time. Two knobs, both wired from flags + environment variables, and one prompt-side contract:
++
++| Flag | Env var | Default | Meaning |
++|------|---------|---------|---------|
++| `--solve-mem-mb` | `OFF_BY_ONE_SOLVE_MEM_MB` | `0` (unlimited) | Per-solve memory cap in MiB, applied to the sandboxed command through the `oby-memcap` wrapper as `RLIMIT_AS`. `0` = unlimited. |
++| `--solve-reject-rss-mb` | `OFF_BY_ONE_SOLVE_REJECT_RSS_MB` | `-1` (auto) | Reject a solve whose observed peak RSS exceeds this many MiB, **even when the solver returned success**. `-1` = auto (80% of `--solve-mem-mb`); `0` = disabled; `>0` = that threshold in MiB. |
++
++The reject threshold closes the gap between "the solve survived the cap" and "the solve is a trustworthy pre-verified answer". The daemon samples the solve process tree's peak RSS (`VmHWM`) while the solve runs; if the peak **exceeds** the threshold, the submission is marked `failed` and **nothing is committed to the graph**, even though `pi-agent` exited 0. The failure reason names the problem class, the measured peak, and the threshold, e.g.:
++
++```
++rejected: peak RSS 5.012 GiB exceeds reject threshold 4.800 GiB (problem_class=go-bbr-pacing)
++```
++
++The default auto threshold is 80% of the per-solve cap, so a capped deployment (e.g. `--solve-mem-mb 6144`) rejects solves peaking above ~4.8 GiB. With no cap configured there is no wall to approach, so the derived form is disabled. Rejected solves are counted separately from ordinary failures: the cron metrics expose `solve_rejected`, and the metrics endpoint (`GET /metrics`) reports the `rejected` roll-up alongside `over_budget`.
++
++The prompt-side half of the fix is a **bounds contract** in the shipped `pi-agent` wrapper (`scripts/pi-agent`), next to the other solve instructions. For simulation-style problems — anything that simulates, replays, or generates a sequence of events, packets, requests, or ticks — the solution must declare explicit bounds (the maximum number of simulated events/packets/seconds) and aggregate incrementally rather than retaining a record per event. The 2026-10-03 47 GB RAM + swap incident was a generated packet simulator that appended one record per simulated event; the contract plus the reject threshold mean such a run cannot be stored as a verified answer.
++
++---
++
+ ## Deploying the server (deploy rotation)
+ 
+ The server you talk to is this repo's `./off-by-one`, run by the systemd unit
+diff --git a/internal/cron/loop.go b/internal/cron/loop.go
+index 0a810276..2ccdaefb 100644
+--- a/internal/cron/loop.go
++++ b/internal/cron/loop.go
+@@ -53,6 +53,12 @@ type Metrics struct {
+ 	SolveAttempts atomic.Int64
+ 	SolveSuccess  atomic.Int64
+ 	SolveFailed   atomic.Int64
++	// SolveRejected counts the subset of failures refused by the
++	// harness because their observed peak RSS exceeded the reject
++	// threshold (DF-OFF-BY-ONE-31). A rejected solve is counted in
++	// SolveFailed too (it is a failure); this counter makes the two
++	// causes separable.
++	SolveRejected atomic.Int64
+ 	SkippedIdle   atomic.Int64
+ 	SkippedEmpty  atomic.Int64
+ 
+@@ -78,6 +84,7 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
+ 		SolveAttempts:  attempts,
+ 		SolveSuccess:   success,
+ 		SolveFailed:    failed,
++		SolveRejected:  m.SolveRejected.Load(),
+ 		SkippedIdle:    m.SkippedIdle.Load(),
+ 		SkippedEmpty:   m.SkippedEmpty.Load(),
+ 		AvgSolveMS:     avgMS,
+@@ -101,6 +108,20 @@ func (m *Metrics) recordFailure(d time.Duration) {
+ 	m.mu.Unlock()
+ }
+ 
++// recordRejection counts a solve refused by the harness for approaching
++// the per-solve memory cap. It is a failure (both SolveAttempts and
++// SolveFailed move, exactly like recordFailure) plus the dedicated
++// SolveRejected counter so an operator can tell "the solver broke" from
++// "the harness refused a near-cap solve" (DF-OFF-BY-ONE-31).
++func (m *Metrics) recordRejection(d time.Duration) {
++	m.SolveAttempts.Add(1)
++	m.SolveFailed.Add(1)
++	m.SolveRejected.Add(1)
++	m.mu.Lock()
++	m.totalRuntime += d
++	m.mu.Unlock()
++}
++
+ func (m *Metrics) recordIdleSkip()  { m.SkippedIdle.Add(1) }
+ func (m *Metrics) recordEmptySkip() { m.SkippedEmpty.Add(1) }
+ 
+@@ -111,12 +132,39 @@ type MetricsSnapshot struct {
+ 	SolveAttempts  int64   `json:"solve_attempts"`
+ 	SolveSuccess   int64   `json:"solve_success"`
+ 	SolveFailed    int64   `json:"solve_failed"`
++	SolveRejected  int64   `json:"solve_rejected"`
+ 	SkippedIdle    int64   `json:"skipped_idle"`
+ 	SkippedEmpty   int64   `json:"skipped_empty"`
+ 	AvgSolveMS     float64 `json:"avg_solve_ms"`
+ 	TotalRuntimeMS int64   `json:"total_runtime_ms"`
+ }
+ 
++// DefaultSolveRejectFraction is the default fraction of the per-solve
++// memory cap at which a solve is REJECTED (DF-OFF-BY-ONE-31): a solve
++// whose observed peak RSS exceeds this fraction of the cap is refused
++// even when Solve returned success. 80% leaves headroom between "normal
++// solve" and the RLIMIT_AS wall, so a solution that only fit by swapping
++// is caught before it is stored as a pre-verified answer.
++const DefaultSolveRejectFraction = 0.8
++
++// SolveRejectThreshold returns the peak-RSS byte threshold at which a
++// solve is rejected for a given per-solve memory cap: the cap scaled by
++// DefaultSolveRejectFraction. A cap of 0 (unlimited) yields 0, which
++// disables rejection — with no cap there is no wall to approach. The
++// result is rounded down to whole bytes.
++func SolveRejectThreshold(memCapBytes uint64) uint64 {
++	if memCapBytes == 0 {
++		return 0
++	}
++	return uint64(float64(memCapBytes) * DefaultSolveRejectFraction)
++}
++
++// ErrSolveRejected signals a solve that returned success but whose
++// observed peak RSS exceeded the configured reject threshold. The queue
++// entry is marked failed with the measured peak in the reason and
++// nothing is committed to the graph (DF-OFF-BY-ONE-31).
++var ErrSolveRejected = errors.New("cron: solve rejected for approaching the memory cap")
++
+ // Config is the loop's runtime configuration. Zero values are
+ // filled in by ResolveConfig.
+ type Config struct {
+@@ -167,6 +215,16 @@ type Config struct {
+ 	// sandbox.ProcSampler{}. nil disables sampling (PeakRSSBytes 0).
+ 	RSSSampler sandbox.Sampler
+ 
++	// SolveRejectRSSBytes is the peak-RSS threshold above which a solve
++	// that returned SUCCESS is rejected rather than committed
++	// (DF-OFF-BY-ONE-31): the solve is marked failed, the record is
++	// stamped Rejected, and nothing reaches the graph. 0 disables the
++	// check. The daemon derives the default as
++	// DefaultSolveRejectFraction of the per-solve memory cap
++	// (-solve-mem-mb) via SolveRejectThreshold; an operator can override
++	// it with -solve-reject-rss-mb (0 there disables it explicitly).
++	SolveRejectRSSBytes uint64
++
+ 	// Logger is the structured logger for loop events. nil → log.Default().
+ 	Logger *log.Logger
+ 
+@@ -474,7 +532,7 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
+ 		killed = isMemoryKill(err)
+ 	}
+ 
+-	record := func(success bool) metrics.SolveRecord {
++	record := func(success, rejected bool) metrics.SolveRecord {
+ 		return metrics.SolveRecord{
+ 			SubmissionID: entry.ID,
+ 			ProblemClass: entry.ProblemClass,
+@@ -483,6 +541,7 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
+ 			WallTimeMS:   l.cfg.Now().Sub(start).Milliseconds(),
+ 			Killed:       killed,
+ 			Success:      success,
++			Rejected:     rejected,
+ 		}
+ 	}
+ 
+@@ -498,12 +557,34 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
+ 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error()))
+ 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
+ 		if l.cfg.Observer != nil {
+-			l.cfg.Observer.RecordSolve(record(false))
++			l.cfg.Observer.RecordSolve(record(false, false))
+ 		}
+ 		l.cfg.Logger.Printf("cron: solve failed for %s (peak_rss=%s): %v", entry.ID, gibStr(peakRSS), err)
+ 		return fmt.Errorf("solve: %w", err)
+ 	}
+ 
++	// Harness-side rejection (DF-OFF-BY-ONE-31): Solve returned success,
++	// but the solver's observed peak RSS exceeded the reject threshold —
++	// a solve that only fit by paging close to the per-solve cap must not
++	// be stored as a pre-verified answer. The queue entry is marked
++	// failed with the measured peak in the reason and NOTHING is
++	// committed to the graph. This is deliberate: a 47 GB generated
++	// packet simulator (the 2026-10-03 incident) is the class this
++	// guards, and a solution from such a run is not trustworthy evidence.
++	if l.cfg.SolveRejectRSSBytes > 0 && peakRSS > l.cfg.SolveRejectRSSBytes {
++		_ = l.cfg.Queue.SetStage(ctx, entry.ID, "solver_rejected")
++		reason := fmt.Sprintf("rejected: peak RSS %s GiB exceeds reject threshold %s GiB (problem_class=%s)",
++			gibStr(peakRSS), gibStr(l.cfg.SolveRejectRSSBytes), entry.ProblemClass)
++		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, reason)
++		l.metrics.recordRejection(l.cfg.Now().Sub(start))
++		if l.cfg.Observer != nil {
++			l.cfg.Observer.RecordSolve(record(false, true))
++		}
++		l.cfg.Logger.Printf("cron: solve REJECTED for %s (peak_rss=%s GiB > reject_threshold=%s GiB, problem_class=%s)",
++			entry.ID, gibStr(peakRSS), gibStr(l.cfg.SolveRejectRSSBytes), entry.ProblemClass)
++		return fmt.Errorf("%w: %s", ErrSolveRejected, reason)
++	}
++
+ 	_ = l.cfg.Queue.SetStage(ctx, entry.ID, "committing")
+ 	answerID, err := l.cfg.Solver.Commit(ctx, entry, sol)
+ 	if err != nil {
+@@ -511,7 +592,7 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
+ 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, err.Error())
+ 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
+ 		if l.cfg.Observer != nil {
+-			l.cfg.Observer.RecordSolve(record(false))
++			l.cfg.Observer.RecordSolve(record(false, false))
+ 		}
+ 		l.cfg.Logger.Printf("cron: commit failed for %s (peak_rss=%s): %v", entry.ID, gibStr(peakRSS), err)
+ 		return fmt.Errorf("commit: %w", err)
+@@ -520,14 +601,14 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
+ 	if err := l.cfg.Queue.MarkComplete(ctx, entry.ID, answerID); err != nil {
+ 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
+ 		if l.cfg.Observer != nil {
+-			l.cfg.Observer.RecordSolve(record(false))
++			l.cfg.Observer.RecordSolve(record(false, false))
+ 		}
+ 		l.cfg.Logger.Printf("cron: mark-complete failed for %s (peak_rss=%s): %v", entry.ID, gibStr(peakRSS), err)
+ 		return fmt.Errorf("mark complete: %w", err)
+ 	}
+ 	l.metrics.recordSuccess(l.cfg.Now().Sub(start))
+ 	if l.cfg.Observer != nil {
+-		l.cfg.Observer.RecordSolve(record(true))
++		l.cfg.Observer.RecordSolve(record(true, false))
+ 	}
+ 	l.cfg.Logger.Printf("cron: solved %s → answer %d in %s (peak_rss=%s)", entry.ID, answerID, l.cfg.Now().Sub(start), gibStr(peakRSS))
+ 	return nil
+diff --git a/internal/cron/memgate_test.go b/internal/cron/memgate_test.go
+index 51eb2796..82661ff5 100644
+--- a/internal/cron/memgate_test.go
++++ b/internal/cron/memgate_test.go
+@@ -465,3 +465,197 @@ func TestSolveFailureLogCarriesPeakRSS(t *testing.T) {
+ 		t.Fatalf("failure log %q missing peak_rss=", buf.String())
+ 	}
+ }
++
++// -----------------------------------------------------------------------------
++// Harness-side reject threshold (DF-OFF-BY-ONE-31).
++
++// TestSolveRejectThreshold pins the default fraction and the derivation
++// from a per-solve memory cap: 80% of the cap, disabled (0) with no cap.
++func TestSolveRejectThreshold(t *testing.T) {
++	if DefaultSolveRejectFraction != 0.8 {
++		t.Fatalf("DefaultSolveRejectFraction = %v, want 0.8", DefaultSolveRejectFraction)
++	}
++	if got := SolveRejectThreshold(0); got != 0 {
++		t.Errorf("SolveRejectThreshold(0) = %d, want 0 (no cap = no rejection)", got)
++	}
++	capBytes := uint64(6144) << 20 // the deploy unit's -solve-mem-mb 6144
++	got := SolveRejectThreshold(capBytes)
++	if want := uint64(float64(capBytes) * DefaultSolveRejectFraction); got != want {
++		t.Errorf("SolveRejectThreshold(%d) = %d, want %d", capBytes, got, want)
++	}
++	if got == 0 || got >= capBytes {
++		t.Errorf("threshold %d not strictly inside (0, %d)", got, capBytes)
++	}
++}
++
++// TestLoopRejectsNearCapSolve pins acceptance (a): a solve whose sampler
++// reports a peak ABOVE the reject threshold is REJECTED even though Solve
++// returned success — the queue entry is failed with the measured peak in
++// the reason, metrics/observer record a rejection, and nothing is
++// committed to the graph.
++func TestLoopRejectsNearCapSolve(t *testing.T) {
++	const threshold = uint64(4) << 30 // 4 GiB
++	const peak = uint64(5) << 30      // 5 GiB — above the threshold
++
++	obs := metrics.New(metrics.DefaultRSSAlertBytes, nil)
++	s := &stubSampler{byPid: map[int]uint64{os.Getpid(): peak}}
++	saved := childPIDsFn
++	childPIDsFn = func(int) []int { return nil }
++	defer func() { childPIDsFn = saved }()
++
++	sol := &fakeSolver{} // Solve succeeds
++	q := newFakeQueue(makeEntry("rej-1"))
++	l := NewLoop(Config{
++		Queue:               q,
++		Solver:              sol,
++		Interval:            time.Millisecond,
++		LoadThreshold:       -1,
++		RSSSampler:          s,
++		SolveRejectRSSBytes: threshold,
++		Observer:            obs,
++	})
++
++	err := l.Tick(context.Background())
++	if !errors.Is(err, ErrSolveRejected) {
++		t.Fatalf("Tick err = %v, want ErrSolveRejected", err)
++	}
++
++	// The entry is failed (not complete) with a reason naming the problem
++	// class, the measured peak, and the threshold.
++	if got := q.done["rej-1"]; got != ingest.StatusFailed {
++		t.Errorf("entry status = %q, want %q", got, ingest.StatusFailed)
++	}
++	if _, ok := q.answers["rej-1"]; ok {
++		t.Error("entry marked complete with an answer, want failed")
++	}
++	reason := q.failText["rej-1"]
++	for _, want := range []string{"class-rej-1", gibStr(peak), gibStr(threshold)} {
++		if !strings.Contains(reason, want) {
++			t.Errorf("failure reason %q missing %q", reason, want)
++		}
++	}
++
++	// Nothing reached the graph.
++	if n := sol.commitCalls.Load(); n != 0 {
++		t.Errorf("Commit calls = %d, want 0 (a rejected solve must not commit)", n)
++	}
++
++	// Metrics: a rejected solve is a failure AND a rejection, never a success.
++	m := l.Metrics().Snapshot()
++	if m.SolveRejected != 1 {
++		t.Errorf("SolveRejected = %d, want 1", m.SolveRejected)
++	}
++	if m.SolveFailed != 1 {
++		t.Errorf("SolveFailed = %d, want 1", m.SolveFailed)
++	}
++	if m.SolveSuccess != 0 {
++		t.Errorf("SolveSuccess = %d, want 0", m.SolveSuccess)
++	}
++
++	// Observer: the record is stamped Rejected with Success=false and
++	// carries the measured peak.
++	snap := obs.Snapshot()
++	if snap.SolveCount != 1 {
++		t.Fatalf("SolveCount = %d, want 1", snap.SolveCount)
++	}
++	if snap.Rejected != 1 {
++		t.Errorf("Snapshot.Rejected = %d, want 1", snap.Rejected)
++	}
++	if snap.LastSolve == nil {
++		t.Fatal("LastSolve nil")
++	}
++	if !snap.LastSolve.Rejected {
++		t.Error("LastSolve.Rejected = false, want true")
++	}
++	if snap.LastSolve.Success {
++		t.Error("LastSolve.Success = true, want false for a rejected solve")
++	}
++	if snap.LastSolve.PeakRSSBytes != peak {
++		t.Errorf("LastSolve.PeakRSSBytes = %d, want %d", snap.LastSolve.PeakRSSBytes, peak)
++	}
++}
++
++// TestLoopAcceptsBoundedSolveBelowRejectThreshold pins acceptance (b): a
++// solve whose peak is BELOW the reject threshold is committed normally.
++func TestLoopAcceptsBoundedSolveBelowRejectThreshold(t *testing.T) {
++	const threshold = uint64(4) << 30 // 4 GiB
++	const peak = uint64(1) << 30      // 1 GiB — well below
++
++	obs := metrics.New(metrics.DefaultRSSAlertBytes, nil)
++	s := &stubSampler{byPid: map[int]uint64{os.Getpid(): peak}}
++	saved := childPIDsFn
++	childPIDsFn = func(int) []int { return nil }
++	defer func() { childPIDsFn = saved }()
++
++	sol := &fakeSolver{} // Commit returns 42
++	q := newFakeQueue(makeEntry("ok-1"))
++	l := NewLoop(Config{
++		Queue:               q,
++		Solver:              sol,
++		Interval:            time.Millisecond,
++		LoadThreshold:       -1,
++		RSSSampler:          s,
++		SolveRejectRSSBytes: threshold,
++		Observer:            obs,
++	})
++
++	if err := l.Tick(context.Background()); err != nil {
++		t.Fatalf("Tick err = %v, want success", err)
++	}
++	if got := q.done["ok-1"]; got != ingest.StatusComplete {
++		t.Errorf("entry status = %q, want %q", got, ingest.StatusComplete)
++	}
++	if got := q.answers["ok-1"]; got != 42 {
++		t.Errorf("answer id = %d, want 42", got)
++	}
++	if n := sol.commitCalls.Load(); n != 1 {
++		t.Errorf("Commit calls = %d, want 1", n)
++	}
++	m := l.Metrics().Snapshot()
++	if m.SolveSuccess != 1 || m.SolveRejected != 0 {
++		t.Errorf("metrics success=%d rejected=%d, want success=1 rejected=0", m.SolveSuccess, m.SolveRejected)
++	}
++	snap := obs.Snapshot()
++	if snap.LastSolve == nil || snap.LastSolve.Rejected {
++		t.Errorf("LastSolve = %+v, want a non-rejected record", snap.LastSolve)
++	}
++	if snap.Rejected != 0 {
++		t.Errorf("Snapshot.Rejected = %d, want 0", snap.Rejected)
++	}
++}
++
++// TestLoopRejectionDisabledWhenThresholdZero pins the "zero disables"
++// contract: the same near-cap peak is committed when
++// SolveRejectRSSBytes is 0 (the no-cap default).
++func TestLoopRejectionDisabledWhenThresholdZero(t *testing.T) {
++	const peak = uint64(5) << 30
++
++	s := &stubSampler{byPid: map[int]uint64{os.Getpid(): peak}}
++	saved := childPIDsFn
++	childPIDsFn = func(int) []int { return nil }
++	defer func() { childPIDsFn = saved }()
++
++	sol := &fakeSolver{}
++	q := newFakeQueue(makeEntry("nocap-1"))
++	l := NewLoop(Config{
++		Queue:               q,
++		Solver:              sol,
++		Interval:            time.Millisecond,
++		LoadThreshold:       -1,
++		RSSSampler:          s,
++		SolveRejectRSSBytes: 0, // disabled
++	})
++
++	if err := l.Tick(context.Background()); err != nil {
++		t.Fatalf("Tick err = %v, want success with rejection disabled", err)
++	}
++	if got := q.done["nocap-1"]; got != ingest.StatusComplete {
++		t.Errorf("entry status = %q, want %q (rejection disabled)", got, ingest.StatusComplete)
++	}
++	if n := sol.commitCalls.Load(); n != 1 {
++		t.Errorf("Commit calls = %d, want 1 with rejection disabled", n)
++	}
++	if got := l.Metrics().Snapshot().SolveRejected; got != 0 {
++		t.Errorf("SolveRejected = %d, want 0", got)
++	}
++}
+diff --git a/internal/metrics/metrics.go b/internal/metrics/metrics.go
+index 14a17dad..8ce1628d 100644
+--- a/internal/metrics/metrics.go
++++ b/internal/metrics/metrics.go
+@@ -44,7 +44,11 @@ const DefaultRSSAlertBytes uint64 = 4 << 30
+ // `go test`-style invocations pi-agent made (parsed from its stdout);
+ // it is the field that was 47 GB on the incident solve. Killed reports
+ // whether the solve died on its memory cap (exec.ExitError) rather
+-// than finishing.
++// than finishing. Rejected reports whether the harness refused the
++// solve AFTER it returned success because its observed peak RSS
++// exceeded the configured reject threshold (DF-OFF-BY-ONE-31); a
++// rejected solve is never committed to the graph, so Success is false
++// for it even though the solver exited cleanly.
+ type SolveRecord struct {
+ 	SubmissionID   string `json:"submission_id"`
+ 	ProblemClass   string `json:"problem_class"`
+@@ -54,6 +58,7 @@ type SolveRecord struct {
+ 	TestRuns       int    `json:"test_runs"`
+ 	Killed         bool   `json:"killed"`
+ 	Success        bool   `json:"success"`
++	Rejected       bool   `json:"rejected"`
+ 	OverBudget     bool   `json:"over_budget"`
+ 	AlertBytesUsed uint64 `json:"alert_threshold_bytes"`
+ }
+@@ -193,6 +198,10 @@ type Snapshot struct {
+ 	SkippedHostPressure int64 `json:"skipped_host_pressure"`
+ 	// OverBudget solves — peak RSS exceeded the alert threshold.
+ 	OverBudget int `json:"over_budget"`
++	// Rejected solves — the harness refused the solve because its
++	// observed peak RSS exceeded the reject threshold, even though the
++	// solver returned success (DF-OFF-BY-ONE-31).
++	Rejected int `json:"rejected"`
+ 	// PeakRSSBytesMax is the largest peak RSS observed; 0 before the
+ 	// first solve.
+ 	PeakRSSBytesMax uint64 `json:"peak_rss_bytes_max"`
+@@ -225,6 +234,9 @@ func (o *Observer) Snapshot() Snapshot {
+ 		if r.OverBudget {
+ 			snap.OverBudget++
+ 		}
++		if r.Rejected {
++			snap.Rejected++
++		}
+ 		if r.PeakRSSBytes > maxRSS {
+ 			maxRSS = r.PeakRSSBytes
+ 		}
+diff --git a/internal/metrics/metrics_test.go b/internal/metrics/metrics_test.go
+index 19c20832..25279f0f 100644
+--- a/internal/metrics/metrics_test.go
++++ b/internal/metrics/metrics_test.go
+@@ -136,3 +136,38 @@ func TestAlertThreshold(t *testing.T) {
+ 		t.Errorf("AlertThreshold = %d, want %d", obs.AlertThreshold(), 8<<30)
+ 	}
+ }
++
++// TestSnapshotRejected pins the Rejected roll-up (DF-OFF-BY-ONE-31): a
++// record stamped Rejected is counted in Snapshot.Rejected and survives a
++// Recent() round-trip, while a normal record is not.
++func TestSnapshotRejected(t *testing.T) {
++	obs := New(DefaultRSSAlertBytes, log.Default())
++
++	obs.RecordSolve(SolveRecord{
++		SubmissionID: "rej",
++		PeakRSSBytes: 5 << 30,
++		Rejected:     true,
++		Success:      false,
++	})
++	obs.RecordSolve(SolveRecord{
++		SubmissionID: "ok",
++		PeakRSSBytes: 1 << 30,
++		Success:      true,
++	})
++
++	snap := obs.Snapshot()
++	if snap.Rejected != 1 {
++		t.Errorf("Rejected = %d, want 1", snap.Rejected)
++	}
++	if snap.SolveCount != 2 {
++		t.Errorf("SolveCount = %d, want 2", snap.SolveCount)
++	}
++	if snap.LastSolve == nil || snap.LastSolve.Rejected {
++		t.Errorf("LastSolve = %+v, want the non-rejected record", snap.LastSolve)
++	}
++
++	recent := obs.Recent(2)
++	if len(recent) != 2 || !recent[0].Rejected {
++		t.Errorf("Recent = %+v, want the first record stamped Rejected", recent)
++	}
++}
+diff --git a/internal/solver/contract_test.go b/internal/solver/contract_test.go
+new file mode 100644
+index 00000000..a73a0d63
+--- /dev/null
++++ b/internal/solver/contract_test.go
+@@ -0,0 +1,49 @@
++package solver
++
++import (
++	"os"
++	"path/filepath"
++	"regexp"
++	"strings"
++	"testing"
++)
++
++// jsConcat joins adjacent single-quoted string literals so the contract
++// phrases can be asserted as they read, not as the source happens to wrap
++// them (`'... the maximum ' + 'number of ...'`). Re-wrapping a line in
++// the wrapper must not make this test fail.
++var jsConcat = regexp.MustCompile(`'\s*\+\s*'`)
++
++// TestPiAgentWrapperDeclaresResourceBounds pins DF-OFF-BY-ONE-31
++// acceptance (c): the solve contract the shipped wrapper hands to
++// pi-agent (scripts/pi-agent) requires simulation-style solutions to
++// declare explicit bounds and to aggregate incrementally instead of
++// retaining a record per event.
++//
++// The prompt is built by the wrapper, not by Go code, so a regression
++// there would silently drop the contract while every Go test stayed
++// green. This test reads the shipped file and asserts the marker phrases
++// so the reminder cannot be edited away unnoticed. It is deliberately a
++// substring check on the source (not an execution of the wrapper): the
++// wrapper needs a real pi binary and provider keys, neither of which a
++// unit test can supply.
++func TestPiAgentWrapperDeclaresResourceBounds(t *testing.T) {
++	wrapperPath := filepath.Join("..", "..", "scripts", "pi-agent")
++	raw, err := os.ReadFile(wrapperPath)
++	if err != nil {
++		t.Fatalf("read %s: %v", wrapperPath, err)
++	}
++	body := jsConcat.ReplaceAllString(string(raw), "")
++
++	for _, want := range []string{
++		"## Resource bounds (required for simulation-style problems)",
++		"declare explicit bounds",
++		"maximum number of simulated events/packets/seconds",
++		"aggregate the result incrementally",
++		"rather than retaining a record per event",
++	} {
++		if !strings.Contains(body, want) {
++			t.Errorf("scripts/pi-agent solve prompt is missing the resource-bounds contract phrase %q", want)
++		}
++	}
++}
+diff --git a/scripts/pi-agent b/scripts/pi-agent
+index 1c278d1d..d8c28b7a 100755
+--- a/scripts/pi-agent
++++ b/scripts/pi-agent
+@@ -258,6 +258,22 @@ function main() {
+       'with a title, root-cause analysis, the exact fix (code or commands), and a verification ' +
+       'section. Keep it self-contained and directly usable.'
+   );
++  // Resource-bounds contract (DF-OFF-BY-ONE-31). A generated packet
++  // simulator that kept one record per simulated event filled 47 GB of
++  // RAM + swap on 2026-10-03, so the contract lives in the prompt itself,
++  // next to the other solve instructions. The marker phrases below are
++  // asserted by internal/solver TestPiAgentWrapperDeclaresResourceBounds —
++  // keep them intact when editing this text.
++  parts.push(
++    '\n## Resource bounds (required for simulation-style problems)\n' +
++      'If your solution simulates, replays, or generates a sequence of events, packets, ' +
++      'requests, or ticks, it MUST declare explicit bounds as named constants: the maximum ' +
++      'number of simulated events/packets/seconds it will process, and the memory ceiling ' +
++      'that follows from it. It MUST aggregate the result incrementally as each event is ' +
++      'processed — running counters, sums, or fixed-size summaries — rather than retaining ' +
++      'a record per event in a growing slice, map, or list, which is unbounded. State the ' +
++      'bounds in the solution so a reader can verify the problem size is finite.'
++  );
+   const prompt = parts.join('\n');
+ 
+   // --- env hygiene ---
