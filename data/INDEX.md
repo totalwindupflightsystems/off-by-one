@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2497 problem classes · 4124 verified answers** · exported 2026-10-04 22:00 UTC
+**2503 problem classes · 4130 verified answers** · exported 2026-10-05 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2503,3 +2503,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2584 | git-jsonl-board-concurrent-commit-collision | 1 | go |
 | 2585 | gitreins-guard-go-lint-single-file-scope-false-fail | 1 | go |
 | 2586 | act-mypy-step-crash-glibc | 1 |  |
+| 2587 | js-merkle-streaming-proof-pruning | 1 | js |
+| 2588 | go-lease-fenced-shard-rebalance | 1 | go |
+| 2589 | python-sqlite-online-index-repair | 1 | python |
+| 2590 | logsey-zero-parse-timestamp-shape | 1 | go |
+| 2591 | python-local-cosine-prefilter-to-skip-llm-call | 1 | go |
+| 2592 | toolsd-diff-patch-roundtrip-filename-mismatch | 1 | go |
