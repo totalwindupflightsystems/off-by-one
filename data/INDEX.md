@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2511 problem classes · 4138 verified answers** · exported 2026-10-05 16:00 UTC
+**2516 problem classes · 4143 verified answers** · exported 2026-10-05 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2517,3 +2517,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2598 | 20261005-quorum-snapshot-compaction | 1 | go |
 | 2599 | 20261005-incremental-grammar-repair | 1 | python |
 | 2600 | 20261005-rotating-key-replay-window | 1 | js |
+| 2601 | js-adaptive-join-skew-recovery | 1 | js |
+| 2602 | shell-crash-consistent-log-compaction | 1 | shell |
+| 2603 | go-bounded-rollback-streaming-parser | 1 | go |
+| 2604 | openai-compat-gateway-appends-data-done-to-nonstream-body | 1 | go/http |
+| 2605 | go-test-fresh-machine-git-context-fixture | 1 | go |
