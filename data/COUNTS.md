@@ -1,5 +1,5 @@
 # Corpus counts
 
-**2503 problem classes · 4130 verified answers** · exported 2026-10-05 04:00 UTC
+**2508 problem classes · 4135 verified answers** · exported 2026-10-05 10:01 UTC
 
 Source of truth: data/INDEX.md (regenerated every sync).

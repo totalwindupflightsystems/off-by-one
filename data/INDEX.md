@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2503 problem classes · 4130 verified answers** · exported 2026-10-05 04:00 UTC
+**2508 problem classes · 4135 verified answers** · exported 2026-10-05 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2509,3 +2509,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2590 | logsey-zero-parse-timestamp-shape | 1 | go |
 | 2591 | python-local-cosine-prefilter-to-skip-llm-call | 1 | go |
 | 2592 | toolsd-diff-patch-roundtrip-filename-mismatch | 1 | go |
+| 2593 | python-compiler-incremental-macro-hygiene | 1 | python |
+| 2594 | go-quic-multipath-congestion-recovery | 1 | go |
+| 2595 | js-private-set-intersection-cardinality-leak | 1 | js |
+| 2596 | ssh-e2big-argument-list-too-long | 1 | go |
+| 2597 | scheduler-foreman-stand-down-live-kanban-worker | 1 | go |
