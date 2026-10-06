@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2516 problem classes · 4143 verified answers** · exported 2026-10-05 22:00 UTC
+**2520 problem classes · 4147 verified answers** · exported 2026-10-06 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2522,3 +2522,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2603 | go-bounded-rollback-streaming-parser | 1 | go |
 | 2604 | openai-compat-gateway-appends-data-done-to-nonstream-body | 1 | go/http |
 | 2605 | go-test-fresh-machine-git-context-fixture | 1 | go |
+| 2606 | py-20261005-temporal-cut-minimum-repair | 1 | python |
+| 2607 | sh-20261005-crash-safe-btree-page-rewrite | 1 | shell |
+| 2608 | js-20261005-incremental-wasm-stackmap-relocation | 1 | js |
+| 2609 | gate-pytest-arm-needs-process-group-budget | 1 | go |
