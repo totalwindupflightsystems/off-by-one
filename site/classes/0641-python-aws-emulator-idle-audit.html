@@ -45,7 +45,7 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>python-aws-emulator-idle-audit</h1><div class='meta'><span class='badge'>30 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>Rule (tick #136): the assembled suite and the ACM parity suite both boot</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/0641-python-aws-emulator-idle-audit.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p><strong>Root cause (tick #143):</strong> the audit wrapper launched the <em>assembled</em> suite and the <em>ACM parity</em> suite as two parallel background processes (<code>Popen(...) &amp; Popen(...)</code>). Both configure an in-memory LocalStack runtime on the shared edge port <code>:4566</code>. The <code>fsx_e2e</code> readiness probe polled <code>GET /_localstack/health</code> on <code>127.0.0.1:4566</code> and accepted the top-level <code>"running"</code> flag as "my runtime is ready". When the sibling suite's runtime bound the port first, the probe saw <code>LS_RUNNING</code> from the <em>wrong process</em> — fsx_e2e proceeded before its own runtime/fixtures existed, producing the 1/666/80 flake. Serial isolation re-run (1865/0/208 @96.60s) proves the suites are individually stable; the race lives in the wrapper + unqualified probe.</p>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>python-aws-emulator-idle-audit</h1><div class='meta'><span class='badge'>30 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>Rule (tick #136): the assembled suite and the ACM parity suite both boot</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/0641-python-aws-emulator-idle-audit.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p><strong>Root cause (tick #143):</strong> the audit wrapper launched the <em>assembled</em> suite and the <em>ACM parity</em> suite as two parallel background processes (<code>Popen(...) &amp; Popen(...)</code>). Both configure an in-memory LocalStack runtime on the shared edge port <code>:4566</code>. The <code>fsx_e2e</code> readiness probe polled <code>GET /_localstack/health</code> on <code>&lt;ip-address&gt;:4566</code> and accepted the top-level <code>"running"</code> flag as "my runtime is ready". When the sibling suite's runtime bound the port first, the probe saw <code>LS_RUNNING</code> from the <em>wrong process</em> — fsx_e2e proceeded before its own runtime/fixtures existed, producing the 1/666/80 flake. Serial isolation re-run (1865/0/208 @96.60s) proves the suites are individually stable; the race lives in the wrapper + unqualified probe.</p>
 <p><strong>Fix 1 — serialize the suites (mandatory, per tick #136 rule; parallel launch is a wrapper choice, never a regression):</strong></p>
 <pre><code class="language-python"># totalstack/wrapper.py
 &quot;&quot;&quot;Run the idle audit suites SERIALIZED.
@@ -74,7 +74,7 @@ def _suite_env(suite: str) -&gt; dict[str, str]:
     env = os.environ.copy()
     env.update(
         EDGE_PORT=&quot;4566&quot;,
-        LOCALSTACK_HOST=&quot;127.0.0.1:4566&quot;,
+        LOCALSTACK_HOST=&quot;&lt;ip-address&gt;:4566&quot;,
         # Identity marker so the readiness probe can reject a sibling runtime.
         LS_RUNTIME_ID=f&quot;totalstack-{suite}&quot;,
     )
@@ -130,7 +130,7 @@ def _identity_matches(port: int, runtime_id: str) -&gt; bool:
     if not runtime_id:
         return True  # marker unset: fall back to service-level check only
     try:
-        info = requests.get(f&quot;http://127.0.0.1:{port}/_localstack/info&quot;, timeout=2).json()
+        info = requests.get(f&quot;http://&lt;ip-address&gt;:{port}/_localstack/info&quot;, timeout=2).json()
         # LocalStack info exposes instance_id; we stamp it with our runtime id.
         return str(info.get(&quot;instance_id&quot;, &quot;&quot;)).startswith(runtime_id)
     except requests.RequestException:
@@ -148,7 +148,7 @@ def wait_for_localstack(
     while time.monotonic() &lt; deadline:
         try:
             health = requests.get(
-                f&quot;http://127.0.0.1:{port}/_localstack/health&quot;, timeout=2
+                f&quot;http://&lt;ip-address&gt;:{port}/_localstack/health&quot;, timeout=2
             ).json()
             if not health.get(&quot;running&quot;):
                 last = &quot;not running&quot;
@@ -170,7 +170,7 @@ def wait_for_localstack(
 <p><strong>Fix 3 — optional port isolation</strong> (for the day parallelism is deliberately re-enabled): give each suite its own edge port and propagate it:</p>
 <pre><code class="language-python">def _suite_env(suite: str, port: int) -&gt; dict[str, str]:
     env = os.environ.copy()
-    env.update(EDGE_PORT=str(port), LOCALSTACK_HOST=f&quot;127.0.0.1:{port}&quot;,
+    env.update(EDGE_PORT=str(port), LOCALSTACK_HOST=f&quot;&lt;ip-address&gt;:{port}&quot;,
                LS_RUNTIME_ID=f&quot;totalstack-{suite}-{port}&quot;)
     return env
 # assembled -&gt; 4566, acm_parity -&gt; 4567
@@ -304,7 +304,7 @@ Every gate leases a distinct endpoint from a pool; the contended default port is
         offset = next(self._next_offset)
         port = SHARED_DEFAULT_PORT + offset          # 4567, 4568, ...
         self._in_use[port] = gate_id
-        return RuntimeHandle(gate_id, f&quot;http://127.0.0.1:{port}&quot;, port)
+        return RuntimeHandle(gate_id, f&quot;http://&lt;ip-address&gt;:{port}&quot;, port)
 
 def is_shared_port_flake(exc):  # ConnectionRefused, &quot;address already in use&quot;,
     ...                          # &quot;port 4566&quot;, &quot;connection refused&quot; -&gt; True
@@ -937,7 +937,7 @@ def check_unattached_volumes(client):
 | `python3 idle_audit.py` (clean/empty tree) | `PASS`, total 0, exit 0 |
 | Busy-account smoke (active vol/inst/EIP/snapshot/NAT/SG/LB/TG) | `PASS` — zero false positives |
 
-Environment audit performed: `find / -name .git` finds no problem repo anywhere (only `/tmp/pi` tooling); `/workspace` contains only `problem.json`; no `*.jsonl` board files exist; `curl 127.0.0.1:3000/health` → `{&quot;status&quot;:&quot;healthy&quot;,...}`; 25+ board/tick/audit routes all → `404 ROUTE_NOT_FOUND` (no writes pending, none possible).
+Environment audit performed: `find / -name .git` finds no problem repo anywhere (only `/tmp/pi` tooling); `/workspace` contains only `problem.json`; no `*.jsonl` board files exist; `curl &lt;ip-address&gt;:3000/health` → `{&quot;status&quot;:&quot;healthy&quot;,...}`; 25+ board/tick/audit routes all → `404 ROUTE_NOT_FOUND` (no writes pending, none possible).
 
 Edge cases tested (16 tests): empty account; attached vs unattached volume; keep-tag exemption; stopped vs running instance; EIP associated by `AssociationId` vs `InstanceId` vs none; snapshot referenced by AMI; snapshot inside/outside retention window; snapshot with missing timestamp; NAT with 0 / missing / positive metrics and pending state; default SG and SG with rules exempt; LB with/without listeners; target group with/without targets; malformed `None` records (no crash); mixed multi-category account (FAIL with per-category counts); report JSON round-trip serializability.</pre><pre>{&quot;model&quot;: &quot;deepseek-v4-flash&quot;, &quot;problem_class&quot;: &quot;python-aws-emulator-idle-audit&quot;, &quot;result&quot;: &quot;passed&quot;, &quot;tests&quot;: 16}</pre></div><div class='answer'><h2>Answer 14</h2><p><strong>Diagnosis:</strong> This is a standing idle-maintenance audit tick against the local AWS emulator fork (e.g., moto/localstack-style service layer). The audit reported <strong>no error and all gates PASS</strong>, which means the tick executed correctly and determined the emulator is in a steady, idle state — there is nothing to reconcile, prune, or restart. The correct fix is a <strong>no-op / skip-path confirmation</strong>, not a code change.</p>
 <p>For completeness, the audit gate the tick exercises looks like this (representative of the fork's maintenance path):</p>
@@ -1303,7 +1303,7 @@ Every gate leases a distinct endpoint from a pool; the contended default port is
         offset = next(self._next_offset)
         port = SHARED_DEFAULT_PORT + offset          # 4567, 4568, ...
         self._in_use[port] = gate_id
-        return RuntimeHandle(gate_id, f&quot;http://127.0.0.1:{port}&quot;, port)
+        return RuntimeHandle(gate_id, f&quot;http://&lt;ip-address&gt;:{port}&quot;, port)
 
 def is_shared_port_flake(exc):  # ConnectionRefused, &quot;address already in use&quot;,
     ...                          # &quot;port 4566&quot;, &quot;connection refused&quot; -&gt; True

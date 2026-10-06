@@ -9,14 +9,17 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/totalwindupflightsystems/off-by-one/internal/export"
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
 	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
@@ -110,7 +113,7 @@ func (s *Server) Handler() http.Handler {
 	// In read-only (public catalog) mode, block all mutating endpoints
 	// and the AI chat WebSocket before they reach the mux.
 	if s.ReadOnly {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return sanitizeReadOnlyJSON(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/ws/chat" {
 				writeError(w, http.StatusForbidden, "read_only", "AI agent disabled in read-only catalog mode")
 				return
@@ -120,10 +123,70 @@ func (s *Server) Handler() http.Handler {
 				return
 			}
 			mux.ServeHTTP(w, r)
-		})
+		}))
 	}
 
 	return mux
+}
+
+// sanitizeReadOnlyJSON protects every JSON read surface on the public
+// catalog, including discover (POST is a pure read), queue metadata, and
+// taxonomy. It works on parsed JSON values so escaping/serialization cannot
+// bypass the same filter used by the corpus exporter.
+func sanitizeReadOnlyJSON(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		recorder := &bufferedResponseWriter{header: make(http.Header)}
+		next.ServeHTTP(recorder, r)
+		for key, values := range recorder.header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		if !strings.HasPrefix(strings.ToLower(recorder.header.Get("Content-Type")), "application/json") {
+			w.WriteHeader(recorder.statusCode())
+			_, _ = w.Write(recorder.body.Bytes())
+			return
+		}
+		body, err := export.SanitizePublicJSON(recorder.body.Bytes())
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"error":"public_response_sanitization_failed"}`)
+			return
+		}
+		w.Header().Del("Content-Length")
+		w.Header().Del("ETag")
+		w.WriteHeader(recorder.statusCode())
+		_, _ = w.Write(body)
+	})
+}
+
+type bufferedResponseWriter struct {
+	header http.Header
+	status int
+	body   bytes.Buffer
+}
+
+func (w *bufferedResponseWriter) Header() http.Header { return w.header }
+
+func (w *bufferedResponseWriter) WriteHeader(code int) {
+	if w.status == 0 {
+		w.status = code
+	}
+}
+
+func (w *bufferedResponseWriter) Write(p []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	return w.body.Write(p)
+}
+
+func (w *bufferedResponseWriter) statusCode() int {
+	if w.status == 0 {
+		return http.StatusOK
+	}
+	return w.status
 }
 
 // readOnlyAllowedPost reports whether a POST endpoint stays available in

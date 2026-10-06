@@ -29,6 +29,7 @@ _spec.loader.exec_module(_mod)
 sanitize_host_paths = _mod.sanitize_host_paths
 sanitize_internal_names = _mod.sanitize_internal_names
 sanitize_corpus_text = _mod.sanitize_corpus_text
+sanitize_common_pii = _mod.sanitize_common_pii
 
 
 class SanitizeHostPathsTest(unittest.TestCase):
@@ -47,6 +48,11 @@ class SanitizeHostPathsTest(unittest.TestCase):
             "/home/runner/work/sdk-python/sdk-python": "~/work/sdk-python/sdk-python",
             "/home/user/repo/engine": "~/repo/engine",
             "/home/agent/solutions": "~/solutions",
+            "/Users/alice/Library/Secrets/key": "~/Library/Secrets/key",
+            r"C:\\Users\\alice\\Documents\\private.txt": r"~\\Documents\\private.txt",
+            r"\\/home\\/alice\\private\\repo": r"~\\private\\repo",
+            "/mnt/c/Users/alice/project": "~/project",
+            "/cygdrive/c/Users/alice/project": "~/project",
         }
         for src, want in cases.items():
             with self.subTest(src=src):
@@ -102,9 +108,31 @@ class SanitizeHostPathsTest(unittest.TestCase):
         import inspect
         src = inspect.getsource(_mod.main)
         for field in ('r["title"]', 'r["description"]', 'r["lang"]', 'r["env"]',
-                      'r["version"]', 'r["solution"]', 'r["evidence"]', 'r["signatures"]'):
+                      'r["version"]', 'r["solution"]', 'r["evidence"]'):
             with self.subTest(field=field):
                 self.assertIn(f"sanitize_corpus_text({field}", src)
+        self.assertIn('sanitize_pii_value(json.loads(r["signatures"]))', src)
+
+
+class SanitizeCommonPIITest(unittest.TestCase):
+    """PUBLIC-PII-001: redact common contact and network identifiers."""
+
+    def test_emails_phones_and_ip_addresses_are_replaced(self):
+        src = "contact alice@example.net at (415) 555-1212; host 203.0.113.7; v6 2001:db8::1"
+        self.assertEqual(
+            sanitize_common_pii(src),
+            "contact <email> at <phone>; host <ip-address>; v6 <ip-address>",
+        )
+
+    def test_dotted_versions_and_non_contact_text(self):
+        self.assertEqual(sanitize_common_pii("tool v1.2.3 is at /usr/bin/tool"),
+                         "tool v1.2.3 is at /usr/bin/tool")
+
+    def test_common_pii_runs_inside_composed_scrub(self):
+        self.assertEqual(
+            sanitize_corpus_text("/home/alice/app uses alice@example.net via 10.0.0.4"),
+            "~/app uses <email> via <ip-address>",
+        )
 
 
 class SanitizeInternalNamesTest(unittest.TestCase):

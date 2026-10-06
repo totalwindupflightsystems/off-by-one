@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2520 problem classes · 4147 verified answers** · exported 2026-10-06 04:00 UTC
+**2523 problem classes · 4150 verified answers** · exported 2026-10-06 07:56 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2526,3 +2526,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2607 | sh-20261005-crash-safe-btree-page-rewrite | 1 | shell |
 | 2608 | js-20261005-incremental-wasm-stackmap-relocation | 1 | js |
 | 2609 | gate-pytest-arm-needs-process-group-budget | 1 | go |
+| 2610 | temporal-join-retraction-frontier | 1 | python |
+| 2611 | hygienic-incremental-macro-expansion | 1 | js |
+| 2612 | quorum-lease-fencing-under-clock-drift | 1 | go |

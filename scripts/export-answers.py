@@ -16,22 +16,16 @@ SQLite remains the operational store for the live server.
 Usage:
   python3 scripts/export-answers.py [path-to-off-by-one.db]
 
-Host-path hygiene (REVIEW-OB-006): the corpus is public, so no operator
-machine path may leak into it. Every emitted text field is passed through
-sanitize_corpus_text(), which rewrites any /home/<user> prefix (kara,
-bunker, bunker-*, runner, user — generically any account name matching
-[A-Za-z0-9_-]+) to the portable `~` form:
-    /home/kara/.local/bin/pi-agent  ->  ~/.local/bin/pi-agent
-JSON record shapes are unchanged — only string values are rewritten.
-
-Name hygiene (REVIEW-OB-009): internal project/tool names are lab-internal
-identifiers and must not leak either. sanitize_corpus_text() also rewrites
-them to neutral placeholders via _NAME_REDACTIONS:
-    hermes-dagger | chimera-v2 | warpfs | crier  ->  <project>
-    /home/<user>/.local/bin/gitreins | ~/.local/bin/gitreins | .local/bin/gitreins
-                                                ->  <tool>
-Mirrored in internal/export/git.go sanitizeInternalNames (keep in sync).
+Privacy hygiene (PUBLIC-PII-001): this repo's corpus is public, and agents
+can be helpful enough to copy real workstation details into an answer. The
+export applies common PII substitutions by default: personal home roots from
+Linux/macOS/Windows paths become `~`; email, phone, IPv4 and IPv6 literals
+become `<email>`, `<phone>` and `<ip-address>`. The schema and surrounding
+technical text stay intact. A separate fail-closed corpus/site guard checks
+the generated public artifacts; gitleaks remains the credential scanner and
+is not treated as a general PII detector.
 """
+import ipaddress
 import json
 import os
 import re
@@ -81,21 +75,61 @@ EXCLUDED_CLASS_PATTERNS = [
 ]
 _EXCLUDED_RES = [re.compile(p, re.IGNORECASE) for p in EXCLUDED_CLASS_PATTERNS]
 
-# REVIEW-OB-006: operator host paths (/home/kara, /home/bunker-*,
-# /home/runner, /home/user, ...) must never reach the public corpus.
-# The account-name class covers any user; the mapping is prefix -> "~".
-_HOST_PATH_RE = re.compile(r"/home/[A-Za-z0-9_-]+")
+# PUBLIC-PII-001: basic built-in PII redaction for the public corpus. Gitleaks
+# scans credentials, but the corpus is allowlisted for example secrets; these
+# separate transforms protect common personal artifacts across all text fields.
+# Keep the equivalent checks in scripts/check-public-pii.py and Go export.
+_HOST_PATH_RE = re.compile(
+    r"(?i)(?:\\*/home|\\*/users|\\*/mnt/[a-z]/users|"
+    r"\\*/cygdrive/[a-z]/users|[a-z]:[/\\]+users|"
+    r"\\*/documents and settings)[/\\]+[A-Za-z0-9._-]+"
+)
+_EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+_PHONE_RE = re.compile(
+    r"(?<![0-9])(?:\+?[0-9]{1,3}[ .-]?)?(?:\([0-9]{3}\)|[0-9]{3})"
+    r"[ .-][0-9]{3}[ .-][0-9]{4}(?![0-9])"
+)
+_IPV4_RE = re.compile(
+    r"(?<![0-9.])(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])"
+    r"(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}(?![0-9.])"
+)
+_IPV6_CANDIDATE_RE = re.compile(r"(?<![A-Za-z0-9_:])(?:[0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f:.%]+(?![A-Za-z0-9_:])")
+_PII_PLACEHOLDERS = {"<email>", "<phone>", "<ip-address>"}
 
 
 def sanitize_host_paths(text):
-    """Rewrite every /home/<user> prefix in a corpus text field to `~`.
-
-    None/empty pass through unchanged. Non-path text (e.g. "/usr/bin",
-    "home/kara" without a leading slash) is untouched.
-    """
+    """Replace Linux/macOS/Windows personal home roots with `~` (keep suffix)."""
     if not text:
         return text
     return _HOST_PATH_RE.sub("~", text)
+
+
+def sanitize_ip_addresses(text):
+    """Replace valid IPv4/IPv6 literals; preserve ordinary dotted versions."""
+    if not text:
+        return text
+    text = _IPV4_RE.sub("<ip-address>", text)
+
+    def redact_ipv6(match):
+        token = match.group(0)
+        candidate = token.split("%", 1)[0] if "%" in token else token
+        try:
+            ipaddress.IPv6Address(candidate)
+        except ipaddress.AddressValueError:
+            return token
+        return "<ip-address>"
+
+    return _IPV6_CANDIDATE_RE.sub(redact_ipv6, text)
+
+
+def sanitize_common_pii(text):
+    """Replace common personal contact/network identifiers with placeholders."""
+    if not text:
+        return text
+    text = sanitize_host_paths(text)
+    text = _EMAIL_RE.sub("<email>", text)
+    text = _PHONE_RE.sub("<phone>", text)
+    return sanitize_ip_addresses(text)
 
 
 # REVIEW-OB-009: internal project/tool names are lab-internal identifiers —
@@ -129,16 +163,22 @@ def sanitize_internal_names(text):
 
 
 def sanitize_corpus_text(text):
-    """Full corpus-text scrub: internal names first, then host paths.
-
-    Name redaction runs first because the <tool> rule consumes its own
-    /home/<user>/ prefix; the host-path rewrite then backstops any other
-    /home/<user> occurrence. Applied to every emitted text field
-    (title/description/lang/env/version/solution/evidence/signatures).
-    """
+    """Full corpus scrub: internal identifiers first, then common PII."""
     if not text:
         return text
-    return sanitize_host_paths(sanitize_internal_names(text))
+    return sanitize_common_pii(sanitize_internal_names(text))
+
+
+def sanitize_pii_value(value):
+    """Recursively sanitize strings in parsed structured metadata."""
+    if isinstance(value, str):
+        return sanitize_corpus_text(value)
+    if isinstance(value, list):
+        return [sanitize_pii_value(item) for item in value]
+    if isinstance(value, dict):
+        return {sanitize_corpus_text(str(key)): sanitize_pii_value(item)
+                for key, item in value.items()}
+    return value
 
 
 # REVIEW-OB-010: environment/version are exact-match discovery filters
@@ -283,7 +323,7 @@ def main() -> None:
             "version": normalize_version(sanitize_corpus_text(r["version"])),
             "solution": sanitize_corpus_text(r["solution"]),
             "evidence": sanitize_corpus_text(r["evidence"]),
-            "signatures": json.loads(sanitize_corpus_text(r["signatures"])) if r["signatures"] else None,
+            "signatures": sanitize_pii_value(json.loads(r["signatures"])) if r["signatures"] else None,
             "status": r["status"],
             "created_at": r["answer_created"],
         })
@@ -382,6 +422,15 @@ no SQLite, no setup** needed to consume or contribute.
 | `answers/` | One JSON file per problem class — browse, diff, PR |
 | `INDEX.md` | Catalog of every problem class + language coverage |
 | `COUNTS.md` | Live corpus counts — auto-stamped every export |
+
+## Privacy-by-default
+
+Answers are scrubbed before publication because agents can copy real workstation
+context into otherwise useful diagnostics. Personal Linux/macOS/Windows home
+roots become `~`; email addresses, phone numbers, and IPv4/IPv6 literals become
+`<email>`, `<phone>`, and `<ip-address>`. The same policy is enforced on the
+read-only public API and by CI against the generated `data/` and `site/` artifacts.
+Gitleaks still scans credentials; it is not the PII filter.
 
 ## Consume (3 ways)
 

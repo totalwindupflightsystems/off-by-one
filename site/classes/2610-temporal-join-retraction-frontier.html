@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>temporal-join-retraction-frontier — Off-By-One verified answer</title>
+<meta name="description" content="The failure mode is eager eviction driven by an over-trusted watermark. A temporal (interval) join needs both">
+<meta property="og:title" content="temporal-join-retraction-frontier — Off-By-One">
+<meta property="og:description" content="The failure mode is eager eviction driven by an over-trusted watermark. A temporal (interval) join needs both">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2610-temporal-join-retraction-frontier.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>temporal-join-retraction-frontier</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>python3</span></div><div class='desc'><p>The failure mode is eager eviction driven by an over-trusted watermark. A temporal (interval) join needs both</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2610-temporal-join-retraction-frontier.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Bounded-Memory Temporal Join with Retractions: Diagnosis and Fix</h1>
+<h2>Root-cause analysis</h2>
+<p>The failure mode is <strong>eager eviction driven by an over-trusted watermark</strong>. A temporal (interval) join needs both
+members of every pair. The naive design advances a single global watermark, emits/evicts an event as soon as the
+watermark exceeds <code>t + W</code>, and drops anything at or below the watermark.</p>
+<p>Three independent bugs fall out of that:</p>
+<ol>
+<li><strong>Unsound cutoff.</strong> With any allowed lateness <code>L &gt; 0</code>, an event below the watermark can still arrive and
+   match. Evicting at <code>wm &gt; t + W</code> loses those matches. The correct safe point is <code>t + W + L &lt; min(wm_A, wm_B)</code>,
+   because the <em>opposite</em> side must also have moved past the match window minus the lateness slack.</li>
+<li><strong>Global watermark head-of-line blocking.</strong> One stalled key or source pins the global watermark. State for
+   every key accumulates, and a hard cap then forces lossy drops. The frontier must be <strong>per key</strong> (and the
+   cap enforced without silent drops).</li>
+<li><strong>Duplicate double-counting.</strong> Deduplicating with an ever-growing id set is unbounded and contradicting the
+   cap. In fact dedup state only needs ids of <strong>currently buffered (unsealed)</strong> events: any later copy lands
+   below the seal threshold and is provably redundant.</li>
+</ol>
+<p>Two consequences the problem statement is testing:</p>
+<ul>
+<li><strong>Exact results under arbitrary arrival order are impossible with bounded memory and unbounded lateness.</strong>
+  An adversary can hold a match for any old event arbitrarily long, so that event must be retained forever.
+  Exactness therefore requires a <strong>bounded lateness <code>L</code></strong> (or a disk spill / backpressure channel — which is
+  exactly what "hard cap" must mean).</li>
+<li><strong>Inner interval-join results are monotone</strong> (new events only add pairs), so plain inner joins need <strong>no
+  retractions</strong> once you emit only at the safe frontier. Retractions are required only for <em>speculative</em>
+  emissions (outer-join null-fill, upserts, aggregates). Both protocols are given and tested below.</li>
+</ul>
+<h2>Model and invariants</h2>
+<p>Events: <code>(side ∈ {A,B}, key, timestamp, event_id)</code>. Join output: all pairs with equal key and <code>|t_A − t_B| ≤ W</code>.</p>
+<p>State per key:</p>
+<table>
+<thead>
+<tr>
+<th>state</th>
+<th>meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>wm[k][side]</code></td>
+<td><code>max</code> timestamp observed for <code>(k, side)</code> — a lower bound on future timestamps</td>
+</tr>
+<tr>
+<td><code>buf[k][A]</code>, <code>buf[k][B]</code></td>
+<td>unsealed events, kept <strong>sorted by timestamp</strong></td>
+</tr>
+<tr>
+<td><code>seen[k]</code></td>
+<td>ids of events currently in <code>buf</code> (dedup)</td>
+</tr>
+</tbody>
+</table>
+<p>Invariants that make the result exact:</p>
+<ol>
+<li><strong>Frontier:</strong> <code>F[k] = min(wm[k][A], wm[k][B])</code>.</li>
+<li><strong>Seal (eviction) rule:</strong> event <code>x</code> may be evicted only when <code>t_x + W + L &lt; F[k]</code>. At that instant every
+   possible partner on the other side has already arrived (watermark honest, lateness ≤ <code>L</code>), <strong>and</strong> is still
+   buffered, so emitting <code>x</code> against the opposite buffer is complete.</li>
+<li><strong>Unique emission:</strong> a pair <code>(a,b)</code> is emitted exactly once — when the first of its two members is evicted.
+   Candidates are popped in increasing timestamp order, so the partner is guaranteed present.</li>
+<li><strong>Duplicate rule:</strong> id in <code>seen[k]</code> ⇒ skip. Id not in <code>seen[k]</code> but <code>t &lt; F[k] − L − W</code> ⇒ the event is below
+   the seal threshold; under the lateness bound it is a redundant copy (or a contract violation) and is dropped
+   without affecting the final result.</li>
+<li><strong>Hard cap is not a drop rule.</strong> When <code>size ≥ cap</code>, the event goes to the spill queue (disk) and is replayed
+   when capacity frees. Dropping unsealed events is only ever safe if you accept approximate results.</li>
+</ol>
+<p>Bounded memory guarantee: at any moment per key only events with timestamps in <code>(F[k]−W−L, F[k]]</code> are retained,
+so <code>cap ≥ max_k (#events in a W+L horizon)</code> suffices for zero spilling. A single hot/stalled key can still
+consume the cap; that key’s source must be back-pressured (or spilled), not the data dropped.</p>
+<h2>Exact fix (code)</h2>
+<p>Self-contained, tested implementation. Save as <code>bounded_temporal_join.py</code> and run.</p>
+<pre><code class="language-python">&quot;&quot;&quot;
+Bounded-memory temporal (interval) join over out-of-order streams with
+per-key watermarks, bounded lateness, duplicate suppression, hard state cap
+with disk spill, and a retraction protocol for speculative outer joins.
+&quot;&quot;&quot;
+from bisect import insort
+from collections import defaultdict, deque
+
+NEG = float('-inf')
+POS = float('inf')
+
+
+class IntervalJoin:
+    &quot;&quot;&quot;
+    Inner interval join: (a,b) emitted iff key(a)==key(b) and |t_a - t_b| &lt;= W.
+    An event x is sealed once  t_x + W + L &lt; min(wm[key]['A'], wm[key]['B']).
+    Only sealed events are evicted; every pair is emitted exactly once.
+    &quot;&quot;&quot;
+    def __init__(self, W, lateness=0, max_state=POS, spill_enabled=True):
+        self.W, self.L = W, lateness
+        self.cap, self.spill_enabled = max_state, spill_enabled
+        self.buf = defaultdict(lambda: {'A': [], 'B': []})
+        self.wm = {}
+        self.seen = defaultdict(set)          # ids of currently buffered events
+        self.size = 0
+        self.spill = deque()                  # disk-backed pending queue
+        self.emitted = []
+        self.n_spilled = self.n_late_dropped = self.n_dup = 0
+
+    def _ensure(self, k):
+        if k not in self.wm:
+            self.wm[k] = {'A': NEG, 'B': NEG}
+        return self.buf[k]
+
+    def _frontier(self, k):
+        return min(self.wm[k]['A'], self.wm[k]['B'])
+
+    def _seal_threshold(self, k):
+        return self._frontier(k) - self.L - self.W
+
+    def _insert(self, side, k, t, eid, payload):
+        b = self._ensure(k)
+        if t &gt; self.wm[k][side]:
+            self.wm[k][side] = t
+        insort(b[side], (t, eid, payload))
+        self.seen[k].add(eid)
+        self.size += 1
+
+    def _advance(self, k):
+        b = self.buf[k]
+        while True:
+            thr = self._seal_threshold(k)
+            side = None
+            for s in ('A', 'B'):                       # pop globally smallest t
+                if b[s] and b[s][0][0] &lt; thr:
+                    if side is None or b[s][0][0] &lt; b[side][0][0]:
+                        side = s
+            if side is None:
+                break
+            t, eid, _ = b[side].pop(0)
+            self.size -= 1
+            self.seen[k].discard(eid)
+            other = 'B' if side == 'A' else 'A'
+            for (yt, yeid, _) in b[other]:
+                if yt &lt; t - self.W:
+                    continue
+                if yt &gt; t + self.W:
+                    break
+                self.emitted.append((k, eid, yeid) if side == 'A'
+                                    else (k, yeid, eid))
+
+    def _drain_spill(self):
+        while self.spill and self.size &lt; self.cap:
+            side, k, t, eid, payload = self.spill.popleft()
+            if eid in self.seen[k]:
+                self.n_dup += 1
+            elif t &lt; self._seal_threshold(k):
+                self.n_late_dropped += 1
+            else:
+                self._insert(side, k, t, eid, payload)
+                self._advance(k)
+
+    def push(self, side, k, t, eid, payload=None):
+        self._ensure(k)
+        if eid in self.seen[k]:
+            self.n_dup += 1
+            return 'dup'
+        if t &lt; self._seal_threshold(k):
+            self.n_late_dropped += 1
+            return 'too-late'
+        if self.size &gt;= self.cap:
+            if not self.spill_enabled:
+                self.n_late_dropped += 1
+                return 'dropped-cap'
+            self.spill.append((side, k, t, eid, payload))
+            self.n_spilled += 1
+            return 'spilled'
+        self._insert(side, k, t, eid, payload)
+        self._advance(k)
+        self._drain_spill()
+        return 'ok'
+
+    def close(self):
+        &quot;&quot;&quot;End of stream: drain disk ignoring cap, then flush all watermarks.&quot;&quot;&quot;
+        while self.spill:
+            side, k, t, eid, payload = self.spill.popleft()
+            if eid not in self.seen[k]:
+                self._insert(side, k, t, eid, payload)
+                self._advance(k)
+        for k in list(self.wm):
+            self.wm[k]['A'] = self.wm[k]['B'] = POS
+            self._advance(k)
+        return sorted(self.emitted)
+
+
+class RetractingLeftOuter:
+    &quot;&quot;&quot;
+    A-left outer interval join with low-latency speculative emission.
+    A provisional (a, None) row is emitted at the SOFT frontier t_a+W &lt; wm_B,
+    retracted if a late B within L matches, and its retraction state is dropped
+    at the HARD frontier  t_a+W+L &lt; min(wm_A, wm_B).
+    &quot;&quot;&quot;
+    def __init__(self, W, L):
+        self.W, self.L = W, L
+        self.bufA, self.bufB = [], []
+        self.wmA = self.wmB = NEG
+        self.prov = {}                       # aid -&gt; {'t','rows','final'}
+        self.seenA, self.seenB = set(), set()
+        self.log = []                        # ('assert'|'retract', row)
+        self.n_retract = 0
+
+    def _matches(self, a):
+        return [(b, be) for (b, be) in self.bufB if abs(b - a[0]) &lt;= self.W]
+
+    def _emit(self, kind, row):
+        self.log.append((kind, row))
+        if kind == 'retract':
+            self.n_retract += 1
+
+    def _soft_seal(self, a):
+        aid = a[1]
+        ms = self._matches(a)
+        rows = [(aid, be) for (_, be) in ms] or [(aid, None)]
+        for r in rows:
+            self._emit('assert', r)
+        self.prov[aid] = {'t': a[0], 'rows': rows}
+
+    def _refresh(self, aid):
+        a = next((x for x in self.bufA if x[1] == aid), (self.prov[aid]['t'], aid))
+        ms = self._matches(a)
+        newrows = [(aid, be) for (_, be) in ms] or [(aid, None)]
+        for r in self.prov[aid]['rows']:
+            self._emit('retract', r)
+        for r in newrows:
+            self._emit('assert', r)
+        self.prov[aid]['rows'] = newrows
+
+    def _flush_A(self):
+        F = min(self.wmA, self.wmB)
+        for a in list(self.bufA):
+            t, eid = a
+            hard = t &lt; F - self.L - self.W
+            soft = t &lt; self.wmB - self.W
+            if eid not in self.prov and (hard or soft):
+                self._soft_seal(a)
+            if hard:
+                self.prov.pop(eid, None)     # rows final; drop retraction state
+                self.bufA.remove(a)
+
+    def push(self, side, t, eid):
+        if side == 'A':
+            if eid in self.seenA:
+                return
+            self.seenA.add(eid)
+            self.bufA.append((t, eid))
+            self.wmA = max(self.wmA, t)
+            self._flush_A()
+        else:
+            if eid in self.seenB:
+                return
+            self.seenB.add(eid)
+            self.bufB.append((t, eid))
+            self.wmB = max(self.wmB, t)
+            for aid, st in list(self.prov.items()):
+                if abs(st['t'] - t) &lt;= self.W:
+                    self._refresh(aid)
+            self._flush_A()
+
+    def close(self):
+        self.wmA = self.wmB = POS
+        self._flush_A()
+        for a in list(self.bufA):
+            if a[1] not in self.prov:
+                self._soft_seal(a)
+        final = set()
+        for kind, row in self.log:
+            final.add(row) if kind == 'assert' else final.discard(row)
+        return final
+
+
+# ----------------------------- verification -----------------------------
+def brute_force(events, W):
+    &quot;&quot;&quot;Exact batch answer, dedup by (side,key,id).&quot;&quot;&quot;
+    seen, A, B = set(), defaultdict(list), defaultdict(list)
+    for side, k, t, eid in events:
+        if (side, k, eid) in seen:
+            continue
+        seen.add((side, k, eid))
+        (A if side == 'A' else B)[k].append((t, eid))
+    return {(k, ea, eb)
+            for k in set(A) | set(B)
+            for ta, ea in A[k] for tb, eb in B[k]
+            if abs(ta - tb) &lt;= W}
+
+
+if __name__ == '__main__':
+    import random
+
+    def actual_lateness(events):
+        wm = defaultdict(lambda: {'A': NEG, 'B': NEG})
+        worst = 0.0
+        for s, k, t, _ in events:
+            f = min(wm[k]['A'], wm[k]['B'])
+            if f &gt; NEG:
+                worst = max(worst, f - t)
+            wm[k][s] = max(wm[k][s], t)
+        return max(worst, 0.0)
+
+    # 1. exactness under arbitrary permutations
+    bad = 0
+    for seed in range(500):
+        rng = random.Random(seed)
+        W = rng.choice([0, 1, 3, 5])
+        evs = [(rng.choice('AB'), rng.randrange(3), rng.randrange(40), f'e{i}')
+               for i in range(rng.randrange(5, 60))]
+        order = list(range(len(evs))); rng.shuffle(order)
+        sh = [evs[i] for i in order]
+        j = IntervalJoin(W, int(actual_lateness(sh)) + 1)
+        for s, k, t, e in sh:
+            j.push(s, k, t, e)
+        bad += set(j.close()) != brute_force(sh, W)
+    assert bad == 0
+    print('inner exact: 500/500 random permutations match brute force')
+
+    # 2. duplicates + hard cap with spill
+    bad = 0
+    for seed in range(300):
+        rng = random.Random(seed)
+        W = rng.choice([1, 2, 4])
+        evs = [(rng.choice('AB'), rng.randrange(3), rng.randrange(20), f'e{i}')
+               for i in range(rng.randrange(5, 50))]
+        evs += [evs[i] for i in rng.sample(range(len(evs)), min(8, len(evs)))]
+        rng.shuffle(evs)
+        j = IntervalJoin(W, int(actual_lateness(evs)) + 1, max_state=6)
+        for s, k, t, e in evs:
+            j.push(s, k, t, e)
+        bad += set(j.close()) != brute_force(evs, W)
+    assert bad == 0
+    print('duplicates + hard cap/disk-spill: 300/300 match brute force')
+
+    # 3. adversarial skew: B stalls, A floods; drop-on-cap loses data
+    evs = [('A', 'k', t, f'A{t}') for t in range(50)] + [('B', 'k', 25, 'B25')]
+    random.Random(1).shuffle(evs)
+    L = int(actual_lateness(evs)) + 1
+    j = IntervalJoin(1, L, max_state=4)
+    for s, k, t, e in evs:
+        j.push(s, k, t, e)
+    exact = set(j.close())
+    j2 = IntervalJoin(1, L, max_state=4, spill_enabled=False)
+    for s, k, t, e in evs:
+        j2.push(s, k, t, e)
+    lossy = set(j2.close())
+    assert exact == brute_force(evs, 1) and lossy != exact
+    print(f'adversarial skew: exact={len(exact)} via {j.n_spilled} spilled; '
+          f'drop-on-cap loses {len(exact) - len(lossy)}')
+
+    # 4. retraction for speculative outer join
+    evs = [('A', 5, 'A5'), ('B', 10, 'B10'), ('B', 5, 'B5')]
+    r = RetractingLeftOuter(1, 3)
+    for s, t, e in evs:
+        r.push(s, t, e)
+    assert r.close() == {('A5', 'B5')} and r.n_retract &gt;= 1
+    print('retraction log:', r.log)
+    print('ALL CHECKS PASSED')
+</code></pre>
+<p>Expected output:</p>
+<pre><code>inner exact: 500/500 random permutations match brute force
+duplicates + hard cap/disk-spill: 300/300 match brute force
+adversarial skew: exact=3 via 47 spilled; drop-on-cap loses 3
+retraction log: [('assert', ('A5', None)), ('retract', ('A5', None)), ('assert', ('A5', 'B5'))]
+ALL CHECKS PASSED
+</code></pre>
+<h2>Adversarial analysis</h2>
+<p><strong>Watermark skew.</strong> With <code>F[k] = min(wm_A, wm_B)</code>, a stalling side correctly freezes sealing: no matches can be
+retired while the other side is behind. But that same rule means a single hot/stalled key accumulates state up to
+<code>cap</code>. Per-key watermarks fix <em>cross-key</em> head-of-line blocking (a stall in key <code>k1</code> no longer pins <code>k2</code>); they do
+not fix <em>within-key</em> growth. The cap must therefore back-pressure that key’s source or spill. The skew test shows
+47 events spilled while the result stayed exact; the <code>spill_enabled=False</code> variant silently lost all 3 pairs.</p>
+<p><strong>Duplicates.</strong> <code>seen[k]</code> holds only buffered ids. Once an event seals, any later copy has <code>t &lt; F − L − W</code>, hits
+the <code>too-late</code> branch, and is a no-op. Dedup memory is <code>O(buffered)</code>, not <code>O(all history)</code>. Caveat: if copies can
+arrive arbitrarily late (no lateness bound), you need either an unbounded id set or an idempotent sink keyed by
+pair id — the latter keeps memory bounded and is the recommended production choice.</p>
+<p><strong>Impossibility.</strong> Take a key, an A event at <code>t=0</code>, and an adversary that delivers the matching B event at an
+arbitrary future time. To be exact you must keep A forever, so any finite cap without spill/backpressure must
+either lose the match or drop a later event. Hence: exactness ⇔ bounded lateness <code>L</code> (or unbounded/disk state).
+This is why the fix replaces "drop at cap" with "spill at cap".</p>
+<p><strong>Correctness argument for the seal rule.</strong> When <code>t_x + W + L &lt; F[k]</code>, the honest watermark and lateness bound
+guarantee no future opposite event can fall in <code>[t_x − W, t_x + W]</code>; every such partner has arrived and, because
+it is not yet evictable by the same bound, is still in the opposite buffer. Emitting then is complete and final.
+Popping candidates in increasing <code>t</code> ensures each pair is emitted exactly once: at the first member’s eviction the
+other member is still buffered, and after eviction it cannot be emitted again.</p>
+<h2>Verification summary</h2>
+<table>
+<thead>
+<tr>
+<th>check</th>
+<th>result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>500 random permutations vs. batch brute force (inner join)</td>
+<td>0 mismatches</td>
+</tr>
+<tr>
+<td>300 cases with injected duplicates and <code>cap=6</code> (spill on)</td>
+<td>0 mismatches</td>
+</tr>
+<tr>
+<td>adversarial skew, stalled side + flooded side</td>
+<td>exact via 47 spilled; drop-on-cap loses 3 pairs</td>
+</tr>
+<tr>
+<td>forced speculative null→pair retraction (outer join)</td>
+<td>correct final <code>{('A5','B5')}</code>, 1 retraction</td>
+</tr>
+<tr>
+<td>duplicate handling</td>
+<td><code>seen</code> bounded to buffered ids only</td>
+</tr>
+</tbody>
+</table>
+<p>Run: <code>python3 bounded_temporal_join.py</code> → <code>ALL CHECKS PASSED</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: temporal-join-retraction-frontier
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-06T04:02:07.933Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Design a bounded-memory temporal join over two out-of-order event streams with per-key watermarks, late-data retractions, and a hard cap on retained state. Specify the minimal state and eviction rules that preserve exact results under arbitrary arrival order, and analyze adversarial watermark skew and duplicate events.&quot;, &quot;environment&quot;: &quot;python3&quot;, &quot;language&quot;: &quot;python&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;temporal-join-retraction-frontier&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-06T04:02:07.936Z&quot;, &quot;version&quot;: &quot;3.11&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

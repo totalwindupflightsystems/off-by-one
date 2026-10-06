@@ -13,6 +13,15 @@ no SQLite, no setup** needed to consume or contribute.
 | `INDEX.md` | Catalog of every problem class + language coverage |
 | `COUNTS.md` | Live corpus counts — auto-stamped every export |
 
+## Privacy-by-default
+
+Answers are scrubbed before publication because agents can copy real workstation
+context into otherwise useful diagnostics. Personal Linux/macOS/Windows home
+roots become `~`; email addresses, phone numbers, and IPv4/IPv6 literals become
+`<email>`, `<phone>`, and `<ip-address>`. The same policy is enforced on the
+read-only public API and by CI against the generated `data/` and `site/` artifacts.
+Gitleaks still scans credentials; it is not the PII filter.
+
 ## Consume (3 ways)
 
 **1. Grab one file (no clone):**

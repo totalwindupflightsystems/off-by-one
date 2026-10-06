@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -518,19 +520,49 @@ func normalizeRepoURL(u string) string {
 
 // --- Host-path hygiene (REVIEW-OB-006) -----------------------------------
 
-// hostPathPattern matches an operator-machine home prefix: /home/<user>
-// where <user> is any plausible account name (kara, bunker, bunker-*,
-// runner, user, ...). The subtree export is a public surface, so these
-// must never be written into it.
-var hostPathPattern = regexp.MustCompile(`/home/[A-Za-z0-9_-]+`)
+// hostPathPattern matches personal home-directory roots across Linux, macOS,
+// Windows, WSL/Cygwin, and JSON-escaped slash variants. Keep in sync with
+// _HOST_PATH_RE in scripts/export-answers.py; public exports must not retain
+// account names from any platform.
+var hostPathPattern = regexp.MustCompile(`(?i)(?:\\*/home|\\*/users|\\*/mnt/[a-z]/users|\\*/cygdrive/[a-z]/users|[a-z]:[/\\]+users|\\*/documents and settings)[/\\]+[A-Za-z0-9._-]+`)
 
-// sanitizeHostPaths rewrites every /home/<user> prefix in s to "~"
-// (e.g. "/home/kara/.local/bin/pi-agent" -> "~/.local/bin/pi-agent").
-// Non-path text ("/usr/bin", a bare "/home", "home/kara" without the
-// leading slash) is untouched. writeItem applies it to every rendered
-// file before it reaches disk.
+// sanitizeHostPaths rewrites every personal home root in s to "~"
+// (e.g. "/home/user/project" -> "~/project" and `C:\\Users\\user\\repo`
+// -> "~\\repo"). System paths such as /usr/bin remain untouched.
 func sanitizeHostPaths(s string) string {
 	return hostPathPattern.ReplaceAllString(s, "~")
+}
+
+var (
+	personalEmailPattern = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b`)
+	personalPhonePattern = regexp.MustCompile(`(^|[^0-9])(?:\+[0-9]{1,3}[ .-]?)?(?:\([0-9]{3}\)|[0-9]{3})[ .-][0-9]{3}[ .-][0-9]{4}([^0-9]|$)`)
+	ipv4Pattern          = regexp.MustCompile(`(^|[^0-9.])((?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})([^0-9.]|$)`)
+	ipv6CandidatePattern = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_:])((?:[0-9a-f]{0,4}:){2,}[0-9a-f:.%]+)([^A-Za-z0-9_:]|$)`)
+)
+
+// sanitizeCommonPII is the public answer-sharing filter. Gitleaks remains
+// responsible for credential detection; this separately redacts common
+// personal contact/network identifiers, including data inside signatures.
+func sanitizeCommonPII(s string) string {
+	s = sanitizeHostPaths(s)
+	s = personalEmailPattern.ReplaceAllString(s, "<email>")
+	s = personalPhonePattern.ReplaceAllString(s, "${1}<phone>${2}")
+	s = ipv4Pattern.ReplaceAllString(s, "${1}<ip-address>${3}")
+	s = ipv6CandidatePattern.ReplaceAllStringFunc(s, func(match string) string {
+		parts := ipv6CandidatePattern.FindStringSubmatch(match)
+		if len(parts) != 4 {
+			return match
+		}
+		addr := parts[2]
+		if i := strings.IndexByte(addr, '%'); i >= 0 {
+			addr = addr[:i]
+		}
+		if net.ParseIP(addr) != nil {
+			return parts[1] + "<ip-address>" + parts[3]
+		}
+		return match
+	})
+	return s
 }
 
 // --- Internal-name hygiene (REVIEW-OB-009) --------------------------------
@@ -563,13 +595,69 @@ func sanitizeInternalNames(s string) string {
 	return s
 }
 
-// sanitizeCorpusText is the full corpus-text scrub: internal names first,
-// then host paths. Name redaction runs first because the <tool> rule
-// consumes its own /home/<user>/ prefix; the host-path rewrite then
-// backstops any other /home/<user> occurrence. writeItem applies it to
-// every rendered file before it reaches disk.
+// sanitizeCorpusText is the full public-export scrub: internal names first,
+// then personal home paths and common contact/network PII. writeItem applies
+// it to every answer text field before it reaches the target repository.
 func sanitizeCorpusText(s string) string {
-	return sanitizeHostPaths(sanitizeInternalNames(s))
+	return sanitizeCommonPII(sanitizeInternalNames(s))
+}
+
+// SanitizePublicJSON redacts common PII in every string value and object key
+// in a JSON response. It preserves non-string values (UseNumber avoids a
+// float64 round-trip) and fails on sanitized-key collisions rather than
+// silently overwriting data.
+func SanitizePublicJSON(raw []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("public JSON response contains trailing data")
+		}
+		return nil, err
+	}
+	sanitized, err := sanitizeJSONValue(value)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(sanitized)
+}
+
+func sanitizeJSONValue(value any) (any, error) {
+	switch v := value.(type) {
+	case string:
+		return sanitizeCorpusText(v), nil
+	case []any:
+		out := make([]any, len(v))
+		for i, item := range v {
+			sanitized, err := sanitizeJSONValue(item)
+			if err != nil {
+				return nil, err
+			}
+			out[i] = sanitized
+		}
+		return out, nil
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			safeKey := sanitizeCorpusText(key)
+			if _, exists := out[safeKey]; exists {
+				return nil, fmt.Errorf("public PII redaction produced duplicate JSON key")
+			}
+			sanitized, err := sanitizeJSONValue(item)
+			if err != nil {
+				return nil, err
+			}
+			out[safeKey] = sanitized
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
 }
 
 // --- Formatting (spec §5.1) ---------------------------------------------

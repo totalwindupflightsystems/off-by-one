@@ -22,9 +22,12 @@
 #    are lab-internal identifiers. The export pipeline rewrites them to
 #    <project>/<tool> placeholders at write time.
 #
-# Exit 1 (listing the offending files) when a match is found under data/ or
-# site/; exit 0 when clean. Ops files legitimately carry deploy paths and are
-# deliberately out of scope — only data/ and site/ are scanned.
+# 4. PUBLIC-PII-001 — personal path roots across common platforms, email,
+#    phone, IPv4 and IPv6 are rejected by a dedicated checker. Output names
+#    only categories/files/counts; matched values are never echoed.
+#
+# Exit 1 when a match is found under data/ or site/; exit 0 when clean. Ops
+# files legitimately carry deploy paths and are deliberately out of scope.
 #
 # CORPUS_HYGIENE_ROOT overrides the scan root so the self-test can point the
 # guard at a temp fixture tree (scripts/tests/check-corpus-hygiene-selftest.sh).
@@ -70,6 +73,12 @@ badge_offenders="$(grep -rEl "$BADGE_PATTERN" "$ROOT/site" 2>/dev/null)"
 if [ -n "$badge_offenders" ]; then
   printf 'corpus hygiene VIOLATION: prose environment badge (whitespace, ; or ~) under site/:\n' >&2
   printf '%s\n' "$badge_offenders" | sed 's/^/  /' >&2
+  rc=1
+fi
+
+# PUBLIC-PII-001: unlike gitleaks, this checks common personal identifiers
+# in the public corpus/site and never prints the matched values.
+if ! python3 "$GUARD_DIR/check-public-pii.py" "$ROOT"; then
   rc=1
 fi
 
