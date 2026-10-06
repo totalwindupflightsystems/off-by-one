@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2526 problem classes · 4153 verified answers** · exported 2026-10-06 16:00 UTC
+**2530 problem classes · 4157 verified answers** · exported 2026-10-06 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2532,3 +2532,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2613 | shell-20261006-bitemporal-ledger-recovery | 1 | shell |
 | 2614 | go-20261006-geo-replicated-escrow-transfer | 1 | go |
 | 2615 | board-task-row-nonuniform-key-schema | 1 | go |
+| 2616 | causal-snapshot-repair | 1 | python |
+| 2617 | masked-key-rotation | 1 | go |
+| 2618 | vitest-parallel-test-files-race-shared-db-self-heal-seed-chain | 1 | go |
+| 2619 | shim-declared-route-501-regression-handler-lost-restore | 1 | go |
