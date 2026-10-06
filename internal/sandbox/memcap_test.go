@@ -15,6 +15,33 @@ import (
 // (the standard TestHelperProcess pattern).
 const memCapHelperEnv = "OBY_TEST_MEMCAP_HELPER"
 
+// memCapPyEnv carries the resolved python3 path from the parent test to
+// the alloc-under-cap helper child. The child execs it AFTER pinning
+// RLIMIT_AS, so the ENOMEM observation is made by a process that does
+// not run the Go runtime.
+const memCapPyEnv = "OBY_TEST_MEMCAP_PY"
+
+// allocUnderCapProbePy is the non-Go half of the alloc-under-cap arm: an
+// anonymous 256 MiB mapping attempted under the 64 MiB RLIMIT_AS the
+// helper pinned just before exec. mmap(2) charges the address space at
+// map time, so no pages need to be touched for the kernel to refuse.
+// It prints ALLOC-REFUSED and exits 0 only when the kernel answers
+// ENOMEM (errno 12); a successful mapping means the cap is not enforced
+// and the probe exits 1 so the parent test fails loudly.
+const allocUnderCapProbePy = `import mmap, sys
+try:
+    m = mmap.mmap(-1, 268435456)
+except OSError as e:
+    if e.errno == 12:
+        print("ALLOC-REFUSED")
+        sys.exit(0)
+    print("mmap failed with %r, want ENOMEM (errno 12)" % (e,), file=sys.stderr)
+    sys.exit(1)
+m.close()
+print("256 MiB mmap SUCCEEDED under a 64 MiB RLIMIT_AS -- cap not enforced", file=sys.stderr)
+sys.exit(1)
+`
+
 // TestMemCapHelperProcess is not a test — it is the child half of the
 // subprocess arms below. It runs the mode named by
 // OBY_TEST_MEMCAP_MODE and exits non-zero on any unexpected outcome.
@@ -49,26 +76,35 @@ func TestMemCapHelperProcess(t *testing.T) {
 		fmt.Println("ROUNDTRIP-OK")
 		os.Exit(0)
 	case "alloc-under-cap":
-		// Pin the cap at 64 MiB, then ask the kernel for a 256 MiB
-		// anonymous mapping: it MUST be refused with ENOMEM. A direct
-		// mmap is used instead of a Go heap allocation so the arm does
-		// not depend on runtime arena behaviour.
+		// Pin the cap at 64 MiB, then REPLACE this process with a
+		// non-Go probe that performs the 256 MiB mmap. The Go runtime
+		// must not keep running post-setrlimit: on CI runners the
+		// first runtime allocation after ApplyMemLimitMB(64) dies with
+		// "fatal error: runtime: cannot allocate memory" in
+		// runtime.persistentalloc1 before the probe is ever reached
+		// (INT-CI-003), while locally the runtime happens to survive.
+		// Everything the exec needs is resolved BEFORE the cap is
+		// applied; between ApplyMemLimitMB and syscall.Exec there is
+		// only the error branch, so no post-cap Go heap allocation is
+		// required. python3 (-S: skip site imports) fits in 64 MiB and
+		// its mmap is charged at map time, so the kernel's ENOMEM is
+		// observed by the exec'd interpreter, never by live Go code.
+		py := os.Getenv(memCapPyEnv)
+		if py == "" {
+			fmt.Fprintf(os.Stderr, "%s not set — parent must resolve python3\n", memCapPyEnv)
+			os.Exit(2)
+		}
+		argv := []string{py, "-S", "-c", allocUnderCapProbePy}
 		if err := ApplyMemLimitMB(64); err != nil {
 			fmt.Fprintf(os.Stderr, "ApplyMemLimitMB(64): %v\n", err)
 			os.Exit(1)
 		}
-		buf, err := syscall.Mmap(-1, 0, 256<<20, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
-		if err == nil {
-			_ = syscall.Munmap(buf)
-			fmt.Fprintln(os.Stderr, "256 MiB mmap SUCCEEDED under a 64 MiB RLIMIT_AS — cap not enforced")
+		// No Go runtime work from here on: exec immediately. An exec
+		// failure is reported best-effort (the cap is already pinned).
+		if err := syscall.Exec(py, argv, nil); err != nil {
+			fmt.Fprintf(os.Stderr, "exec python3 probe: %v\n", err)
 			os.Exit(1)
 		}
-		if err != syscall.ENOMEM {
-			fmt.Fprintf(os.Stderr, "mmap failed with %v, want ENOMEM\n", err)
-			os.Exit(1)
-		}
-		fmt.Println("ALLOC-REFUSED")
-		os.Exit(0)
 	case "alloc-control":
 		// Same 256 MiB mapping with NO cap: must succeed, proving the
 		// alloc-under-cap refusal is caused by the rlimit and not by
@@ -111,11 +147,13 @@ func TestMemCapHelperProcess(t *testing.T) {
 }
 
 // runMemCapHelper re-executes the test binary as the helper child in
-// the given mode and returns its combined output.
-func runMemCapHelper(t *testing.T, mode string) (string, error) {
+// the given mode and returns its combined output. extraEnv entries
+// (KEY=value) are appended to the child's environment.
+func runMemCapHelper(t *testing.T, mode string, extraEnv ...string) (string, error) {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestMemCapHelperProcess$")
-	cmd.Env = append(os.Environ(), memCapHelperEnv+"=1", "OBY_TEST_MEMCAP_MODE="+mode)
+	env := append(os.Environ(), memCapHelperEnv+"=1", "OBY_TEST_MEMCAP_MODE="+mode)
+	cmd.Env = append(env, extraEnv...)
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
@@ -131,13 +169,23 @@ func TestApplyMemLimitMB_RoundTrip(t *testing.T) {
 }
 
 func TestApplyMemLimitMB_RefusesAllocationPastCap(t *testing.T) {
-	// Control first: the host can hand out 256 MiB with no cap.
+	// Control first: the host can hand out 256 MiB with no cap. This arm
+	// is MANDATORY — without it a refusal under the cap cannot be
+	// attributed to the rlimit.
 	out, err := runMemCapHelper(t, "alloc-control")
 	if err != nil || !strings.Contains(out, "ALLOC-OK") {
 		t.Fatalf("control arm (no cap) failed — cannot attribute the capped refusal: err=%v\n%s", err, out)
 	}
-	// Under a 64 MiB cap the same mapping must be refused with ENOMEM.
-	out, err = runMemCapHelper(t, "alloc-under-cap")
+	// The under-cap ENOMEM is observed by an exec'd python3 probe, not
+	// by the Go helper that pinned the cap (see the alloc-under-cap arm
+	// in TestMemCapHelperProcess): a live Go runtime under a 64 MiB
+	// RLIMIT_AS dies on its own post-setrlimit allocations on CI
+	// runners, which is the env-dependent flake this test must not be.
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not on PATH: the under-cap ENOMEM probe needs a non-Go runtime (a Go process cannot survive post-setrlimit under 64 MiB); the control arm above already passed")
+	}
+	out, err = runMemCapHelper(t, "alloc-under-cap", memCapPyEnv+"="+py)
 	if err != nil {
 		t.Fatalf("alloc-under-cap helper failed: %v\n%s", err, out)
 	}
