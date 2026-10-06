@@ -63,7 +63,7 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <p><code>bash -l</code> sources <code>/etc/profile</code> and <code>~/.bash_profile</code>; <code>bash -i</code> moreover sources <code>~/.bashrc</code>. Any of those files may <code>unset</code> or blank the key (some CI images sanitize secrets in login rc, some <code>profile.d</code> scripts reset the environment). The value is visible on the <em>launch command line</em>, but by the time <code>exec</code> happens the variable is gone, so the child's own <code>/proc/&lt;pid&gt;/environ</code> never contained it. A process cannot "leak" a value it never received — reading the parent or the command line is meaningless; only the child's <code>/proc/&lt;pid&gt;/environ</code> is authoritative.</p>
 <p>Reproduced with a hostile <code>~/.bash_profile</code>:</p>
 <pre><code>$ MOCK_LLM_KEY=super-secret-key HOME=/tmp/repro \
-    bash -lic '/tmp/repro/mock-llm --addr 127.0.0.1:18081'
+    bash -lic '/tmp/repro/mock-llm --addr &lt;ip-address&gt;:18081'
 LLM_PROVIDER_NOT_CONFIGURED: MOCK_LLM_KEY missing from /proc/self/environ
 exit=3
 </code></pre>
@@ -93,7 +93,7 @@ battery: pass=37 fail=2
 </blockquote>
 <h3>1. Launch without a login shell, or keep the env out of rc-reachable state</h3>
 <p>If you control the spawn, pass the environment as part of the process creation and skip the login shell entirely:</p>
-<pre><code class="language-bash">env &quot;MOCK_LLM_KEY=$KEY&quot; ./server --addr 127.0.0.1:$PORT &amp;   # no `bash -lic`
+<pre><code class="language-bash">env &quot;MOCK_LLM_KEY=$KEY&quot; ./server --addr &lt;ip-address&gt;:$PORT &amp;   # no `bash -lic`
 </code></pre>
 <p>If the harness <strong>requires</strong> a shell wrapper, make the rc files unable to strip it: put the secret in a file the binary reads itself (<code>--env-file</code>, systemd <code>EnvironmentFile=</code>), or <code>exec</code> from a <code>bash -c</code> whose rc is disabled (<code>bash --noprofile --norc -c 'exec env KEY=… ./server'</code>). The verify step below still applies unconditionally — the wrapper is untrusted by design.</p>
 <h3>2. Read the env back from the actual PID (authoritative)</h3>
@@ -133,7 +133,7 @@ kill_stale() {
   return 1; }
 
 launch() {  # env passed atomically; no login/interactive shell
-  env &quot;$REQUIRED_ENV=$REQUIRED_VAL&quot; &quot;$BIN&quot; --addr &quot;127.0.0.1:$PORT&quot; &gt;/tmp/server.out 2&gt;&amp;1 &amp;
+  env &quot;$REQUIRED_ENV=$REQUIRED_VAL&quot; &quot;$BIN&quot; --addr &quot;&lt;ip-address&gt;:$PORT&quot; &gt;/tmp/server.out 2&gt;&amp;1 &amp;
   disown 2&gt;/dev/null || true; }
 
 wait_for_pid() {
@@ -175,7 +175,7 @@ func EnsureServer(comm, bin, port, key, val string) (int, error) {
     for attempt := 1; attempt &lt;= 3; attempt++ {
         killAll()
         time.Sleep(300 * time.Millisecond)
-        cmd := exec.Command(bin, &quot;--addr&quot;, &quot;127.0.0.1:&quot;+port)
+        cmd := exec.Command(bin, &quot;--addr&quot;, &quot;&lt;ip-address&gt;:&quot;+port)
         cmd.Env = append(os.Environ(), key+&quot;=&quot;+val) // explicit, wrapper-free
         if err := cmd.Start(); err != nil {
             return 0, err
@@ -197,7 +197,7 @@ func EnsureServer(comm, bin, port, key, val string) (int, error) {
 <h2>Verification</h2>
 <p>Reproduction and fix were executed against a Go mock LLM server (<code>comm=mock-llm</code>) that refuses to start without <code>MOCK_LLM_KEY</code> in its own <code>/proc/self/environ</code>, with a hostile <code>~/.bash_profile</code> that unsets the key.</p>
 <p><strong>1. Wrapper env loss (cause 1):</strong></p>
-<pre><code>$ MOCK_LLM_KEY=super-secret-key HOME=/tmp/repro bash -lic '/tmp/repro/mock-llm --addr 127.0.0.1:18081'
+<pre><code>$ MOCK_LLM_KEY=super-secret-key HOME=/tmp/repro bash -lic '/tmp/repro/mock-llm --addr &lt;ip-address&gt;:18081'
 LLM_PROVIDER_NOT_CONFIGURED: MOCK_LLM_KEY missing from /proc/self/environ   exit=3
 </code></pre>
 <p><strong>2. Foreign keyless binary racing the port (cause 2), naive provision:</strong></p>
@@ -212,7 +212,7 @@ battery: pass=37 fail=2        # core 6/8 + extended
 <pre><code>[ensure] killing our stale mock-llm: 2619
 [ensure] READY pid=2802 attempt=1 env-verified + port-owned
 /proc/2802/environ: MOCK_LLM_KEY=&lt;present&gt;          # read from the real binary
-LISTEN 127.0.0.1:43443 users:((&quot;mock-llm&quot;,pid=2802,fd=3))
+LISTEN &lt;ip-address&gt;:43443 users:((&quot;mock-llm&quot;,pid=2802,fd=3))
 battery: pass=39 fail=0
 </code></pre>
 <p><strong>4. Battery totals — matches the reported field result:</strong></p>

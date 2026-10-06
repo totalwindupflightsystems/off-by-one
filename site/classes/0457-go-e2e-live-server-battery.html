@@ -188,12 +188,12 @@ if !rl.Allow(&quot;login:&quot;+getClientIP(r), 5, time.Minute) {
 | 4 | `POST /v1/api/v1/auth/login` valid creds | 404-ish deadlock | 200 + session cookie |
 | 5 | `GET /v1/api/v1/definitely-not-a-route` | masked by validator | `404 page not found` from router — confirms 401/404 disambiguation |
 | 6 | 6 rapid logins, same IP | 429 on 6th (limiter works) | 429 on 6th |
-| 7 | Same burst with `X-Forwarded-For: 203.0.113.9` per request | unlimited (spoof defeats limiter) | 429 on 6th — XFF ignored (no trusted proxies configured) |
+| 7 | Same burst with `X-Forwarded-For: &lt;ip-address&gt;` per request | unlimited (spoof defeats limiter) | 429 on 6th — XFF ignored (no trusted proxies configured) |
 | 8 | Session lookup with raw UUID token | `Scan error ... into *time.Time` (TEXT ts) | 200 — token matched, times scanned |
 
 Edge cases exercised:
-- **XFF multi-hop** `X-Forwarded-For: 1.1.1.1, 2.2.2.2`: right-most untrusted hop wins; ignored entirely when peer is untrusted.
-- **IPv6 literals** `[::1]:8080`, IPv4-mapped `::ffff:127.0.0.1` — normalized to a single bucket key (no per-port/per-format splitting).
+- **XFF multi-hop** `X-Forwarded-For: &lt;ip-address&gt;, &lt;ip-address&gt;`: right-most untrusted hop wins; ignored entirely when peer is untrusted.
+- **IPv6 literals** `[&lt;ip-address&gt;]:8080`, IPv4-mapped `::ffff:&lt;ip-address&gt;` — normalized to a single bucket key (no per-port/per-format splitting).
 - **SkipPaths prefix safety**: `/v1/api/v1/auth/me` skipped by design; `/v1/api/v1/authentication` NOT matched (trailing-slash boundary on `/v1/api/v1/auth/`).
 - **Time formats**: both RFC3339 and SQLite `2006-01-02 15:04:05` string forms scan into `time.Time` under `DATETIME` affinity.
 - **Empty XFF / nil `RemoteAddr`** — falls back to peer host, never panics.
@@ -223,7 +223,7 @@ $(BIN): $(shell find cmd internal -name '*.go' -o -name 'go.mod')
 <p><strong>CLI (<code>cmd/live/main.go</code>)</strong> — <code>serve</code>, <code>version</code>, <code>help</code>, <code>list</code> via a testable <code>run(args, stdout, stderr) int</code>; <code>serve</code> wires SIGINT/SIGTERM → <code>http.Server.Shutdown</code> so the port is released immediately.</p>
 <p><strong>The named battery test (<code>internal/server/server_test.go</code>)</strong> — real loopback TCP (no httptest), then confirms the port is released after shutdown:</p>
 <pre><code class="language-go">func TestE2E_ServeAttachSearchDetach(t *testing.T) {
-    ln, _ := net.Listen(&quot;tcp&quot;, &quot;127.0.0.1:0&quot;)        // real TCP
+    ln, _ := net.Listen(&quot;tcp&quot;, &quot;&lt;ip-address&gt;:0&quot;)        // real TCP
     go http.Server{Handler: srv.Handler()}.Serve(ln)
     // health 4/4 → POST /sessions (attach) → POST /search
     // → DELETE /sessions/{id} (detach) → list shows it gone
@@ -276,7 +276,7 @@ func memlockDegraded() bool {
 </code></pre>
 <p><strong>4. Live E2E test</strong> (<code>TestE2E_ServeAttachSearchDetach</code>) — the fix's self-check: fresh <code>go build</code>, serve on an ephemeral port, poll <code>/health</code> until 200, assert <code>v1.0.0</code> + 4/4 with exact component details, sweep sessions/search/chat/metrics for 200, attach → detach, <code>SIGKILL</code>, then assert the port is released (dial refused <strong>and</strong> rebind succeeds):</p>
 <pre><code class="language-go">portReleased := func(port int) {
-    addr := net.JoinHostPort(&quot;127.0.0.1&quot;, fmt.Sprint(port))
+    addr := net.JoinHostPort(&quot;&lt;ip-address&gt;&quot;, fmt.Sprint(port))
     if conn, err := net.DialTimeout(&quot;tcp&quot;, addr, 2*time.Second); err == nil {
         conn.Close(); t.Fatalf(&quot;port %d still accepting after kill&quot;, port)
     }
@@ -290,7 +290,7 @@ func memlockDegraded() bool {
 | Battery assertion (tick #108) | Observed |
 |---|---|
 | fresh `make build` | `go build -o bin/go-e2e-live-server-battery .` — clean; `gofmt -l` and `go vet` empty |
-| serve :19734 degraded mode | stderr: `WARN memlock: RLIMIT_MEMLOCK below eBPF map budget; serving in degraded mode (expected for battery)`; stdout: `serving on 127.0.0.1:19734` |
+| serve :19734 degraded mode | stderr: `WARN memlock: RLIMIT_MEMLOCK below eBPF map budget; serving in degraded mode (expected for battery)`; stdout: `serving on &lt;ip-address&gt;:19734` |
 | health v1.0.0 4/4 ok | `{&quot;version&quot;:&quot;v1.0.0&quot;,&quot;status&quot;:&quot;ok&quot;,&quot;components&quot;:{&quot;classifier&quot;:{&quot;status&quot;:&quot;ok&quot;,&quot;detail&quot;:&quot;backend=local&quot;},&quot;collector&quot;:{&quot;status&quot;:&quot;ok&quot;,&quot;detail&quot;:&quot;eBPF attached&quot;},&quot;metrics&quot;:{&quot;status&quot;:&quot;ok&quot;},&quot;storage&quot;:{&quot;status&quot;:&quot;ok&quot;}}}` HTTP 200 |
 | sessions/search/chat/metrics 200 | `/sessions`→200, `/search?q=hello`→200, `/metrics`→200, `POST /chat`→200 |
 | CLI 12 subcommands | `--help` grep count = **11**; `version` → `go-e2e-live-server-battery v1.0.0`; 11+1=12 |
@@ -347,7 +347,7 @@ go func() {
 <p><code>list</code> reads the same store and prints <code>No active sessions</code> when it's empty.</p>
 <p><strong>3. Battery</strong> (<code>e2e/live_battery_test.go</code>) — the key fix pattern from the tick: bind <code>:0</code> for a genuinely free port, start <code>serve --no-ebpf</code> there with a tmpdir DB, probe over real TCP, then SIGTERM and verify zero zombies:</p>
 <pre><code class="language-go">// Alternative-port pattern: a sibling deployment may own :19737/:19734.
-ln, err := net.Listen(&quot;tcp&quot;, &quot;127.0.0.1:0&quot;) // real free port
+ln, err := net.Listen(&quot;tcp&quot;, &quot;&lt;ip-address&gt;:0&quot;) // real free port
 addr := ln.Addr().String()
 ln.Close()
 
@@ -387,7 +387,7 @@ PASS  ok  rabbithole/e2e  0.666s
 ```
 
 **Edge cases tested:**
-- *Alternative-port pattern* — locked `127.0.0.1:19734` with a sibling listener; `serve --addr &lt;busy&gt;` fails fast with a `bind` error, while the battery passes on a free `:0`-chosen port.
+- *Alternative-port pattern* — locked `&lt;ip-address&gt;:19734` with a sibling listener; `serve --addr &lt;busy&gt;` fails fast with a `bind` error, while the battery passes on a free `:0`-chosen port.
 - *Hermeticity gate* — `serve` without `RABBITHOLE_DB_PATH` exits non-zero with a clear message (no accidental writes to cwd).
 - *Graceful shutdown* — SIGTERM → exit 0, store flushed (`/tmp/rh178-e2e.db` written, re-readable by `list`), zero zombies; also verified clean SIGTERM exit under a direct subprocess spawn (a bash `&amp;&amp;`-chain `&amp;` backgrounding subtlety initially made `kill` hit a subshell — the server itself always exits 0).
 - *Empty-DB semantics* — `sessions` reports `active:0`; `list` prints `No active sessions`.
@@ -419,7 +419,7 @@ $(BIN): $(shell find cmd internal -name '*.go' -o -name 'go.mod')
 <p><strong>CLI (<code>cmd/live/main.go</code>)</strong> — <code>serve</code>, <code>version</code>, <code>help</code>, <code>list</code> via a testable <code>run(args, stdout, stderr) int</code>; <code>serve</code> wires SIGINT/SIGTERM → <code>http.Server.Shutdown</code> so the port is released immediately.</p>
 <p><strong>The named battery test (<code>internal/server/server_test.go</code>)</strong> — real loopback TCP (no httptest), then confirms the port is released after shutdown:</p>
 <pre><code class="language-go">func TestE2E_ServeAttachSearchDetach(t *testing.T) {
-    ln, _ := net.Listen(&quot;tcp&quot;, &quot;127.0.0.1:0&quot;)        // real TCP
+    ln, _ := net.Listen(&quot;tcp&quot;, &quot;&lt;ip-address&gt;:0&quot;)        // real TCP
     go http.Server{Handler: srv.Handler()}.Serve(ln)
     // health 4/4 → POST /sessions (attach) → POST /search
     // → DELETE /sessions/{id} (detach) → list shows it gone
@@ -472,7 +472,7 @@ func memlockDegraded() bool {
 </code></pre>
 <p><strong>4. Live E2E test</strong> (<code>TestE2E_ServeAttachSearchDetach</code>) — the fix's self-check: fresh <code>go build</code>, serve on an ephemeral port, poll <code>/health</code> until 200, assert <code>v1.0.0</code> + 4/4 with exact component details, sweep sessions/search/chat/metrics for 200, attach → detach, <code>SIGKILL</code>, then assert the port is released (dial refused <strong>and</strong> rebind succeeds):</p>
 <pre><code class="language-go">portReleased := func(port int) {
-    addr := net.JoinHostPort(&quot;127.0.0.1&quot;, fmt.Sprint(port))
+    addr := net.JoinHostPort(&quot;&lt;ip-address&gt;&quot;, fmt.Sprint(port))
     if conn, err := net.DialTimeout(&quot;tcp&quot;, addr, 2*time.Second); err == nil {
         conn.Close(); t.Fatalf(&quot;port %d still accepting after kill&quot;, port)
     }
@@ -486,7 +486,7 @@ func memlockDegraded() bool {
 | Battery assertion (tick #108) | Observed |
 |---|---|
 | fresh `make build` | `go build -o bin/go-e2e-live-server-battery .` — clean; `gofmt -l` and `go vet` empty |
-| serve :19734 degraded mode | stderr: `WARN memlock: RLIMIT_MEMLOCK below eBPF map budget; serving in degraded mode (expected for battery)`; stdout: `serving on 127.0.0.1:19734` |
+| serve :19734 degraded mode | stderr: `WARN memlock: RLIMIT_MEMLOCK below eBPF map budget; serving in degraded mode (expected for battery)`; stdout: `serving on &lt;ip-address&gt;:19734` |
 | health v1.0.0 4/4 ok | `{&quot;version&quot;:&quot;v1.0.0&quot;,&quot;status&quot;:&quot;ok&quot;,&quot;components&quot;:{&quot;classifier&quot;:{&quot;status&quot;:&quot;ok&quot;,&quot;detail&quot;:&quot;backend=local&quot;},&quot;collector&quot;:{&quot;status&quot;:&quot;ok&quot;,&quot;detail&quot;:&quot;eBPF attached&quot;},&quot;metrics&quot;:{&quot;status&quot;:&quot;ok&quot;},&quot;storage&quot;:{&quot;status&quot;:&quot;ok&quot;}}}` HTTP 200 |
 | sessions/search/chat/metrics 200 | `/sessions`→200, `/search?q=hello`→200, `/metrics`→200, `POST /chat`→200 |
 | CLI 12 subcommands | `--help` grep count = **11**; `version` → `go-e2e-live-server-battery v1.0.0`; 11+1=12 |

@@ -849,6 +849,11 @@ func TestSanitizeHostPaths(t *testing.T) {
 		{"generic uppercase", "/home/OLDUSER/.venv/bin", "~/.venv/bin"},
 		{"generic underscore digit", "/home/svc_01/data", "~/data"},
 		{"multiple in one text", "copy /home/kara/a to /home/bunker-deadbeef/b", "copy ~/a to ~/b"},
+		{"macOS home", "/Users/alice/Library/Secrets/key", "~/Library/Secrets/key"},
+		{"Windows home", `C:\\Users\\alice\\Documents\\private.txt`, `~\\Documents\\private.txt`},
+		{"escaped JSON home", `\\/home\\/alice\\private\\repo`, `~\\private\\repo`},
+		{"WSL home", "/mnt/c/Users/alice/project", "~/project"},
+		{"Cygwin home", "/cygdrive/c/Users/alice/project", "~/project"},
 		{"non-home path untouched", "/usr/bin/env python3", "/usr/bin/env python3"},
 		{"bare /home untouched", "/home", "/home"},
 		{"no leading slash untouched", "home/kara is not absolute", "home/kara is not absolute"},
@@ -862,6 +867,48 @@ func TestSanitizeHostPaths(t *testing.T) {
 				t.Errorf("sanitizeHostPaths(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// --- PUBLIC-PII-001: common PII hygiene -----------------------------------
+
+func TestSanitizeCommonPII(t *testing.T) {
+	in := "contact alice@example.net at (415) 555-1212; host 203.0.113.7; v6 2001:db8::1; version v1.2.3"
+	want := "contact <email> at <phone>; host <ip-address>; v6 <ip-address>; version v1.2.3"
+	if got := sanitizeCommonPII(in); got != want {
+		t.Fatalf("sanitizeCommonPII() = %q, want %q", got, want)
+	}
+}
+
+func TestSanitizePublicJSON(t *testing.T) {
+	in := []byte(`{"contact":"alice@example.net","phone":"(415) 555-1212","ip":"203.0.113.7","path":"C:\\Users\\alice\\private","large":9007199254740993,"alice@example.net":"key"}`)
+	out, err := SanitizePublicJSON(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	decoder := json.NewDecoder(bytes.NewReader(out))
+	decoder.UseNumber()
+	if err := decoder.Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"contact": "<email>", "phone": "<phone>", "ip": "<ip-address>",
+		"path": `~\private`, "<email>": "key",
+	} {
+		if got[key] != want {
+			t.Errorf("%s = %#v, want %q", key, got[key], want)
+		}
+	}
+	if got["large"] != json.Number("9007199254740993") {
+		t.Errorf("large integer changed during sanitization: %#v", got["large"])
+	}
+}
+
+func TestSanitizePublicJSONFailsClosedOnKeyCollision(t *testing.T) {
+	_, err := SanitizePublicJSON([]byte(`{"alice@example.net":1,"bob@example.net":2}`))
+	if err == nil {
+		t.Fatal("expected duplicate redacted key error")
 	}
 }
 

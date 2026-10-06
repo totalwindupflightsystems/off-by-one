@@ -179,6 +179,46 @@ run_guard "$FIX"
 printf '\nARM 14 — <project>/<tool> placeholders only: exit 0\n'
 check "exit code 0" "0" "$OUT_RC"
 
+# ── ARM 15 — Windows/macOS/escaped paths are covered ───────────────────────
+FIX="$TMP/arm15-cross-platform-paths"
+mkdir -p "$FIX/data/answers"
+printf '%s\n' '{"solution":"C:\\\\Users\\\\alice\\\\private"}' > "$FIX/data/answers/0001-cross-path.json"
+run_guard "$FIX"
+printf '\nARM 15 — Windows user path: exit 1 without echoing value\n'
+check "exit code 1" "1" "$OUT_RC"
+check_contains "names offending file" "0001-cross-path.json" "$OUT"
+check_contains "does not print the path value" "personal home path" "$OUT"
+
+# ── ARM 16 — email and phone values are detected, but never printed ────────
+FIX="$TMP/arm16-contact-pii"
+mkdir -p "$FIX/data/answers"
+printf '%s\n' '{"solution":"contact alice@example.net or (415) 555-1212"}' > "$FIX/data/answers/0001-contact.json"
+run_guard "$FIX"
+printf '\nARM 16 — contact PII: exit 1, categories only\n'
+check "exit code 1" "1" "$OUT_RC"
+check_contains "detects email category" "email address" "$OUT"
+check_contains "detects phone category" "phone number" "$OUT"
+check "does not echo email value" "0" "$(grep -c 'alice@example.net' "$OUT")"
+
+# ── ARM 17 — IPv4 and IPv6 values are detected ────────────────────────────
+FIX="$TMP/arm17-ip-pii"
+mkdir -p "$FIX/site/classes"
+printf '%s\n' '<pre>server 203.0.113.7 and v6 2001:db8::1</pre>' > "$FIX/site/classes/0001-ip.html"
+run_guard "$FIX"
+printf '\nARM 17 — IP addresses: exit 1, category names only\n'
+check "exit code 1" "1" "$OUT_RC"
+check_contains "detects IPv4" "IPv4 address" "$OUT"
+check_contains "detects IPv6" "IPv6 address" "$OUT"
+check "does not echo IPv4 value" "0" "$(grep -c '203.0.113.7' "$OUT")"
+
+# ── ARM 18 — replacement placeholders are accepted ────────────────────────
+FIX="$TMP/arm18-safe-placeholders"
+mkdir -p "$FIX/data/answers"
+printf '%s\n' '{"solution":"~\\\\repo <email> <phone> <ip-address>"}' > "$FIX/data/answers/0001-safe.json"
+run_guard "$FIX"
+printf '\nARM 18 — redacted placeholders: exit 0\n'
+check "exit code 0" "0" "$OUT_RC"
+
 # ── summary ────────────────────────────────────────────────────────────────
 total=$((pass + fail))
 printf '\n──────────────────────────────────────────────\n'

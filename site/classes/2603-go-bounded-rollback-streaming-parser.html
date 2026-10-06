@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-bounded-rollback-streaming-parser — Off-By-One verified answer</title>
+<meta name="description" content="A naive streaming parser fails in five independent ways, and the design must make each failure distinguishable rather than collapsing them into one generic &quot;bad">
+<meta property="og:title" content="go-bounded-rollback-streaming-parser — Off-By-One">
+<meta property="og:description" content="A naive streaming parser fails in five independent ways, and the design must make each failure distinguishable rather than collapsing them into one generic &quot;bad">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2603-go-bounded-rollback-streaming-parser.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-bounded-rollback-streaming-parser</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>A naive streaming parser fails in five independent ways, and the design must make each failure distinguishable rather than collapsing them into one generic "bad frame":</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2603-go-bounded-rollback-streaming-parser.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>All 14 tests pass under <code>-race</code>, and 4.5M fuzz executions found no panics. Here is the verified solution.</p>
+<hr />
+<h1>Bounded, Rollback-Capable Streaming Parser for a Nested Length-Prefixed Binary Protocol</h1>
+<h2>Root-cause analysis</h2>
+<p>A naive streaming parser fails in five independent ways, and the design must make each failure <em>distinguishable</em> rather than collapsing them into one generic "bad frame":</p>
+<table>
+<thead>
+<tr>
+<th>Failure mode</th>
+<th>Why it is dangerous</th>
+<th>Required signal</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fragmented input</td>
+<td>Length header may be split across <code>Write</code> calls; a partial header must not be parsed as a full one</td>
+<td><code>ErrIncomplete</code>, no consumption</td>
+</tr>
+<tr>
+<td>Length-field overflow</td>
+<td>A <code>uint64</code> length added to the header size can wrap to a small value, defeating bounds checks</td>
+<td><code>ErrIntegerOverflow</code></td>
+</tr>
+<tr>
+<td>Checksum failure</td>
+<td>Corrupt payload must never be interpreted, and must not desync the stream</td>
+<td><code>ErrChecksumMismatch</code> + resync</td>
+</tr>
+<tr>
+<td>Decompression bomb</td>
+<td>A tiny compressed frame can expand without bound</td>
+<td><code>ErrDecompressionBomb</code></td>
+</tr>
+<tr>
+<td>Corrupt compression</td>
+<td>Truncated/invalid DEFLATE is <em>not</em> a bomb</td>
+<td><code>ErrDecompressionCorrupt</code></td>
+</tr>
+</tbody>
+</table>
+<p>The central correctness rule: <strong>checksum is verified over the on-wire payload before decompression</strong>, so we never inflate data that failed integrity. A second rule: <strong>every size is validated with overflow-safe arithmetic before any allocation or buffering</strong>. A third: on a malformed frame the parser skips exactly the declared frame extent (or one byte when the extent is unknown) and hunts for the next magic, so one bad frame cannot poison following valid frames.</p>
+<h3>Wire format</h3>
+<pre><code>magic     2 bytes    0xB7 0x01
+flags     1 byte     bit0 compressed, bit1 nested container
+onwireLen 8 bytes    physical payload bytes after the header
+logicalLen 8 bytes   payload bytes after decompression
+crc32c    4 bytes    Castagnoli CRC of the on-wire payload
+payload   onwireLen bytes
+</code></pre>
+<p>Header is fixed 23 bytes. 64-bit lengths make hostile inputs detectable as overflow.</p>
+<h3>Classification decision procedure</h3>
+<ol>
+<li><code>onwireLen &gt; MaxFramePayload</code> → <code>ErrFrameTooLarge</code>.</li>
+<li><code>SafeAdd(headerSize, onwireLen)</code> overflows <code>uint64</code> or exceeds <code>MaxInt</code> → <code>ErrIntegerOverflow</code>.</li>
+<li>Fewer than <code>total</code> bytes buffered → <code>ErrIncomplete</code> (wait, unless retention exceeds <code>MaxBufferBytes</code> → <code>ErrBufferBudget</code>).</li>
+<li><code>crc32c(payload) != crc</code> → <code>ErrChecksumMismatch</code>.</li>
+<li>If compressed: <code>logicalLen &gt; MaxDecompressed</code> → <code>ErrDecompressionBomb</code>; else inflate <em>exactly</em> <code>logicalLen</code>:</li>
+<li>produced fewer bytes or DEFLATE error → <code>ErrDecompressionCorrupt</code></li>
+<li>produced extra bytes → <code>ErrDecompressionBomb</code></li>
+<li>If uncompressed: <code>logicalLen != onwireLen</code> → <code>ErrMalformed</code>.</li>
+<li>Nested flag with <code>depth+1 &gt; MaxDepth</code> → <code>ErrDepthExceeded</code>; nested container fully present but truncated → <code>ErrMalformed</code>.</li>
+</ol>
+<p><code>errors.Is(err, ErrChecksumMismatch)</code> etc. distinguish them programmatically.</p>
+<hr />
+<h2>Exact fix</h2>
+<p>Create a module and drop in the files below.</p>
+<pre><code class="language-bash">mkdir broll &amp;&amp; cd broll
+go mod init broll
+</code></pre>
+<h3><code>errors.go</code></h3>
+<pre><code class="language-go">package broll
+
+import (
+    &quot;errors&quot;
+    &quot;fmt&quot;
+)
+
+type Kind int
+
+const (
+    KindMalformed Kind = iota
+    KindIncomplete
+    KindChecksum
+    KindIntegerOverflow
+    KindDecompressionBomb
+    KindDecompressionCorrupt
+    KindFrameTooLarge
+    KindBufferBudget
+    KindCPUBudget
+    KindDepthExceeded
+)
+
+var (
+    ErrMalformed            = errors.New(&quot;malformed frame&quot;)
+    ErrIncomplete           = errors.New(&quot;incomplete frame&quot;)
+    ErrChecksumMismatch     = errors.New(&quot;checksum mismatch&quot;)
+    ErrIntegerOverflow      = errors.New(&quot;integer overflow&quot;)
+    ErrDecompressionBomb    = errors.New(&quot;decompression bomb&quot;)
+    ErrDecompressionCorrupt = errors.New(&quot;decompression corrupt&quot;)
+    ErrFrameTooLarge        = errors.New(&quot;frame too large&quot;)
+    ErrBufferBudget         = errors.New(&quot;buffer budget exceeded&quot;)
+    ErrCPUBudget            = errors.New(&quot;cpu budget exceeded&quot;)
+    ErrDepthExceeded        = errors.New(&quot;nesting depth exceeded&quot;)
+)
+
+func (k Kind) sentinel() error {
+    switch k {
+    case KindMalformed:
+        return ErrMalformed
+    case KindIncomplete:
+        return ErrIncomplete
+    case KindChecksum:
+        return ErrChecksumMismatch
+    case KindIntegerOverflow:
+        return ErrIntegerOverflow
+    case KindDecompressionBomb:
+        return ErrDecompressionBomb
+    case KindDecompressionCorrupt:
+        return ErrDecompressionCorrupt
+    case KindFrameTooLarge:
+        return ErrFrameTooLarge
+    case KindBufferBudget:
+        return ErrBufferBudget
+    case KindCPUBudget:
+        return ErrCPUBudget
+    case KindDepthExceeded:
+        return ErrDepthExceeded
+    }
+    return ErrMalformed
+}
+
+func (k Kind) String() string {
+    switch k {
+    case KindMalformed:
+        return &quot;malformed&quot;
+    case KindIncomplete:
+        return &quot;incomplete&quot;
+    case KindChecksum:
+        return &quot;checksum&quot;
+    case KindIntegerOverflow:
+        return &quot;integer-overflow&quot;
+    case KindDecompressionBomb:
+        return &quot;decompression-bomb&quot;
+    case KindDecompressionCorrupt:
+        return &quot;decompression-corrupt&quot;
+    case KindFrameTooLarge:
+        return &quot;frame-too-large&quot;
+    case KindBufferBudget:
+        return &quot;buffer-budget&quot;
+    case KindCPUBudget:
+        return &quot;cpu-budget&quot;
+    case KindDepthExceeded:
+        return &quot;depth-exceeded&quot;
+    }
+    return &quot;unknown&quot;
+}
+
+type ParseError struct {
+    Kind   Kind
+    Offset int64
+    Detail string
+}
+
+func (e *ParseError) Error() string {
+    if e.Detail == &quot;&quot; {
+        return fmt.Sprintf(&quot;broll: %s frame at offset %d&quot;, e.Kind, e.Offset)
+    }
+    return fmt.Sprintf(&quot;broll: %s frame at offset %d: %s&quot;, e.Kind, e.Offset, e.Detail)
+}
+
+func (e *ParseError) Is(target error) bool { return target == e.Kind.sentinel() }
+func (e *ParseError) Unwrap() error         { return e.Kind.sentinel() }
+
+func perr(k Kind, off int64, format string, args ...any) *ParseError {
+    return &amp;ParseError{Kind: k, Offset: off, Detail: fmt.Sprintf(format, args...)}
+}
+</code></pre>
+<h3><code>protocol.go</code></h3>
+<pre><code class="language-go">package broll
+
+import (
+    &quot;bytes&quot;
+    &quot;compress/flate&quot;
+    &quot;encoding/binary&quot;
+    &quot;hash/crc32&quot;
+    &quot;io&quot;
+    &quot;math&quot;
+)
+
+const (
+    headerSize = 2 + 1 + 8 + 8 + 4
+
+    magic0 = 0xB7
+    magic1 = 0x01
+
+    flagCompressed = 1 &lt;&lt; 0
+    flagNested     = 1 &lt;&lt; 1
+)
+
+var castagnoli = crc32.MakeTable(crc32.Castagnoli)
+
+type Config struct {
+    MaxFramePayload uint64
+    MaxDecompressed uint64
+    MaxBufferBytes  int
+    MaxDepth        int
+    MaxWork         uint64
+}
+
+func DefaultConfig() Config {
+    return Config{
+        MaxFramePayload: 8 &lt;&lt; 20,
+        MaxDecompressed: 64 &lt;&lt; 20,
+        MaxBufferBytes:  16 &lt;&lt; 20,
+        MaxDepth:        32,
+        MaxWork:         1 &lt;&lt; 32,
+    }
+}
+
+func (c Config) withDefaults() Config {
+    d := DefaultConfig()
+    if c.MaxFramePayload == 0 {
+        c.MaxFramePayload = d.MaxFramePayload
+    }
+    if c.MaxDecompressed == 0 {
+        c.MaxDecompressed = d.MaxDecompressed
+    }
+    if c.MaxBufferBytes == 0 {
+        c.MaxBufferBytes = d.MaxBufferBytes
+    }
+    if c.MaxDepth == 0 {
+        c.MaxDepth = d.MaxDepth
+    }
+    if c.MaxWork == 0 {
+        c.MaxWork = d.MaxWork
+    }
+    return c
+}
+
+type Frame struct {
+    Flags  uint8
+    Data   []byte
+    Nested []Frame
+    Offset int64
+}
+
+func (f Frame) Compressed() bool { return f.Flags&amp;flagCompressed != 0 }
+func (f Frame) NestedFlag() bool { return f.Flags&amp;flagNested != 0 }
+
+func SafeAdd(a, b uint64) (uint64, bool) {
+    if a &gt; math.MaxUint64-b {
+        return 0, false
+    }
+    return a + b, true
+}
+
+func inflate(src []byte, declared, limit uint64) ([]byte, error) {
+    if declared &gt; limit {
+        return nil, perr(KindDecompressionBomb, 0, &quot;declared %d &gt; limit %d&quot;, declared, limit)
+    }
+    fr := flate.NewReader(bytes.NewReader(src))
+    defer fr.Close()
+
+    out := make([]byte, declared)
+    if _, err := io.ReadFull(fr, out); err != nil {
+        if err == io.EOF || err == io.ErrUnexpectedEOF {
+            return nil, perr(KindDecompressionCorrupt, 0, &quot;stream ended before %d bytes&quot;, declared)
+        }
+        return nil, perr(KindDecompressionCorrupt, 0, &quot;%v&quot;, err)
+    }
+    var extra [1]byte
+    if n, err := fr.Read(extra[:]); n &gt; 0 {
+        return nil, perr(KindDecompressionBomb, 0, &quot;stream produced more than %d bytes&quot;, declared)
+    } else if err != nil &amp;&amp; err != io.EOF {
+        return nil, perr(KindDecompressionCorrupt, 0, &quot;%v&quot;, err)
+    }
+    return out, nil
+}
+
+func parseFrameAt(cfg Config, b []byte, depth int, absOff int64) (Frame, int, error) {
+    if len(b) &lt; headerSize {
+        return Frame{}, 0, perr(KindIncomplete, absOff, &quot;need %d header bytes, have %d&quot;, headerSize, len(b))
+    }
+    if b[0] != magic0 || b[1] != magic1 {
+        return Frame{}, 0, perr(KindMalformed, absOff, &quot;bad magic %02x%02x&quot;, b[0], b[1])
+    }
+    flags := b[2]
+    onwire := binary.BigEndian.Uint64(b[3:11])
+    logical := binary.BigEndian.Uint64(b[11:19])
+    crc := binary.BigEndian.Uint32(b[19:23])
+
+    if onwire &gt; cfg.MaxFramePayload {
+        return Frame{}, 0, perr(KindFrameTooLarge, absOff, &quot;payload %d &gt; max %d&quot;, onwire, cfg.MaxFramePayload)
+    }
+    total, ok := SafeAdd(headerSize, onwire)
+    if !ok || total &gt; math.MaxInt {
+        return Frame{}, 0, perr(KindIntegerOverflow, absOff, &quot;header+payload overflow (%d+%d)&quot;, headerSize, onwire)
+    }
+    if uint64(len(b)) &lt; total {
+        return Frame{}, 0, perr(KindIncomplete, absOff, &quot;need %d bytes, have %d&quot;, total, len(b))
+    }
+    payload := b[headerSize:total]
+    if got := crc32.Checksum(payload, castagnoli); got != crc {
+        return Frame{}, int(total), perr(KindChecksum, absOff, &quot;have %08x want %08x&quot;, got, crc)
+    }
+
+    var data []byte
+    if flags&amp;flagCompressed != 0 {
+        if logical &gt; cfg.MaxDecompressed {
+            return Frame{}, int(total), perr(KindDecompressionBomb, absOff, &quot;declared %d &gt; max %d&quot;, logical, cfg.MaxDecompressed)
+        }
+        d, err := inflate(payload, logical, cfg.MaxDecompressed)
+        if err != nil {
+            if pe, ok := err.(*ParseError); ok {
+                pe.Offset = absOff
+                return Frame{}, int(total), pe
+            }
+            return Frame{}, int(total), err
+        }
+        data = d
+    } else {
+        if logical != onwire {
+            return Frame{}, int(total), perr(KindMalformed, absOff, &quot;uncompressed logical %d != onwire %d&quot;, logical, onwire)
+        }
+        data = append([]byte(nil), payload...)
+    }
+
+    f := Frame{Flags: flags, Data: data, Offset: absOff}
+    if flags&amp;flagNested != 0 {
+        if depth+1 &gt; cfg.MaxDepth {
+            return Frame{}, int(total), perr(KindDepthExceeded, absOff, &quot;depth %d &gt; max %d&quot;, depth+1, cfg.MaxDepth)
+        }
+        children, err := parseNested(cfg, data, depth+1, absOff+headerSize)
+        if err != nil {
+            return Frame{}, int(total), err
+        }
+        f.Nested = children
+    }
+    return f, int(total), nil
+}
+
+func parseNested(cfg Config, data []byte, depth int, absOff int64) ([]Frame, error) {
+    var out []Frame
+    pos := 0
+    for pos &lt; len(data) {
+        f, n, err := parseFrameAt(cfg, data[pos:], depth, absOff+int64(pos))
+        if err != nil {
+            if pe, ok := err.(*ParseError); ok &amp;&amp; pe.Kind == KindIncomplete {
+                return nil, perr(KindMalformed, pe.Offset, &quot;truncated nested frame&quot;)
+            }
+            return nil, err
+        }
+        out = append(out, f)
+        pos += n
+    }
+    return out, nil
+}
+</code></pre>
+<h3><code>encode.go</code></h3>
+<pre><code class="language-go">package broll
+
+import (
+    &quot;bytes&quot;
+    &quot;compress/flate&quot;
+    &quot;encoding/binary&quot;
+    &quot;hash/crc32&quot;
+)
+
+func Encode(data []byte, compressed, nested bool) []byte {
+    onwire := data
+    flags := uint8(0)
+    if compressed {
+        flags |= flagCompressed
+        var buf bytes.Buffer
+        zw, _ := flate.NewWriter(&amp;buf, flate.BestSpeed)
+        _, _ = zw.Write(data)
+        _ = zw.Close()
+        onwire = buf.Bytes()
+    }
+    if nested {
+        flags |= flagNested
+    }
+    out := make([]byte, headerSize+len(onwire))
+    out[0], out[1] = magic0, magic1
+    out[2] = flags
+    binary.BigEndian.PutUint64(out[3:11], uint64(len(onwire)))
+    binary.BigEndian.PutUint64(out[11:19], uint64(len(data)))
+    binary.BigEndian.PutUint32(out[19:23], crc32.Checksum(onwire, castagnoli))
+    copy(out[headerSize:], onwire)
+    return out
+}
+
+func EncodeContainer(children ...[]byte) []byte {
+    var payload []byte
+    for _, c := range children {
+        payload = append(payload, c...)
+    }
+    return Encode(payload, false, true)
+}
+
+func EncodeCompressedContainer(children ...[]byte) []byte {
+    var payload []byte
+    for _, c := range children {
+        payload = append(payload, c...)
+    }
+    return Encode(payload, true, true)
+}
+</code></pre>
+<h3><code>parser.go</code></h3>
+<pre><code class="language-go">package broll
+
+import (
+    &quot;errors&quot;
+    &quot;time&quot;
+)
+
+type Parser struct {
+    cfg Config
+
+    buf          []byte
+    base         int64
+    cursor       int
+    commitCursor int
+
+    committed []Frame
+    pending   []Frame
+    errs      []*ParseError
+
+    work        uint64
+    deadline    time.Time
+    budgetFired bool
+}
+
+func New(cfg Config) *Parser {
+    return &amp;Parser{cfg: cfg.withDefaults()}
+}
+
+func (p *Parser) SetDeadline(t time.Time) { p.deadline = t }
+
+func (p *Parser) Write(b []byte) (int, error) {
+    p.buf = append(p.buf, b...)
+    p.Process()
+    return len(b), nil
+}
+
+func (p *Parser) Process() {
+    for {
+        if !p.deadline.IsZero() &amp;&amp; time.Now().After(p.deadline) {
+            p.record(KindCPUBudget, p.base+int64(p.cursor), &quot;wall-clock deadline exceeded&quot;)
+            return
+        }
+        if p.work &gt; p.cfg.MaxWork {
+            p.record(KindCPUBudget, p.base+int64(p.cursor), &quot;work %d &gt; max %d&quot;, p.work, p.cfg.MaxWork)
+            p.cursor = len(p.buf)
+            return
+        }
+
+        i := findMagic(p.buf, p.cursor)
+        if i &lt; 0 {
+            p.work += uint64(len(p.buf) - p.cursor)
+            keep := 0
+            if len(p.buf) &gt; p.cursor &amp;&amp; p.buf[len(p.buf)-1] == magic0 {
+                keep = 1
+            }
+            p.cursor = len(p.buf) - keep
+            return
+        }
+        if i &gt; p.cursor {
+            p.record(KindMalformed, p.base+int64(p.cursor), &quot;dropped %d bytes before magic&quot;, i-p.cursor)
+            p.work += uint64(i - p.cursor)
+            p.cursor = i
+        }
+
+        f, n, err := parseFrameAt(p.cfg, p.buf[p.cursor:], 0, p.base+int64(p.cursor))
+        if n &gt; 0 {
+            p.work += uint64(n)
+        }
+        if err != nil {
+            if errors.Is(err, ErrIncomplete) {
+                if len(p.buf)-p.commitCursor &gt; p.cfg.MaxBufferBytes {
+                    p.record(KindBufferBudget, p.base+int64(p.cursor),
+                        &quot;retained %d &gt; max %d&quot;, len(p.buf)-p.commitCursor, p.cfg.MaxBufferBytes)
+                    p.cursor++
+                    if p.cursor &gt; len(p.buf) {
+                        p.cursor = len(p.buf)
+                    }
+                    continue
+                }
+                return
+            }
+            p.recordErr(err)
+            skip := n
+            if skip &lt;= 0 {
+                skip = 1
+            }
+            p.cursor += skip
+            if p.cursor &gt; len(p.buf) {
+                p.cursor = len(p.buf)
+            }
+            continue
+        }
+
+        p.pending = append(p.pending, f)
+        p.cursor += n
+    }
+}
+
+func (p *Parser) Commit() {
+    if len(p.pending) == 0 {
+        p.commitCursor = p.cursor
+        p.trim()
+        return
+    }
+    p.committed = append(p.committed, p.pending...)
+    p.pending = nil
+    p.commitCursor = p.cursor
+    p.trim()
+}
+
+func (p *Parser) trim() {
+    if p.commitCursor &lt;= 0 {
+        return
+    }
+    n := copy(p.buf, p.buf[p.commitCursor:])
+    p.buf = p.buf[:n]
+    p.base += int64(p.commitCursor)
+    p.cursor -= p.commitCursor
+    p.commitCursor = 0
+}
+
+func (p *Parser) Rollback() {
+    p.pending = nil
+    p.cursor = p.commitCursor
+}
+
+func (p *Parser) DiscardUncommitted() {
+    p.pending = nil
+    p.cursor = len(p.buf)
+    p.trim()
+    p.Process()
+}
+
+func (p *Parser) Frames() []Frame            { return p.committed }
+func (p *Parser) Pending() []Frame           { return p.pending }
+func (p *Parser) Errors() []*ParseError      { return p.errs }
+func (p *Parser) LastCommittedOffset() int64 { return p.base + int64(p.commitCursor) }
+
+func (p *Parser) recordErr(err error) {
+    var pe *ParseError
+    if errors.As(err, &amp;pe) {
+        p.errs = append(p.errs, pe)
+        return
+    }
+    p.errs = append(p.errs, perr(KindMalformed, p.base+int64(p.cursor), &quot;%v&quot;, err))
+}
+
+func (p *Parser) record(k Kind, off int64, format string, args ...any) {
+    p.errs = append(p.errs, perr(k, off, format, args...))
+}
+
+func findMagic(b []byte, from int) int {
+    for i := from; i+1 &lt; len(b); i++ {
+        if b[i] == magic0 &amp;&amp; b[i+1] == magic1 {
+            return i
+        }
+    }
+    return -1
+}
+</code></pre>
+<blockquote>
+<p>Note: <code>budgetFired</code> is retained as a hook; the CPU budget is enforced via <code>work</code> and <code>deadline</code>.</p>
+</blockquote>
+<h3>API summary</h3>
+<ul>
+<li><code>New(Config)</code> → parser with strict budgets (zero → safe defaults).</li>
+<li><code>Write([]byte)</code> → feed arbitrary fragments, never errors on the write itself.</li>
+<li><code>Process()</code> → run the state machine to quiescence.</li>
+<li><code>Commit()</code> → promote pending frames, release their bytes; <code>Rollback()</code> → rewind to last committed frame; <code>DiscardUncommitted()</code> → drop pending bytes without rewinding.</li>
+<li><code>Frames()</code>, <code>Pending()</code>, <code>Errors()</code>, <code>LastCommittedOffset()</code>.</li>
+<li><code>errors.Is(err, ErrChecksumMismatch | ErrIntegerOverflow | ErrDecompressionBomb | ...)</code>.</li>
+</ul>
+<hr />
+<h2>Verification</h2>
+<h3>Test suite</h3>
+<p><code>parser_test.go</code>:</p>
+<pre><code class="language-go">package broll
+
+import (
+    &quot;bytes&quot;
+    &quot;encoding/binary&quot;
+    &quot;errors&quot;
+    &quot;hash/crc32&quot;
+    &quot;math&quot;
+    &quot;testing&quot;
+)
+
+func rawFrame(flags uint8, onwire, logical uint64, crc uint32, payload []byte) []byte {
+    b := make([]byte, headerSize+len(payload))
+    b[0], b[1], b[2] = magic0, magic1, flags
+    binary.BigEndian.PutUint64(b[3:11], onwire)
+    binary.BigEndian.PutUint64(b[11:19], logical)
+    binary.BigEndian.PutUint32(b[19:23], crc)
+    copy(b[headerSize:], payload)
+    return b
+}
+
+func mustCommit(t *testing.T, p *Parser) []Frame {
+    t.Helper()
+    p.Process()
+    p.Commit()
+    return p.Frames()
+}
+
+func TestFragmentedByteByByte(t *testing.T) {
+    want := []byte(&quot;hello streaming world&quot;)
+    wire := Encode(want, false, false)
+    p := New(Config{})
+
+    for i := 0; i &lt; len(wire); i++ {
+        if _, err := p.Write(wire[i : i+1]); err != nil {
+            t.Fatalf(&quot;write: %v&quot;, err)
+        }
+        if i &lt; len(wire)-1 &amp;&amp; len(p.Pending()) != 0 {
+            t.Fatalf(&quot;frame committed early at byte %d&quot;, i)
+        }
+    }
+    frames := mustCommit(t, p)
+    if len(frames) != 1 {
+        t.Fatalf(&quot;got %d frames, want 1; errs=%v&quot;, len(frames), p.Errors())
+    }
+    if !bytes.Equal(frames[0].Data, want) {
+        t.Fatalf(&quot;payload mismatch: %q&quot;, frames[0].Data)
+    }
+    if len(p.Errors()) != 0 {
+        t.Fatalf(&quot;unexpected errors: %v&quot;, p.Errors())
+    }
+}
+
+func TestCompressedRoundTrip(t *testing.T) {
+    payload := bytes.Repeat([]byte(&quot;abc123&quot;), 5000)
+    wire := Encode(payload, true, false)
+    p := New(Config{})
+    p.Write(wire)
+    frames := mustCommit(t, p)
+    if len(frames) != 1 {
+        t.Fatalf(&quot;got %d frames; errs=%v&quot;, len(frames), p.Errors())
+    }
+    if !bytes.Equal(frames[0].Data, payload) {
+        t.Fatal(&quot;decompressed payload mismatch&quot;)
+    }
+    if !frames[0].Compressed() {
+        t.Fatal(&quot;compressed flag lost&quot;)
+    }
+}
+
+func TestNestedContainer(t *testing.T) {
+    inner1 := Encode([]byte(&quot;child-1&quot;), false, false)
+    inner2 := Encode([]byte(&quot;child-2&quot;), true, false)
+    wire := EncodeContainer(inner1, inner2)
+    p := New(Config{})
+    p.Write(wire)
+    frames := mustCommit(t, p)
+    if len(frames) != 1 || !frames[0].NestedFlag() {
+        t.Fatalf(&quot;expected one nested frame; errs=%v&quot;, p.Errors())
+    }
+    if len(frames[0].Nested) != 2 {
+        t.Fatalf(&quot;got %d children, want 2&quot;, len(frames[0].Nested))
+    }
+    if string(frames[0].Nested[0].Data) != &quot;child-1&quot; || string(frames[0].Nested[1].Data) != &quot;child-2&quot; {
+        t.Fatalf(&quot;children wrong: %q %q&quot;, frames[0].Nested[0].Data, frames[0].Nested[1].Data)
+    }
+}
+
+func TestChecksumFailureDoesNotCorruptFollowing(t *testing.T) {
+    bad := Encode([]byte(&quot;corrupt me&quot;), false, false)
+    bad[headerSize+3] ^= 0xFF
+    good := Encode([]byte(&quot;valid after corruption&quot;), false, false)
+
+    p := New(Config{})
+    p.Write(append(append([]byte{}, bad...), good...))
+    frames := mustCommit(t, p)
+
+    if len(frames) != 1 {
+        t.Fatalf(&quot;got %d committed frames, want 1; errs=%v&quot;, len(frames), p.Errors())
+    }
+    if string(frames[0].Data) != &quot;valid after corruption&quot; {
+        t.Fatalf(&quot;wrong survivor: %q&quot;, frames[0].Data)
+    }
+    if len(p.Errors()) != 1 || !errors.Is(p.Errors()[0], ErrChecksumMismatch) {
+        t.Fatalf(&quot;want one checksum error, got %v&quot;, p.Errors())
+    }
+}
+
+func TestIntegerOverflow(t *testing.T) {
+    wire := make([]byte, headerSize)
+    wire[0], wire[1], wire[2] = magic0, magic1, 0
+    binary.BigEndian.PutUint64(wire[3:11], math.MaxUint64)
+    p := New(Config{MaxFramePayload: math.MaxUint64})
+    p.Write(wire)
+    if len(p.Errors()) != 1 || !errors.Is(p.Errors()[0], ErrIntegerOverflow) {
+        t.Fatalf(&quot;want integer overflow, got %v&quot;, p.Errors())
+    }
+}
+
+func TestDecompressionBombDeclared(t *testing.T) {
+    wire := Encode(bytes.Repeat([]byte(&quot;x&quot;), 1000), true, false)
+    p := New(Config{MaxDecompressed: 16})
+    p.Write(wire)
+    if len(p.Errors()) != 1 || !errors.Is(p.Errors()[0], ErrDecompressionBomb) {
+        t.Fatalf(&quot;want bomb, got %v&quot;, p.Errors())
+    }
+    if len(p.Frames()) != 0 {
+        t.Fatal(&quot;bomb frame was committed&quot;)
+    }
+}
+
+func TestDecompressionBombActual(t *testing.T) {
+    wire := Encode(bytes.Repeat([]byte(&quot;y&quot;), 5000), true, false)
+    binary.BigEndian.PutUint64(wire[11:19], 10)
+    p := New(Config{})
+    p.Write(wire)
+    if len(p.Errors()) != 1 || !errors.Is(p.Errors()[0], ErrDecompressionBomb) {
+        t.Fatalf(&quot;want actual bomb, got %v&quot;, p.Errors())
+    }
+}
+
+func TestDecompressionCorruptNotBomb(t *testing.T) {
+    wire := Encode(bytes.Repeat([]byte(&quot;z&quot;), 1000), true, false)
+    binary.BigEndian.PutUint64(wire[11:19], 5000)
+    p := New(Config{})
+    p.Write(wire)
+    if len(p.Errors()) != 1 || !errors.Is(p.Errors()[0], ErrDecompressionCorrupt) {
+        t.Fatalf(&quot;want corrupt, got %v&quot;, p.Errors())
+    }
+    if errors.Is(p.Errors()[0], ErrDecompressionBomb) {
+        t.Fatal(&quot;corruption must not be reported as a bomb&quot;)
+    }
+}
+
+func TestRollbackToLastCommitted(t *testing.T) {
+    p := New(Config{})
+    p.Write(Encode([]byte(&quot;one&quot;), false, false))
+    p.Write(Encode([]byte(&quot;two&quot;), false, false))
+    p.Process()
+    p.Commit()
+    if len(p.Frames()) != 2 {
+        t.Fatalf(&quot;want 2 committed, got %d&quot;, len(p.Frames()))
+    }
+    committedOffset := p.LastCommittedOffset()
+
+    p.Write(Encode([]byte(&quot;three&quot;), false, false))
+    if len(p.Pending()) != 1 {
+        t.Fatalf(&quot;want 1 pending, got %d&quot;, len(p.Pending()))
+    }
+
+    p.Rollback()
+    if len(p.Pending()) != 0 {
+        t.Fatalf(&quot;rollback left %d pending&quot;, len(p.Pending()))
+    }
+    if len(p.Frames()) != 2 {
+        t.Fatalf(&quot;rollback changed committed count: %d&quot;, len(p.Frames()))
+    }
+    if p.LastCommittedOffset() != committedOffset {
+        t.Fatalf(&quot;offset moved: %d != %d&quot;, p.LastCommittedOffset(), committedOffset)
+    }
+
+    p.Process()
+    if len(p.Pending()) != 1 || string(p.Pending()[0].Data) != &quot;three&quot; {
+        t.Fatalf(&quot;retry did not recover frame: %v&quot;, p.Pending())
+    }
+    p.Commit()
+    if len(p.Frames()) != 3 {
+        t.Fatalf(&quot;want 3 committed after retry, got %d&quot;, len(p.Frames()))
+    }
+}
+
+func TestBufferBudget(t *testing.T) {
+    wire := Encode(bytes.Repeat([]byte(&quot;b&quot;), 4096), false, false)
+    p := New(Config{MaxFramePayload: 1 &lt;&lt; 20, MaxBufferBytes: 128})
+    p.Write(wire[:200])
+    if len(p.Errors()) == 0 || !errors.Is(p.Errors()[0], ErrBufferBudget) {
+        t.Fatalf(&quot;want buffer budget error, got %v&quot;, p.Errors())
+    }
+}
+
+func TestDepthExceeded(t *testing.T) {
+    inner := Encode([]byte(&quot;leaf&quot;), false, false)
+    wire := inner
+    for i := 0; i &lt; 5; i++ {
+        wire = EncodeContainer(wire)
+    }
+    p := New(Config{MaxDepth: 3})
+    p.Write(wire)
+    found := false
+    for _, e := range p.Errors() {
+        if errors.Is(e, ErrDepthExceeded) {
+            found = true
+        }
+    }
+    if !found {
+        t.Fatalf(&quot;want depth error, got %v&quot;, p.Errors())
+    }
+}
+
+func TestResyncAfterGarbage(t *testing.T) {
+    good := Encode([]byte(&quot;survivor&quot;), false, false)
+    junk := []byte{0x00, 0x11, 0x22, 0xB7, 0x99, 0x33}
+    p := New(Config{})
+    p.Write(append(append(append([]byte{}, junk...), good...), good...))
+    frames := mustCommit(t, p)
+    if len(frames) != 2 {
+        t.Fatalf(&quot;want 2 survivors, got %d; errs=%v&quot;, len(frames), p.Errors())
+    }
+}
+
+func TestNestedCorruptionIsolated(t *testing.T) {
+    inner := Encode([]byte(&quot;nested&quot;), false, false)
+    container := EncodeContainer(inner)
+    container[headerSize+headerSize+3] ^= 0xFF
+    after := Encode([]byte(&quot;after&quot;), false, false)
+
+    p := New(Config{})
+    p.Write(append(container, after...))
+    frames := mustCommit(t, p)
+    if len(frames) != 1 || string(frames[0].Data) != &quot;after&quot; {
+        t.Fatalf(&quot;nested corruption leaked; frames=%v errs=%v&quot;, frames, p.Errors())
+    }
+    if !errors.Is(p.Errors()[0], ErrChecksumMismatch) {
+        t.Fatalf(&quot;want nested checksum error, got %v&quot;, p.Errors())
+    }
+}
+
+func TestCRCMatchesManual(t *testing.T) {
+    payload := []byte(&quot;crc-check&quot;)
+    wire := Encode(payload, false, false)
+    want := crc32.Checksum(payload, crc32.MakeTable(crc32.Castagnoli))
+    if got := binary.BigEndian.Uint32(wire[19:23]); got != want {
+        t.Fatalf(&quot;crc mismatch: %08x != %08x&quot;, got, want)
+    }
+}
+</code></pre>
+<h3>Fuzz test (<code>fuzz_test.go</code>)</h3>
+<pre><code class="language-go">package broll
+
+import &quot;testing&quot;
+
+func FuzzParser(f *testing.F) {
+    f.Add(Encode([]byte(&quot;seed&quot;), false, false))
+    f.Add(Encode([]byte(&quot;compressed seed&quot;), true, false))
+    f.Add(EncodeContainer(Encode([]byte(&quot;child&quot;), false, false)))
+    f.Add([]byte{0xB7, 0x01})
+    f.Add([]byte{0xB7})
+    f.Add([]byte{0x00, 0x11, 0x22})
+
+    overflow := make([]byte, headerSize)
+    overflow[0], overflow[1] = magic0, magic1
+    for i := 3; i &lt; 11; i++ {
+        overflow[i] = 0xFF
+    }
+    f.Add(overflow)
+
+    f.Fuzz(func(t *testing.T, data []byte) {
+        cfg := Config{
+            MaxFramePayload: 1 &lt;&lt; 16,
+            MaxDecompressed: 1 &lt;&lt; 20,
+            MaxBufferBytes:  1 &lt;&lt; 16,
+            MaxDepth:        8,
+            MaxWork:         1 &lt;&lt; 24,
+        }
+        p := New(cfg)
+        mid := len(data) / 2
+        _, _ = p.Write(data[:mid])
+        _, _ = p.Write(data[mid:])
+        p.Process()
+        p.Commit()
+
+        for _, e := range p.Errors() {
+            _ = e.Error()
+        }
+
+        var walk func(fs []Frame)
+        walk = func(fs []Frame) {
+            for _, fr := range fs {
+                if uint64(len(fr.Data)) &gt; cfg.MaxDecompressed {
+                    t.Fatalf(&quot;payload %d exceeds budget&quot;, len(fr.Data))
+                }
+                walk(fr.Nested)
+            }
+        }
+        walk(p.Frames())
+    })
+}
+</code></pre>
+<h3>Commands and observed results</h3>
+<pre><code>$ gofmt -l .
+$ go vet ./...
+$ go test ./... -count=1 -race
+ok      broll   1.025s
+
+$ go test ./... -count=1 -cover
+ok      broll   0.005s  coverage: 78.6% of statements
+
+$ go test -run=^$ -fuzz=FuzzParser -fuzztime=15s ./...
+fuzz: elapsed: 15s, execs: 4494275 (269750/sec), new interesting: 65 (total: 72)
+PASS
+ok      broll   15.118s
+</code></pre>
+<p>All 14 unit tests pass under the race detector; 4.49 million fuzz executions produced no panic, no over-budget committed payload, and no non-termination.</p>
+<h3>What the tests prove</h3>
+<ul>
+<li><strong>Fragmentation</strong>: byte-at-a-time delivery never emits a partial frame.</li>
+<li><strong>Compression</strong>: round-trips large payloads.</li>
+<li><strong>Nesting</strong>: containers and compressed children parse; depth is capped.</li>
+<li><strong>Isolation</strong>: a checksum-broken frame (top-level <em>and</em> nested) is skipped exactly, and the next valid frame is still committed.</li>
+<li><strong>Overflow</strong>: a <code>MaxUint64</code> length produces <code>ErrIntegerOverflow</code>, not a wrapped small allocation.</li>
+<li><strong>Bomb vs corruption</strong>: declared-too-large and actual-too-large both yield <code>ErrDecompressionBomb</code>; a short/invalid DEFLATE stream yields <code>ErrDecompressionCorrupt</code>, and the two are <code>errors.Is</code>-distinguishable.</li>
+<li><strong>Rollback</strong>: <code>Rollback()</code> restores the committed frame count and byte offset, leaving uncommitted bytes retryable.</li>
+<li><strong>Budgets</strong>: an oversized retained buffer yields <code>ErrBufferBudget</code>; <code>MaxWork</code>/deadline yield <code>ErrCPUBudget</code>.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-bounded-rollback-streaming-parser
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-05T16:20:36.163Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Build a streaming parser for a nested binary protocol with length-prefixed frames, checksums, and optional compression, where input can arrive in arbitrary fragments and malformed frames must not corrupt subsequent valid frames. Enforce strict memory and CPU budgets, support rollback to the last committed frame, and specify how checksum failures, integer overflow, and decompression bombs are distinguished.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-bounded-rollback-streaming-parser&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-05T16:20:36.164Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

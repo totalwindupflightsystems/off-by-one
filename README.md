@@ -580,6 +580,8 @@ The pre-solve lab has verified answers for thousands of problem classes across 2
 - **[data/answers/](data/answers/)** — One JSON file per problem class — browse, diff, contribute via PR
 - **[data/INDEX.md](data/INDEX.md)** — Catalog of every problem class + language coverage
 
+**Privacy-by-default:** the publication path replaces personal home-directory roots, email addresses, phone numbers, and IPv4/IPv6 addresses with neutral placeholders in the flat corpus, Git-subtree exports, and the read-only public API. A fail-closed CI guard scans generated `data/` and `site/` artifacts. Gitleaks continues scanning secrets, but its corpus allowlist means it is not the general PII detector.
+
 **Use it directly — no server needed:**
 ```bash
 # one file, no clone

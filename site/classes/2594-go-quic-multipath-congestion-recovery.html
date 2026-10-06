@@ -1,0 +1,1259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-quic-multipath-congestion-recovery — Off-By-One verified answer</title>
+<meta name="description" content="A single global &quot;in-flight&quot; counter plus a single loss timer is unsafe in a multipath sender. ACKs arrive reordered, and a path can disappear while it still own">
+<meta property="og:title" content="go-quic-multipath-congestion-recovery — Off-By-One">
+<meta property="og:description" content="A single global &quot;in-flight&quot; counter plus a single loss timer is unsafe in a multipath sender. ACKs arrive reordered, and a path can disappear while it still own">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2594-go-quic-multipath-congestion-recovery.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-quic-multipath-congestion-recovery</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>A single global "in-flight" counter plus a single loss timer is unsafe in a multipath sender. ACKs arrive reordered, and a path can disappear while it still owns unacknowledged bytes. The fix is a per-path congestion/RTT domain, a bounded late-ACK window, and a migration grace period that releases the dead path's congestion budget immediately but delays retransmission long enough for a racing ACK to cancel it.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2594-go-quic-multipath-congestion-recovery.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is verified and saved to <code>~/mpquic/SOLUTION.md</code>. Here is the complete document.</p>
+<hr />
+<h1>Multipath QUIC Sender: Correct Congestion &amp; Recovery under Reordering and Abrupt Migration</h1>
+<h2>Summary</h2>
+<p>A single global "in-flight" counter plus a single loss timer is unsafe in a multipath sender. ACKs arrive reordered, and a path can disappear while it still owns unacknowledged bytes. The fix is a <strong>per-path congestion/RTT domain</strong>, a <strong>bounded late-ACK window</strong>, and a <strong>migration grace period</strong> that releases the dead path's congestion budget immediately but delays retransmission long enough for a racing ACK to cancel it.</p>
+<p>Files created and verified:</p>
+<pre><code>~/mpquic/go.mod
+~/mpquic/mpquic.go
+~/mpquic/mpquic_test.go
+~/mpquic/SOLUTION.md
+</code></pre>
+<hr />
+<h2>Root-cause analysis</h2>
+<h3>1. A shared congestion/RTT/loss state cannot be per-path safe</h3>
+<p>If <code>bytes_in_flight</code>, <code>cwnd</code>, <code>srtt</code>, and loss detection are shared across paths, then:
+- a fast path's ACK advances the loss threshold for a slow path's packets, declaring them lost spuriously;
+- a slow path's RTT sample contaminates the fast path's PTO;
+- a loss on one path halves the window for both, so a congested path throttles a healthy one.</p>
+<p><strong>Rule:</strong> each path owns <code>cwnd</code>, <code>ssthresh</code>, <code>bytes_in_flight</code>, <code>srtt/rttvar</code>, <code>largest_acked</code>, and its outstanding packet set. Loss detection is evaluated <strong>only among packets sent on the same path that produced the ACK</strong>.</p>
+<h3>2. Reordered ACKs cause spurious retransmits</h3>
+<p>The packet-threshold rule (<code>pn &lt;= largest_acked - kPacketThreshold</code>) can fire for a packet whose ACK is still in flight. If the sender has already queued a retransmission, it emits a duplicate datagram.</p>
+<p><strong>Rule:</strong> when an ACK later proves a "lost" packet was delivered, look it up and <strong>cancel the queued retransmission</strong>. That requires keeping the lost packet around briefly. The window is a <strong>bounded FIFO</strong> so memory cannot grow with connection age.</p>
+<h3>3. Abrupt migration causes deadlock or spurious retransmits</h3>
+<p>When a path is invalidated, its unacknowledged packets will never be ACKed by that path:
+- <strong>Deadlock:</strong> if those bytes remain counted against a connection- or path-level in-flight limit, the sender is permanently blocked waiting for ACKs that never come.
+- <strong>Spurious retransmit:</strong> if the sender immediately retransmits everything, it duplicates frames the peer may already have received (invalidation and data cross on the wire).</p>
+<p><strong>Rule (key insight):</strong> on invalidation
+1. move every unacked packet to a <em>migrating</em> set and <strong>release the path's congestion budget now</strong> (kills deadlock);
+2. do <strong>not</strong> retransmit immediately; set a <strong>PTO deadline</strong> (kills spurious retransmits for racing ACKs);
+3. when the deadline expires, mark frames lost and reschedule on a surviving path (kills deadlock if the ACK never comes).</p>
+<p>A migration is <strong>not</strong> a congestion signal: do not reduce <code>cwnd</code> for it.</p>
+<h3>4. Unbounded reordering memory</h3>
+<p>Storing every ACKed packet number, or expanding arbitrary ACK ranges, lets a peer exhaust memory.</p>
+<p><strong>Rule:</strong> test outstanding packets for ACK membership instead of expanding ranges; keep only unacked packets plus a bounded recent-loss window.</p>
+<hr />
+<h2>Exact fix</h2>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Per-path safety</td>
+<td><code>pathState</code> with its own <code>reno</code> controller, <code>rttEstimator</code>, <code>outstanding</code> map, <code>largestAcked</code></td>
+</tr>
+<tr>
+<td>Reordering tolerance</td>
+<td>per-path packet-threshold loss + bounded <code>lostPackets</code>/<code>lostOrder</code> FIFO, cancel-on-late-ACK</td>
+</tr>
+<tr>
+<td>Migration</td>
+<td><code>InvalidatePath</code> moves packets to <code>migrating</code>, zeroes <code>bytesInFlight</code>, sets a PTO deadline</td>
+</tr>
+<tr>
+<td>Bounded memory</td>
+<td>membership testing against <code>AckFrame</code>; <code>MaxReorderingPackets</code>; <code>MaxSendBuffer</code></td>
+</tr>
+</tbody>
+</table>
+<pre><code>                 send                      ack
+  app frame ───────────▶ outstanding ───────────▶ gone
+                             │  │
+              packet-threshold│  │InvalidatePath
+                     loss     │  │  (release budget)
+                             ▼  ▼
+                        retx queued ◀── lost window ──┐
+                             │        (bounded)       │ late ACK: cancel retx
+                             │  migration PTO expiry  │
+                             └────────────────────────┘
+</code></pre>
+<h3>Full source (<code>mpquic.go</code>)</h3>
+<pre><code class="language-go">// Package mpquic implements a QUIC-like multipath sender that stripes
+// datagrams over two paths with independent RTT, loss and congestion state.
+//
+// The sender is written to be correct under two adversarial conditions that
+// the task calls out explicitly:
+//
+//  1. ACK reordering. Acknowledgments may arrive out of order, so the
+//     packet-threshold loss rule can fire for a packet whose ACK is still in
+//     flight. The sender therefore keeps a *bounded* record of recently lost
+//     packets so a late ACK can cancel the queued retransmission instead of
+//     producing a spurious retransmit.
+//
+//  2. Abrupt path migration. When a path is invalidated, every unacknowledged
+//     packet on it is moved into a bounded &quot;migrating&quot; set and its congestion
+//     budget is released immediately. The frames are only rescheduled after a
+//     PTO grace period, so an ACK that races with the migration cancels the
+//     retransmission, while the grace timer guarantees forward progress if the
+//     ACK never comes (no deadlock).
+package mpquic
+
+import (
+    &quot;errors&quot;
+    &quot;sort&quot;
+    &quot;time&quot;
+)
+
+// PathID identifies a network path.
+type PathID uint8
+
+const (
+    PathA PathID = 0
+    PathB PathID = 1
+)
+
+const (
+    // MaxDatagramSize is the fixed payload size used by the sender.
+    MaxDatagramSize = 1200
+    // MinCwnd is the floor for a path's congestion window.
+    MinCwnd = 2 * MaxDatagramSize
+)
+
+// Config tunes the sender.
+type Config struct {
+    InitialRTT      time.Duration
+    InitialCwnd     int
+    PacketThreshold uint64  // reordering tolerance before a lower PN is declared lost
+    TimeThreshold   float64 // multiplier of max(SRTT, latest RTT) for time-based loss
+    MaxAckDelay     time.Duration
+    // MaxReorderingPackets bounds the number of recently-lost packets kept
+    // around so late ACKs can cancel retransmissions. This is the &quot;bounded
+    // reordering memory&quot; of the sender.
+    MaxReorderingPackets int
+    // MaxConnectionInFlight, when &gt; 0, caps the total bytes in flight across
+    // all *active* paths. Migrating bytes are deliberately not counted.
+    MaxConnectionInFlight int
+    // MaxSendBuffer bounds the number of application frames waiting to be sent.
+    MaxSendBuffer int
+}
+
+// DefaultConfig returns a conservative, production-shaped default.
+func DefaultConfig() Config {
+    return Config{
+        InitialRTT:            100 * time.Millisecond,
+        InitialCwnd:           10 * MaxDatagramSize,
+        PacketThreshold:       3,
+        TimeThreshold:         9.0 / 8.0,
+        MaxAckDelay:           25 * time.Millisecond,
+        MaxReorderingPackets:  512,
+        MaxConnectionInFlight: 0,
+        MaxSendBuffer:         1024,
+    }
+}
+
+// Frame is an application data unit. ID must be unique per frame so that a
+// retransmission can be matched back to the original.
+type Frame struct {
+    ID   uint64
+    Data []byte
+}
+
+// Range is an inclusive range of packet numbers.
+type Range struct {
+    Smallest uint64
+    Largest  uint64
+}
+
+// AckFrame is a (possibly non-contiguous) acknowledgment. Ranges are strictly
+// below Largest. The sender tests outstanding packets for membership rather
+// than expanding the ranges, so a malicious ACK cannot blow up memory.
+type AckFrame struct {
+    Largest uint64
+    Ranges  []Range
+}
+
+func (a AckFrame) contains(pn uint64) bool {
+    if pn == a.Largest {
+        return true
+    }
+    for i := range a.Ranges {
+        r := a.Ranges[i]
+        if pn &gt;= r.Smallest &amp;&amp; pn &lt;= r.Largest {
+            return true
+        }
+    }
+    return false
+}
+
+// ---------------------------------------------------------------------------
+// RTT estimation
+// ---------------------------------------------------------------------------
+
+type rttEstimator struct {
+    inited bool
+    srtt   time.Duration
+    rttvar time.Duration
+    latest time.Duration
+}
+
+func (r *rttEstimator) update(sample time.Duration) {
+    if sample &lt;= 0 {
+        return
+    }
+    if !r.inited {
+        r.srtt = sample
+        r.rttvar = sample / 2
+        r.inited = true
+    } else {
+        diff := r.srtt - sample
+        if diff &lt; 0 {
+            diff = -diff
+        }
+        r.rttvar = (3*r.rttvar + diff) / 4
+        r.srtt = (7*r.srtt + sample) / 8
+    }
+    r.latest = sample
+}
+
+// pto is the probe timeout: SRTT + 4*RTTVAR + max_ack_delay.
+func (r *rttEstimator) pto(maxAckDelay time.Duration) time.Duration {
+    if !r.inited {
+        return 0
+    }
+    p := r.srtt + 4*r.rttvar + maxAckDelay
+    if p &lt; 10*time.Millisecond {
+        p = 10 * time.Millisecond
+    }
+    return p
+}
+
+// lossDelay is the time-threshold for declaring a packet lost.
+func (r *rttEstimator) lossDelay(mult float64) time.Duration {
+    if !r.inited {
+        return 0
+    }
+    base := r.srtt
+    if r.latest &gt; base {
+        base = r.latest
+    }
+    d := time.Duration(float64(base) * mult)
+    if d &lt; 10*time.Millisecond {
+        d = 10 * time.Millisecond
+    }
+    return d
+}
+
+func (r *rttEstimator) srttOr(d time.Duration) time.Duration {
+    if r.inited {
+        return r.srtt
+    }
+    return d
+}
+
+// ---------------------------------------------------------------------------
+// Per-path congestion control (NewReno)
+// ---------------------------------------------------------------------------
+
+type reno struct {
+    cwnd          int
+    ssthresh      int
+    bytesInFlight int
+    recoveryEnd   uint64
+    inRecovery    bool
+}
+
+func newReno(initial int) reno {
+    return reno{cwnd: initial, ssthresh: 1 &lt;&lt; 30}
+}
+
+func (c *reno) onAck(pn uint64, ackedBytes int) {
+    if c.inRecovery {
+        if pn &lt;= c.recoveryEnd {
+            return // no window growth for ACKs inside a recovery period
+        }
+        c.inRecovery = false
+    }
+    if c.cwnd &lt; c.ssthresh {
+        c.cwnd += ackedBytes // slow start
+    } else {
+        inc := MaxDatagramSize * ackedBytes / c.cwnd
+        if inc &lt; 1 {
+            inc = 1
+        }
+        c.cwnd += inc // congestion avoidance
+    }
+}
+
+// onCongestion enters a recovery period ending at the largest PN sent when the
+// loss was detected. Losses reported inside the same period do not reduce the
+// window a second time.
+func (c *reno) onCongestion(recoveryEnd uint64) {
+    if c.inRecovery &amp;&amp; recoveryEnd &lt;= c.recoveryEnd {
+        return
+    }
+    c.inRecovery = true
+    c.recoveryEnd = recoveryEnd
+    c.ssthresh = c.cwnd / 2
+    if c.ssthresh &lt; MinCwnd {
+        c.ssthresh = MinCwnd
+    }
+    c.cwnd = c.ssthresh
+}
+
+// ---------------------------------------------------------------------------
+// Sender state
+// ---------------------------------------------------------------------------
+
+type packet struct {
+    pn        uint64
+    path      PathID
+    sentAt    time.Time
+    size      int
+    frame     Frame
+    acked     bool
+    lost      bool
+    migrating bool
+    deadline  time.Time
+}
+
+type pathState struct {
+    id              PathID
+    active          bool
+    cc              reno
+    rtt             rttEstimator
+    outstanding     map[uint64]*packet
+    largestSent     uint64
+    largestAcked    uint64
+    hasLargestAcked bool
+}
+
+// Outgoing is a datagram produced by Send.
+type Outgoing struct {
+    Path  PathID
+    PN    uint64
+    Frame Frame
+    Retx  bool
+}
+
+// Stats are diagnostic counters, useful for verification.
+type Stats struct {
+    Sent                 int
+    Retransmits          int
+    SpuriousLosses       int
+    MigrationRetransmits int
+    CongestionEvents     int
+    Acked                int
+    AckFrames            int
+}
+
+// Sender is a multipath QUIC-like sender. All methods take an explicit
+// timestamp so behavior is deterministic and testable.
+type Sender struct {
+    cfg    Config
+    nextPN uint64
+
+    paths map[PathID]*pathState
+
+    byPN map[uint64]*packet
+
+    // lostPackets is a bounded window of recently-lost packets. A late ACK
+    // for one of them cancels the queued retransmission (spurious-loss
+    // suppression). Eviction is FIFO, so memory is bounded.
+    lostPackets map[uint64]*packet
+    lostOrder   []uint64
+
+    // migrating holds packets from an invalidated path. They are still in
+    // byPN (so ACKs can find them) but no longer consume any path's budget.
+    migrating []*packet
+
+    newFrames []Frame
+    retxOrder []uint64
+    scheduled map[uint64]bool
+    frames    map[uint64]Frame
+
+    stats Stats
+}
+
+// New creates a Sender. Zero-valued config fields fall back to DefaultConfig.
+func New(cfg Config) *Sender {
+    d := DefaultConfig()
+    if cfg.InitialRTT &lt;= 0 {
+        cfg.InitialRTT = d.InitialRTT
+    }
+    if cfg.InitialCwnd &lt;= 0 {
+        cfg.InitialCwnd = d.InitialCwnd
+    }
+    if cfg.PacketThreshold == 0 {
+        cfg.PacketThreshold = d.PacketThreshold
+    }
+    if cfg.TimeThreshold &lt;= 0 {
+        cfg.TimeThreshold = d.TimeThreshold
+    }
+    if cfg.MaxAckDelay &lt;= 0 {
+        cfg.MaxAckDelay = d.MaxAckDelay
+    }
+    if cfg.MaxReorderingPackets &lt;= 0 {
+        cfg.MaxReorderingPackets = d.MaxReorderingPackets
+    }
+    if cfg.MaxSendBuffer &lt;= 0 {
+        cfg.MaxSendBuffer = d.MaxSendBuffer
+    }
+    return &amp;Sender{
+        cfg:         cfg,
+        paths:       map[PathID]*pathState{},
+        byPN:        map[uint64]*packet{},
+        lostPackets: map[uint64]*packet{},
+        scheduled:   map[uint64]bool{},
+        frames:      map[uint64]Frame{},
+    }
+}
+
+// AddPath activates a path with a fresh, independent congestion controller.
+// Re-adding an already-active path is a no-op; re-adding a previously
+// invalidated path installs a clean controller.
+func (s *Sender) AddPath(id PathID) {
+    if p, ok := s.paths[id]; ok &amp;&amp; p.active {
+        return
+    }
+    s.paths[id] = &amp;pathState{
+        id:          id,
+        active:      true,
+        cc:          newReno(s.cfg.InitialCwnd),
+        outstanding: map[uint64]*packet{},
+    }
+}
+
+// Enqueue queues an application frame for transmission.
+func (s *Sender) Enqueue(f Frame) error {
+    if len(s.newFrames) &gt;= s.cfg.MaxSendBuffer {
+        return errors.New(&quot;mpquic: send buffer full&quot;)
+    }
+    cp := make([]byte, len(f.Data))
+    copy(cp, f.Data)
+    f.Data = cp
+    s.newFrames = append(s.newFrames, f)
+    return nil
+}
+
+// InvalidatePath handles an abrupt migration: the path is retired and every
+// unacknowledged packet is moved to the migrating set with a PTO deadline.
+//
+// Crucially the path's congestion budget is released at once. If those bytes
+// remained &quot;in flight&quot;, a connection-level or path-level window could be
+// exhausted forever because no ACK will ever arrive for the dead path. The
+// frames are not retransmitted yet: a PTO grace period lets a racing ACK
+// cancel the retransmission.
+func (s *Sender) InvalidatePath(now time.Time, id PathID) {
+    p := s.paths[id]
+    if p == nil || !p.active {
+        return
+    }
+    p.active = false
+
+    pto := p.rtt.pto(s.cfg.MaxAckDelay)
+    if pto &lt;= 0 {
+        pto = 2*p.rtt.srttOr(s.cfg.InitialRTT) + s.cfg.MaxAckDelay
+    }
+    deadline := now.Add(pto)
+
+    for pn, pkt := range p.outstanding {
+        pkt.migrating = true
+        pkt.deadline = deadline
+        s.migrating = append(s.migrating, pkt)
+        delete(p.outstanding, pn)
+    }
+    p.cc.bytesInFlight = 0
+}
+
+// CheckTimeouts drives the two timer-based transitions:
+//   - migration grace expiry -&gt; reschedule the frame on a surviving path;
+//   - time-threshold loss on an active path -&gt; reschedule and reduce cwnd.
+func (s *Sender) CheckTimeouts(now time.Time) {
+    // Migration deadlines.
+    if len(s.migrating) &gt; 0 {
+        due := make([]*packet, 0, len(s.migrating))
+        for _, pkt := range s.migrating {
+            if !pkt.acked &amp;&amp; !pkt.lost &amp;&amp; !now.Before(pkt.deadline) {
+                due = append(due, pkt)
+            }
+        }
+        for _, pkt := range due {
+            if s.declareLost(pkt, true) {
+                s.stats.MigrationRetransmits++
+            }
+        }
+    }
+
+    // Time-threshold loss detection on active paths.
+    for _, p := range s.paths {
+        if !p.active {
+            continue
+        }
+        delay := p.rtt.lossDelay(s.cfg.TimeThreshold)
+        if delay &lt;= 0 {
+            delay = s.cfg.InitialRTT
+        }
+        var due []*packet
+        for _, pkt := range p.outstanding {
+            if now.Sub(pkt.sentAt) &gt;= delay {
+                due = append(due, pkt)
+            }
+        }
+        for _, pkt := range due {
+            s.declareLost(pkt, false)
+        }
+    }
+}
+
+func (s *Sender) removeMigrating(pkt *packet) {
+    for i, p := range s.migrating {
+        if p == pkt {
+            s.migrating = append(s.migrating[:i], s.migrating[i+1:]...)
+            return
+        }
+    }
+}
+
+// declareLost moves a packet out of flight, optionally applies a congestion
+// event, remembers it in the bounded lost window, and schedules its frame for
+// retransmission (once). It returns true if this call changed the packet's
+// state.
+func (s *Sender) declareLost(pkt *packet, fromMigration bool) bool {
+    if pkt.acked || pkt.lost {
+        return false
+    }
+    pkt.lost = true
+
+    if pkt.migrating {
+        s.removeMigrating(pkt)
+    } else if p, ok := s.paths[pkt.path]; ok {
+        delete(p.outstanding, pkt.pn)
+        p.cc.bytesInFlight -= pkt.size
+        if p.cc.bytesInFlight &lt; 0 {
+            p.cc.bytesInFlight = 0
+        }
+        if !fromMigration {
+            // A migration is not a congestion signal: the path vanished,
+            // it did not become congested.
+            p.cc.onCongestion(p.largestSent)
+            s.stats.CongestionEvents++
+        }
+    }
+
+    delete(s.byPN, pkt.pn)
+    s.rememberLost(pkt)
+
+    if _, ok := s.scheduled[pkt.frame.ID]; !ok {
+        s.scheduled[pkt.frame.ID] = true
+        s.frames[pkt.frame.ID] = pkt.frame
+        s.retxOrder = append(s.retxOrder, pkt.frame.ID)
+    }
+    return true
+}
+
+func (s *Sender) rememberLost(pkt *packet) {
+    s.lostPackets[pkt.pn] = pkt
+    s.lostOrder = append(s.lostOrder, pkt.pn)
+    for len(s.lostOrder) &gt; s.cfg.MaxReorderingPackets {
+        old := s.lostOrder[0]
+        s.lostOrder = s.lostOrder[1:]
+        delete(s.lostPackets, old)
+    }
+}
+
+// detectLostPath applies the packet-threshold rule within a single path. Only
+// packets sent on the path that produced the ACK are considered, so
+// cross-path reordering cannot cause spurious losses. Late ACKs are handled
+// by the bounded lost window in OnAck.
+func (s *Sender) detectLostPath(p *pathState) {
+    if !p.hasLargestAcked || p.largestAcked &lt; s.cfg.PacketThreshold {
+        return
+    }
+    cutoff := p.largestAcked - s.cfg.PacketThreshold
+    var due []*packet
+    for pn, pkt := range p.outstanding {
+        if pn &lt;= cutoff {
+            due = append(due, pkt)
+        }
+    }
+    for _, pkt := range due {
+        s.declareLost(pkt, false)
+    }
+}
+
+// OnAck processes an ACK frame. It is safe against out-of-order and duplicate
+// ACKs, and against ACKs that acknowledge packets already declared lost.
+func (s *Sender) OnAck(now time.Time, ack AckFrame) {
+    s.stats.AckFrames++
+
+    // Collect live packets. Membership testing keeps memory proportional to
+    // the send window regardless of how many ranges the ACK carries.
+    var hits []*packet
+    for pn, pkt := range s.byPN {
+        if ack.contains(pn) {
+            hits = append(hits, pkt)
+        }
+    }
+
+    // Collect late ACKs for packets already declared lost. These are what
+    // would otherwise become spurious retransmits.
+    var lostHits []*packet
+    for pn, pkt := range s.lostPackets {
+        if ack.contains(pn) {
+            lostHits = append(lostHits, pkt)
+        }
+    }
+    for _, pkt := range lostHits {
+        delete(s.scheduled, pkt.frame.ID)
+        delete(s.lostPackets, pkt.pn)
+        s.stats.SpuriousLosses++
+    }
+
+    // Process live ACKs in ascending PN order so largestAcked only grows.
+    sort.Slice(hits, func(i, j int) bool { return hits[i].pn &lt; hits[j].pn })
+
+    prevLargest := map[PathID]uint64{}
+    newLargest := map[PathID]*packet{}
+
+    for _, pkt := range hits {
+        if pkt.acked {
+            continue
+        }
+        pkt.acked = true
+        delete(s.byPN, pkt.pn)
+        // A frame that was scheduled for retransmission is now known to
+        // have been delivered: cancel the pending retransmit.
+        delete(s.scheduled, pkt.frame.ID)
+
+        p, ok := s.paths[pkt.path]
+        if !ok {
+            continue
+        }
+        if pkt.migrating {
+            s.removeMigrating(pkt)
+            // No congestion credit for an abandoned path.
+        } else {
+            delete(p.outstanding, pkt.pn)
+            p.cc.bytesInFlight -= pkt.size
+            if p.cc.bytesInFlight &lt; 0 {
+                p.cc.bytesInFlight = 0
+            }
+            p.cc.onAck(pkt.pn, pkt.size)
+        }
+        s.stats.Acked++
+
+        if _, seen := prevLargest[pkt.path]; !seen {
+            prevLargest[pkt.path] = p.largestAcked
+        }
+        if pkt.pn &gt; p.largestAcked {
+            p.largestAcked = pkt.pn
+            p.hasLargestAcked = true
+        }
+        if m := newLargest[pkt.path]; m == nil || pkt.pn &gt; m.pn {
+            newLargest[pkt.path] = pkt
+        }
+    }
+
+    // RTT sampling (largest newly acked PN per path) and loss detection.
+    for pid, pkt := range newLargest {
+        p := s.paths[pid]
+        if p == nil {
+            continue
+        }
+        if pkt.pn &gt; prevLargest[pid] {
+            p.rtt.update(now.Sub(pkt.sentAt))
+        }
+        s.detectLostPath(p)
+    }
+}
+
+// pickPath selects an active path with room in its congestion window. The
+// connection-level cap counts only active paths; migrating bytes are excluded
+// precisely so an invalidated path cannot deadlock the connection.
+func (s *Sender) pickPath() *pathState {
+    if s.cfg.MaxConnectionInFlight &gt; 0 &amp;&amp;
+        s.connInFlight()+MaxDatagramSize &gt; s.cfg.MaxConnectionInFlight {
+        return nil
+    }
+    var best *pathState
+    bestAvail := 0
+    for _, p := range s.paths {
+        if !p.active {
+            continue
+        }
+        avail := p.cc.cwnd - p.cc.bytesInFlight
+        if avail &lt; MaxDatagramSize {
+            continue
+        }
+        if best == nil || avail &gt; bestAvail || (avail == bestAvail &amp;&amp; p.id &lt; best.id) {
+            best = p
+            bestAvail = avail
+        }
+    }
+    return best
+}
+
+func (s *Sender) connInFlight() int {
+    total := 0
+    for _, p := range s.paths {
+        if p.active {
+            total += p.cc.bytesInFlight
+        }
+    }
+    return total
+}
+
+// Send produces the next datagram, retransmissions first. It returns false
+// when there is no frame to send or no congestion capacity on an active path.
+func (s *Sender) Send(now time.Time) (*Outgoing, bool) {
+    s.CheckTimeouts(now)
+
+    var fr Frame
+    isRetx := false
+    for len(s.retxOrder) &gt; 0 {
+        id := s.retxOrder[0]
+        s.retxOrder = s.retxOrder[1:]
+        if _, ok := s.scheduled[id]; !ok {
+            continue // canceled by a late ACK
+        }
+        delete(s.scheduled, id)
+        f, ok := s.frames[id]
+        if !ok {
+            continue
+        }
+        fr = f
+        isRetx = true
+        break
+    }
+    if !isRetx {
+        if len(s.newFrames) == 0 {
+            return nil, false
+        }
+        fr = s.newFrames[0]
+        s.newFrames = s.newFrames[1:]
+    }
+
+    p := s.pickPath()
+    if p == nil {
+        if isRetx {
+            s.scheduled[fr.ID] = true
+            s.retxOrder = append([]uint64{fr.ID}, s.retxOrder...)
+        } else {
+            s.newFrames = append([]Frame{fr}, s.newFrames...)
+        }
+        return nil, false
+    }
+
+    pn := s.nextPN
+    s.nextPN++
+    pkt := &amp;packet{pn: pn, path: p.id, sentAt: now, size: MaxDatagramSize, frame: fr}
+    p.outstanding[pn] = pkt
+    p.cc.bytesInFlight += pkt.size
+    p.largestSent = pn
+    s.byPN[pn] = pkt
+
+    s.stats.Sent++
+    if isRetx {
+        s.stats.Retransmits++
+    }
+    return &amp;Outgoing{Path: p.id, PN: pn, Frame: fr, Retx: isRetx}, true
+}
+
+// Stats returns a snapshot of the sender counters.
+func (s *Sender) Stats() Stats { return s.stats }
+
+// BytesInFlight returns the congestion-controlled bytes in flight on a path.
+func (s *Sender) BytesInFlight(id PathID) int {
+    if p, ok := s.paths[id]; ok {
+        return p.cc.bytesInFlight
+    }
+    return 0
+}
+
+// MigratingCount returns the number of packets awaiting the migration grace.
+func (s *Sender) MigratingCount() int { return len(s.migrating) }
+
+// PendingFrames returns the number of unsent application frames.
+func (s *Sender) PendingFrames() int { return len(s.newFrames) }
+
+// ScheduledRetransmits returns the number of retransmissions queued but not
+// yet sent (including those already canceled but not lazily removed).
+func (s *Sender) ScheduledRetransmits() int { return len(s.scheduled) }
+</code></pre>
+<h3>Test suite (<code>mpquic_test.go</code>)</h3>
+<pre><code class="language-go">package mpquic
+
+import (
+    &quot;math/rand&quot;
+    &quot;sort&quot;
+    &quot;testing&quot;
+    &quot;time&quot;
+)
+
+func mkFrame(id uint64) Frame { return Frame{ID: id, Data: []byte{byte(id)}} }
+
+// sendAll drains the sender until it refuses to produce more datagrams.
+func sendAll(s *Sender, now time.Time) []*Outgoing {
+    var out []*Outgoing
+    for {
+        o, ok := s.Send(now)
+        if !ok {
+            return out
+        }
+        out = append(out, o)
+    }
+}
+
+// TestBasicTwoPath checks the happy path: independent paths, all ACKed, no
+// retransmits, no spurious losses.
+func TestBasicTwoPath(t *testing.T) {
+    s := New(DefaultConfig())
+    s.AddPath(PathA)
+    s.AddPath(PathB)
+
+    now := time.Unix(0, 0)
+    for i := uint64(0); i &lt; 10; i++ {
+        if err := s.Enqueue(mkFrame(i)); err != nil {
+            t.Fatal(err)
+        }
+    }
+    out := sendAll(s, now)
+    if len(out) != 10 {
+        t.Fatalf(&quot;want 10 datagrams, got %d&quot;, len(out))
+    }
+
+    s.OnAck(now.Add(time.Second), AckFrame{Largest: 9, Ranges: []Range{{Smallest: 0, Largest: 8}}})
+
+    if s.Stats().Acked != 10 {
+        t.Fatalf(&quot;acked = %d, want 10&quot;, s.Stats().Acked)
+    }
+    if s.Stats().Retransmits != 0 {
+        t.Fatalf(&quot;retransmits = %d, want 0&quot;, s.Stats().Retransmits)
+    }
+    if s.Stats().SpuriousLosses != 0 {
+        t.Fatalf(&quot;spurious losses = %d, want 0&quot;, s.Stats().SpuriousLosses)
+    }
+}
+
+// TestReorderedAckCancelsSpuriousRetransmit exercises the packet-threshold
+// rule firing for PN0..2 because only PN5 is ACKed, followed by a delayed ACK
+// for PN0..4. The queued retransmissions must be canceled; no retransmit is
+// allowed to leave the sender.
+func TestReorderedAckCancelsSpuriousRetransmit(t *testing.T) {
+    s := New(DefaultConfig())
+    s.AddPath(PathA)
+
+    now := time.Unix(0, 0)
+    for i := uint64(0); i &lt; 6; i++ {
+        if err := s.Enqueue(mkFrame(i)); err != nil {
+            t.Fatal(err)
+        }
+    }
+    if got := len(sendAll(s, now)); got != 6 {
+        t.Fatalf(&quot;want 6 datagrams, got %d&quot;, got)
+    }
+
+    // Only PN5 is acknowledged. PN0..2 fall below the packet threshold and
+    // are (prematurely) declared lost, queueing retransmissions.
+    s.OnAck(now.Add(10*time.Millisecond), AckFrame{Largest: 5})
+    if s.ScheduledRetransmits() != 3 {
+        t.Fatalf(&quot;scheduled retransmits = %d, want 3&quot;, s.ScheduledRetransmits())
+    }
+
+    // The delayed ACK for PN0..4 races in before any retransmit is sent.
+    s.OnAck(now.Add(20*time.Millisecond), AckFrame{Largest: 4, Ranges: []Range{{Smallest: 0, Largest: 3}}})
+
+    if s.Stats().SpuriousLosses != 3 {
+        t.Fatalf(&quot;spurious losses = %d, want 3&quot;, s.Stats().SpuriousLosses)
+    }
+    if len(s.byPN) != 0 {
+        t.Fatalf(&quot;%d packets still in flight, want 0&quot;, len(s.byPN))
+    }
+    if s.ScheduledRetransmits() != 0 {
+        t.Fatalf(&quot;scheduled retransmits = %d, want 0&quot;, s.ScheduledRetransmits())
+    }
+
+    o, ok := s.Send(now.Add(30 * time.Millisecond))
+    if ok &amp;&amp; o.Retx {
+        t.Fatalf(&quot;spurious retransmit produced: %+v&quot;, o)
+    }
+    if s.Stats().Retransmits != 0 {
+        t.Fatalf(&quot;retransmits = %d, want 0&quot;, s.Stats().Retransmits)
+    }
+}
+
+// TestMigrationAckRaceNoSpuriousRetransmit checks that an ACK which arrives
+// after a path is invalidated but before the migration grace period expires
+// cancels the retransmission.
+func TestMigrationAckRaceNoSpuriousRetransmit(t *testing.T) {
+    s := New(DefaultConfig())
+    s.AddPath(PathA)
+
+    now := time.Unix(0, 0)
+    for i := uint64(0); i &lt; 4; i++ {
+        if err := s.Enqueue(mkFrame(i)); err != nil {
+            t.Fatal(err)
+        }
+    }
+    if got := len(sendAll(s, now)); got != 4 {
+        t.Fatalf(&quot;want 4 datagrams on path A, got %d&quot;, got)
+    }
+
+    s.InvalidatePath(now, PathA)
+    s.AddPath(PathB) // the surviving path
+
+    if s.MigratingCount() != 4 {
+        t.Fatalf(&quot;migrating = %d, want 4&quot;, s.MigratingCount())
+    }
+    if s.BytesInFlight(PathA) != 0 {
+        t.Fatalf(&quot;bytes in flight on dead path = %d, want 0&quot;, s.BytesInFlight(PathA))
+    }
+
+    // The peer's ACK arrives just after migration.
+    s.OnAck(now.Add(10*time.Millisecond), AckFrame{Largest: 3, Ranges: []Range{{Smallest: 0, Largest: 2}}})
+
+    if s.Stats().MigrationRetransmits != 0 {
+        t.Fatalf(&quot;migration retransmits = %d, want 0&quot;, s.Stats().MigrationRetransmits)
+    }
+    if s.MigratingCount() != 0 {
+        t.Fatalf(&quot;migrating = %d, want 0&quot;, s.MigratingCount())
+    }
+    if o, ok := s.Send(now.Add(20 * time.Millisecond)); ok &amp;&amp; o.Retx {
+        t.Fatalf(&quot;spurious retransmit after migration race: %+v&quot;, o)
+    }
+}
+
+// TestMigrationTimeoutPreventsDeadlock checks the other side of the race: if
+// the ACK never arrives, the grace timer must reschedule every frame on the
+// surviving path. A connection-level in-flight cap makes the deadlock that
+// would occur if migrating bytes were still counted explicit.
+func TestMigrationTimeoutPreventsDeadlock(t *testing.T) {
+    cfg := DefaultConfig()
+    cfg.MaxConnectionInFlight = 4 * MaxDatagramSize // exactly the 4 frames we send
+    s := New(cfg)
+    s.AddPath(PathA)
+
+    now := time.Unix(0, 0)
+    for i := uint64(0); i &lt; 4; i++ {
+        if err := s.Enqueue(mkFrame(i)); err != nil {
+            t.Fatal(err)
+        }
+    }
+    if got := len(sendAll(s, now)); got != 4 {
+        t.Fatalf(&quot;want 4 datagrams, got %d&quot;, got)
+    }
+
+    s.InvalidatePath(now, PathA)
+    s.AddPath(PathB)
+
+    // If the dead path's bytes were still counted, the connection cap would
+    // be full (4*1200) and Send could never make progress.
+    if s.connInFlight() != 0 {
+        t.Fatalf(&quot;connection in-flight after migration = %d, want 0&quot;, s.connInFlight())
+    }
+
+    later := now.Add(time.Second) // well past the PTO grace period
+    s.CheckTimeouts(later)
+    if s.Stats().MigrationRetransmits != 4 {
+        t.Fatalf(&quot;migration retransmits = %d, want 4&quot;, s.Stats().MigrationRetransmits)
+    }
+
+    var retx int
+    for {
+        o, ok := s.Send(later)
+        if !ok {
+            break
+        }
+        if o.Path != PathB {
+            t.Fatalf(&quot;retransmit went to path %d, want path B&quot;, o.Path)
+        }
+        if o.Retx {
+            retx++
+        }
+        later = later.Add(time.Millisecond)
+    }
+    if retx != 4 {
+        t.Fatalf(&quot;retransmits on path B = %d, want 4&quot;, retx)
+    }
+}
+
+// TestCrossPathReorderingDoesNotCauseLoss confirms that an ACK for a packet on
+// one path cannot declare packets on the other path lost, even when the global
+// packet numbers are interleaved.
+func TestCrossPathReorderingDoesNotCauseLoss(t *testing.T) {
+    s := New(DefaultConfig())
+    s.AddPath(PathA)
+    s.AddPath(PathB)
+
+    now := time.Unix(0, 0)
+    for i := uint64(0); i &lt; 8; i++ {
+        if err := s.Enqueue(mkFrame(i)); err != nil {
+            t.Fatal(err)
+        }
+    }
+    outs := sendAll(s, now)
+    if len(outs) != 8 {
+        t.Fatalf(&quot;want 8 datagrams, got %d&quot;, len(outs))
+    }
+
+    // Acknowledge all path-B packets as one ACK (PNs 1, 3, 5, largest 7).
+    // Path-A outstanding packets must be untouched: loss detection is
+    // per-path, so interleaved global PNs cannot cause cross-path losses.
+    beforeA := len(s.paths[PathA].outstanding)
+    s.OnAck(now.Add(10*time.Millisecond), AckFrame{
+        Largest: 7,
+        Ranges:  []Range{{Smallest: 1, Largest: 1}, {Smallest: 3, Largest: 3}, {Smallest: 5, Largest: 5}},
+    })
+    if s.ScheduledRetransmits() != 0 {
+        t.Fatalf(&quot;cross-path ACK scheduled retransmits: %d&quot;, s.ScheduledRetransmits())
+    }
+    if got := len(s.paths[PathA].outstanding); got != beforeA {
+        t.Fatalf(&quot;path A outstanding changed: %d -&gt; %d&quot;, beforeA, got)
+    }
+}
+
+// TestBoundedReorderingMemory confirms the recently-lost window never grows
+// past its configured bound even under a long run of losses.
+func TestBoundedReorderingMemory(t *testing.T) {
+    cfg := DefaultConfig()
+    cfg.MaxReorderingPackets = 8
+    cfg.InitialCwnd = 100 * MaxDatagramSize
+    s := New(cfg)
+    s.AddPath(PathA)
+
+    now := time.Unix(0, 0)
+    for i := uint64(0); i &lt; 100; i++ {
+        if err := s.Enqueue(mkFrame(i)); err != nil {
+            t.Fatal(err)
+        }
+    }
+    sendAll(s, now)
+
+    // Force the whole window to be declared lost via the packet threshold.
+    s.OnAck(now.Add(10*time.Millisecond), AckFrame{Largest: 99})
+    if len(s.lostPackets) &gt; cfg.MaxReorderingPackets {
+        t.Fatalf(&quot;lostPackets = %d, exceeds bound %d&quot;, len(s.lostPackets), cfg.MaxReorderingPackets)
+    }
+    if len(s.lostOrder) &gt; cfg.MaxReorderingPackets {
+        t.Fatalf(&quot;lostOrder = %d, exceeds bound %d&quot;, len(s.lostOrder), cfg.MaxReorderingPackets)
+    }
+}
+
+// TestRandomizedStress drives the sender with random ACKs, random path
+// invalidations and random timeouts, then checks the safety invariants and
+// convergence.
+func TestRandomizedStress(t *testing.T) {
+    rng := rand.New(rand.NewSource(7))
+    s := New(DefaultConfig())
+    s.AddPath(PathA)
+    s.AddPath(PathB)
+    now := time.Unix(0, 0)
+
+    const total = 300
+    for i := uint64(0); i &lt; total; i++ {
+        if err := s.Enqueue(mkFrame(i)); err != nil {
+            t.Fatal(err)
+        }
+    }
+
+    ackAll := func(at time.Time) {
+        if len(s.byPN) == 0 {
+            return
+        }
+        var pns []uint64
+        for pn := range s.byPN {
+            pns = append(pns, pn)
+        }
+        sort.Slice(pns, func(i, j int) bool { return pns[i] &lt; pns[j] })
+        ack := AckFrame{Largest: pns[len(pns)-1]}
+        for _, pn := range pns[:len(pns)-1] {
+            ack.Ranges = append(ack.Ranges, Range{Smallest: pn, Largest: pn})
+        }
+        s.OnAck(at, ack)
+    }
+
+    for round := 0; round &lt; 3000; round++ {
+        now = now.Add(time.Millisecond)
+        for {
+            if _, ok := s.Send(now); !ok {
+                break
+            }
+        }
+        if rng.Intn(40) == 0 {
+            id := PathID(rng.Intn(2))
+            s.InvalidatePath(now, id)
+            s.AddPath(id) // revive cleanly
+        }
+        if len(s.byPN) &gt; 0 &amp;&amp; rng.Intn(4) != 0 {
+            ackAll(now)
+        }
+        for _, p := range s.paths {
+            if p.cc.bytesInFlight &lt; 0 {
+                t.Fatalf(&quot;negative bytesInFlight on path %d: %d&quot;, p.id, p.cc.bytesInFlight)
+            }
+        }
+        if len(s.lostPackets) &gt; s.cfg.MaxReorderingPackets {
+            t.Fatalf(&quot;lostPackets unbounded: %d&quot;, len(s.lostPackets))
+        }
+    }
+
+    for round := 0; round &lt; 5000; round++ {
+        if len(s.byPN) == 0 &amp;&amp; len(s.newFrames) == 0 &amp;&amp; len(s.migrating) == 0 &amp;&amp; len(s.scheduled) == 0 {
+            break
+        }
+        now = now.Add(10 * time.Millisecond)
+        for {
+            if _, ok := s.Send(now); !ok {
+                break
+            }
+        }
+        ackAll(now)
+    }
+    if len(s.byPN) != 0 || len(s.newFrames) != 0 || len(s.migrating) != 0 {
+        t.Fatalf(&quot;stress did not converge: inFlight=%d new=%d migrating=%d scheduled=%d&quot;,
+            len(s.byPN), len(s.newFrames), len(s.migrating), len(s.scheduled))
+    }
+}
+</code></pre>
+<hr />
+<h2>Verification</h2>
+<h3>Reproduce from scratch</h3>
+<pre><code class="language-bash">mkdir -p ~/mpquic &amp;&amp; cd ~/mpquic
+# create go.mod, mpquic.go and mpquic_test.go from the listings above
+go vet ./...
+gofmt -l .            # must print nothing
+go test -race -count=1 -v ./...
+</code></pre>
+<h3>What each test proves</h3>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Property verified</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TestBasicTwoPath</code></td>
+<td>Two independent paths, all packets ACKed, <strong>0</strong> retransmits, <strong>0</strong> spurious losses</td>
+</tr>
+<tr>
+<td><code>TestReorderedAckCancelsSpuriousRetransmit</code></td>
+<td>A late ACK cancels 3 queued retransmissions; <code>SpuriousLosses == 3</code>, <code>Retransmits == 0</code>, nothing left in flight</td>
+</tr>
+<tr>
+<td><code>TestMigrationAckRaceNoSpuriousRetransmit</code></td>
+<td>ACK racing the invalidation → <code>MigrationRetransmits == 0</code>, dead path's <code>BytesInFlight == 0</code>, <code>MigratingCount == 0</code></td>
+</tr>
+<tr>
+<td><code>TestMigrationTimeoutPreventsDeadlock</code></td>
+<td>ACK never arrives → PTO reschedules 4 frames on the surviving path, all sent on Path B; connection in-flight after migration is 0</td>
+</tr>
+<tr>
+<td><code>TestCrossPathReorderingDoesNotCauseLoss</code></td>
+<td>An ACK for Path B packets never touches Path A's outstanding set</td>
+</tr>
+<tr>
+<td><code>TestBoundedReorderingMemory</code></td>
+<td><code>lostPackets</code>/<code>lostOrder</code> never exceed <code>MaxReorderingPackets</code> (8)</td>
+</tr>
+<tr>
+<td><code>TestRandomizedStress</code></td>
+<td>300 frames × 3000 rounds of random ACKs, random invalidations, random timeouts: no negative in-flight, bounded lost window, full convergence</td>
+</tr>
+</tbody>
+</table>
+<h3>Observed result</h3>
+<pre><code>$ cd ~/mpquic &amp;&amp; go vet ./... &amp;&amp; gofmt -l . &amp;&amp; go test -race -count=1 -v ./...
+=== RUN   TestBasicTwoPath
+--- PASS: TestBasicTwoPath (0.00s)
+=== RUN   TestReorderedAckCancelsSpuriousRetransmit
+--- PASS: TestReorderedAckCancelsSpuriousRetransmit (0.00s)
+=== RUN   TestMigrationAckRaceNoSpuriousRetransmit
+--- PASS: TestMigrationAckRaceNoSpuriousRetransmit (0.00s)
+=== RUN   TestMigrationTimeoutPreventsDeadlock
+--- PASS: TestMigrationTimeoutPreventsDeadlock (0.00s)
+=== RUN   TestCrossPathReorderingDoesNotCauseLoss
+--- PASS: TestCrossPathReorderingDoesNotCauseLoss (0.00s)
+=== RUN   TestBoundedReorderingMemory
+--- PASS: TestBoundedReorderingMemory (0.00s)
+=== RUN   TestRandomizedStress
+--- PASS: TestRandomizedStress (0.00s)
+PASS
+ok      mpquic  1.015s
+</code></pre>
+<p>Coverage: <code>go test -cover ./...</code> → <code>coverage: 86.9% of statements</code>.</p>
+<h3>Key assertions in code form</h3>
+<p>Spurious-retransmit suppression:</p>
+<pre><code class="language-go">s.OnAck(now.Add(10*time.Millisecond), AckFrame{Largest: 5})          // queues 3 retx
+s.OnAck(now.Add(20*time.Millisecond), AckFrame{Largest: 4,
+        Ranges: []Range{{Smallest: 0, Largest: 3}}})                 // late ACK cancels them
+if s.Stats().Retransmits != 0 { /* fail */ }
+</code></pre>
+<p>Migration deadlock avoidance:</p>
+<pre><code class="language-go">s.InvalidatePath(now, PathA)      // bytesInFlight(PathA) -&gt; 0 immediately
+s.AddPath(PathB)
+if s.connInFlight() != 0 { /* fail */ }   // dead path no longer blocks the connection
+s.CheckTimeouts(now.Add(time.Second))     // PTO grace expires
+// exactly 4 frames are retransmitted on PathB
+</code></pre>
+<hr />
+<h2>Implementation notes / production hardening</h2>
+<ul>
+<li><code>MigrationRetransmits</code> proves retransmissions happen <strong>after</strong> the grace period; if an ACK for a migrating packet arrives first, <code>OnAck</code> removes it from <code>migrating</code> and never schedules a retransmission.</li>
+<li><code>AckFrame.contains</code> is O(number of ranges); the sender never materializes ranges, so adversarial ACKs cannot allocate memory.</li>
+<li><code>MaxConnectionInFlight</code> sums only <strong>active</strong> paths, which makes the deadlock impossible while still bounding total network load.</li>
+<li>RTT samples are taken only from the largest newly-ACKed PN on each path, so reordering does not deflate <code>srtt</code>.</li>
+<li><code>onCongestion</code> uses a recovery epoch (<code>recoveryEnd</code>) so multiple losses in one RTT only halve <code>cwnd</code> once.</li>
+<li>For an interoperable wire format, map <code>Frame</code> onto QUIC STREAM/CRYPTO frames and keep the 1:1 packet↔frame retransmission bookkeeping used here; the cancellation logic (frame id ↔ scheduled retransmit) is direct.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-quic-multipath-congestion-recovery
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-05T04:09:01.414Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a QUIC-like sender that stripes datagrams over two paths with independent RTT, loss, and congestion state, while packet acknowledgments may arrive reordered and path migration can invalidate one path abruptly. Preserve per-path congestion safety and bounded reordering memory, and define recovery behavior that avoids both spurious retransmits and deadlock when acknowledgments race with migration.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-quic-multipath-congestion-recovery&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-05T04:09:01.415Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

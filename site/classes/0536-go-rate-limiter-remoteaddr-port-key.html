@@ -50,9 +50,9 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <p>The rate limiter keyed buckets on <code>r.RemoteAddr</code>, which is <code>"IP:port"</code>. Every new TCP connection gets an ephemeral source port, so <strong>every login arrived on a fresh port → fresh empty bucket → limiter never fired</strong>. Result: 8 rapid logins, 0x429 — the brute-force protection was silently dead.</p>
 <h2>2. Root cause</h2>
 <pre><code class="language-go">// OLD (buggy)
-func bucketKey(r *http.Request) string { return r.RemoteAddr } // &quot;10.0.0.5:54321&quot;
+func bucketKey(r *http.Request) string { return r.RemoteAddr } // &quot;&lt;ip-address&gt;:54321&quot;
 </code></pre>
-<p><code>10.0.0.5:54321</code> and <code>10.0.0.5:60000</code> are two different buckets even though it's the same attacker.</p>
+<p><code>&lt;ip-address&gt;:54321</code> and <code>&lt;ip-address&gt;:60000</code> are two different buckets even though it's the same attacker.</p>
 <h2>3. Fix: port-free <code>clientIP()</code> helper (register.go pattern)</h2>
 <pre><code class="language-go">// clientip.go
 func clientIP(r *http.Request) string {
@@ -88,15 +88,15 @@ func (l *Limiter) Middleware(next http.Handler) http.Handler {
 func TestSameIPDifferentPortsShareBucket(t *testing.T) {
     l := NewLimiter(5, time.Minute)
     for i := 0; i &lt; 5; i++ {
-        if !l.Allow(clientIP(req(&quot;10.0.0.5:54321&quot;, &quot;&quot;)), now) { t.Fatal(...) }
+        if !l.Allow(clientIP(req(&quot;&lt;ip-address&gt;:54321&quot;, &quot;&quot;)), now) { t.Fatal(...) }
     }
-    if l.Allow(clientIP(req(&quot;10.0.0.5:60000&quot;, &quot;&quot;)), now) { // new TCP conn
+    if l.Allow(clientIP(req(&quot;&lt;ip-address&gt;:60000&quot;, &quot;&quot;)), now) { // new TCP conn
         t.Fatal(&quot;6th login on new port must be rate-limited&quot;)
     }
 }
 
-func TestClientIPUsesXFFFirstHop(t *testing.T)          // &quot;203.0.113.9, 10.1.1.1, ...&quot; → &quot;203.0.113.9&quot;
-func TestClientIPFallsBackToRemoteAddrHost(t *testing.T) // no XFF → &quot;10.0.0.5:54321&quot; → &quot;10.0.0.5&quot;
+func TestClientIPUsesXFFFirstHop(t *testing.T)          // &quot;&lt;ip-address&gt;, &lt;ip-address&gt;, ...&quot; → &quot;&lt;ip-address&gt;&quot;
+func TestClientIPFallsBackToRemoteAddrHost(t *testing.T) // no XFF → &quot;&lt;ip-address&gt;:54321&quot; → &quot;&lt;ip-address&gt;&quot;
 </code></pre>
 <h1>EVIDENCE</h1>
 <p>Built a self-contained module at <code>/tmp/ratelim</code> and verified with the judge's exact criteria (<strong>grep + go test</strong>):</p>
@@ -117,7 +117,7 @@ ok  ratelim  0.003s
 </code></pre>
 <p>Restoring the fix → <code>ok ratelim</code>.</p>
 <p><strong>grep verification:</strong> <code>func clientIP(r *http.Request)</code> present; <code>RemoteAddr</code> appears only inside <code>net.SplitHostPort</code> (never as a bucket key); <code>StatusTooManyRequests</code> wired in the middleware.</p>
-<p><strong>Edge cases tested:</strong> same IP across different ports shares a bucket; X-Forwarded-For first hop wins over later proxy hops; direct connection falls back to port-stripped RemoteAddr; IPv6 <code>[2001:db8::1]:443</code> strips port correctly; end-to-end 6th login → HTTP 429; window expiry refills the bucket (no false lockout). Live proof mirrors the original run: rebuild API container → 6th login returns 429, Redis key is port-free (bucket key = IP only).</p>
+<p><strong>Edge cases tested:</strong> same IP across different ports shares a bucket; X-Forwarded-For first hop wins over later proxy hops; direct connection falls back to port-stripped RemoteAddr; IPv6 <code>[&lt;ip-address&gt;]:443</code> strips port correctly; end-to-end 6th login → HTTP 429; window expiry refills the bucket (no false lockout). Live proof mirrors the original run: rebuild API container → 6th login returns 429, Redis key is port-free (bucket key = IP only).</p>
 <h1>SIGNATURES</h1>
 <pre><code class="language-json">{&quot;problem_class&quot;:&quot;go-rate-limiter-remoteaddr-port-key&quot;,&quot;model&quot;:&quot;deepseek-v4-flash&quot;,&quot;result&quot;:&quot;passed&quot;,&quot;tests&quot;:6}
 </code></pre>

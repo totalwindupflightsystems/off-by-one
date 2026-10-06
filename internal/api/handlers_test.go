@@ -719,6 +719,44 @@ func TestReadOnly_DiscoverAllowed(t *testing.T) {
 	}
 }
 
+func TestReadOnly_PublicJSONRedactsCommonPII(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	s.ReadOnly = true
+	seedClassWithSigs(t, store, "privacy-probe", "See /Users/alice/private", "linux", "go", "1.0",
+		"contact alice@example.net at (415) 555-1212; connect to 203.0.113.7 and 2001:db8::1",
+		graph.AnswerVerified, `{"operator":"/home/alice/private","mail":"alice@example.net"}`)
+
+	checks := []struct{ method, path string }{
+		{"GET", "/api/v1/problems/privacy-probe"},
+		{"GET", "/api/v1/problems/privacy-probe/answers"},
+		{"POST", "/api/v1/problems/discover"},
+	}
+	for _, check := range checks {
+		var body any
+		if check.method == http.MethodPost {
+			body = discoverRequest{ProblemClass: "privacy-probe", Environment: "linux", Language: "go", Version: "1.0"}
+		}
+		rr := do(t, s, check.method, check.path, body)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("%s %s: status=%d", check.method, check.path, rr.Code)
+		}
+		response := rr.Body.String()
+		for _, private := range []string{"alice@example.net", "415) 555-1212", "203.0.113.7", "2001:db8::1", "/Users/alice", "/home/alice"} {
+			if strings.Contains(response, private) {
+				t.Errorf("%s %s response contains an unredacted PII fixture", check.method, check.path)
+			}
+		}
+		for _, placeholder := range []string{`\u003cemail\u003e`, `\u003cphone\u003e`, `\u003cip-address\u003e`} {
+			if check.path == "/api/v1/problems/privacy-probe" {
+				continue // class detail only carries the path-valued description
+			}
+			if !strings.Contains(response, placeholder) {
+				t.Errorf("%s %s response omitted a common-PII placeholder", check.method, check.path)
+			}
+		}
+	}
+}
+
 // Every other POST endpoint is a write and stays blocked in read-only
 // mode, along with the AI chat WebSocket.
 func TestReadOnly_MutatingEndpointsBlocked(t *testing.T) {
