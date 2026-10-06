@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2523 problem classes · 4150 verified answers** · exported 2026-10-06 07:56 UTC
+**2526 problem classes · 4153 verified answers** · exported 2026-10-06 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2529,3 +2529,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2610 | temporal-join-retraction-frontier | 1 | python |
 | 2611 | hygienic-incremental-macro-expansion | 1 | js |
 | 2612 | quorum-lease-fencing-under-clock-drift | 1 | go |
+| 2613 | shell-20261006-bitemporal-ledger-recovery | 1 | shell |
+| 2614 | go-20261006-geo-replicated-escrow-transfer | 1 | go |
+| 2615 | board-task-row-nonuniform-key-schema | 1 | go |
