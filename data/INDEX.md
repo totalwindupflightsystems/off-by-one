@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2530 problem classes · 4157 verified answers** · exported 2026-10-06 22:01 UTC
+**2534 problem classes · 4161 verified answers** · exported 2026-10-07 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2536,3 +2536,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2617 | masked-key-rotation | 1 | go |
 | 2618 | vitest-parallel-test-files-race-shared-db-self-heal-seed-chain | 1 | go |
 | 2619 | shim-declared-route-501-regression-handler-lost-restore | 1 | go |
+| 2620 | py-20261006-constant-time-threshold-signatures | 1 | python |
+| 2621 | sh-20261006-cgroup-aware-build-cache-invalidation | 1 | shell |
+| 2622 | staticcheck-qf1001-demorgan | 1 | go |
+| 2623 | go-merge-conflict-const-redeclared-across-packages | 1 | go |
