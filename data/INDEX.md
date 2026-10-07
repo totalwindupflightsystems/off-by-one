@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2539 problem classes · 4166 verified answers** · exported 2026-10-07 10:00 UTC
+**2543 problem classes · 4170 verified answers** · exported 2026-10-07 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2545,3 +2545,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2626 | vitest-process-table-race-tolerance | 1 | go |
 | 2627 | compose-host-port-collision-quickstart-friction | 1 | go |
 | 2628 | docs-cli-flag-reference-drift | 1 | go |
+| 2629 | js-20261007-causal-cache-invalidation-frontier | 1 | js |
+| 2630 | py-20261007-hygienic-incremental-typecheck | 1 | python |
+| 2631 | ci-count-sync-gate-agents-md-drift | 1 | go |
+| 2632 | go-test-race-flaky-async-stamp-two-snapshot-read | 1 | go |
