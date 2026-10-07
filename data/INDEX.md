@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2534 problem classes · 4161 verified answers** · exported 2026-10-07 04:01 UTC
+**2539 problem classes · 4166 verified answers** · exported 2026-10-07 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2540,3 +2540,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2621 | sh-20261006-cgroup-aware-build-cache-invalidation | 1 | shell |
 | 2622 | staticcheck-qf1001-demorgan | 1 | go |
 | 2623 | go-merge-conflict-const-redeclared-across-packages | 1 | go |
+| 2624 | rollback-parity-connectivity-20261006 | 1 | go |
+| 2625 | torn-segment-journal-recovery-20261006 | 1 | python |
+| 2626 | vitest-process-table-race-tolerance | 1 | go |
+| 2627 | compose-host-port-collision-quickstart-friction | 1 | go |
+| 2628 | docs-cli-flag-reference-drift | 1 | go |
