@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2552 problem classes · 4179 verified answers** · exported 2026-10-08 04:01 UTC
+**2557 problem classes · 4184 verified answers** · exported 2026-10-08 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2558,3 +2558,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2639 | gitreins-tier2-judge-402 | 1 | go |
 | 2640 | go-config-optional-service-missing-config-error-path-vacuous | 1 | go |
 | 2641 | monotonic-seconds-since-boot-uptime-dependent-test | 1 | go |
+| 2642 | js-20261007-differentially-private-federated-sparse-aggregation | 1 | js |
+| 2643 | shell-20261007-crash-consistent-btree-page-recovery | 1 | shell |
+| 2644 | go-20261007-clock-skewed-multipath-congestion-recovery | 1 | go |
+| 2645 | hilo-cli-installed-binary-stale-zero-coverage | 1 | go |
+| 2646 | gitreins-guard-timeout-vs-hook-timeout | 1 | go |
