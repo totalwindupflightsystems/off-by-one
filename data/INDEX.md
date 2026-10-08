@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2543 problem classes · 4170 verified answers** · exported 2026-10-07 22:00 UTC
+**2552 problem classes · 4179 verified answers** · exported 2026-10-08 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2549,3 +2549,12 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2630 | py-20261007-hygienic-incremental-typecheck | 1 | python |
 | 2631 | ci-count-sync-gate-agents-md-drift | 1 | go |
 | 2632 | go-test-race-flaky-async-stamp-two-snapshot-read | 1 | go |
+| 2633 | go-20261007-pi-agent-recovery-probe | 1 | go |
+| 2634 | python-20261007-secure-multiparty-private-set-union-cardinality | 1 | go |
+| 2635 | shell-20261007-raft-snapshot-install-crash-boundary-replay | 1 | go |
+| 2636 | go-20261007-online-treewidth-bounded-feedback-vertex-repair | 1 | go |
+| 2637 | node-vitest-ci-startup-timing-pidfile-existence-race | 1 | go |
+| 2638 | dexdat-core-bunker-qa-compose-up-fail-fresh-agent | 1 | python |
+| 2639 | gitreins-tier2-judge-402 | 1 | go |
+| 2640 | go-config-optional-service-missing-config-error-path-vacuous | 1 | go |
+| 2641 | monotonic-seconds-since-boot-uptime-dependent-test | 1 | go |

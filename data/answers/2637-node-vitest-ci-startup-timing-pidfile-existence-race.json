@@ -1,0 +1,28 @@
+{
+  "class_id": 2637,
+  "title": "node-vitest-ci-startup-timing-pidfile-existence-race",
+  "description": "node-vitest-ci-startup-timing-pidfile-existence-race",
+  "created_at": "2026-10-07 23:01:23",
+  "answers": [
+    {
+      "answer_id": 4367,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Solution written to **`~/SOLUTION-pidfile-existence-race.md`**. Both the race and the fix were empirically verified.\n\n---\n\n# Fix: daemon pidfile-existence race in the Vitest CI startup test\n\n**Problem class:** `node-vitest-ci-startup-timing-pidfile-existence-race`\n\n## Symptom\n\nFlaky CI failure at:\n\n```ts\nawait waitForHealth(baseUrl);\nexpect(fs.existsSync(pidFile)).toBe(true); // flaky\n```\n\nThe test samples pidfile existence in the same tick `/health` first answers.\n\n## Root cause\n\nThe daemon reaches two observable states non-atomically:\n1. `/health` starts answering via `server.listen`, and\n2. the pidfile is written **asynchronously** later.\n\n`waitForHealth` only waits for (1). The single-shot `fs.existsSync` is a point-in-time snapshot; under CI scheduling the pidfile write lands a few ms after health is ready, so the assertion fails even though the daemon is healthy. This is the same startup-timing family as INT-CI-021/023/025/026. The defect is in the **test** — it conflates \"health ready\" with \"startup side effects durable\".\n\n## The fix\n\nPoll for the pidfile with a bounded timeout before asserting.\n\n```ts\nimport fs from 'node:fs';\n\nexport async function waitForFile(\n  file: string,\n  { timeoutMs = 10_000, intervalMs = 50 }: { timeoutMs?: number; intervalMs?: number } = {},\n): Promise<void> {\n  const deadline = Date.now() + timeoutMs;\n  while (Date.now() < deadline) {\n    if (fs.existsSync(file)) return;\n    await new Promise((resolve) => setTimeout(resolve, intervalMs));\n  }\n  if (fs.existsSync(file)) return; // final check\n  throw new Error(`Timed out after ${timeoutMs}ms waiting for file: ${file}`);\n}\n```\n\n```ts\n// before (racy)\nawait waitForHealth(baseUrl);\nexpect(fs.existsSync(pidFile)).toBe(true);\n\n// after (deterministic)\nawait waitForHealth(baseUrl);\nawait waitForFile(pidFile, { timeoutMs: 10_000, intervalMs: 50 });\nexpect(fs.existsSync(pidFile)).toBe(true);\n```\n\nNotes: don't just raise the health timeout (health is already ready); don't use a bare `sleep(500)` (reintroduces flakiness). A stronger daemon-side fix would write the pidfile before advertising readiness, but the polling helper is the correct minimal test-side fix.\n\n## Verification\n\nSelf-contained reproducer (`/tmp/pidrace/race.mjs`) simulated the daemon and ran 300 rounds with a 5ms pidfile write delay:\n\n```\nsingle-shot existsSync failures: 299/300  (missed-by ms samples: 0.017, 0.01, 0.014, 0.01, 0.01)\npolling existsSync failures:     0/300\n```\n\nNegative path verified — helper still fails clearly on a genuinely missing file:\n\n```\nthrew after 302 ms: Timed out after 300ms waiting for file: /tmp/definitely-missing.pid\n```\n\nSuggested CI confirmation: run the test file 20× in a loop and 10× under `nproc`-saturating `yes` load, expecting all green.\n",
+      "evidence": "# Evidence\n- Problem class: node-vitest-ci-startup-timing-pidfile-existence-race\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-07T23:01:23.610Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "node-vitest-ci-startup-timing-pidfile-existence-race",
+        "provider": "openrouter",
+        "solved_at": "2026-10-07T23:01:23.610Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-07 23:01:24"
+    }
+  ]
+}
