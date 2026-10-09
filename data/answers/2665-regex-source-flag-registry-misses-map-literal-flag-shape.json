@@ -1,0 +1,28 @@
+{
+  "class_id": 2665,
+  "title": "regex-source-flag-registry-misses-map-literal-flag-shape",
+  "description": "regex-source-flag-registry-misses-map-literal-flag-shape",
+  "created_at": "2026-10-09 17:46:47",
+  "answers": [
+    {
+      "answer_id": 4395,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I diagnosed this in the actual repo (`github.com/deployBunker/bunker`, cloned to `/workspace/bunker`) and verified the fix end-to-end (reproduced the failing gate, applied the change, re-ran it green).\n\n# Fix: docs flag registry misses `flagGrammar` map-literal specs\n\n## Root cause\n\nThe docs-drift gate (`cmd/docs-drift`, driven by `internal/docscheck`) derives the per-command long-flag registry from source, not from a running binary. `internal/docscheck/flags.go` only knew two registration shapes:\n\n- `reFlagCall` — cobra registrations like `cmd.Flags().StringVar(&x, \"server\", …)`.\n- `reFlagPeel` — manual peel cases like `case rest[i] == \"--detach\":`.\n\n`bunker exec`, `bunker run`, and `bunker env` (all `DisableFlagParsing`) now declare their authoritative accepted-flag surface in a `flagGrammar` spec map:\n\n```go\n// internal/cli/exec.go\nexecGrammar := flagGrammar{name: \"exec\", specs: map[string]flagGrammarSpec{\n    \"--server\":  {apply: func(v string) error { serverName = v; return nil }},\n    \"--session\": {apply: func(v string) error { sessionID = v; return nil }},\n    ...\n}}\n```\n\n`--session` (exec/run), `--preset` (run), and the peeled `--config`/`--daemon-config` exist **only** as map keys — no cobra `Flags()` call, no `case` peel. `collectFlagLiterals` never recorded them, leaving the registry incomplete:\n\n```\nexec = [base64 exec-cap raw script server stdin timeout]\nrun  = [detach env name server timeout]\n```\n\nThe real-tree gate then flagged already-correct docs in `docs/exec-audit.md` (GAP-095):\n\n```\ndocs/exec-audit.md:307: docs-flag-surface: --session is not a flag of `bunker exec` …; accept: --base64 --exec-cap --raw --script --server --stdin --timeout\ndocs/exec-audit.md:308: docs-flag-surface: --session is not a flag of `bunker run` …; accept: --detach --env --name --server --timeout\n```\n\n## Exact fix\n\nFile: `internal/docscheck/flags.go`\n\n1. Add a third registration regex:\n\n```go\n// reFlagSpec matches the map-literal spec table of a flagGrammar\n// (exec, run, env): `\"--session\": {apply: func(…) …}`. Those peel-style\n// commands key their accepted-flag surface by the full flag name, and the\n// table — not the cobra registration — is authoritative; a registry that\n// does not read it reports a documented `--session` as unknown.\nreFlagSpec = regexp.MustCompile(`\"(--[A-Za-z0-9][A-Za-z0-9-]*)\"\\s*:\\s*\\{apply:`)\n```\n\n2. Collect it in `collectFlagLiterals`, next to the peel loop:\n\n```go\nfor _, m := range reFlagPeel.FindAllStringSubmatch(body, -1) {\n    addFlagName(into, strings.TrimPrefix(m[1], \"--\"))\n}\nfor _, m := range reFlagSpec.FindAllStringSubmatch(body, -1) {\n    addFlagName(into, strings.TrimPrefix(m[1], \"--\"))\n}\n```\n\nThe `\\s*:\\s*\\{apply:` anchor is tied to the first struct field (`flagGrammarSpec` starts with `apply`), so a map literal that merely looks like a flag key cannot inflate the registry.\n\n3. Added regression test `TestFlagsForReadsFlagGrammarSpecTables` in `internal/docscheck/flags_test.go`, asserting a flag declared only as a `specs:` map key is collected.\n\n## Verification\n\n```bash\ngofmt -l internal/docscheck/      # no output\ngo test ./internal/docscheck/ -count=1\ngo run ./cmd/docs-drift\n```\n\nObserved `go run ./cmd/docs-drift`:\n\n```\ndocs OK: README/CHANGELOG/docs match v0.2.0 (35 released commands, 208 commit(s) after the tag)\n  released: [agent-tools audit connect cp deploy destroy env exec fs guard heartbeat homes host-provision info key linger list metrics mount registry renew restart run spawn ssh start status stop subid-migrate surface systemd tunnel umount use version]\n```\n\nBefore the fix, `TestRealDocsPassFlagSurface` failed on `docs/exec-audit.md:307-308`; after the fix both pass with no marker, and all docscheck tests are green. (The real-tree tests need release tags — in a shallow/tag-less checkout they skip; in CI they run.)\n\nThe solution file was written to `/workspace/solution.md`.\n",
+      "evidence": "# Evidence\n- Problem class: regex-source-flag-registry-misses-map-literal-flag-shape\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-09T17:46:47.401Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "regex-source-flag-registry-misses-map-literal-flag-shape",
+        "provider": "openrouter",
+        "solved_at": "2026-10-09T17:46:47.403Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-09 17:46:47"
+    }
+  ]
+}

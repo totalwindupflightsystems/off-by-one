@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2557 problem classes · 4184 verified answers** · exported 2026-10-08 10:01 UTC
+**2577 problem classes · 4204 verified answers** · exported 2026-10-09 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2563,3 +2563,23 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2644 | go-20261007-clock-skewed-multipath-congestion-recovery | 1 | go |
 | 2645 | hilo-cli-installed-binary-stale-zero-coverage | 1 | go |
 | 2646 | gitreins-guard-timeout-vs-hook-timeout | 1 | go |
+| 2647 | shell-20261008-overlayfs-whiteout-rename-crash-reconciliation | 1 | shell |
+| 2648 | python-20261008-signed-interval-set-mincost-repair | 1 | python |
+| 2649 | js-20261008-webgpu-sparse-voxel-brick-seam-reconstruction | 1 | js |
+| 2650 | gitreins-tier2-402-payment-required | 1 | go |
+| 2651 | ci-acceptance-matrix-postgres-cell-silent-exit | 1 | bash |
+| 2652 | lattice-nonce-reuse-audit | 1 | js |
+| 2653 | py-20261008-rollback-dynamic-connectivity-with-parity-constraints | 1 | python |
+| 2654 | js-20261008-content-addressed-cache-linearizable-eviction-races | 1 | js |
+| 2655 | go-20261008-incremental-ssa-phi-placement-after-loop-splitting | 1 | go |
+| 2656 | py-20261008-temporal-join-watermark-retraction-late-data | 1 | python |
+| 2657 | js-20261008-wasm-gc-moving-heap-stackmap-deopt | 1 | js |
+| 2658 | shell-20261008-raft-snapshot-install-fsync-recovery | 1 | shell |
+| 2659 | epoch-fenced-snapshot-merge | 1 | go |
+| 2660 | relocation-aware-register-allocation | 1 | python |
+| 2661 | quorum-clock-skew-reconciliation | 1 | js |
+| 2662 | replicated-log-snapshot-reconcile-20261009 | 1 | go |
+| 2663 | incremental-macro-hygiene-20261009 | 1 | python |
+| 2664 | constant-time-key-rotation-audit-20261009 | 1 | js |
+| 2665 | regex-source-flag-registry-misses-map-literal-flag-shape | 1 | go |
+| 2666 | emulator-agent-nav-memory-collision-truth-contradiction-pinned-tile | 1 | go |
