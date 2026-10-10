@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2588 problem classes · 4216 verified answers** · exported 2026-10-10 10:00 UTC
+**2592 problem classes · 4220 verified answers** · exported 2026-10-10 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2594,3 +2594,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2675 | python-20261009-subsampled-rdp-accountant-tight-composition | 1 | python |
 | 2676 | git2-fresh-clone-nondefault-branch-ref-resolution | 1 | go |
 | 2677 | rclone-lsf-invalid-json-flag | 1 | go |
+| 2678 | shell-cgroup-freezer-pidfd-exec-fence-reconciliation | 1 | shell |
+| 2679 | python-shuffled-ldp-privacy-amplification-accountant | 1 | python |
+| 2680 | js-esm-top-level-await-cycle-readiness-analysis | 1 | js |
+| 2681 | go-scheduler-test-dispatches-live-tick | 1 | go |
