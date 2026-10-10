@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.9.0
+version: 1.10.0
 category: software-development
 ---
 
@@ -435,3 +435,32 @@ Recipe that worked end-to-end (2026-10-10, live :8766): submit new class
 NOT normal-dep leaks). Resubmit → 409 deduplicated. Discover warm: 10.0ms ±2.0
 (hyperfine n=20). Fresh bunker install: clone 5s → build 41s → seed 14s →
 serve health ok in ~60s total.
+
+31. **user@host identifiers survive every PII surface (DF-OFF-BY-ONE-33, P1)** —
+    the email regex (internal/export/git.go:538) requires a dotted domain, so
+    `kara@builder-machine`-style identifiers pass through export, the
+    readonly API, the corpus and the site verbatim. `check-public-pii.py`
+    mirrors the same regex, so its green means nothing for this class. Never
+    assume a green hygiene check covers identifier-shaped leaks; grep the
+    published corpus for `[A-Za-z0-9._-]+@[A-Za-z0-9_-]+` before trusting it.
+
+32. **The published corpus carries internal org identifiers (DF-OFF-BY-ONE-34, P2)** —
+    wojons/* repo paths, get-h3, dexdat, 9router, task-router all appear in
+    data/answers.jsonl and site/ despite the internal-name redaction doctrine.
+    Until DF-34 lands, treat everything in the corpus as potentially
+    lab-attributable; do not quote corpus answers as "scrubbed of lab context".
+
+33. **Export target must be bare/pushable (DF-OFF-BY-ONE-35, P3)** —
+    `POST /api/v1/export` with target_repo pointing at a normal working clone
+    fails with git's raw "refusing to update checked out branch" error. Use a
+    bare repo (`git clone --bare`) or a remote you can push to. Also: the
+    server's export dir is ONE persistent clone — exporting to a different
+    target_repo fails with ErrRepoMismatch by design; restart with a fresh
+    -export-dir instead of fighting it.
+
+Recipe that verified the privacy promise end-to-end (2026-10-10b): build a
+PII-contaminated community repo → import into a scratch node → export to a
+bare repo → re-import into a third node → discover → grep for raw PII (expect
+only `<ip-address>`/`<email>`/`<phone>`/`~`) → repeat discover against a
+`-readonly` node. Perf on the scratch node: discover 0.9–1.6ms warm, 16ms
+cold; re-import 76ms; bunker install clone 60s / build 54s / seed 10s.

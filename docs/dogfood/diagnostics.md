@@ -788,3 +788,35 @@ subtlety most human-written answers miss.
 
 **Board rows:** DF-OFF-BY-ONE-36 (P1), DF-OFF-BY-ONE-37 (P2), DF-OFF-BY-ONE-38 (P3),
 INSTALL-OFF-BY-ONE-2026-10-10 (P2, complete — bunker-las-02; las-03 offline).
+
+## §16 — 2026-10-10b: PII redaction round-trip (DF-33, DF-34, DF-35)
+
+How the privacy layer actually works, learned by feeding a contaminated
+answer through the full sharing loop (details in
+`2026-10-10b-pii-integration.md`):
+
+- **Redaction lives at the boundary, not the core.** The local graph stores
+  the truth verbatim; `sanitizeCorpusText` scrubs at export/render time and
+  `sanitizeReadOnlyJSON` wraps every response of a `-readonly` server
+  (internal/api/server.go:150). A normal read-write node serves raw PII to
+  localhost by design — the boundary is the trust line.
+- **The email regex is dotted-domain-only** (internal/export/git.go:538).
+  `user@host` (no TLD) survives export, the readonly API, and anything
+  derived from the corpus. The corpus-hygiene checker mirrors the same
+  regex, so the gate is green while the leak is real. That blindness is the
+  finding (DF-33): a checker that re-implements the producer's pattern
+  cannot catch the producer's pattern mistakes.
+- **Internal-name redaction has drifted from its doctrine.** The list covers
+  4 project names + the gitreins path, but the published corpus carries
+  wojons/*, get-h3, dexdat, 9router, task-router. Whether each name is
+  policy-redacted is a decision, not a regex — DF-34 frames it.
+- **Export targets must be pushable** (bare or GitHub-style). Non-bare
+  local repos 500 with git's raw error (DF-35). The export working dir is
+  one persistent clone per server: a different `target_repo` trips the
+  origin-mismatch guard — fail-closed, but undocumented.
+- **Why the 3-node round-trip matters:** import stores verbatim, export
+  scrubs, re-import ingests the scrubbed text. Any scrub bug therefore
+  PROPAGATES to consumers and becomes permanent in their graphs — the same
+  failure class as the export clobber (DF-22). Redaction correctness is
+  data-integrity correctness.
+
