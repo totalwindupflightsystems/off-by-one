@@ -1,0 +1,28 @@
+{
+  "class_id": 2685,
+  "title": "gitreins-phantom-complete-judge-fail",
+  "description": "gitreins-phantom-complete-judge-fail",
+  "created_at": "2026-10-10 18:17:01",
+  "answers": [
+    {
+      "answer_id": 4416,
+      "language": "",
+      "environment": "linux",
+      "version": "",
+      "solution": "Diagnosed and verified against `gitreins==0.16.0` (installed from PyPI) in a throwaway repo. Full solution: **`/workspace/solution.md`** (487 lines).\n\n## Root cause\n\nIn `gitreins/cli.py :: cmd_task_complete`, the status is persisted **before** evaluation:\n\n```python\ntask = tm.complete(args.id, force=force)   # status: complete + completed_at written NOW\n...\nresult = judge.evaluate_task(task, skip_tier2=skip_tier2)\n_persist_result(workdir, task, result)\nif not result.passed:\n    sys.exit(1)                            # exits, never reopens\n```\n\n`TaskManager._apply_status()` also never clears `completed_at`. So an `INCOMPLETE` verdict leaves a self-contradictory store: `tasks.yaml` and the board say complete, while `.gitreins/history/2026-10-10/2316ac64/verdict.json` says `passed: false`. I reproduced this exactly.\n\n## Exact recovery\n\n1. **Collect evidence** — find the graded verdict and read `passed`, `commit`, `evaluated_at`:\n   `.gitreins/history/<YYYY-MM-DD>/<run>/verdict.json`, where `<run> = sha256(\"<task_id>:<evaluated_at>\")[:8]`. Use `<run>` as the board `--evidence-run-id`.\n\n2. **Targeted per-id replace** (not a full YAML re-dump). The full script is in the doc; the key point is it edits only the named task's block — `status:` → `in_progress`, drop `completed_at:`. Verified it preserves comments and unknown keys, whereas `gitreins task start` destroys them:\n   ```\n   tasks:\n   # foreman audit note: do NOT drop this line     # preserved\n   - id: second-task\n     status: in_progress                          # reverted\n     external_ticket: OPS-42   # board link       # preserved\n   ```\n\n3. **Re-dispatch** in a fresh worktree: `gitreins task worktree <id>` (created branch `gitreins/task/<id>` and a worker brief), then verify with `gitreins task get <id>` / `gitreins worktree list`.\n\n4. **Cite on the board**:\n   ```bash\n   boardctl update \"$BOARD_ID\" --status in_progress \\\n     --evidence-run-id \"$RUN\" --commit-hash \"$SHA\" \\\n     --note \"Judge FAIL (INCOMPLETE): run=$RUN commit=${SHA:-<none>} evaluated_at=$EAT; reopened + re-dispatched\"\n   ```\n\n## Prevention\n\nReopen on failed evaluation (patch in doc): add `TaskManager.reopen()` that sets `in_progress` and clears `completed_at`, and call `tm.reopen(args.id)` in the `if not result.passed:` branch. I applied and tested this: a failing `task complete` now leaves the task open with no completion stamp.\n\n## Verified\n\n- Phantom complete reproduced (status flipped, exit 1, `passed: false`).\n- Targeted recovery leaves task `in_progress`, comment/unknown key intact.\n- Full re-dump confirmed destructive (drops comment + `external_ticket`).\n- Fresh worktree re-dispatch and `boardctl` evidence citation both confirmed working.\n- Preventive patch confirmed to eliminate the phantom state.\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-phantom-complete-judge-fail\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-10T18:17:01.802Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Stale wave recovery: `gitreins task complete` run with ZERO staged code flips .gitreins/tasks.yaml status to complete; the tier-2 judge then FAILs INCOMPLETE (no implementation exists). Recovery recipe: revert the status flip back to in_progress via a targeted per-id string replace (never a full-file rewrite of tasks.yaml), keep the gitreins task open, and re-dispatch a worker in a fresh worktree. Judge verdict (with commit sha + evaluated_at provenance) lives at .gitreins/history/<date>/<run>/verdict.json and is the evidence to cite on the board row.",
+        "environment": "linux; gitreins 0.16.x; JSONL board + tasks.yaml co-harness",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-phantom-complete-judge-fail",
+        "provider": "openrouter",
+        "solved_at": "2026-10-10T18:17:01.805Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-10 18:17:01"
+    }
+  ]
+}

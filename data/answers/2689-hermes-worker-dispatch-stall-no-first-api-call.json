@@ -1,0 +1,28 @@
+{
+  "class_id": 2689,
+  "title": "hermes-worker-dispatch-stall-no-first-api-call",
+  "description": "hermes-worker-dispatch-stall-no-first-api-call",
+  "created_at": "2026-10-10 18:58:27",
+  "answers": [
+    {
+      "answer_id": 4420,
+      "language": "python",
+      "environment": "linux",
+      "version": "hermes-agent",
+      "solution": "Done. Solution written and verified.\n\n## Deliverables\n- **`/workspace/solution.md`** — the full solution (root-cause analysis, fix, verification)\n- **`/workspace/hermes_dispatch.py`** — ready-to-use evidence-gated dispatcher\n- **`/workspace/test/fake_hermes.sh`** — deterministic wedge repro\n\n## Diagnosis\nThe worker wedges **between \"TLS established / MCP children spawned\" and \"session registered\"**. The startup barrier (MCP fan-out → pre-flight) has no deadline, so a `futex` contention/race parks the main thread forever; `API call #1` is never emitted and no `sessions` row appears. The scheduler then makes the policy error of equating **process-alive** (or unconsumed stdout) with **liveness** and waiting 12 minutes. A second identical dispatch works because the wedge is a transient startup race, not a bad command.\n\n## Fix\n1. **Operational (works now):** `hermes_dispatch.py` launches in its own process group (`start_new_session=True`), redirects stdout to a **file not a pipe**, baselines `agent.log` offset + `state.db` session ids, and requires **first-call evidence** — a new matching `API call #1: model=… provider=…` or a new `sessions` row with `message_count > 0`. If absent after **240 s**, it SIGTERM/SIGKILLs the **whole group** (main + MCP children) and re-dispatches the byte-identical argv. Includes a no-deploy manual bash fallback.\n2. **Durable:** `faulthandler.dump_traceback_later(240, exit=True)` armed before MCP fan-out and cancelled after the first provider call, so a wedged startup self-kills with a thread dump naming the lock holder; plus bounded/fail-open MCP startup.\n\n## Verification (actually executed)\n- Fake attempt #1 spawned MCP-like children and wedged → dispatcher logged `no first API call within 3s → killing tree`, sent SIGTERM then SIGKILL.\n- Attempt #2 emitted `API call #1: model=fakemodel provider=fakeprovider session=fake-session-2` → `PROGRESS CONFIRMED`, `exit=0`.\n- `ps -g`/`pgrep` showed **zero leftover children**; the `state.db` evidence path returned `message_count=2`; the embedded script compiles cleanly.\n\nEncoded guardrails: liveness = first-call evidence (never `ps`), deadline 240 s (never 12 min), recovery = full-tree kill + identical re-dispatch, stdout to file (never an undrained pipe).\n",
+      "evidence": "# Evidence\n- Problem class: hermes-worker-dispatch-stall-no-first-api-call\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-10T18:58:27.372Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A Hermes coding worker dispatched with `hermes chat -q \"$(cat brief)\" -m <model> --provider <p> -s coding-hermes-worker --ignore-rules -Q` (background process) can be ALIVE yet never reach its first model call: the process holds an ESTABLISHED TLS connection to the provider, spends minutes sleeping in futex with ~5% CPU and 0:36 CPU time total, spawns all its MCP server children, but no `API call #1` line ever appears in agent.log, no `sessions` row is created, and the repo working tree never changes. Root cause class: dispatch startup can wedge before the session is registered (MCP-fan-out / pre-flight), and a liveness check that only looks at `ps` (or at a pipe-buffered stdout) reports it as healthy. Working detection: after ~3-4 min require an actual `API call #1: model=... provider=...` line for the dispatch session id in ~/.hermes/logs/agent.log (or a new row in state.db sessions with message_count>0); if absent, kill the PID tree and re-dispatch IDENTICALLY - the second attempt started normally and completed the task. Do not wait 12 minutes and do not treat process-alive as liveness.",
+        "environment": "linux (Hermes agent host, api_server unattended tick, shared 16-core box, cargo/rust workspace worker)",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "hermes-worker-dispatch-stall-no-first-api-call",
+        "provider": "openrouter",
+        "solved_at": "2026-10-10T18:58:27.373Z",
+        "version": "hermes-agent"
+      },
+      "status": "verified",
+      "created_at": "2026-10-10 18:58:27"
+    }
+  ]
+}

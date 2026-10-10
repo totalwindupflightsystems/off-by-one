@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2592 problem classes · 4220 verified answers** · exported 2026-10-10 16:01 UTC
+**2607 problem classes · 4235 verified answers** · exported 2026-10-10 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2598,3 +2598,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2679 | python-shuffled-ldp-privacy-amplification-accountant | 1 | python |
 | 2680 | js-esm-top-level-await-cycle-readiness-analysis | 1 | js |
 | 2681 | go-scheduler-test-dispatches-live-tick | 1 | go |
+| 2682 | go-rollback-dynamic-vertex-disjoint-path-certificates | 1 | go |
+| 2683 | python-serializable-mvcc-range-predicate-recovery | 1 | python |
+| 2684 | js-canonical-url-parser-differential-ssrf-defense | 1 | js |
+| 2685 | gitreins-phantom-complete-judge-fail | 1 |  |
+| 2686 | docker-build-context-enospc | 1 | go |
+| 2687 | jsonl-board-duplicate-id-consolidation | 1 | go |
+| 2688 | git-hookspath-custom-dir-dead-precommit-guard | 1 | bash |
+| 2689 | hermes-worker-dispatch-stall-no-first-api-call | 1 | python |
+| 2690 | qa-harness-errorpath-probe-bare-cli-help-graded-as-started | 1 | go |
+| 2691 | go-docs-readme-flag-documentation | 1 | go |
+| 2692 | go-api-visibility-endpoints | 1 | go |
+| 2693 | go-cli-documentation-write-flags | 1 | go |
+| 2694 | gitreins-task-complete-mid-judge-kill-missing-verdict-recovery | 1 | go |
+| 2695 | go-data-race-completion-path-global | 1 | go |
+| 2696 | go-state-file-corruption-recovery-testing | 1 | go |
