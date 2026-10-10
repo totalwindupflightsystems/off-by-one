@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.8.0
+version: 1.9.0
 category: software-development
 ---
 
@@ -397,3 +397,41 @@ Full evidence: docs/dogfood/2026-10-02-integration.md + diagnostics §14.
     when the queue is empty. This is misleading — should return an empty-array response
     like `{"queued":[],"in_progress":[]}`, not a 404-style error. Fix: check queue state
     before returning error, or document that empty queue = 404.
+
+## Field-tested 2026-10-10 (dogfood tick #14): verdict ✅ SHIPPABLE (first end-to-end solve)
+
+Angle: the flagship loop — submit a NEW class to the live service and watch
+the idle-cycle solver produce a verified answer (first run in 14 to watch a
+solve land). Evidence: docs/dogfood/2026-10-10-integration.md + diagnostics §15.
+
+28. **Discover matches only the EXACT tuple — and the README's own example
+    tuple never matches (DF-OFF-BY-ONE-36, P1)** — `POST /problems/discover`
+    with `{"problem_class":"so-nil-pointer-deref","environment":"linux",
+    "language":"go","version":"1.26.1"}` returns `{found:false,
+    version_warnings:[]}` on both the live service and a fresh seed, because
+    the corpus answer carries `version:""`. Dropping the version field returns
+    `found:true`. There is no exact-miss fallback and the response does not
+    even WARN that version was the mismatch cause. When calling discover from
+    agents: omit `version` unless you know the corpus stores it. Fix: graceful
+    degrade (exact tuple → same class any tuple, populate version_warnings) +
+    fix the README example tuple.
+
+29. **Dedup 409 body omits the existing submission_id (DF-OFF-BY-ONE-37, P2)** —
+    README promises the 409 deduplicated response carries "the existing
+    submission_id (the same id the first submit returned)". Actual:
+    `{"submission_id":"","status":"deduplicated","position":0,
+    "existing_solutions":1}`. Scripted consumers cannot poll the existing
+    entry as documented.
+
+30. **Solve wall time ≈ 2x quoted ETA (DF-OFF-BY-ONE-38, P3)** — real solve
+    6m35s vs `estimated_time` 3m33s. Poll `/api/v1/queue/{id}` expecting
+    `in_progress` for roughly double the quoted window; nothing is wrong, the
+    ETA is just optimistic.
+
+Recipe that worked end-to-end (2026-10-10, live :8766): submit new class
+(rust/linux/stable, post-debug) → sub id, ETA 3m33s → poll every 45s →
+`complete` in 6m35s → discover `found:true`, verified answer, high quality
+(the solve empirically proved `resolver="2"` fixes build-dep feature leaks but
+NOT normal-dep leaks). Resubmit → 409 deduplicated. Discover warm: 10.0ms ±2.0
+(hyperfine n=20). Fresh bunker install: clone 5s → build 41s → seed 14s →
+serve health ok in ~60s total.

@@ -744,3 +744,47 @@ recorded in the dogfood-log entry.)
 - DF-27: Check queue state before returning error, or document that empty queue = 404. Return {"queued":[],"in_progress":[]} when empty.
 
 **Board rows:** DF-OFF-BY-ONE-26 (P2), DF-OFF-BY-ONE-27 (P3)
+
+## §15 — 2026-10-10: the flagship solve loop, end-to-end for the first time (DF-36, DF-37, DF-38)
+
+**Why this angle:** 13 prior runs proved queueing, discover reads, sharing,
+the Muster consumer, the public deployment, and installability — but no run
+had ever submitted a genuinely new problem and watched the idle-cycle solver
+deliver an answer. That is the product's core promise; it was the one surface
+still unproven in real use.
+
+**What actually happens (mechanism, learned by driving it):** submit →
+`queue_entries` row (position + ETA from AvgSolveTime) → the cron loop picks
+it when idle (load-threshold gate; the live service runs `-load-threshold -1`,
+always eligible) → pi-agent spawns INSIDE the bwrap sandbox → solver writes
+SOLUTION.md + evidence → answer node lands `status: verified` → discover
+serves it on the class. Observed wall: 6m35s total, ~6.5m of it
+`solver_running`.
+
+**Errors hit on the way:**
+1. Discover `found:false` on the README's own example tuple — the API
+   matches the exact (class, env, lang, version) tuple with no fallback and no
+   mismatch warning (empty `version_warnings`). Verified NOT an install or
+   seed problem: the class exists, the answer exists (version=""), and
+   omitting version returns found:true. → DF-36.
+2. Dedup 409 carries `submission_id: ""` — the README's poll-the-existing-
+   submission contract is unsatisfiable for a scripted consumer. → DF-37.
+3. Sibling lane consumed board ids DF-33..35 mid-tick — re-grepped max id
+   immediately before appending and renumbered to 36-38; the git diff shows
+   exactly 4 added lines. Lesson: grep the board's max id at append time,
+   never from memory of a prior grep.
+
+**The right way (validated recipe):** submit with a NEW class slug +
+cadence; poll `/api/v1/queue/{sub}` every ~45s; expect ~2x the quoted ETA;
+then discover WITHOUT a version field unless you know the corpus tuple. The
+answer quality is the strongest signal in this run: the solve installed Rust
+in the sandbox, built failing/fixed workspaces, and correctly distinguished
+resolver-2's coverage of build-dep vs normal-dep feature unification — a
+subtlety most human-written answers miss.
+
+**Numbers:** discover 10.0ms ±2.0 warm (hyperfine n=20, live); submit/poll
+<100ms; solve 6m35s (ETA 3m33s); bunker install clone 5s / build 41s / seed
+14s / serve ok ≈60s total.
+
+**Board rows:** DF-OFF-BY-ONE-36 (P1), DF-OFF-BY-ONE-37 (P2), DF-OFF-BY-ONE-38 (P3),
+INSTALL-OFF-BY-ONE-2026-10-10 (P2, complete — bunker-las-02; las-03 offline).
