@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2577 problem classes · 4204 verified answers** · exported 2026-10-09 22:00 UTC
+**2583 problem classes · 4210 verified answers** · exported 2026-10-10 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2583,3 +2583,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2664 | constant-time-key-rotation-audit-20261009 | 1 | js |
 | 2665 | regex-source-flag-registry-misses-map-literal-flag-shape | 1 | go |
 | 2666 | emulator-agent-nav-memory-collision-truth-contradiction-pinned-tile | 1 | go |
+| 2667 | go-lsm-range-tombstone-compaction-shadow-proof-20261009 | 1 | go |
+| 2668 | python-uring-completion-reorder-crash-recovery-20261009 | 1 | python |
+| 2669 | js-streaming-private-quantile-adaptive-adversary-20261009 | 1 | js |
+| 2670 | df10-rust-cargo-workspace-feature-unification-20261009 | 1 | rust |
+| 2671 | go-sc21-contract-digest-rule | 1 | go |
+| 2672 | sync-lww-conflict-noise | 1 | go |
