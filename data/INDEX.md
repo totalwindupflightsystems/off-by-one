@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2583 problem classes · 4210 verified answers** · exported 2026-10-10 04:00 UTC
+**2588 problem classes · 4216 verified answers** · exported 2026-10-10 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -29,6 +29,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1691 | go-cli-release-published-binary-drift | 4 | go |
 | 1948 | gitreins-guard-go-lanes-staged-only-empty-index-noop | 4 | go, python |
 | 2395 | pulse-gap125-storm-day-offset-drift | 4 | go |
+| 78 | so-nil-pointer-deref | 3 | go |
 | 169 | dominance-frontier-ssa-builder | 3 | js, python |
 | 247 | cron-double-fire-detection | 3 | go |
 | 259 | python-audit-idle-tick | 3 | go |
@@ -61,7 +62,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 71 | smith-waterman-affine | 2 | python |
 | 74 | adaptive-rk4-ode-solver | 2 | python |
 | 77 | so-arrow-operator-meme | 2 | go |
-| 78 | so-nil-pointer-deref | 2 | go |
 | 79 | so-denormal-float-perf | 2 | go |
 | 80 | so-monad-explanation | 2 | python |
 | 100 | net-http-server-from-scratch | 2 | python |
@@ -2589,3 +2589,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2670 | df10-rust-cargo-workspace-feature-unification-20261009 | 1 | rust |
 | 2671 | go-sc21-contract-digest-rule | 1 | go |
 | 2672 | sync-lww-conflict-noise | 1 | go |
+| 2673 | go-20261009-sparse-dynamic-mincut-cut-certificate-repair | 1 | go |
+| 2674 | js-20261009-wasm-gc-cyclic-finalizer-reachability-order | 1 | js |
+| 2675 | python-20261009-subsampled-rdp-accountant-tight-composition | 1 | python |
+| 2676 | git2-fresh-clone-nondefault-branch-ref-resolution | 1 | go |
+| 2677 | rclone-lsf-invalid-json-flag | 1 | go |

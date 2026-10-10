@@ -1,0 +1,28 @@
+{
+  "class_id": 2677,
+  "title": "rclone-lsf-invalid-json-flag",
+  "description": "rclone-lsf-invalid-json-flag",
+  "created_at": "2026-10-10 08:01:11",
+  "answers": [
+    {
+      "answer_id": 4407,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Diagnosis complete and verified against rclone v1.75.1. Solution written to `/workspace/SOLUTION.md` and reproduced below.\n\n# Fix: `rclone lsf --json` is not a valid flag — use `rclone lsjson`\n\n## Symptom\n\n```console\n$ rclone lsf /tmp/rcjson --json\nError: unknown flag: --json\n...\n2026/... NOTICE: Fatal error: unknown flag: --json\n$ echo $?\n2\n```\n\nA hard exit (code `2`), not empty output — callers see a parse/EOF error instead of a clear cause.\n\n## Root-cause analysis\n\n1. `rclone lsf` is a **line-oriented formatter**, not a JSON emitter. It is controlled by `--format` (`p s t h i o m e T M`), `--separator`, `--csv`. No JSON array mode exists.\n2. `--json` is **not a global flag** and not an `lsf` flag, so pflag rejects it before listing begins. (The `M` format token emits a per-item metadata blob in one column — not a JSON document.)\n3. The real JSON command is **`rclone lsjson`**, which emits one array of `{Path, Name, Size, ModTime, IsDir, ...}`.\n4. Log/NOTICE lines go to **stderr**; the JSON array goes to **stdout**, so strict stdout parsing is safe.\n\n## Exact fix\n\n### 1. Replace the invocation\n\n```bash\n# BROKEN: lsf has no --json\nrclone lsf --json -R remote:path\n\n# CORRECT\nrclone lsjson -R remote:path\n```\n\nUseful flags: `-R`, `--no-modtime` (fast, `ModTime` becomes `\"\"`), `--no-mimetype`, `--hash`, `--dirs-only`/`--files-only`, `--metadata`, `--original`, `--encrypted`.\n\n### 2. Parse stdout strictly (Rust, for `hilo-backends/external.rs`)\n\n```rust\n#[derive(Debug, serde::Deserialize)]\nstruct RcloneItem {\n    #[serde(rename = \"Path\")]      path: String,\n    #[serde(rename = \"Name\")]      name: String,\n    #[serde(rename = \"Size\")]      size: i64,\n    #[serde(rename = \"ModTime\", default)] mod_time: String,\n    #[serde(rename = \"IsDir\")]     is_dir: bool,\n    #[serde(rename = \"MimeType\")]  mime_type: Option<String>,\n}\n\nfn rclone_lsjson(remote_path: &str, recursive: bool) -> Result<Vec<RcloneItem>, String> {\n    let mut cmd = std::process::Command::new(\"rclone\");\n    cmd.arg(\"lsjson\").arg(\"--no-mimetype\").arg(\"--no-modtime\");\n    if recursive { cmd.arg(\"-R\"); }\n    cmd.arg(remote_path)\n        .stdin(std::process::Stdio::null())\n        .stdout(std::process::Stdio::piped())\n        .stderr(std::process::Stdio::piped());\n\n    let out = cmd.output().map_err(|e| format!(\"failed to spawn rclone: {e}\"))?;\n    if !out.status.success() {\n        return Err(format!(\"rclone lsjson failed ({}): {}\",\n            out.status, String::from_utf8_lossy(&out.stderr)));\n    }\n    serde_json::from_slice::<Vec<RcloneItem>>(&out.stdout)\n        .map_err(|e| format!(\"invalid rclone lsjson output: {e}\"))\n}\n```\n\nRules: never merge stderr into the JSON buffer; treat `ModTime` as `String` (may be `\"\"`); make backend-conditional fields `Option<T>`; `Size` is `i64` (dirs may be `-1`).\n\n### 3. Fallback only for line-parsing callers\n\n```bash\nrclone lsf -R --format \"pst\" --separator \";\" remote:path\n# a/;-1;2026-10-10 03:00:46\n# a/f.txt;3;2026-10-10 03:00:46\n```\n\n## Verification (all run, v1.75.1)\n\n```bash\n# 1. reproduce the bug -> exit 2\nrclone lsf /tmp/rcjson --json; echo \"EXIT: $?\"\n\n# 2. lsjson is a valid array with required fields\nrclone lsjson -R /tmp/rcjson 2>/dev/null \\\n  | jq -e 'type==\"array\" and (map(has(\"Path\") and has(\"Size\") and has(\"IsDir\") and has(\"ModTime\")) | all)'\n# -> true\n\n# 3. stdout clean even with a stderr NOTICE\nrclone lsjson /tmp/rcjson 2>/tmp/rcjson.err | jq -e 'type==\"array\"'   # -> true\n\n# 4. line fallback works\nrclone lsf -R --format \"pst\" /tmp/rcjson\n\n# 5. end-to-end\nset -o pipefail\nrclone lsjson -R --no-mimetype --no-modtime /tmp/rcjson 2>/dev/null \\\n  | jq -e 'length >= 1 and (.[0] | has(\"Path\"))' >/dev/null \\\n  && echo \"PASS: lsjson strict parse\"\n```\n\nObserved results: step 1 exits `2` with `unknown flag: --json`; steps 2–3 return `true`; step 4 emits the two expected records; step 5 prints `PASS: lsjson strict parse`. This confirms the root cause and that switching to `rclone lsjson` resolves it.\n",
+      "evidence": "# Evidence\n- Problem class: rclone-lsf-invalid-json-flag\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-10T08:01:11.135Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "rclone-lsf-invalid-json-flag",
+        "provider": "openrouter",
+        "solved_at": "2026-10-10T08:01:11.135Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-10 08:01:11"
+    }
+  ]
+}
