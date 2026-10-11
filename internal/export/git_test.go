@@ -1032,6 +1032,70 @@ func TestSanitizeCommonPII(t *testing.T) {
 	}
 }
 
+// DF-OFF-BY-ONE-33: dotless user@host identifiers must be redacted, but
+// programming syntax that superficially matches local@host (CI action
+// tags, package/module versions, VCS specs, workflow scope ids, regex and
+// decorator fragments) must pass through unchanged.
+func TestSanitizeDotlessIdentifiers(t *testing.T) {
+	redact := map[string]string{
+		"user@host":                                      "<email>",
+		"ssh user@localhost":                             "ssh <email>",
+		"scp out.tar user@builder-machine:/tmp":          "scp out.tar <email>:/tmp",
+		"Trace archived from kara@builder-machine. Done": "Trace archived from <email>. Done",
+		"postgres://duckbrain:pw@localhost:5432/db":      "postgres://duckbrain:<email>:5432/db",
+		"contact admin@localhost, not later":             "contact <email>, not later",
+		"two: user@host and ops@builder-machine":         "two: <email> and <email>",
+	}
+	for in, want := range redact {
+		if got := sanitizeDotlessIdentifiers(in); got != want {
+			t.Errorf("sanitizeDotlessIdentifiers(%q) = %q, want redacted %q", in, got, want)
+		}
+	}
+
+	keep := []string{
+		// CI action tags and version refs
+		"uses: actions/checkout@v4",
+		"uses: actions/setup-go@v5",
+		"golangci/golangci-lint-action@v6 with version: v1.64.8",
+		"pin vitest@4 and zod@3, upgrade pnpm@11",
+		"bar@v0.3.4 matches module@version; go get pkg@vX.Y.Z",
+		"v8@latest and consensus@v0",
+		// commit pins and branch refs
+		"repo.git@main and h3src@main",
+		"duckbrain@77b5b8b and main@85e8a61",
+		// VCS install spec
+		"pip install gitreins@git+https://example.invalid/repo.git@6f7a02b",
+		// Go module version continuation (match stops at the dot)
+		"Found in: net/http@go1.26.5 Fixed in: net/http@go1.26.6",
+		// scoped npm package with version
+		"@vitest/coverage-v8@2.1.9 from lock file",
+		// version-bearing model@provider routing labels
+		"worker glm-5.3-flash@zai-glm-default and gpt-5.6-luna@openai-codex",
+		// workflow run-scope placeholders
+		`run scope "run@step1" and nested "run@each@item-1@step1" collide on run_id@step`,
+		// single-letter fragments from escapes next to decorators/keywords
+		`escaped \\n@dataclass and \\t@echo read raw as n@dataclass t@echo`,
+		"raw t@mkdir and t@if fragments",
+		// regex fragment locals
+		`const re = /PORT=(\d+)\s+@heading\/api/`,
+		// dotted email stays owned by the standard email rule
+		"alice@example.net",
+	}
+	for _, in := range keep {
+		if got := sanitizeDotlessIdentifiers(in); got != in {
+			t.Errorf("sanitizeDotlessIdentifiers(%q) = %q, want unchanged", in, got)
+		}
+	}
+
+	// The composed scrub applies the same classification (redacts real
+	// user@host, keeps syntax) alongside the other PII classes.
+	in := "run actions/checkout@v4 then ssh user@localhost and mail alice@example.net"
+	want := "run actions/checkout@v4 then ssh <email> and mail <email>"
+	if got := sanitizeCommonPII(in); got != want {
+		t.Errorf("sanitizeCommonPII(%q) = %q, want %q", in, got, want)
+	}
+}
+
 func TestSanitizePublicJSON(t *testing.T) {
 	in := []byte(`{"contact":"alice@example.net","phone":"(415) 555-1212","ip":"203.0.113.7","path":"C:\\Users\\alice\\private","large":9007199254740993,"alice@example.net":"key"}`)
 	out, err := SanitizePublicJSON(in)
