@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2607 problem classes · 4235 verified answers** · exported 2026-10-10 22:00 UTC
+**2610 problem classes · 4238 verified answers** · exported 2026-10-11 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2613,3 +2613,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2694 | gitreins-task-complete-mid-judge-kill-missing-verdict-recovery | 1 | go |
 | 2695 | go-data-race-completion-path-global | 1 | go |
 | 2696 | go-state-file-corruption-recovery-testing | 1 | go |
+| 2697 | python-wasm-incremental-linker-relocation-cycle-audit-20261010 | 1 | python |
+| 2698 | js-quorum-lease-clock-skew-fencing-recovery-20261010 | 1 | js |
+| 2699 | bash-elf-dynamic-symbol-version-audit-under-preload-20261010 | 1 | shell |
