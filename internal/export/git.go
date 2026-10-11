@@ -535,6 +535,7 @@ func sanitizeHostPaths(s string) string {
 
 var (
 	personalEmailPattern = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b`)
+	dotlessEmailPattern  = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9_-]+\b`)
 	personalPhonePattern = regexp.MustCompile(`(^|[^0-9])(?:\+[0-9]{1,3}[ .-]?)?(?:\([0-9]{3}\)|[0-9]{3})[ .-][0-9]{3}[ .-][0-9]{4}([^0-9]|$)`)
 	ipv4Pattern          = regexp.MustCompile(`(^|[^0-9.])((?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})([^0-9.]|$)`)
 	ipv6CandidatePattern = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_:])((?:[0-9a-f]{0,4}:){2,}[0-9a-f:.%]+)([^A-Za-z0-9_:]|$)`)
@@ -546,6 +547,7 @@ var (
 func sanitizeCommonPII(s string) string {
 	s = sanitizeHostPaths(s)
 	s = personalEmailPattern.ReplaceAllString(s, "<email>")
+	s = dotlessEmailPattern.ReplaceAllString(s, "<email>")
 	s = personalPhonePattern.ReplaceAllString(s, "${1}<phone>${2}")
 	s = ipv4Pattern.ReplaceAllString(s, "${1}<ip-address>${3}")
 	s = ipv6CandidatePattern.ReplaceAllStringFunc(s, func(match string) string {

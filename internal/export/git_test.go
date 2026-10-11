@@ -873,8 +873,8 @@ func TestSanitizeHostPaths(t *testing.T) {
 // --- PUBLIC-PII-001: common PII hygiene -----------------------------------
 
 func TestSanitizeCommonPII(t *testing.T) {
-	in := "contact alice@example.net at (415) 555-1212; host 203.0.113.7; v6 2001:db8::1; version v1.2.3"
-	want := "contact <email> at <phone>; host <ip-address>; v6 <ip-address>; version v1.2.3"
+	in := "contact alice@example.net and user@host, admin@localhost. at (415) 555-1212; host 203.0.113.7; v6 2001:db8::1; version v1.2.3"
+	want := "contact <email> and <email>, <email>. at <phone>; host <ip-address>; v6 <ip-address>; version v1.2.3"
 	if got := sanitizeCommonPII(in); got != want {
 		t.Fatalf("sanitizeCommonPII() = %q, want %q", got, want)
 	}

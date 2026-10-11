@@ -85,6 +85,7 @@ _HOST_PATH_RE = re.compile(
     r"\\*/documents and settings)[/\\]+[A-Za-z0-9._-]+"
 )
 _EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+_DOTLESS_EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9_-]+\b")
 _PHONE_RE = re.compile(
     r"(?<![0-9])(?:\+?[0-9]{1,3}[ .-]?)?(?:\([0-9]{3}\)|[0-9]{3})"
     r"[ .-][0-9]{3}[ .-][0-9]{4}(?![0-9])"
@@ -128,6 +129,7 @@ def sanitize_common_pii(text):
         return text
     text = sanitize_host_paths(text)
     text = _EMAIL_RE.sub("<email>", text)
+    text = _DOTLESS_EMAIL_RE.sub("<email>", text)
     text = _PHONE_RE.sub("<phone>", text)
     return sanitize_ip_addresses(text)
 

@@ -18,10 +18,11 @@ HOME_PATH = re.compile(
     r"\\*/documents and settings)[/\\]+[A-Za-z0-9._-]+"
 )
 EMAIL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
+DOTLESS_EMAIL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9_-]+\b")
 PHONE = re.compile(r"(?<![0-9])(?:\+?[0-9]{1,3}[ .-]?)?(?:\([0-9]{3}\)|[0-9]{3})[ .-][0-9]{3}[ .-][0-9]{4}(?![0-9])")
 IPV4 = re.compile(r"(?<![0-9.])(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}(?![0-9.])")
 IPV6_CANDIDATE = re.compile(r"(?<![A-Za-z0-9_:])(?:[0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f:.%]+(?![A-Za-z0-9_:])")
-CHECKS = (("personal home path", HOME_PATH), ("email address", EMAIL), ("phone number", PHONE), ("IPv4 address", IPV4))
+CHECKS = (("personal home path", HOME_PATH), ("email address", EMAIL), ("dotless host identifier", DOTLESS_EMAIL), ("phone number", PHONE), ("IPv4 address", IPV4))
 
 
 def scan_text(text):
