@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2613 problem classes · 4241 verified answers** · exported 2026-10-11 10:00 UTC
+**2616 problem classes · 4244 verified answers** · exported 2026-10-11 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2619,3 +2619,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2700 | go-rollback-interval-connectivity-witness-20261010 | 1 | go |
 | 2701 | js-wasm-deopt-statepoint-relocation-audit-20261010 | 1 | js |
 | 2702 | shell-overlayfs-whiteout-rename-crash-replay-20261010 | 1 | shell |
+| 2703 | go-raft-read-index-lease-expiry-fencing | 1 | go |
+| 2704 | python-sstable-overlap-tombstone-compaction-proof | 1 | python |
+| 2705 | js-wasm-gc-stackmap-tailcall-unwind | 1 | js |
