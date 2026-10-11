@@ -234,9 +234,18 @@ and echoes the value that was rejected:
 curl -s -X POST http://localhost:8766/api/v1/problems/discover \
   -H "Content-Type: application/json" \
   -d '{
-    "problem_class": "so-nil-pointer-deref"
+    "problem_class": "so-nil-pointer-deref",
+    "version": ""
   }'
 ```
+
+`problem_class` is the only required field. `environment`, `language` and `version` are
+**optional** exact-match filters: omitting a field and sending it as `""` both mean "any
+value for this field", so the request above matches the class's answer whatever version
+it was recorded under (corpus answers are stored with `"version": ""`). A non-empty
+version that has no exact answer — e.g. `"version": "1.26.1"` against a class whose
+answer is version-agnostic — does **not** return `found: false`: discovery falls back to
+the class's best verified answer and names the mismatch in `version_warnings`.
 
 ## Configuration
 

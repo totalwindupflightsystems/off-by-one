@@ -12,7 +12,10 @@ import (
 //
 //  1. The exact-match answer (if any) for the (env, lang, version) tuple
 //     requested. If env/lang/version are empty, the most recent verified
-//     answer is returned.
+//     answer is returned. When a NON-empty version has no exact answer but
+//     the class holds a verified answer, discovery falls back to the best
+//     verified answer for the class ignoring version and reports the
+//     mismatch in VersionWarnings (DF-OFF-BY-ONE-36).
 //  2. The version history — parent_id chains walked from the exact match
 //     back through superseded versions.
 //  3. Lateral edges — related problem classes connected via problem_edges,
@@ -44,6 +47,30 @@ func (s *Store) Discovery(ctx context.Context, title, env, lang, version string,
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return nil, err
 	}
+	// DF-OFF-BY-ONE-36: a non-empty version with no exact answer must not
+	// hide a class that DOES hold a verified answer. Corpus answers are
+	// recorded with version "" (the store's version wildcard) because the
+	// version observed at solve time is host context, so a caller replaying
+	// a raw toolchain version — the README's own example tuple
+	// (linux/go/1.26.1) — otherwise gets found:false for a class that has a
+	// perfectly good answer. Fall back to the same ranked query with the
+	// version filter dropped.
+	//
+	// Only the VERSION filter is dropped: env and language describe the
+	// caller's own runtime, and papering over a mismatch there would serve
+	// an answer for the wrong runtime. The mismatch is surfaced in
+	// VersionWarnings instead of being hidden.
+	versionFallback := false
+	if best == nil && version != "" {
+		fb, ferr := s.bestAnswer(ctx, pc.ID, env, lang, "")
+		if ferr != nil && !errors.Is(ferr, ErrNotFound) {
+			return nil, ferr
+		}
+		if fb != nil {
+			best = fb
+			versionFallback = true
+		}
+	}
 	if best != nil {
 		res.Exact = best
 		// 2. Walk parent_id chain for version history.
@@ -53,10 +80,16 @@ func (s *Store) Discovery(ctx context.Context, title, env, lang, version string,
 		}
 		res.Versions = versions
 		// 3. Surface version warnings for tuples with known superseding
-		// answers.
+		// answers, plus the fallback mismatch when one occurred.
 		warnings, err := s.versionWarnings(ctx, pc.ID, env, lang, version)
 		if err != nil {
 			return nil, fmt.Errorf("version warnings: %w", err)
+		}
+		if versionFallback {
+			// Prepend: the mismatch is the first thing the caller reads.
+			warnings = append([]string{fmt.Sprintf(
+				"Requested version %q has no exact answer; serving the best verified answer for this problem class (answer version %q).",
+				version, best.Version)}, warnings...)
 		}
 		res.VersionWarnings = warnings
 	}

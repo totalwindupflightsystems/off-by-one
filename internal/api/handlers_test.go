@@ -663,6 +663,73 @@ func TestDiscover_VersionWarningsEmptyPresent(t *testing.T) {
 	}
 }
 
+// TestDiscover_VersionFallbackReadmeExample guards DF-OFF-BY-ONE-36 at the
+// HTTP surface: the class's corpus answer is recorded with version "",
+// while the README's submit example uses linux/go/1.26.1 and its discover
+// example only names the class. All three spellings of "no specific
+// version" must return the answer; only the mismatched one may report a
+// version_warnings note. Pre-fix, the version="1.26.1" probes returned
+// found:false (200 with no answer).
+func TestDiscover_VersionFallbackReadmeExample(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	seedClass(t, store, "so-nil-pointer-deref", "nil pointer", "linux", "go", "", "check the pointer", graph.AnswerVerified)
+
+	cases := []struct {
+		name       string
+		body       any
+		wantWarned bool
+	}{
+		{
+			name:       "README submit tuple (version 1.26.1)",
+			body:       discoverRequest{ProblemClass: "so-nil-pointer-deref", Environment: "linux", Language: "go", Version: "1.26.1"},
+			wantWarned: true,
+		},
+		{
+			// Raw JSON, not the struct: the JSON field is genuinely absent.
+			name:       "class + version only",
+			body:       json.RawMessage(`{"problem_class":"so-nil-pointer-deref","version":"1.26.1"}`),
+			wantWarned: true,
+		},
+		{
+			name:       "explicit empty version",
+			body:       discoverRequest{ProblemClass: "so-nil-pointer-deref", Version: ""},
+			wantWarned: false,
+		},
+		{
+			name:       "no version field at all",
+			body:       json.RawMessage(`{"problem_class":"so-nil-pointer-deref"}`),
+			wantWarned: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := do(t, s, "POST", "/api/v1/problems/discover", tc.body)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+			}
+			var resp discoverResponse
+			if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if !resp.Found {
+				t.Fatalf("found = false, want true, body = %s", rr.Body.String())
+			}
+			if resp.Answer == nil {
+				t.Fatal("answer missing while found = true")
+			}
+			if resp.Answer.Version != "" {
+				t.Errorf("answer.version = %q, want \"\" (the corpus answer)", resp.Answer.Version)
+			}
+			if got := len(resp.VersionWarnings) > 0; got != tc.wantWarned {
+				t.Errorf("version_warnings = %v, want warned=%v", resp.VersionWarnings, tc.wantWarned)
+			}
+			if tc.wantWarned && !strings.Contains(resp.VersionWarnings[0], "1.26.1") {
+				t.Errorf("version_warnings[0] = %q, want it to name the requested version", resp.VersionWarnings[0])
+			}
+		})
+	}
+}
+
 func TestDiscover_NotFound(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	body := discoverRequest{ProblemClass: "no-such-class"}

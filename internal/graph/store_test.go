@@ -3,6 +3,7 @@ package graph
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -245,6 +246,102 @@ func TestStore_Discovery_ExactMatch(t *testing.T) {
 	}
 	if res.Exact.Solution != "use --chown" {
 		t.Errorf("solution = %q", res.Exact.Solution)
+	}
+}
+
+// TestStore_Discovery_VersionFallback guards DF-OFF-BY-ONE-36: a caller
+// replaying a raw toolchain version (the README's own tuple,
+// linux/go/1.26.1) must not get an empty result for a class whose verified
+// answer was recorded with the version wildcard "". Discovery falls back to
+// the best verified answer for the class, ignoring ONLY the version filter,
+// and reports the mismatch in VersionWarnings.
+//
+// The negative arms matter as much as the positive one: the fallback must
+// not invent an answer for a class with no verified answer, and it must not
+// paper over an env/language mismatch (that would serve an answer for a
+// runtime the class has no answer for).
+func TestStore_Discovery_VersionFallback(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	cid, err := s.CreateProblemClass(ctx, "readme-tuple", "answer recorded with an empty version")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	aid, err := s.CreateAnswerNode(ctx, cid, 0, "linux", "go", "", "install the toolchain", "evidence", "{}")
+	if err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+	if err := s.UpdateAnswerStatus(ctx, aid, AnswerVerified); err != nil {
+		t.Fatalf("UpdateAnswerStatus: %v", err)
+	}
+
+	// (1) version mismatch -> the class answer is served, with a warning.
+	res, err := s.Discovery(ctx, "readme-tuple", "linux", "go", "1.26.1", false)
+	if err != nil {
+		t.Fatalf("Discovery (mismatched version): %v", err)
+	}
+	if res.Exact == nil {
+		t.Fatal("Discovery (mismatched version): no answer, want the version-agnostic one")
+	}
+	if res.Exact.ID != aid || res.Exact.Version != "" {
+		t.Errorf("Discovery (mismatched version) served %+v, want answer %d with version \"\"", res.Exact, aid)
+	}
+	if len(res.VersionWarnings) == 0 {
+		t.Error("Discovery (mismatched version): version_warnings empty, want a mismatch note")
+	} else if !strings.Contains(res.VersionWarnings[0], "1.26.1") {
+		t.Errorf("version_warnings[0] = %q, want it to name the requested version 1.26.1", res.VersionWarnings[0])
+	}
+
+	// (2) an explicit empty version still takes the exact-match path.
+	res, err = s.Discovery(ctx, "readme-tuple", "linux", "go", "", false)
+	if err != nil {
+		t.Fatalf("Discovery (empty version): %v", err)
+	}
+	if res.Exact == nil {
+		t.Fatal("Discovery (empty version): no answer")
+	}
+	if len(res.VersionWarnings) != 0 {
+		t.Errorf("Discovery (empty version): version_warnings = %v, want none", res.VersionWarnings)
+	}
+
+	// (3) omitting the tuple keeps matching the version-agnostic answer.
+	res, err = s.Discovery(ctx, "readme-tuple", "", "", "", false)
+	if err != nil {
+		t.Fatalf("Discovery (no tuple): %v", err)
+	}
+	if res.Exact == nil {
+		t.Fatal("Discovery (no tuple): no answer")
+	}
+
+	// (4) negative arm: the fallback must NOT ignore env/language.
+	res, err = s.Discovery(ctx, "readme-tuple", "windows", "go", "1.26.1", false)
+	if err != nil {
+		t.Fatalf("Discovery (env mismatch): %v", err)
+	}
+	if res.Exact != nil {
+		t.Errorf("Discovery (env mismatch) served %+v, want no answer for that runtime", res.Exact)
+	}
+
+	// (5) negative arm: a class whose only answer is not verified still has
+	// no answer to fall back to.
+	noAns, err := s.CreateProblemClass(ctx, "readme-tuple-unanswered", "class without a verified answer")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	pend, err := s.CreateAnswerNode(ctx, noAns, 0, "linux", "go", "1.0", "in flight", "evidence", "{}")
+	if err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+	if err := s.UpdateAnswerStatus(ctx, pend, AnswerPending); err != nil {
+		t.Fatalf("UpdateAnswerStatus: %v", err)
+	}
+	res, err = s.Discovery(ctx, "readme-tuple-unanswered", "linux", "go", "1.26.1", false)
+	if err != nil {
+		t.Fatalf("Discovery (no verified answer): %v", err)
+	}
+	if res.Exact != nil {
+		t.Errorf("Discovery (no verified answer) served %+v, want no answer", res.Exact)
 	}
 }
 
