@@ -85,7 +85,30 @@ _HOST_PATH_RE = re.compile(
     r"\\*/documents and settings)[/\\]+[A-Za-z0-9._-]+"
 )
 _EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
-_DOTLESS_EMAIL_RE = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9_-]+\b")
+# DF-OFF-BY-ONE-33: dotless user@host identifiers (user@localhost,
+# kara@builder-machine) escape the dotted-TLD email pattern above, but a
+# bare "local@host" regex also matches a large amount of legitimate
+# programming syntax: version refs (actions/checkout@v4, vitest@4,
+# pkg@latest, repo@<sha>), module version continuations (net/http@go1.26.5
+# — the dotless match stops at the dot of a dotted token), VCS install
+# specs (pkg@git+https://…), regex fragments ([a-z]+@heading), workflow
+# scope placeholders (run@step1, run@each@item-1@step1), and single-letter
+# artifacts produced when escaped newlines/tabs sit next to decorators
+# ("\n@dataclass" read as raw text looks like "n@dataclass"). The
+# classifier below keeps those forms and redacts only plausible
+# user@host identifiers. Keep in sync with dotlessCandidatePattern /
+# isDotlessUserHost in internal/export/git.go and DOTLESS_* in
+# scripts/check-public-pii.py.
+_DOTLESS_CANDIDATE_RE = re.compile(r"(?i)\b([A-Z0-9._%+-]+)@([A-Z0-9_-]+)\b")
+_DOTLESS_VERSION_HOST_RE = re.compile(r"(?i)^v?\d")        # @v4, @4, @2000s
+_DOTLESS_SHA_HOST_RE = re.compile(r"(?i)^[0-9a-f]{7,40}$")  # repo@<sha>
+_DOTLESS_SCOPE_HOST_RE = re.compile(r"(?i)^(?:step\d*|each|item-\d+)$")
+_DOTLESS_VX_HOST_RE = re.compile(r"(?i)^vx+$")             # pkg@vX placeholder
+_DOTLESS_VERSION_LOCAL_RE = re.compile(r"\d+\.\d+")        # glm-5.3-flash@provider
+_DOTLESS_REF_HOSTS = frozenset({
+    "latest", "main", "master", "next", "head",  # dist-tags / branch refs
+    "version", "init",                           # prose placeholders
+})
 _PHONE_RE = re.compile(
     r"(?<![0-9])(?:\+?[0-9]{1,3}[ .-]?)?(?:\([0-9]{3}\)|[0-9]{3})"
     r"[ .-][0-9]{3}[ .-][0-9]{4}(?![0-9])"
@@ -123,13 +146,65 @@ def sanitize_ip_addresses(text):
     return _IPV6_CANDIDATE_RE.sub(redact_ipv6, text)
 
 
+def _is_dotless_user_host(local, host, following):
+    """True when a dotless local@host candidate is a real user@host
+    identifier rather than programming syntax. ``following`` is the (up to
+    two) characters right after the match — a dotted continuation
+    (net/http@go1.26.5, user@host.example) or a VCS marker
+    (pkg@git+https://) means the candidate is part of a larger token the
+    dotted-email rule (or no rule) owns."""
+    if len(local) < 2 or len(host) < 2:
+        return False
+    if not local[0].isalnum() or not local[-1].isalnum() or ".." in local:
+        return False
+    if _DOTLESS_VERSION_LOCAL_RE.search(local):
+        return False
+    if _DOTLESS_VERSION_HOST_RE.match(host):
+        return False
+    low = host.lower()
+    if low in _DOTLESS_REF_HOSTS or _DOTLESS_VX_HOST_RE.match(low):
+        return False
+    if _DOTLESS_SCOPE_HOST_RE.match(host):
+        return False
+    if _DOTLESS_SHA_HOST_RE.match(host) and any(c.isdigit() for c in host):
+        return False
+    if following.startswith("+"):
+        return False
+    if len(following) == 2 and following[0] == "." and following[1].isalnum():
+        return False
+    return True
+
+
+def sanitize_dotless_identifiers(text):
+    """Redact dotless user@host identifiers (user@localhost,
+    kara@builder-machine) to <email>; leave programming syntax that merely
+    looks like one (actions/checkout@v4, vitest@4, run@step1) intact."""
+    if not text:
+        return text
+    out = []
+    last = 0
+    redacted = False
+    for match in _DOTLESS_CANDIDATE_RE.finditer(text):
+        following = text[match.end():match.end() + 2]
+        if not _is_dotless_user_host(match.group(1), match.group(2), following):
+            continue
+        out.append(text[last:match.start()])
+        out.append("<email>")
+        last = match.end()
+        redacted = True
+    if not redacted:
+        return text
+    out.append(text[last:])
+    return "".join(out)
+
+
 def sanitize_common_pii(text):
     """Replace common personal contact/network identifiers with placeholders."""
     if not text:
         return text
     text = sanitize_host_paths(text)
     text = _EMAIL_RE.sub("<email>", text)
-    text = _DOTLESS_EMAIL_RE.sub("<email>", text)
+    text = sanitize_dotless_identifiers(text)
     text = _PHONE_RE.sub("<phone>", text)
     return sanitize_ip_addresses(text)
 

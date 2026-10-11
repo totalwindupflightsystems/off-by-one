@@ -18,11 +18,53 @@ HOME_PATH = re.compile(
     r"\\*/documents and settings)[/\\]+[A-Za-z0-9._-]+"
 )
 EMAIL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b")
-DOTLESS_EMAIL = re.compile(r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9_-]+\b")
+# DF-OFF-BY-ONE-33: dotless user@host identifiers (user@localhost,
+# user@builder-machine) are PII the dotted-TLD email pattern misses, but a
+# bare dotless regex matches legitimate programming syntax (CI action tags
+# actions/checkout@v4, package versions vitest@4, Go module versions
+# net/http@go1.26.5, workflow scope ids run@step1, decorator-adjacent
+# fragments like n@dataclass). Count only candidates the classifier accepts
+# as real user@host identifiers. Keep in sync with _DOTLESS_* /
+# _is_dotless_user_host in scripts/export-answers.py and
+# dotlessCandidatePattern / isDotlessUserHost in internal/export/git.go.
+DOTLESS_CANDIDATE = re.compile(r"(?i)\b([A-Z0-9._%+-]+)@([A-Z0-9_-]+)\b")
+_DOTLESS_VERSION_HOST_RE = re.compile(r"(?i)^v?\d")
+_DOTLESS_SHA_HOST_RE = re.compile(r"(?i)^[0-9a-f]{7,40}$")
+_DOTLESS_SCOPE_HOST_RE = re.compile(r"(?i)^(?:step\d*|each|item-\d+)$")
+_DOTLESS_VX_HOST_RE = re.compile(r"(?i)^vx+$")
+_DOTLESS_VERSION_LOCAL_RE = re.compile(r"\d+\.\d+")
+_DOTLESS_REF_HOSTS = frozenset({
+    "latest", "main", "master", "next", "head",
+    "version", "init",
+})
 PHONE = re.compile(r"(?<![0-9])(?:\+?[0-9]{1,3}[ .-]?)?(?:\([0-9]{3}\)|[0-9]{3})[ .-][0-9]{3}[ .-][0-9]{4}(?![0-9])")
 IPV4 = re.compile(r"(?<![0-9.])(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3}(?![0-9.])")
 IPV6_CANDIDATE = re.compile(r"(?<![A-Za-z0-9_:])(?:[0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f:.%]+(?![A-Za-z0-9_:])")
-CHECKS = (("personal home path", HOME_PATH), ("email address", EMAIL), ("dotless host identifier", DOTLESS_EMAIL), ("phone number", PHONE), ("IPv4 address", IPV4))
+CHECKS = (("personal home path", HOME_PATH), ("email address", EMAIL), ("phone number", PHONE), ("IPv4 address", IPV4))
+
+
+def _is_dotless_user_host(local, host, following):
+    """Mirror of export-answers.py — true user@host identifier vs syntax."""
+    if len(local) < 2 or len(host) < 2:
+        return False
+    if not local[0].isalnum() or not local[-1].isalnum() or ".." in local:
+        return False
+    if _DOTLESS_VERSION_LOCAL_RE.search(local):
+        return False
+    if _DOTLESS_VERSION_HOST_RE.match(host):
+        return False
+    low = host.lower()
+    if low in _DOTLESS_REF_HOSTS or _DOTLESS_VX_HOST_RE.match(low):
+        return False
+    if _DOTLESS_SCOPE_HOST_RE.match(host):
+        return False
+    if _DOTLESS_SHA_HOST_RE.match(host) and any(c.isdigit() for c in host):
+        return False
+    if following.startswith("+"):
+        return False
+    if len(following) == 2 and following[0] == "." and following[1].isalnum():
+        return False
+    return True
 
 
 def scan_text(text):
@@ -31,6 +73,13 @@ def scan_text(text):
         matches = len(pattern.findall(text))
         if matches:
             counts[label] = matches
+    dotless = 0
+    for match in DOTLESS_CANDIDATE.finditer(text):
+        following = text[match.end():match.end() + 2]
+        if _is_dotless_user_host(match.group(1), match.group(2), following):
+            dotless += 1
+    if dotless:
+        counts["dotless host identifier"] = dotless
     ipv6 = 0
     for match in IPV6_CANDIDATE.finditer(text):
         token = match.group(0).split("%", 1)[0]

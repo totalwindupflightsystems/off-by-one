@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>js-20261009-wasm-gc-cyclic-finalizer-reachability-order — Off-By-One verified answer</title>
+<meta name="description" content="This problem class looks like a simple mark-and-sweep, but four independent mechanics interact, and each one is a classic source of wrong answers:">
+<meta property="og:title" content="js-20261009-wasm-gc-cyclic-finalizer-reachability-order — Off-By-One">
+<meta property="og:description" content="This problem class looks like a simple mark-and-sweep, but four independent mechanics interact, and each one is a classic source of wrong answers:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2674-js-20261009-wasm-gc-cyclic-finalizer-reachability-order.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>js-20261009-wasm-gc-cyclic-finalizer-reachability-order</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>js</span><span class='badge v'>node20</span></div><div class='desc'><p>This problem class looks like a simple mark-and-sweep, but four independent mechanics interact, and each one is a classic source of wrong answers:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2674-js-20261009-wasm-gc-cyclic-finalizer-reachability-order.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is complete and verified. Here is the self-contained markdown (also saved at <code>~/wasm-gc-sim/SOLUTION.md</code>, alongside <code>gc.js</code>, <code>test.js</code>, <code>fuzz.js</code>, <code>demo.js</code>).</p>
+<hr />
+<h1>Wasm-GC Cyclic Heap with Weak Refs, Ephemerons, Finalizers, and Incremental Slices</h1>
+<h2>1. Diagnosis / root cause</h2>
+<p>This problem class looks like a simple mark-and-sweep, but four independent mechanics interact, and each one is a classic source of wrong answers:</p>
+<ol>
+<li><strong>Cycles vs. reachability.</strong> The collector must be a <em>reachability</em> analysis from roots, not a reference count. A cycle with no root is garbage; a cycle reachable from a root is fully live.*</li>
+<li><strong>Weak references are not roots</strong>, but they must be <em>cleared deterministically</em> when their target dies. The trap is clearing too early: if you clear during marking and then a mutation/finalizer makes the target reachable, you produce a dangling/incorrectly-cleared weak cell. Weak clearing must happen against the <strong>final</strong> live set, after finalizers run.</li>
+<li><strong>Ephemerons are not ordinary edges.</strong> <code>{key, value}</code> keeps the value alive <strong>iff the key is alive</strong>, and this is a <em>fixed point</em>: marking a value can mark another ephemeron's key, etc. A single pass leaks or over-collects. Chains/cycles require iteration to a fixed point.</li>
+<li><strong>Finalizers and resurrection.</strong> An unreachable finalizable object must be retained one collection so its finalizer can run, and its reachable closure retained too (else the finalizer sees freed memory). Finalizers run <strong>at most once</strong> and may resurrect. The bug is "incorrect resurrection": reviving a finalized/swept object, or restoring an already-cleared weak ref.</li>
+<li><strong>Incremental slices break naive marking.</strong> Between slices the mutator can create a <code>BLACK → WHITE</code> edge; the white target is never scanned and a live object is collected. The fix is a <strong>write barrier</strong> (shade the target grey), plus the same treatment for ephemeron updates and allocate-grey.</li>
+</ol>
+<p>Observable output = <strong>survivors</strong> + <strong>finalization order</strong>. Determinism requires a fixed order (here: allocation registration order).</p>
+<h2>2. Normative semantics + invariants</h2>
+<ul>
+<li>
+<p>R1 root keeps target live. R2 strong edges transitive. R3 weak never retains, cleared against final live set. R4 ephemeron <code>{key,value}</code> retains value iff cell live and key live, iterated to fixed point. R5 unreachable unfinalized finalizable object + closure retained one cycle; finalizer exactly once; reclaimed if not resurrected. R6 unreachable non-finalizable / already-finalized swept. R7 no post-sweep resurrection (stale handles throw).</p>
+</li>
+<li>
+<p><strong>INV-1</strong> no <code>BLACK → WHITE</code> edge (Dijkstra insertion barrier).</p>
+</li>
+<li><strong>INV-2</strong> ephemeron added/changed on a BLACK cell with live key shades the value.</li>
+<li><strong>INV-3</strong> weak edges never shade; cleared only after finalizers + final live set.</li>
+<li><strong>INV-4</strong> <code>finalized</code> flag set before callback (at-most-once).</li>
+<li><strong>INV-5</strong> a queued finalizable object is shaded with full strong closure + ephemeron fixpoint.</li>
+</ul>
+<h2>3. The fix — complete simulator (<code>gc.js</code>)</h2>
+<pre><code class="language-js">'use strict';
+
+/*
+ * Deterministic simulator for a Wasm-GC-style managed heap with:
+ *   - strong references and reference cycles
+ *   - weak references
+ *   - ephemerons (key is weak, value is strong iff key is strongly live)
+ *   - finalizers with at-most-once semantics and documented ordering
+ *   - incremental (slice-based) marking with a mutation write barrier
+ *
+ * Reachability rules implemented (the normative spec of this module):
+ *   R1. A root keeps its target strongly live.
+ *   R2. A strong edge from a live object keeps its target live (transitive).
+ *   R3. A weak edge never keeps its target live. A weak reference whose target
+ *       is not live at the end of a collection is cleared (permanently).
+ *   R4. An ephemeron E is a cell {key, value}. If E is live and E.key is live,
+ *       then E.value is live. This is iterated to a fixed point (handles
+ *       transitive/cyclic ephemeron chains).
+ *   R5. An unreachable object with an unfired finalizer is retained (together
+ *       with its strong closure) for one collection. Its finalizer runs at the
+ *       end of that collection, exactly once. After it fires it may be
+ *       resurrected by the finalizer; otherwise it is collected next cycle.
+ *   R6. Unreachable objects without finalizers (or whose finalizer already
+ *       fired) are swept.
+ *   R7. No object is ever resurrected after it has been swept: handles to
+ *       swept objects become invalid and mutation attempts throw.
+ *
+ * Incremental correctness (tri-color invariant):
+ *   INV-1 (no black -&gt; white edge). During incremental marking, mutating a
+ *         BLACK object to point at a WHITE object shades the WHITE object
+ *         GREY (Dijkstra insertion barrier). This guarantees every object
+ *         live at the end of the increment is marked.
+ *   INV-2 (ephemeron consistency). Setting/altering an ephemeron on a BLACK
+ *         cell whose key is already live shades the value.
+ *   INV-3 (weak safety). Weak edges never shade; they are cleared only after
+ *         finalizers have run and the final live set is fixed, so a finalizer
+ *         resurrection cannot leave a dangling/restored weak reference.
+ *
+ * Determinism:
+ *   - Traversal/graph iteration is ordered by object registration index (the
+ *     order objects were allocated).
+ *   - Finalizers fire in registration-index order.
+ */
+
+const WHITE = 0;
+const GREY = 1;
+const BLACK = 2;
+
+class HeapObject {
+  constructor(id, reg) {
+    this.id = id;
+    this.reg = reg;
+    this.strong = new Set(); // ids of strong targets
+    this.weak = new Set();   // ids of weak targets
+    this.ephemeron = null;   // { key: id, value: id }
+    this.finalizer = null;   // { label, fn }
+    this.color = WHITE;
+    this.alive = true;
+    this.finalized = false;
+    this.pending = false;    // retained for finalization this cycle
+  }
+}
+
+class GC {
+  constructor() {
+    this.objects = new Map();
+    this.roots = new Set();
+    this.finalizationLog = [];
+    this.weakClearLog = [];
+    this.barrierActivations = 0;
+    this._counter = 0;
+    this._reg = 0;
+    this._grey = [];
+    this.inc = null;
+  }
+
+  // ------------------------------------------------------------------ heap
+  newObject(id) {
+    if (id === undefined) id = `o${this._counter++}`;
+    id = String(id);
+    if (this.objects.has(id)) throw new Error(`duplicate object id: ${id}`);
+    const o = new HeapObject(id, this._reg++);
+    this.objects.set(id, o);
+    if (this.inc &amp;&amp; this.inc.active) this._shade(o); // allocate-grey: never lost
+    return o;
+  }
+
+  obj(id) { return this.objects.get(String(id)); }
+
+  _must(id) {
+    const o = this.objects.get(String(id));
+    if (!o) throw new Error(`no such object (collected or never allocated): ${id}`);
+    return o;
+  }
+
+  addRoot(id) {
+    const o = this._must(id);
+    this.roots.add(o);
+    if (this.inc &amp;&amp; this.inc.active) this._shade(o);
+    return o;
+  }
+
+  removeRoot(id) { this.roots.delete(this._must(id)); }
+
+  setStrong(fromId, toId) {
+    const from = this._must(fromId);
+    this._must(toId).alive = true;
+    from.strong.add(String(toId));
+    if (this.inc &amp;&amp; this.inc.active) this._writeBarrier(from, String(toId));
+  }
+
+  deleteStrong(fromId, toId) { this._must(fromId).strong.delete(String(toId)); }
+
+  setWeak(fromId, toId) {
+    this._must(fromId).weak.add(String(toId));
+  }
+
+  deleteWeak(fromId, toId) { this._must(fromId).weak.delete(String(toId)); }
+
+  setEphemeron(ephId, keyId, valueId) {
+    const eph = this._must(ephId);
+    eph.ephemeron = { key: String(keyId), value: String(valueId) };
+    this._must(keyId);
+    this._must(valueId);
+    if (this.inc &amp;&amp; this.inc.active) this._ephemeronBarrier(eph);
+  }
+
+  clearEphemeron(ephId) { this._must(ephId).ephemeron = null; }
+
+  setFinalizer(id, label, fn) {
+    this._must(id).finalizer = { label, fn: fn || null };
+  }
+
+  // -------------------------------------------------------- marking engine
+  _resetMarks() {
+    for (const o of this.objects.values()) {
+      o.color = WHITE;
+      o.pending = false;
+    }
+    this._grey.length = 0;
+  }
+
+  _shade(o) {
+    if (o &amp;&amp; o.alive &amp;&amp; o.color === WHITE) {
+      o.color = GREY;
+      this._grey.push(o);
+    }
+  }
+
+  _processGrey(limit = Infinity) {
+    let n = 0;
+    while (this._grey.length &gt; 0 &amp;&amp; n &lt; limit) {
+      const o = this._grey.pop();
+      if (o.color !== GREY) continue;
+      for (const tid of o.strong) this._shade(this.objects.get(tid));
+      o.color = BLACK;
+      n++;
+    }
+    return this._grey.length === 0;
+  }
+
+  _markRoots() { for (const o of this.roots) this._shade(o); }
+
+  _sortedObjects() {
+    return [...this.objects.values()].sort((a, b) =&gt; a.reg - b.reg);
+  }
+
+  _ephemeronFixpoint() {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const o of this._sortedObjects()) {
+        if (o.color === WHITE || !o.ephemeron) continue;
+        const key = this.objects.get(o.ephemeron.key);
+        if (!key || key.color === WHITE) continue;
+        const val = this.objects.get(o.ephemeron.value);
+        if (!val || val.color !== WHITE) continue;
+        this._shade(val);
+        this._processGrey();
+        changed = true;
+      }
+    }
+  }
+
+  // Retain every unreachable, unfinalized, finalizable object plus its strong
+  // closure. Iterated with ephemerons to a joint fixed point. Returns newly
+  // queued objects (in registration order).
+  _retainUnreachableFinalizable() {
+    const queued = [];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      this._ephemeronFixpoint();
+      for (const o of this._sortedObjects()) {
+        if (o.color === WHITE &amp;&amp; o.finalizer &amp;&amp; !o.finalized &amp;&amp; !o.pending) {
+          o.pending = true;
+          queued.push(o);
+          this._shade(o);
+          this._processGrey();
+          changed = true;
+        }
+      }
+    }
+    this._ephemeronFixpoint();
+    return queued;
+  }
+
+  _runFinalizers(queued) {
+    queued.sort((a, b) =&gt; a.reg - b.reg); // deterministic, documented order
+    for (const o of queued) {
+      if (o.finalized) continue;
+      o.finalized = true;            // at-most-once, before the callback runs
+      this.finalizationLog.push(o.finalizer.label);
+      if (o.finalizer.fn) o.finalizer.fn(o, this);
+    }
+    for (const o of queued) o.pending = false;
+  }
+
+  _clearWeak() {
+    for (const o of this._sortedObjects()) {
+      if (o.color === WHITE) continue; // owner is dying; its weak cells vanish
+      for (const tid of [...o.weak]) {
+        const t = this.objects.get(tid);
+        if (!t || t.color === WHITE) {
+          o.weak.delete(tid);
+          this.weakClearLog.push({ from: o.id, to: tid });
+        }
+      }
+    }
+    return this.weakClearLog;
+  }
+
+  _sweep() {
+    for (const o of [...this.objects.values()]) {
+      if (o.color === WHITE) {
+        o.alive = false;
+        this.objects.delete(o.id);
+      }
+    }
+  }
+
+  _finalMark() {
+    this._resetMarks();
+    this._markRoots();
+    this._processGrey();
+    this._ephemeronFixpoint();
+  }
+
+  _report() {
+    return {
+      alive: [...this.objects.values()].map((o) =&gt; o.id).sort(),
+      finalized: [...this.finalizationLog],
+      clearedWeak: [...this.weakClearLog],
+      barrierActivations: this.barrierActivations,
+    };
+  }
+
+  // ------------------------------------------------------- full collection
+  collectFull() {
+    // Phase A: mark roots + strong closure + ephemerons.
+    this._finalMark();
+    // Phase B: retain unreachable finalizable objects and run their finalizers.
+    const queued = this._retainUnreachableFinalizable();
+    this._runFinalizers(queued);
+    // Phase C: final live set from current roots. Any object that became
+    // unreachable as a side effect of finalization and still needs a finalizer
+    // is retained but deferred to the NEXT collection (no cascade this cycle),
+    // matching a single-generation finalization queue.
+    this._finalMark();
+    const deferred = this._retainUnreachableFinalizable();
+    for (const o of deferred) o.pending = false;
+    // Phase D: clear weak refs against the fixed live set, then sweep.
+    this._clearWeak();
+    this._sweep();
+    return this._report();
+  }
+
+  // -------------------------------------------------- incremental collection
+  startIncremental() {
+    if (this.inc &amp;&amp; this.inc.active) throw new Error('incremental collection already active');
+    this._resetMarks();
+    this.inc = { active: true };
+    this._markRoots();
+    return this;
+  }
+
+  // Process at most `budget` grey objects. Returns true when no grey work and
+  // the ephemeron fixed point is stable.
+  step(budget = 1) {
+    if (!this.inc || !this.inc.active) throw new Error('no active incremental collection');
+    this._processGrey(budget);
+    if (this._grey.length === 0) {
+      this._ephemeronFixpoint();
+      return this._grey.length === 0;
+    }
+    return false;
+  }
+
+  isMarkingComplete() {
+    if (!this.inc || !this.inc.active) return false;
+    return this._grey.length === 0 &amp;&amp; this._ephemeronsStable();
+  }
+
+  _ephemeronsStable() {
+    for (const o of this.objects.values()) {
+      if (o.color === WHITE || !o.ephemeron) continue;
+      const key = this.objects.get(o.ephemeron.key);
+      const val = this.objects.get(o.ephemeron.value);
+      if (key &amp;&amp; key.color !== WHITE &amp;&amp; val &amp;&amp; val.color === WHITE) return false;
+    }
+    return true;
+  }
+
+  // Dijkstra insertion barrier: BLACK -&gt; WHITE becomes BLACK -&gt; GREY.
+  _writeBarrier(from, toId) {
+    if (from.color === BLACK) {
+      const t = this.objects.get(toId);
+      if (t &amp;&amp; t.color === WHITE) {
+        this._shade(t);
+        this.barrierActivations++;
+      }
+    }
+  }
+
+  _ephemeronBarrier(eph) {
+    if (eph.color !== BLACK || !eph.ephemeron) return;
+    const key = this.objects.get(eph.ephemeron.key);
+    const val = this.objects.get(eph.ephemeron.value);
+    if (key &amp;&amp; key.color !== WHITE &amp;&amp; val &amp;&amp; val.color === WHITE) {
+      this._shade(val);
+      this.barrierActivations++;
+    }
+  }
+
+  finishIncremental() {
+    if (!this.inc || !this.inc.active) throw new Error('no active incremental collection');
+    while (!this._processGrey(4096)) { /* drain */ }
+    this._ephemeronFixpoint();
+    const queued = this._retainUnreachableFinalizable();
+    this._runFinalizers(queued);
+    this.inc.active = false;
+    // Final live set with deferred finalizable retention (no cascade).
+    this._finalMark();
+    const deferred = this._retainUnreachableFinalizable();
+    for (const o of deferred) o.pending = false;
+    this._clearWeak();
+    this._sweep();
+    this.inc = null;
+    return this._report();
+  }
+}
+
+module.exports = { GC, WHITE, GREY, BLACK };
+</code></pre>
+<h3>Public API</h3>
+<table>
+<thead>
+<tr>
+<th>Call</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>new GC()</code></td>
+<td>fresh heap</td>
+</tr>
+<tr>
+<td><code>newObject(id)</code></td>
+<td>allocate; auto-id if omitted</td>
+</tr>
+<tr>
+<td><code>addRoot(id)</code> / <code>removeRoot(id)</code></td>
+<td>root set (added roots shaded during marking)</td>
+</tr>
+<tr>
+<td><code>setStrong(a,b)</code> / <code>deleteStrong(a,b)</code></td>
+<td>strong edge, with write barrier</td>
+</tr>
+<tr>
+<td><code>setWeak(a,b)</code> / <code>deleteWeak(a,b)</code></td>
+<td>weak edge</td>
+</tr>
+<tr>
+<td><code>setEphemeron(e,key,val)</code> / <code>clearEphemeron(e)</code></td>
+<td>ephemeron, with barrier</td>
+</tr>
+<tr>
+<td><code>setFinalizer(id,label,fn)</code></td>
+<td>finalizer, at most once, registration order</td>
+</tr>
+<tr>
+<td><code>collectFull()</code></td>
+<td>stop-the-world collection</td>
+</tr>
+<tr>
+<td><code>startIncremental()</code> / <code>step(budget)</code> / <code>isMarkingComplete()</code> / <code>finishIncremental()</code></td>
+<td>sliced collection</td>
+</tr>
+</tbody>
+</table>
+<p>Returns <code>{ alive, finalized, clearedWeak, barrierActivations }</code>.</p>
+<h2>4. Verification</h2>
+<p>Files: <code>test.js</code>, <code>fuzz.js</code>, <code>demo.js</code>. Commands:</p>
+<pre><code class="language-bash">node test.js    # 19 deterministic unit tests
+node fuzz.js    # 400 static differential graphs + 300 mutating invariant runs
+node demo.js    # worked example
+</code></pre>
+<h3>Unit tests — 19 passed, 0 failed</h3>
+<pre><code>ok   - strong roots are live; unreachable objects are swept
+ok   - reference cycles do not keep objects alive without a root
+ok   - weak edges never keep targets alive and are cleared
+ok   - weak target that is otherwise strongly live is not cleared
+ok   - ephemeron value dies when its key dies
+ok   - ephemeron value lives when its key lives
+ok   - ephemeron chains reach a fixed point transitively
+ok   - ephemeron cycle without an external root stays dead
+ok   - finalizers run in registration order
+ok   - finalizer fires at most once
+ok   - finalizer can resurrect its object exactly once
+ok   - objects reachable from a pending finalizable object are retained, not finalized
+ok   - swept objects cannot be resurrected (stale handle throws)
+ok   - without a barrier, a black-&gt;white edge would lose a live object
+ok   - incremental collection with slices matches full collection
+ok   - mutations between slices are captured by the barrier
+ok   - ephemeron mutation barrier during incremental marking
+ok   - objects allocated mid-incremental survive and are scanned
+ok   - weak ref cleared against the final live set, not the pre-final set
+</code></pre>
+<h3>Differential + invariant fuzz</h3>
+<pre><code>ok   - static differential fuzz (400 random graphs)
+ok   - mutating tri-color invariant fuzz (300 random runs)
+fuzz verification passed
+</code></pre>
+<p>For 400 random static graphs a sliced incremental collection produces the exact same <code>alive</code>/<code>clearedWeak</code>/<code>finalized</code> as a full collection. For 300 mutating runs, after every slice and mutation there is no <code>BLACK → WHITE</code> strong edge, and every root-reachable object at finish is alive.</p>
+<h3>Worked example (<code>node demo.js</code>)</h3>
+<pre><code class="language-json">after collect 1: {
+  &quot;alive&quot;: [ &quot;F2&quot;, &quot;Holder&quot;, &quot;Root&quot; ],
+  &quot;finalized&quot;: [ &quot;F1&quot; ],
+  &quot;clearedWeak&quot;: [ { &quot;from&quot;: &quot;Holder&quot;, &quot;to&quot;: &quot;WeakTarget&quot; } ],
+  &quot;barrierActivations&quot;: 0
+}
+ephemeron key live: [&quot;EphValue&quot;,&quot;Holder&quot;,&quot;Key&quot;,&quot;Root&quot;]
+</code></pre>
+<ul>
+<li><code>WeakTarget</code> is only weakly reachable → swept, weak cell cleared.</li>
+<li><code>Key</code> unreachable → ephemeron does not retain <code>EphValue</code>; making <code>Key</code> a root activates it.</li>
+<li><code>F1</code> queued; closure retains <code>F2</code>, so only <code>F1</code> finalizes this cycle; <code>F2</code> finalizes next cycle.</li>
+</ul>
+<h2>5. Implementation notes</h2>
+<ul>
+<li>Fixed-point ordering by allocation registration index → deterministic finalization order.</li>
+<li>Ephemeron barrier on black cells prevents losing a value in incremental mode.</li>
+<li>Allocate-grey mid-cycle prevents newly allocated objects from being lost.</li>
+<li>Newly-unreachable finalizable objects found in the final pass are retained but deferred to the next collection (no unbounded same-cycle cascade).</li>
+<li><code>_must</code> throws on collected handles → no post-sweep resurrection.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: js-20261009-wasm-gc-cyclic-finalizer-reachability-order
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-10T04:18:05.412Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Given a WebAssembly-GC heap graph with weak references, ephemerons, finalizers, and incremental collection slices, compute which objects survive and the observable finalization order under the specified reachability rules. Implement a deterministic simulator that handles cycles and mutation barriers without resurrecting objects incorrectly, and explain the invariants needed to match the collector semantics.&quot;, &quot;environment&quot;: &quot;node20&quot;, &quot;language&quot;: &quot;js&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;js-20261009-wasm-gc-cyclic-finalizer-reachability-order&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-10T04:18:05.413Z&quot;, &quot;version&quot;: &quot;20&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
