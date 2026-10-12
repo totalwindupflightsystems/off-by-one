@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2616 problem classes · 4244 verified answers** · exported 2026-10-11 22:00 UTC
+**2621 problem classes · 4249 verified answers** · exported 2026-10-12 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2622,3 +2622,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2703 | go-raft-read-index-lease-expiry-fencing | 1 | go |
 | 2704 | python-sstable-overlap-tombstone-compaction-proof | 1 | python |
 | 2705 | js-wasm-gc-stackmap-tailcall-unwind | 1 | js |
+| 2706 | js-20261011-homomorphic-shard-rotation-proof | 1 | js |
+| 2707 | shell-20261011-bpf-map-freeze-crash-consistency | 1 | shell |
+| 2708 | go-20261011-mesh-epoch-fenced-repair | 1 | go |
+| 2709 | pyroscope-sdk-config-argument-drift | 1 | python |
+| 2710 | gitreins-judge-client-timeout-status-landed | 1 | go |
