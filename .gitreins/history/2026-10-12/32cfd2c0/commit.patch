@@ -1,0 +1,141 @@
+commit 6ea48894f8e6c7f1aea9efcaaeead0005abca000
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Mon Oct 12 13:28:56 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Mon Oct 12 13:28:56 2026 -0500
+
+    fix: resolve exec target before applying RLIMIT_AS in oby-memcap. Addresses INT-CI-005.
+    
+    cmd/oby-memcap applied RLIMIT_AS first and then ran exec.LookPath +
+    os.Environ under the cap; the first Go runtime allocation after
+    setrlimit could die with "fatal error: runtime: cannot allocate
+    memory" before syscall.Exec was reached (runner-sensitive, Go 1.26 CI
+    job, TestObyMemcapExec_ChildInheritsCap). Reorder so the path lookup,
+    argv, and envp are all resolved before ApplyMemLimitMB, leaving only
+    the exec error branch between setrlimit and exec. Error messages and
+    exit codes are unchanged (usage/env/apply -> 2, lookpath/exec -> 127).
+    
+    Also give TestObyMemcapExec_ChildInheritsCap a real enforcement arm:
+    the wrapper execs a non-Go (python3 -S) child that asserts the
+    inherited RLIMIT_AS via getrlimit (soft == hard == 64 MiB) AND that a
+    256 MiB anonymous mmap is refused with ENOMEM — the /bin/sh
+    /proc/self/limits arm only proved the value, not the refusal.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ cmd/oby-memcap/main.go          | 32 +++++++++++++++++++---------
+ internal/sandbox/memcap_test.go | 46 +++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 68 insertions(+), 10 deletions(-)
+
+diff --git a/cmd/oby-memcap/main.go b/cmd/oby-memcap/main.go
+index 17a0471a..9c6a7e85 100644
+--- a/cmd/oby-memcap/main.go
++++ b/cmd/oby-memcap/main.go
+@@ -23,6 +23,27 @@ import (
+ )
+ 
+ func main() {
++	if len(os.Args) < 2 {
++		fmt.Fprintf(os.Stderr, "usage: oby-memcap <command> [args...] (cap via %s, MiB; unset = unlimited)\n", sandbox.MemCapEnvVar)
++		os.Exit(2)
++	}
++	// Resolve EVERYTHING the exec needs BEFORE the cap is applied.
++	// RLIMIT_AS pins the virtual address space of this process, and the
++	// Go runtime allocates on paths like exec.LookPath (PATH walking,
++	// error construction) and os.Environ (slice copy); under a tight cap
++	// (e.g. 64 MiB in the sandbox inheritance test) the first such
++	// post-setrlimit allocation can kill the runtime with
++	// "fatal error: runtime: cannot allocate memory" before the exec is
++	// ever reached — runner-sensitive, seen on CI (INT-CI-005). Between
++	// ApplyMemLimitMB and syscall.Exec below there is only the exec
++	// error branch, so no post-cap Go heap allocation is required.
++	path, err := exec.LookPath(os.Args[1])
++	if err != nil {
++		fmt.Fprintf(os.Stderr, "oby-memcap: %v\n", err)
++		os.Exit(127)
++	}
++	argv := os.Args[1:]
++	envp := os.Environ()
+ 	if raw := os.Getenv(sandbox.MemCapEnvVar); raw != "" {
+ 		mb, err := strconv.Atoi(raw)
+ 		if err != nil {
+@@ -34,16 +55,7 @@ func main() {
+ 			os.Exit(2)
+ 		}
+ 	}
+-	if len(os.Args) < 2 {
+-		fmt.Fprintf(os.Stderr, "usage: oby-memcap <command> [args...] (cap via %s, MiB; unset = unlimited)\n", sandbox.MemCapEnvVar)
+-		os.Exit(2)
+-	}
+-	path, err := exec.LookPath(os.Args[1])
+-	if err != nil {
+-		fmt.Fprintf(os.Stderr, "oby-memcap: %v\n", err)
+-		os.Exit(127)
+-	}
+-	if err := syscall.Exec(path, os.Args[1:], os.Environ()); err != nil {
++	if err := syscall.Exec(path, argv, envp); err != nil {
+ 		fmt.Fprintf(os.Stderr, "oby-memcap: exec %s: %v\n", path, err)
+ 		os.Exit(127)
+ 	}
+diff --git a/internal/sandbox/memcap_test.go b/internal/sandbox/memcap_test.go
+index fb4c17bb..ce862db4 100644
+--- a/internal/sandbox/memcap_test.go
++++ b/internal/sandbox/memcap_test.go
+@@ -42,6 +42,32 @@ print("256 MiB mmap SUCCEEDED under a 64 MiB RLIMIT_AS -- cap not enforced", fil
+ sys.exit(1)
+ `
+ 
++// inheritedCapProbePy is the enforcement arm of
++// TestObyMemcapExec_ChildInheritsCap: it runs as the child the REAL
++// cmd/oby-memcap wrapper exec'd under OBY_MEM_LIMIT_MB=64, so the 64
++// MiB RLIMIT_AS must already be inherited — the probe never applies it
++// itself. It asserts the kernel's own record (getrlimit: soft == hard
++// == 64 MiB) AND the enforcement (the 256 MiB anonymous mapping is
++// refused with ENOMEM, errno 12). Prints ALLOC-REFUSED and exits 0
++// only when both hold.
++const inheritedCapProbePy = `import mmap, resource, sys
++soft, hard = resource.getrlimit(resource.RLIMIT_AS)
++if (soft, hard) != (67108864, 67108864):
++    print("inherited RLIMIT_AS = (%d, %d), want (67108864, 67108864)" % (soft, hard), file=sys.stderr)
++    sys.exit(1)
++try:
++    m = mmap.mmap(-1, 268435456)
++except OSError as e:
++    if e.errno == 12:
++        print("ALLOC-REFUSED")
++        sys.exit(0)
++    print("mmap failed with %r, want ENOMEM (errno 12)" % (e,), file=sys.stderr)
++    sys.exit(1)
++m.close()
++print("256 MiB mmap SUCCEEDED under inherited 64 MiB RLIMIT_AS -- cap not enforced", file=sys.stderr)
++sys.exit(1)
++`
++
+ // TestMemCapHelperProcess is not a test — it is the child half of the
+ // subprocess arms below. It runs the mode named by
+ // OBY_TEST_MEMCAP_MODE and exits non-zero on any unexpected outcome.
+@@ -318,4 +344,24 @@ func TestObyMemcapExec_ChildInheritsCap(t *testing.T) {
+ 	if !strings.Contains(string(out), "67108864             67108864") {
+ 		t.Fatalf("inherited RLIMIT_AS is not pinned soft==hard at 64 MiB (67108864 bytes), got:\n%s", out)
+ 	}
++
++	// Enforcement arm: the wrapper execs a NON-Go child that both
++	// re-reads the inherited limit via getrlimit(2) and attempts the
++	// 256 MiB mapping, which the kernel must refuse with ENOMEM. A Go
++	// child cannot start under a 64 MiB RLIMIT_AS, so this arm needs a
++	// non-Go runtime (python3, -S to skip site imports) — matching the
++	// alloc-under-cap arm of TestApplyMemLimitMB_RefusesAllocationPastCap.
++	py, err := exec.LookPath("python3")
++	if err != nil {
++		t.Skip("python3 not on PATH: the inherited-cap ENOMEM probe needs a non-Go runtime (a Go process cannot survive under 64 MiB); the /bin/sh limits arm above already passed")
++	}
++	cmd = exec.Command(wrapper, py, "-S", "-c", inheritedCapProbePy)
++	cmd.Env = append(os.Environ(), MemCapEnvVar+"=64")
++	out, err = cmd.CombinedOutput()
++	if err != nil {
++		t.Fatalf("oby-memcap enforcement arm failed: %v\n%s", err, out)
++	}
++	if !strings.Contains(string(out), "ALLOC-REFUSED") {
++		t.Fatalf("enforcement arm did not observe ENOMEM under the inherited cap, output:\n%s", out)
++	}
+ }
