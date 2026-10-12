@@ -265,6 +265,51 @@ paths:
 	}
 }
 
+// TestOpenAPISpec_SubmitProblemRequestRequiredTools pins the published
+// SubmitProblemRequest contract: the optional required_tools field the
+// submit handler already accepts (internal/api submitProblemRequest) must
+// be declared in the served document as an array of strings, and it must
+// stay out of the schema's required list (DF-OFF-BY-ONE-39).
+func TestOpenAPISpec_SubmitProblemRequestRequiredTools(t *testing.T) {
+	raw, err := JSONBytes()
+	if err != nil {
+		t.Fatalf("JSONBytes: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+
+	schema := mustMap(t, mustMap(t, mustMap(t, doc, "components"), "schemas"), "SubmitProblemRequest")
+	props := mustMap(t, schema, "properties")
+	rt, ok := props["required_tools"].(map[string]any)
+	if !ok {
+		t.Fatalf("SubmitProblemRequest.properties.required_tools = %#v (%T), want a mapping", props["required_tools"], props["required_tools"])
+	}
+	if got := rt["type"]; got != "array" {
+		t.Errorf("required_tools.type = %#v, want %q", got, "array")
+	}
+	items, ok := rt["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("required_tools.items = %#v (%T), want a mapping", rt["items"], rt["items"])
+	}
+	if got := items["type"]; got != "string" {
+		t.Errorf("required_tools.items.type = %#v, want %q", got, "string")
+	}
+
+	// The field is optional: it must not appear in the schema's required
+	// list (which holds only problem_class and cadence).
+	required, ok := schema["required"].([]any)
+	if !ok {
+		t.Fatalf("SubmitProblemRequest.required = %#v (%T), want an array", schema["required"], schema["required"])
+	}
+	for _, r := range required {
+		if r == "required_tools" {
+			t.Errorf("required_tools must stay optional, but it is in required: %v", required)
+		}
+	}
+}
+
 func TestYAMLParsing_TabInIndentErrors(t *testing.T) {
 	yaml := "key:\n\tvalue: 1\n"
 	var doc any
