@@ -4,7 +4,7 @@
 # The answer corpus (data/) and the generated static site (site/) are PUBLIC
 # (github.com/totalwindupflightsystems/off-by-one + the ob1.it.com catalog).
 #
-# Two leak classes are rejected:
+# The following publication leak classes are rejected:
 #
 # 1. REVIEW-OB-006 — operator host paths: any /home/<user> prefix (kara,
 #    bunker, bunker-*, runner, user — generically [A-Za-z0-9_-]+ account
@@ -17,10 +17,10 @@
 #    "environment"/"version" JSON fields under data/ plus the rendered
 #    env badge (class='badge v') under site/.
 #
-# 3. REVIEW-OB-009 — internal project/tool names: hermes-dagger,
-#    chimera-v2, warpfs, crier and any .local/bin/gitreins install path
-#    are lab-internal identifiers. The export pipeline rewrites them to
-#    <project>/<tool> placeholders at write time.
+# 3. REVIEW-OB-009 — internal project/tool names are lab-internal
+#    identifiers. The export pipeline rewrites them to neutral placeholders
+#    at write time. Organization identifiers are rejected in prose but
+#    allowed inside URLs, which are functional distribution/navigation links.
 #
 # 4. PUBLIC-PII-001 — personal path roots across common platforms, email,
 #    phone, IPv4 and IPv6 are rejected by a dedicated checker. Output names
@@ -42,7 +42,8 @@ HOST_PATH_PATTERN='/home/[A-Za-z0-9_-]+'
 # The rendered env badge on the static site carries the same value.
 BADGE_PATTERN="class='badge v'>[^<]*[ ;~]"
 # REVIEW-OB-009: internal project/tool names must never be published.
-NAME_PATTERN='hermes-dagger|chimera-v2|warpfs|crier|\.local/bin/gitreins'
+NAME_PATTERN='hermes-dagger|chimera-v2|warpfs|crier|\.local/bin/gitreins|wojons/|get-h3|dexdat|9router|task-router|musterflow'
+ORG_PATTERN='totalwindupflightsystems'
 
 rc=0
 
@@ -55,8 +56,24 @@ fi
 
 name_offenders="$(grep -rEl "$NAME_PATTERN" "$ROOT/data" "$ROOT/site" 2>/dev/null)"
 if [ -n "$name_offenders" ]; then
-  printf 'corpus hygiene VIOLATION: internal project/tool names (hermes-dagger, chimera-v2, warpfs, crier, .local/bin/gitreins) under data/ or site/:\n' >&2
+  printf 'corpus hygiene VIOLATION: internal project/tool names (including added REVIEW-OB-009 identifiers) under data/ or site/:\n' >&2
   printf '%s\n' "$name_offenders" | sed 's/^/  /' >&2
+  rc=1
+fi
+
+# Organization names are allowed only as URL hosts/paths for distribution
+# and repository navigation. Strip URLs before checking prose so a same-line
+# prose leak remains detectable even when a legitimate link is present.
+org_offenders=""
+while IFS= read -r candidate; do
+  [ -n "$candidate" ] || continue
+  if perl -0777 -pe 's#https?://[^\s"<>]+##gi' "$candidate" | grep -Eqi "$ORG_PATTERN"; then
+    org_offenders="${org_offenders}${candidate}"$'\n'
+  fi
+done < <(grep -rIl "$ORG_PATTERN" "$ROOT/data" "$ROOT/site" 2>/dev/null || true)
+if [ -n "$org_offenders" ]; then
+  printf 'corpus hygiene VIOLATION: organization identifier in prose under data/ or site/:\n' >&2
+  printf '%s' "$org_offenders" | sed 's/^/  /' >&2
   rc=1
 fi
 
@@ -88,5 +105,5 @@ if [ "$rc" -ne 0 ]; then
   exit 1
 fi
 
-printf 'corpus hygiene OK: no /home/<user> paths, no internal names and no prose env/version tokens under %s/{data,site}\n' "$ROOT"
+printf 'corpus hygiene OK: no /home/<user> paths, no internal names, no organization identifiers in prose and no prose env/version tokens under %s/{data,site}\n' "$ROOT"
 exit 0

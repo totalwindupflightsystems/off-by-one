@@ -14,7 +14,7 @@
 #   6. REVIEW-OB-010: a data/ fixture with prose in "environment" FAILS;
 #   7. REVIEW-OB-010: a data/ fixture with prose in "version" FAILS;
 #   8. REVIEW-OB-010: a site/ fixture with a prose env badge FAILS.
-#   9-12. REVIEW-OB-009: one data/ fixture per internal name
+#   9-18. REVIEW-OB-009: one data/ fixture per internal name
 #      (hermes-dagger, chimera-v2, warpfs, crier) FAILS, file named;
 #   13. REVIEW-OB-009: a site/ fixture with a .local/bin/gitreins path FAILS;
 #   14. REVIEW-OB-009: <project>/<tool> placeholder text PASSES.
@@ -148,17 +148,35 @@ check_contains "names the badge rule" "prose environment badge" "$OUT"
 # single pattern. Placeholder text (<project>, <tool>) is clean and is
 # covered by ARM 14.
 n=9
-for leak in hermes-dagger chimera-v2 warpfs crier; do
-  FIX="$TMP/arm$n-name-$leak"
+for leak in hermes-dagger chimera-v2 warpfs crier \
+  wojons/off-by-one-answers get-h3 dexdat 9router task-router musterflow; do
+  safe_leak="${leak//\//-}"
+  FIX="$TMP/arm$n-name-$safe_leak"
   mkdir -p "$FIX/data/answers"
-  printf '{"solution":"debug the %s deploy pipeline"}\n' "$leak" > "$FIX/data/answers/0001-$leak.json"
+  printf '{"solution":"debug the %s deploy pipeline"}\n' "$leak" > "$FIX/data/answers/0001-$safe_leak.json"
   run_guard "$FIX"
   printf '\nARM %s — %s leak under data/: exit 1, file named\n' "$n" "$leak"
   check "exit code 1" "1" "$OUT_RC"
-  check_contains "names the offending file" "0001-$leak.json" "$OUT"
+  check_contains "names the offending file" "0001-$safe_leak.json" "$OUT"
   check_contains "names the rule" "internal project/tool names" "$OUT"
   n=$((n + 1))
 done
+
+# Organization identifiers are prohibited in prose but permitted in URLs.
+FIX="$TMP/arm15-organization-prose"
+mkdir -p "$FIX/data/answers"
+printf '{"solution":"internal org totalwindupflightsystems owns this"}\n' > "$FIX/data/answers/organization.json"
+run_guard "$FIX"
+printf '\nREVIEW-OB-009 — organization identifier in prose fails\n'
+check "exit code 1" "1" "$OUT_RC"
+check_contains "names offending file" "organization.json" "$OUT"
+
+FIX="$TMP/arm16-organization-url"
+mkdir -p "$FIX/data/answers"
+printf '{"solution":"fetch https://raw.githubusercontent.com/totalwindupflightsystems/off-by-one/master/data/answers/a.json"}\n' > "$FIX/data/answers/distribution-url.json"
+run_guard "$FIX"
+printf '\nREVIEW-OB-009 — load-bearing raw distribution URL passes\n'
+check "exit code 0" "0" "$OUT_RC"
 
 # ── ARM 13 — REVIEW-OB-009: gitreins tool-path leak under site/ fails ──────
 FIX="$TMP/arm13-gitreins-path"

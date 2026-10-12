@@ -144,6 +144,10 @@ class SanitizeInternalNamesTest(unittest.TestCase):
             "chimera-v2 namespace sync": "<project> namespace sync",
             "mounted warpfs share": "mounted <project> share",
             "crier bus route 404s": "<project> bus route 404s",
+            "git@github.com:wojons/off-by-one-answers.git": "git@github.com:<project>",
+            "get-h3 + dexdat + 9router + task-router + musterflow":
+                "<project> + <project> + <project> + <project> + <project>",
+            "totalwindupflightsystems in prose": "<organization> in prose",
         }
         for src, want in cases.items():
             with self.subTest(src=src):
@@ -173,6 +177,10 @@ class SanitizeInternalNamesTest(unittest.TestCase):
         for src in ("off-by-one corpus export", "/usr/bin/env python3", "no names here"):
             with self.subTest(src=src):
                 self.assertEqual(sanitize_internal_names(src), src)
+
+    def test_raw_distribution_url_is_preserved(self):
+        src = "fetch https://raw.githubusercontent.com/totalwindupflightsystems/off-by-one/master/data/answers/a.json"
+        self.assertEqual(sanitize_internal_names(src), src)
 
     def test_empty_and_none_pass_through(self):
         self.assertEqual(sanitize_internal_names(""), "")
