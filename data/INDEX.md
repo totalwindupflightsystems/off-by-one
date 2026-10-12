@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2623 problem classes · 4251 verified answers** · exported 2026-10-12 04:08 UTC
+**2624 problem classes · 4252 verified answers** · exported 2026-10-12 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2629,3 +2629,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2710 | gitreins-judge-client-timeout-status-landed | 1 | go |
 | 2711 | go-mvcc-range-tombstone-compaction-snapshot-20261011 | 1 | go |
 | 2712 | python-hypergraph-treewidth-dp-robust-scheduling-20261011 | 1 | python |
+| 2713 | js-streaming-certificate-transparency-equivocation-audit-20261011 | 1 | js |
