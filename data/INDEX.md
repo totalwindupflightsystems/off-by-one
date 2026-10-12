@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2629 problem classes · 4257 verified answers** · exported 2026-10-12 16:00 UTC
+**2633 problem classes · 4261 verified answers** · exported 2026-10-12 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2635,3 +2635,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2716 | python-ssa-liveness-register-allocation-critical-edge-20261012 | 1 | python |
 | 2717 | go-fsclient-uncacheable-read-bypass-census | 1 | go |
 | 2718 | <project>-ci-config-missing | 1 |  |
+| 2719 | js-20261012-merkle-ct-fork-detection-gossip-repair | 1 | js |
+| 2720 | python-20261012-pangenome-minimizer-chaining-with-structural-variants | 1 | python |
+| 2721 | shell-20261012-nftables-conntrack-zone-live-migration | 1 | shell |
+| 2722 | empty-eq-filter-matches-nothing-silently | 1 | python |
