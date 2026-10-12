@@ -1,0 +1,502 @@
+commit 460d304e9525abd22a6a9be7e89fd9a1e6270548
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Mon Oct 12 11:57:28 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Mon Oct 12 11:57:28 2026 -0500
+
+    fix(export): refuse non-bare target_repo with 400 invalid_target_repo
+    
+    A target_repo pointing at a local non-bare working repository whose
+    checked-out branch is the push branch can never accept the push — git
+    rejects it with "refusing to update checked out branch" — but the export
+    reached git push and leaked that raw failure as HTTP 500 export_failed.
+    
+    The engine now validates the push target before any clone, write, or
+    commit: when Push is set and RepoURL resolves to a local non-bare repo
+    (plain path or file:// URL) whose checked-out branch is the push branch
+    and receive.denyCurrentBranch is not ignore/warn/updateInstead, Export
+    returns the typed ErrNonBareTarget naming target_repo. The handler maps
+    it to 400 invalid_target_repo. Remote URLs, missing paths, bare repos,
+    detached HEADs, pushes to a non-checked-out branch, and dry runs are
+    untouched; bare/remote export success behavior is preserved.
+    
+    Regression coverage: engine tests for the refusal (including
+    before-mutation ordering and the dry-run exemption), the allowed
+    non-checked-out-branch push, and the local-vs-remote path
+    classification; a handler test asserting the 400 invalid_target_repo
+    contract against a real non-bare target. RED-proven: with the
+    production change reverted, the handler test fails with the exact
+    dogfood-evidence response (500 export_failed carrying git's "refusing
+    to update checked out branch").
+    
+    docs/api-reference.md and pkg/api/openapi.yaml now state that
+    target_repo must be a bare repository or a remote that accepts pushes,
+    with the 400 invalid_target_repo shape. The spec edit was verified
+    through pkg/api's own YAML parser (all 19 schemas intact).
+    
+    Addresses DF-OFF-BY-ONE-35.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ docs/api-reference.md         |  13 +++-
+ internal/api/handlers.go      |  10 +++
+ internal/api/handlers_test.go |  96 ++++++++++++++++++++++++++
+ internal/export/git.go        |  85 +++++++++++++++++++++++
+ internal/export/git_test.go   | 152 ++++++++++++++++++++++++++++++++++++++++++
+ pkg/api/openapi.yaml          |   4 +-
+ 6 files changed, 356 insertions(+), 4 deletions(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 03fa3c6e..87ca0ceb 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -456,7 +456,7 @@ Export verified answers to a git repository as a subtree commit.
+ 
+ | Field | Type | Required | Description |
+ |-------|------|----------|-------------|
+-| `target_repo` | string | Yes | Git URL of the target repo |
++| `target_repo` | string | Yes | Git URL or local path of the target repo. Must be a **bare** repository (`git init --bare`) or a remote that accepts pushes — a local non-bare working repo whose checked-out branch is the push branch is rejected (see below) |
+ | `answer_ids` | integer[] | Yes | IDs of answers to export |
+ | `branch` | string | No | Target branch |
+ | `commit_message` | string | No | Commit message |
+@@ -473,7 +473,16 @@ Export verified answers to a git repository as a subtree commit.
+ 
+ `pr_url` is omitted when the repo does not support pull requests.
+ 
+-**Status codes:** `200`, `400` (missing required fields), `501` (export not configured), `500` (export failed).
++**Non-bare target (`400`).** Pointing `target_repo` at a local non-bare working repository fails validation **before** any clone, write, or commit when the push would update the branch that repo currently has checked out — git always refuses such a push ("refusing to update checked out branch"). The export answers `400 invalid_target_repo` with a message naming `target_repo`; create a bare sibling (`git init --bare`) or push to a remote instead. Pushes to a branch that is *not* checked out, and repos configured with `receive.denyCurrentBranch=ignore/warn/updateInstead`, are accepted as before.
++
++```json
++{
++  "error": "invalid_target_repo",
++  "message": "export: target_repo must be a bare repository or a remote that accepts pushes: target_repo \"/srv/work\" is a non-bare working repository with branch \"main\" checked out; git refuses pushes that update the checked-out branch — use a bare repository (git init --bare) or a pushable remote"
++}
++```
++
++**Status codes:** `200`, `400` (missing required fields, unknown answer id, or non-bare `target_repo`), `501` (export not configured), `500` (export failed).
+ 
+ **Example**
+ 
+diff --git a/internal/api/handlers.go b/internal/api/handlers.go
+index beb68706..39108ca1 100644
+--- a/internal/api/handlers.go
++++ b/internal/api/handlers.go
+@@ -978,6 +978,16 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+ 
+ 	result, err := engine.Export(r.Context(), items)
+ 	if err != nil {
++		// A target_repo pointing at a local non-bare working repository
++		// whose checked-out branch is the push branch can never accept the
++		// push — that is a client request problem (fix the target), not a
++		// server fault, so it is a 400 naming target_repo rather than a
++		// 500 leaking git's raw "refusing to update checked out branch"
++		// failure (DF-OFF-BY-ONE-35).
++		if errors.Is(err, export.ErrNonBareTarget) {
++			writeError(w, http.StatusBadRequest, "invalid_target_repo", err.Error())
++			return
++		}
+ 		// Community edits in the export clone that the export would
+ 		// destroy are a conflict the caller can resolve (push/revert the
+ 		// clone or re-clone), not a server fault (DF-OFF-BY-ONE-22).
+diff --git a/internal/api/handlers_test.go b/internal/api/handlers_test.go
+index bab860c3..5c546aaa 100644
+--- a/internal/api/handlers_test.go
++++ b/internal/api/handlers_test.go
+@@ -2863,6 +2863,102 @@ func pushAnswerFilesForHandler(t *testing.T, barePath, branch, classTitle, env,
+ 	}
+ }
+ 
++// TestExportNonBareTarget400 guards DF-OFF-BY-ONE-35 at the HTTP surface:
++// a target_repo pointing at a local NON-bare working repository whose
++// checked-out branch is the push branch is a client request problem, so the
++// handler answers 400 invalid_target_repo naming the field — never a 500
++// export_failed leaking git's raw "refusing to update checked out branch"
++// push failure (the pre-fix dogfood evidence).
++func TestExportNonBareTarget400(t *testing.T) {
++	if _, err := exec.LookPath("git"); err != nil {
++		t.Skip("git not installed — skipping export integration test")
++	}
++	s, store, _ := newTestServer(t)
++	s.ExportLocalDir = filepath.Join(t.TempDir(), "export-clone")
++
++	ctx := context.Background()
++	pc, _, err := store.UpsertProblemClass(ctx, "export-nonbare-class", "non-bare target regression class")
++	if err != nil {
++		t.Fatalf("UpsertProblemClass: %v", err)
++	}
++	answerID, err := store.CreateAnswerNode(ctx, pc.ID, 0,
++		"docker", "go", "go-1.26",
++		"Use `COPY --chown=appuser:appuser` in Dockerfile.",
++		"Verified in Docker 24.0+.",
++		"")
++	if err != nil {
++		t.Fatalf("CreateAnswerNode: %v", err)
++	}
++	if err := store.UpdateAnswerStatus(ctx, answerID, graph.AnswerVerified); err != nil {
++		t.Fatalf("UpdateAnswerStatus: %v", err)
++	}
++
++	target := initWorkRepoForHandler(t, "main")
++
++	rr := do(t, s, "POST", "/api/v1/export", exportRequest{
++		TargetRepo: target,
++		AnswerIDs:  []int64{answerID},
++	})
++	if rr.Code != http.StatusBadRequest {
++		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
++	}
++	var body struct {
++		Error   string `json:"error"`
++		Message string `json:"message"`
++	}
++	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
++		t.Fatalf("decode: %v", err)
++	}
++	if body.Error != "invalid_target_repo" {
++		t.Errorf("error = %q, want invalid_target_repo", body.Error)
++	}
++	if !strings.Contains(body.Message, "target_repo") {
++		t.Errorf("message = %q, want it to name the field target_repo", body.Message)
++	}
++	if strings.Contains(body.Message, "refusing to update checked out branch") {
++		t.Errorf("message leaks the raw git push failure: %q", body.Message)
++	}
++	// Validation runs before any mutation: the export clone dir must be
++	// absent or empty.
++	if entries, err := os.ReadDir(s.ExportLocalDir); err == nil && len(entries) != 0 {
++		t.Errorf("export clone dir holds %d entries — the refusal did not run before mutation", len(entries))
++	}
++}
++
++// initWorkRepoForHandler creates a NON-bare working repository with one
++// commit on the given branch — the shape git refuses to receive pushes into.
++func initWorkRepoForHandler(t *testing.T, branch string) string {
++	t.Helper()
++	repo := filepath.Join(t.TempDir(), "work")
++	if out, err := exec.Command("git", "init", "-b", branch, repo).CombinedOutput(); err != nil {
++		t.Fatalf("git init: %v\n%s", err, out)
++	}
++	for _, args := range [][]string{
++		{"config", "user.email", "test@example.com"},
++		{"config", "user.name", "Test"},
++	} {
++		cmd := exec.Command("git", args...)
++		cmd.Dir = repo
++		if out, err := cmd.CombinedOutput(); err != nil {
++			t.Fatalf("git %s: %v\n%s", args[0], err, out)
++		}
++	}
++	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# Work Repo\n"), 0o644); err != nil {
++		t.Fatalf("write README: %v", err)
++	}
++	for _, args := range [][]string{
++		{"add", "."},
++		{"commit", "-m", "initial"},
++	} {
++		cmd := exec.Command("git", args...)
++		cmd.Dir = repo
++		if out, err := cmd.CombinedOutput(); err != nil {
++			t.Fatalf("git %s: %v\n%s", args[0], err, out)
++		}
++	}
++	return repo
++}
++
+ // TestExportImportRouteRegistered verifies the routes are wired by
+ // checking that a POST to them does NOT return 404 (it should return
+ // 501 when not configured, proving the route exists).
+diff --git a/internal/export/git.go b/internal/export/git.go
+index 3051f32a..20fd88f8 100644
+--- a/internal/export/git.go
++++ b/internal/export/git.go
+@@ -159,6 +159,14 @@ var ErrRepoMismatch = errors.New("export: RepoURL does not match the existing cl
+ // working-tree changes.
+ var ErrUnsafeExport = errors.New("export: refusing to overwrite community edits")
+ 
++// ErrNonBareTarget is returned before any clone or write when the export
++// would push into the checked-out branch of a LOCAL non-bare working
++// repository — a push git always refuses ("refusing to update checked out
++// branch"). The fix belongs to the caller, so the error names the request
++// field: point target_repo at a bare repository or a remote that accepts
++// pushes (DF-OFF-BY-ONE-35).
++var ErrNonBareTarget = errors.New("export: target_repo must be a bare repository or a remote that accepts pushes")
++
+ // Export runs the full export flow for the given items:
+ //
+ //  1. Prepare the local clone (clone or pull)
+@@ -176,6 +184,12 @@ func (e *Engine) Export(ctx context.Context, items []ExportItem) (*ExportResult,
+ 	if e.cfg.RepoURL == "" {
+ 		return nil, errors.New("export: RepoURL is required")
+ 	}
++	// Fail fast on a target the push can never succeed against — a local
++	// non-bare working repo with the push branch checked out — before any
++	// clone, write, or commit (DF-OFF-BY-ONE-35).
++	if err := e.validatePushTarget(ctx); err != nil {
++		return nil, err
++	}
+ 
+ 	res := &ExportResult{Branch: e.cfg.Branch}
+ 
+@@ -479,6 +493,77 @@ func (e *Engine) stageAndCommit(ctx context.Context, res *ExportResult) error {
+ 	return nil
+ }
+ 
++// validatePushTarget refuses the one push configuration that can never
++// succeed: a LOCAL non-bare working repository whose checked-out branch is
++// the push branch. Git rejects that push ("refusing to update checked out
++// branch") because it would rewrite files the owner may be editing; without
++// this check the refusal surfaced after the clone, write and commit as a
++// raw push failure. The check runs before any mutation and only fires when
++// the export will actually push (Push=true).
++//
++// Anything we cannot prove is the refusing case is left alone: remote URLs
++// (their push policy is the server's), paths that do not exist or are not
++// git repos (the clone fails with its own error), bare repositories,
++// repositories configured with receive.denyCurrentBranch=ignore/warn/
++// updateInstead (those accept the push), a detached HEAD (no branch is
++// checked out), and pushes to a branch other than the checked-out one.
++func (e *Engine) validatePushTarget(ctx context.Context) error {
++	if !e.cfg.Push {
++		return nil
++	}
++	path, ok := localRepoPath(e.cfg.RepoURL)
++	if !ok {
++		return nil
++	}
++	bare, err := e.gitOutput(ctx, "", "-C", path, "rev-parse", "--is-bare-repository")
++	if err != nil || strings.TrimSpace(bare) == "true" {
++		// Not a git repo (the clone will report it) or already bare.
++		return nil
++	}
++	if v, err := e.gitOutput(ctx, "", "-C", path, "config", "--get", "receive.denyCurrentBranch"); err == nil {
++		switch strings.TrimSpace(v) {
++		case "ignore", "warn", "updateInstead":
++			return nil
++		}
++	}
++	head, err := e.gitOutput(ctx, "", "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD")
++	if err != nil {
++		return nil // detached HEAD: no branch is checked out
++	}
++	if strings.TrimSpace(head) == e.cfg.Branch {
++		return fmt.Errorf("%w: target_repo %q is a non-bare working repository with branch %q checked out; "+
++			"git refuses pushes that update the checked-out branch — use a bare repository (git init --bare) or a pushable remote",
++			ErrNonBareTarget, e.cfg.RepoURL, e.cfg.Branch)
++	}
++	return nil
++}
++
++// localRepoPath reports whether raw addresses a repository on the local
++// filesystem, returning the path to inspect. Scheme URLs (https://, ssh://,
++// …) are remotes; scp-like SSH syntax (user@host:path — a colon before the
++// first slash) is a remote; file:// URLs and plain paths are local. A local
++// path that does not exist reports false so the clone surfaces the error.
++func localRepoPath(raw string) (string, bool) {
++	if p, ok := strings.CutPrefix(raw, "file://"); ok {
++		if _, err := os.Stat(p); err != nil {
++			return "", false
++		}
++		return p, true
++	}
++	if strings.Contains(raw, "://") {
++		return "", false
++	}
++	if !strings.HasPrefix(raw, "/") {
++		if i := strings.IndexByte(raw, ':'); i >= 0 && !strings.ContainsRune(raw[:i], '/') {
++			return "", false // scp-like SSH syntax
++		}
++	}
++	if _, err := os.Stat(raw); err != nil {
++		return "", false
++	}
++	return raw, true
++}
++
+ // runGit executes a git command in the given directory (or the current
+ // directory if dir is empty). stderr is captured for error messages.
+ func (e *Engine) runGit(ctx context.Context, dir string, args ...string) error {
+diff --git a/internal/export/git_test.go b/internal/export/git_test.go
+index fe704471..f1db63ca 100644
+--- a/internal/export/git_test.go
++++ b/internal/export/git_test.go
+@@ -272,6 +272,158 @@ func TestExport_ClassMismatch(t *testing.T) {
+ 	}
+ }
+ 
++// initWorkRepo creates a NON-bare working repository with one commit on the
++// given branch and returns its path — the shape git refuses to receive
++// pushes into (receive.denyCurrentBranch=refuse is the default).
++func initWorkRepo(t *testing.T, branch string) string {
++	t.Helper()
++	repo := filepath.Join(t.TempDir(), "work")
++	if out, err := exec.Command("git", "init", "-b", branch, repo).CombinedOutput(); err != nil {
++		t.Fatalf("git init: %v\n%s", err, out)
++	}
++	for _, args := range [][]string{
++		{"config", "user.email", "test@example.com"},
++		{"config", "user.name", "Test"},
++	} {
++		cmd := exec.Command("git", args...)
++		cmd.Dir = repo
++		if out, err := cmd.CombinedOutput(); err != nil {
++			t.Fatalf("git %s: %v\n%s", args[0], err, out)
++		}
++	}
++	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# Work Repo\n"), 0o644); err != nil {
++		t.Fatalf("write README: %v", err)
++	}
++	for _, args := range [][]string{
++		{"add", "."},
++		{"commit", "-m", "initial"},
++	} {
++		cmd := exec.Command("git", args...)
++		cmd.Dir = repo
++		if out, err := cmd.CombinedOutput(); err != nil {
++			t.Fatalf("git %s: %v\n%s", args[0], err, out)
++		}
++	}
++	return repo
++}
++
++// TestExport_NonBareTargetRefused guards DF-OFF-BY-ONE-35 in the owning
++// package: pointing the export at a local NON-bare working repository whose
++// checked-out branch is the push branch must be refused during validation —
++// before any clone, write, commit, or push — with the typed ErrNonBareTarget
++// naming the request field. Pre-fix the export reached git push and surfaced
++// git's raw "refusing to update checked out branch" failure.
++func TestExport_NonBareTargetRefused(t *testing.T) {
++	skipIfNoGit(t)
++	setGitIdentity(t)
++	store, pc, answer := makeStore(t)
++
++	target := initWorkRepo(t, "main")
++	localDir := filepath.Join(t.TempDir(), "clone")
++	e := NewEngine(Config{
++		RepoURL:  target,
++		Branch:   "main",
++		LocalDir: localDir,
++		Push:     true,
++	}, store)
++
++	_, err := e.Export(context.Background(), []ExportItem{
++		{ClassID: pc.ID, AnswerID: answer.ID},
++	})
++	if err == nil {
++		t.Fatal("Export succeeded against a non-bare target; want ErrNonBareTarget")
++	}
++	if !errors.Is(err, ErrNonBareTarget) {
++		t.Fatalf("error = %v, want errors.Is ErrNonBareTarget", err)
++	}
++	if !strings.Contains(err.Error(), "target_repo") {
++		t.Errorf("error %q does not name the caller-controlled field target_repo", err)
++	}
++	if strings.Contains(err.Error(), "refusing to update checked out branch") {
++		t.Errorf("error leaks the raw git push refusal: %q", err)
++	}
++	// Validation runs before any mutation: the clone dir must not exist.
++	if _, statErr := os.Stat(localDir); !os.IsNotExist(statErr) {
++		t.Errorf("clone dir %s exists — validation did not run before the clone", localDir)
++	}
++
++	// A dry run never pushes, so the same target is not refused up front.
++	e2 := NewEngine(Config{
++		RepoURL:  target,
++		Branch:   "main",
++		LocalDir: filepath.Join(t.TempDir(), "clone2"),
++	}, store)
++	res, err := e2.DryRun(context.Background(), []ExportItem{
++		{ClassID: pc.ID, AnswerID: answer.ID},
++	})
++	if err != nil {
++		t.Fatalf("DryRun against a non-bare target: %v", err)
++	}
++	if !res.DryRun {
++		t.Error("DryRun = false, want true")
++	}
++}
++
++// TestExport_NonBareTargetOtherBranchAllowed verifies the refusal is scoped
++// to the guaranteed-failure case: pushing to a branch that is NOT checked
++// out in a non-bare working repo is accepted by git and must still export.
++func TestExport_NonBareTargetOtherBranchAllowed(t *testing.T) {
++	skipIfNoGit(t)
++	setGitIdentity(t)
++	store, pc, answer := makeStore(t)
++
++	target := initWorkRepo(t, "main") // main is checked out; we push "export"
++	localDir := filepath.Join(t.TempDir(), "clone")
++	e := NewEngine(Config{
++		RepoURL:  target,
++		Branch:   "export",
++		LocalDir: localDir,
++		Push:     true,
++	}, store)
++
++	res, err := e.Export(context.Background(), []ExportItem{
++		{ClassID: pc.ID, AnswerID: answer.ID},
++	})
++	if err != nil {
++		t.Fatalf("Export to non-checked-out branch of a non-bare repo: %v", err)
++	}
++	if !res.Pushed {
++		t.Error("Pushed = false, want true")
++	}
++	// The pushed branch is visible in the target repo.
++	if out := gitIn(t, target, "branch", "--list", "export"); out != "export" {
++		t.Errorf("target repo branches = %q, want the pushed export branch", out)
++	}
++}
++
++// TestLocalRepoPath pins the local-vs-remote classification the validation
++// relies on: scheme and scp-like URLs are remotes; file:// URLs and existing
++// paths are local; a path that does not exist is left to the clone error.
++func TestLocalRepoPath(t *testing.T) {
++	existing := t.TempDir()
++	missing := filepath.Join(t.TempDir(), "no-such-repo")
++	cases := []struct {
++		raw      string
++		wantOK   bool
++		wantPath string
++	}{
++		{"https://github.com/example/repo.git", false, ""},
++		{"ssh://git@example.com/repo.git", false, ""},
++		{"git@github.com:example/repo.git", false, ""},
++		{missing, false, ""},
++		{existing, true, existing},
++		{"file://" + existing, true, existing},
++		{"file://" + missing, false, ""},
++	}
++	for _, tc := range cases {
++		gotPath, gotOK := localRepoPath(tc.raw)
++		if gotOK != tc.wantOK || gotPath != tc.wantPath {
++			t.Errorf("localRepoPath(%q) = (%q, %v), want (%q, %v)",
++				tc.raw, gotPath, gotOK, tc.wantPath, tc.wantOK)
++		}
++	}
++}
++
+ func TestExport_FullFlow(t *testing.T) {
+ 	skipIfNoGit(t)
+ 	setGitIdentity(t)
+diff --git a/pkg/api/openapi.yaml b/pkg/api/openapi.yaml
+index 19af0b80..20117f37 100644
+--- a/pkg/api/openapi.yaml
++++ b/pkg/api/openapi.yaml
+@@ -349,7 +349,7 @@ paths:
+               schema:
+                 $ref: '#/components/schemas/ExportResponse'
+         '400':
+-          description: Invalid export request — unparseable body, missing target_repo, empty answer_ids, or an answer id that does not exist
++          description: Invalid export request — unparseable body, missing target_repo, empty answer_ids, an answer id that does not exist, or a target_repo pointing at a local non-bare working repository whose checked-out branch is the push branch (invalid_target_repo — the target must be a bare repository or a remote that accepts pushes)
+           content:
+             application/json:
+               schema:
+@@ -710,7 +710,7 @@ components:
+       properties:
+         target_repo:
+           type: string
+-          description: Git URL of target repo
++          description: Git URL or local path of the target repository. Must be a bare repository (git init --bare) or a remote that accepts pushes; a local non-bare working repo whose checked-out branch is the push branch is rejected with 400 invalid_target_repo before any export work runs.
+         answer_ids:
+           type: array
+           items:
