@@ -42,6 +42,32 @@ print("256 MiB mmap SUCCEEDED under a 64 MiB RLIMIT_AS -- cap not enforced", fil
 sys.exit(1)
 `
 
+// inheritedCapProbePy is the enforcement arm of
+// TestObyMemcapExec_ChildInheritsCap: it runs as the child the REAL
+// cmd/oby-memcap wrapper exec'd under OBY_MEM_LIMIT_MB=64, so the 64
+// MiB RLIMIT_AS must already be inherited — the probe never applies it
+// itself. It asserts the kernel's own record (getrlimit: soft == hard
+// == 64 MiB) AND the enforcement (the 256 MiB anonymous mapping is
+// refused with ENOMEM, errno 12). Prints ALLOC-REFUSED and exits 0
+// only when both hold.
+const inheritedCapProbePy = `import mmap, resource, sys
+soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+if (soft, hard) != (67108864, 67108864):
+    print("inherited RLIMIT_AS = (%d, %d), want (67108864, 67108864)" % (soft, hard), file=sys.stderr)
+    sys.exit(1)
+try:
+    m = mmap.mmap(-1, 268435456)
+except OSError as e:
+    if e.errno == 12:
+        print("ALLOC-REFUSED")
+        sys.exit(0)
+    print("mmap failed with %r, want ENOMEM (errno 12)" % (e,), file=sys.stderr)
+    sys.exit(1)
+m.close()
+print("256 MiB mmap SUCCEEDED under inherited 64 MiB RLIMIT_AS -- cap not enforced", file=sys.stderr)
+sys.exit(1)
+`
+
 // TestMemCapHelperProcess is not a test — it is the child half of the
 // subprocess arms below. It runs the mode named by
 // OBY_TEST_MEMCAP_MODE and exits non-zero on any unexpected outcome.
@@ -317,5 +343,25 @@ func TestObyMemcapExec_ChildInheritsCap(t *testing.T) {
 	// (64 MiB in BYTES, soft==hard — /proc/self/limits prints bytes here).
 	if !strings.Contains(string(out), "67108864             67108864") {
 		t.Fatalf("inherited RLIMIT_AS is not pinned soft==hard at 64 MiB (67108864 bytes), got:\n%s", out)
+	}
+
+	// Enforcement arm: the wrapper execs a NON-Go child that both
+	// re-reads the inherited limit via getrlimit(2) and attempts the
+	// 256 MiB mapping, which the kernel must refuse with ENOMEM. A Go
+	// child cannot start under a 64 MiB RLIMIT_AS, so this arm needs a
+	// non-Go runtime (python3, -S to skip site imports) — matching the
+	// alloc-under-cap arm of TestApplyMemLimitMB_RefusesAllocationPastCap.
+	py, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not on PATH: the inherited-cap ENOMEM probe needs a non-Go runtime (a Go process cannot survive under 64 MiB); the /bin/sh limits arm above already passed")
+	}
+	cmd = exec.Command(wrapper, py, "-S", "-c", inheritedCapProbePy)
+	cmd.Env = append(os.Environ(), MemCapEnvVar+"=64")
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("oby-memcap enforcement arm failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "ALLOC-REFUSED") {
+		t.Fatalf("enforcement arm did not observe ENOMEM under the inherited cap, output:\n%s", out)
 	}
 }

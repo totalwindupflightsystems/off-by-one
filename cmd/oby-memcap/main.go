@@ -23,6 +23,27 @@ import (
 )
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintf(os.Stderr, "usage: oby-memcap <command> [args...] (cap via %s, MiB; unset = unlimited)\n", sandbox.MemCapEnvVar)
+		os.Exit(2)
+	}
+	// Resolve EVERYTHING the exec needs BEFORE the cap is applied.
+	// RLIMIT_AS pins the virtual address space of this process, and the
+	// Go runtime allocates on paths like exec.LookPath (PATH walking,
+	// error construction) and os.Environ (slice copy); under a tight cap
+	// (e.g. 64 MiB in the sandbox inheritance test) the first such
+	// post-setrlimit allocation can kill the runtime with
+	// "fatal error: runtime: cannot allocate memory" before the exec is
+	// ever reached — runner-sensitive, seen on CI (INT-CI-005). Between
+	// ApplyMemLimitMB and syscall.Exec below there is only the exec
+	// error branch, so no post-cap Go heap allocation is required.
+	path, err := exec.LookPath(os.Args[1])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "oby-memcap: %v\n", err)
+		os.Exit(127)
+	}
+	argv := os.Args[1:]
+	envp := os.Environ()
 	if raw := os.Getenv(sandbox.MemCapEnvVar); raw != "" {
 		mb, err := strconv.Atoi(raw)
 		if err != nil {
@@ -34,16 +55,7 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "usage: oby-memcap <command> [args...] (cap via %s, MiB; unset = unlimited)\n", sandbox.MemCapEnvVar)
-		os.Exit(2)
-	}
-	path, err := exec.LookPath(os.Args[1])
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "oby-memcap: %v\n", err)
-		os.Exit(127)
-	}
-	if err := syscall.Exec(path, os.Args[1:], os.Environ()); err != nil {
+	if err := syscall.Exec(path, argv, envp); err != nil {
 		fmt.Fprintf(os.Stderr, "oby-memcap: exec %s: %v\n", path, err)
 		os.Exit(127)
 	}
