@@ -179,7 +179,9 @@ type exportRequest struct {
 
 // exportResponse mirrors ExportResponse from the OpenAPI spec.
 type exportResponse struct {
-	CommitSHA    string `json:"commit_sha"`
+	CommitSHA string `json:"commit_sha"`
+	// PRURL is reserved for future pull-request creation. Nothing assigns
+	// it today, so omitempty keeps it out of every response.
 	PRURL        string `json:"pr_url,omitempty"`
 	FilesChanged int    `json:"files_changed"`
 }

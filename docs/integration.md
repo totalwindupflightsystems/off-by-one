@@ -268,10 +268,11 @@ curl -s -X POST http://localhost:8766/api/v1/export \
 ```json
 {
   "commit_sha": "abc123...",
-  "pr_url": "...",
   "files_changed": 2
 }
 ```
+
+(`pr_url` is a reserved field in the response schema and is never populated — see [Export answers to a git repo](api-reference.md#export--import).)
 
 ### Import answers from a git repo
 

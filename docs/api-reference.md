@@ -466,12 +466,11 @@ Export verified answers to a git repository as a subtree commit.
 ```json
 {
   "commit_sha": "abc123...",
-  "pr_url": "...",
   "files_changed": 2
 }
 ```
 
-`pr_url` is omitted when the repo does not support pull requests.
+`pr_url` is a **reserved** field: it is declared in the response schema (`ExportResponse.pr_url`) for backward compatibility but is **never populated** — there is currently no pull-request creation implementation, so no export response ever carries a PR URL.
 
 **Non-bare target (`400`).** Pointing `target_repo` at a local non-bare working repository fails validation **before** any clone, write, or commit when the push would update the branch that repo currently has checked out — git always refuses such a push ("refusing to update checked out branch"). The export answers `400 invalid_target_repo` with a message naming `target_repo`; create a bare sibling (`git init --bare`) or push to a remote instead. Pushes to a branch that is *not* checked out, and repos configured with `receive.denyCurrentBranch=ignore/warn/updateInstead`, are accepted as before.
 
