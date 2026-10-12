@@ -1,0 +1,456 @@
+commit a59262743c60bdffe6fa9d3f47d7c9e42bdce3ea
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Mon Oct 12 14:11:07 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Mon Oct 12 14:11:07 2026 -0500
+
+    fix(api): roll queue ETA estimate over recent solves. Addresses DF-OFF-BY-ONE-38.
+    
+    Queue.AvgSolveTime averaged completed_at-started_at over ALL completed
+    entries, so months of old, faster solves dominated the mean and the API
+    silently underquoted current waits (live observation: a ~6m35s solve
+    quoted as 3m33s).
+    
+    The estimate is now a rolling mean over the 20 most recently completed
+    solves (bounded SQL subquery, ORDER BY completed_at DESC LIMIT 20).
+    Fallback semantics are unchanged: an empty window still returns 0 and
+    handlers fall back to the 30s per-job default; labs with fewer than 20
+    completions average what they have. estimateTime caps, position rules,
+    and pending/in_progress/terminal wire shapes are untouched.
+    
+    Tests (RED-proven against the pre-fix all-history query):
+    - TestQueue_AvgSolveTime_RecentWindow: stale 40s history + 3 recent
+      400s solves yields the 94s window mean, never the ~87s all-history
+      mean.
+    - TestQueue_AvgSolveTime_WindowDropsOldest: with window+1 completions
+      the oldest outlier drops out of the sample.
+    - TestQueue_AvgSolveTime_NoCompletes: no completions still returns 0
+      (fallback contract, no fabricated number).
+    - TestSubmit_EstimatedTimeUsesRecentWindow: submit quotes 1m34s from
+      the window (raw-JSON key asserted), never the 1m27s all-history
+      quote; pending/in_progress/terminal detail semantics and
+      /api/v1/stats avg_solve_time preserved.
+    
+    Docs: api-reference.md, integration.md, and openapi.yaml now describe
+    the estimator honestly as a rolling 20-solve window.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ docs/api-reference.md         |   4 +-
+ docs/integration.md           |   2 +-
+ internal/api/handlers.go      |   6 +-
+ internal/api/handlers_test.go | 140 ++++++++++++++++++++++++++++++++++++++++++
+ internal/ingest/queue.go      |  32 ++++++++--
+ internal/ingest/queue_test.go | 106 ++++++++++++++++++++++++++++++++
+ pkg/api/openapi.yaml          |  16 ++++-
+ 7 files changed, 292 insertions(+), 14 deletions(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 87ca0ceb..376e99e0 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -408,7 +408,7 @@ Both are RFC 3339 UTC timestamps (e.g. `2026-08-15T02:13:43Z`) and both keys are
+ | `position` | The entry's 1-based place in the returned page — `offset + index + 1` | The entry's 1-based place in the **pending** queue, or `0` when the entry is not waiting (`in_progress`, `complete`, `failed`) |
+ | `estimated_time` | Wait left for this entry: `estimateTime(place in the pending queue, observed mean solve time)` while `pending`; one job while `in_progress`; empty for `complete` / `failed` | Same rule as the list |
+ 
+-`estimated_time` is the lab's observed mean solve time (`avg_solve_time` on `GET /api/v1/stats`, derived from completed solves) multiplied by the number of jobs ahead of the entry, rounded to the nearest second and capped at `30m`. A lab with no completed solves yet falls back to `30s` per job — which is why the sample above shows `"estimated_time": "30s"` for the first pending entry. A finished entry is no longer waiting, so `complete` and `failed` entries always return `"estimated_time": ""`.
++`estimated_time` is the lab's observed mean solve time (`avg_solve_time` on `GET /api/v1/stats`) multiplied by the number of jobs ahead of the entry, rounded to the nearest second and capped at `30m`. The mean is a **rolling window over the 20 most recent completed solves**, not an all-history average: once a solve falls out of the 20 latest completions it stops influencing the estimate, so months-old faster solves cannot keep quoting a wait that current, slower solves will not meet. A lab with fewer than 20 completed solves averages what it has, and a lab with no completed solves yet falls back to `30s` per job — which is why the sample above shows `"estimated_time": "30s"` for the first pending entry. A finished entry is no longer waiting, so `complete` and `failed` entries always return `"estimated_time": ""`.
+ 
+ **Status codes:** `200`, `500`.
+ 
+@@ -597,7 +597,7 @@ Values below were observed on the running lab at the time of writing — they dr
+ }
+ ```
+ 
+-`verified_answers` counts answer rows whose status is `verified` or `ci_passed` **and** whose signatures JSON does not record a failed solve — the predicate is `COALESCE(json_extract(signatures, '$.result'), '') != 'failed'`, so a row with absent, empty, or unparseable signature JSON still counts and only an explicit `result: "failed"` is excluded. A status-verified answer whose signature reports failure is therefore *not* counted: `verified_answers` can be lower than `total_answers` even when nearly every answer is verified, and `hit_rate` is a runtime value, not a constant. `coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1). `readonly` and `solver_available` indicate whether the server is in public catalog mode and whether an active solver is wired up.
++`verified_answers` counts answer rows whose status is `verified` or `ci_passed` **and** whose signatures JSON does not record a failed solve — the predicate is `COALESCE(json_extract(signatures, '$.result'), '') != 'failed'`, so a row with absent, empty, or unparseable signature JSON still counts and only an explicit `result: "failed"` is excluded. A status-verified answer whose signature reports failure is therefore *not* counted: `verified_answers` can be lower than `total_answers` even when nearly every answer is verified, and `hit_rate` is a runtime value, not a constant. `coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1). `avg_solve_time` is the mean wall-clock solve time over the **20 most recent completed solves** — a rolling window, so it tracks current solver conditions rather than all-time history — and is empty until the first solve completes; it is the same per-job estimate the queue's `estimated_time` fields are derived from. `readonly` and `solver_available` indicate whether the server is in public catalog mode and whether an active solver is wired up.
+ 
+ **Status codes:** `200`, `500`.
+ 
+diff --git a/docs/integration.md b/docs/integration.md
+index e5c99e19..e7a0a70d 100644
+--- a/docs/integration.md
++++ b/docs/integration.md
+@@ -242,7 +242,7 @@ curl -s http://localhost:8766/api/v1/stats
+ }
+ ```
+ 
+-Observed on the running lab at the time of writing; the counts drift as the corpus grows. `verified_answers` counts answers whose status is `verified`/`ci_passed` **and** whose signatures JSON does not record a failed solve (`result: "failed"`), so a status-verified answer whose solve failed is excluded and `verified_answers` can be below `total_answers`. `coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1), computed at runtime. `readonly` and `solver_available` tell you whether the running instance is a read-only catalog or has an active solver.
++Observed on the running lab at the time of writing; the counts drift as the corpus grows. `verified_answers` counts answers whose status is `verified`/`ci_passed` **and** whose signatures JSON does not record a failed solve (`result: "failed"`), so a status-verified answer whose solve failed is excluded and `verified_answers` can be below `total_answers`. `coverage` = `verified_answers / total_problems` — it can exceed 1.0 because a single problem class may accumulate multiple verified answers; a value above 1 is normal, not corruption. `hit_rate` = `verified_answers / total_answers` (0..1), computed at runtime. `avg_solve_time` is a rolling mean over the 20 most recent completed solves — it tracks current solve conditions rather than all-time history — and the queue's `estimated_time` values are derived from it (jobs ahead × that mean, capped at 30m). `readonly` and `solver_available` tell you whether the running instance is a read-only catalog or has an active solver.
+ 
+ ---
+ 
+diff --git a/internal/api/handlers.go b/internal/api/handlers.go
+index 39108ca1..f84e0434 100644
+--- a/internal/api/handlers.go
++++ b/internal/api/handlers.go
+@@ -736,7 +736,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+ 	}
+ 	depth, _ := s.Queue.Depth(r.Context())
+ 	st.QueueDepth = depth
+-	// Avg solve time comes from the queue's solve timings; left empty
++	// Avg solve time comes from the queue's recent solve timings (a
++	// rolling window over the latest completed solves); left empty
+ 	// until the first solve completes (same error-ignore style as Depth).
+ 	if avg, _ := s.Queue.AvgSolveTime(r.Context()); avg > 0 {
+ 		st.AvgSolveTime = avg.Round(time.Second).String()
+@@ -1169,7 +1170,8 @@ const defaultPerJobEstimate = 30 * time.Second
+ const maxEstimateTotal = 30 * time.Minute
+ 
+ // estimateTime derives the submit-response ETA from the lab's observed
+-// mean solve time (perJob) multiplied by the number of queued jobs
++// mean solve time (perJob — Queue.AvgSolveTime, a rolling mean over the
++// most recent completed solves) multiplied by the number of queued jobs
+ // (depth), rounded to the nearest second and capped at maxEstimateTotal.
+ //
+ // depth <= 0 means nothing is ahead of the caller, so it returns "0s".
+diff --git a/internal/api/handlers_test.go b/internal/api/handlers_test.go
+index 5c546aaa..ae7a9172 100644
+--- a/internal/api/handlers_test.go
++++ b/internal/api/handlers_test.go
+@@ -3121,3 +3121,143 @@ func TestImportInvalidConflictStrategy(t *testing.T) {
+ 		t.Errorf("message = %q, want it to name conflict_strategy", body.Message)
+ 	}
+ }
++
++// seedWindowedSolve inserts one completed queue entry that finished at
++// completedAt ("2006-01-02 15:04:05") after a solve of dur, so a test
++// can build a solve history with an explicit completion order.
++func seedWindowedSolve(t *testing.T, store *graph.Store, id, completedAt string, dur time.Duration) {
++	t.Helper()
++	end, err := time.Parse("2006-01-02 15:04:05", completedAt)
++	if err != nil {
++		t.Fatalf("parse completedAt %q: %v", completedAt, err)
++	}
++	if _, err := store.DB().Exec(`INSERT INTO queue_entries
++		(id, problem_class, status, stage, started_at, completed_at)
++		VALUES (?, 'cls-observed', 'complete', 'done', ?, ?)`,
++		id, end.Add(-dur).Format("2006-01-02 15:04:05"), completedAt); err != nil {
++		t.Fatalf("insert completed entry %s: %v", id, err)
++	}
++}
++
++// recentWindow mirrors ingest.avgSolveTimeWindow (unexported): the
++// number of most recent completed solves AvgSolveTime averages over.
++const recentWindow = 20
++
++// TestSubmit_EstimatedTimeUsesRecentWindow guards DF-OFF-BY-ONE-38 at
++// the API layer: when the lab's solve history is stale relative to
++// current solve conditions, the quoted ETA must follow the rolling
++// recent window, not the all-history mean. Board observation: a live
++// solve took ~6m35s while the API quoted 3m33s because old, faster
++// solves dominated the average.
++//
++// Fixture: recentWindow stale solves of 40s each (completed in January),
++// then 3 recent solves of 400s each (completed in October — the
++// 6m35s-class current condition). The window mean is (3x400s +
++// 17x40s)/20 = 94s; the all-history mean is (3x400s + 20x40s)/23 =
++// ~87s. The submit response must quote 1m34s, never 1m27s.
++func TestSubmit_EstimatedTimeUsesRecentWindow(t *testing.T) {
++	s, store, queue := newTestServer(t)
++	ctx := context.Background()
++
++	for i := 0; i < recentWindow; i++ {
++		seedWindowedSolve(t, store, fmt.Sprintf("sub_stale_%02d", i),
++			fmt.Sprintf("2026-01-01 00:%02d:00", i), 40*time.Second)
++	}
++	for i := 0; i < 3; i++ {
++		seedWindowedSolve(t, store, fmt.Sprintf("sub_live_%d", i),
++			fmt.Sprintf("2026-10-01 00:0%d:00", i), 400*time.Second)
++	}
++
++	perJob, err := queue.AvgSolveTime(ctx)
++	if err != nil {
++		t.Fatalf("AvgSolveTime: %v", err)
++	}
++	if perJob.Round(time.Second) != 94*time.Second {
++		t.Fatalf("fixture window mean = %s, want 1m34s", perJob)
++	}
++
++	// Raw JSON, per the wire lesson: decode the untyped body too, so a
++	// missing/mis-tagged estimated_time key is caught rather than
++	// silently zero-valued by the struct decode.
++	rr := do(t, s, "POST", "/api/v1/problems/submit", submitProblemRequest{
++		ProblemClass: "cls-window-live",
++		Environment:  "docker",
++		Language:     "go",
++		Cadence:      ingest.CadencePrePhase,
++	})
++	if rr.Code != http.StatusOK {
++		t.Fatalf("submit status = %d, body = %s", rr.Code, rr.Body.String())
++	}
++	var raw map[string]any
++	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
++		t.Fatalf("decode raw submit: %v", err)
++	}
++	var submitted submitProblemResponse
++	if err := json.Unmarshal(rr.Body.Bytes(), &submitted); err != nil {
++		t.Fatalf("decode submit: %v", err)
++	}
++	rawETA, ok := raw["estimated_time"]
++	if !ok {
++		t.Fatalf("submit response has no estimated_time key: %v", raw)
++	}
++	if rawETA != submitted.EstimatedTime {
++		t.Errorf("raw estimated_time = %v, decoded = %q", rawETA, submitted.EstimatedTime)
++	}
++
++	wantETA := estimateTime(1, perJob) // 1 x 1m34s
++	if submitted.EstimatedTime != wantETA {
++		t.Errorf("submit estimated_time = %q, want %q (rolling recent window)", submitted.EstimatedTime, wantETA)
++	}
++	allHistory := time.Duration((3*400+20*40)/23) * time.Second // ~1m27s
++	if stale := estimateTime(1, allHistory); submitted.EstimatedTime == stale {
++		t.Errorf("submit estimated_time = %q matches the all-history quote %q — stale history still dominates",
++			submitted.EstimatedTime, stale)
++	}
++
++	// Pending/in_progress/terminal wire semantics must be preserved
++	// under the windowed estimate.
++	_, pending := getQueueEntry(t, s, submitted.SubmissionID)
++	if pending.Status != ingest.StatusPending {
++		t.Fatalf("submitted status = %q, want pending", pending.Status)
++	}
++	if pending.Position != 1 || pending.EstimatedTime != wantETA {
++		t.Errorf("pending detail = position %d eta %q, want position 1 eta %q",
++			pending.Position, pending.EstimatedTime, wantETA)
++	}
++	solving, err := queue.Dequeue(ctx)
++	if err != nil {
++		t.Fatalf("Dequeue: %v", err)
++	}
++	if solving == nil || solving.ID != submitted.SubmissionID {
++		t.Fatalf("Dequeue = %+v, want the submitted row %s", solving, submitted.SubmissionID)
++	}
++	_, inprog := getQueueEntry(t, s, submitted.SubmissionID)
++	if inprog.Status != ingest.StatusInProgress {
++		t.Fatalf("in_progress status = %q", inprog.Status)
++	}
++	if inprog.Position != 0 || inprog.EstimatedTime != estimateTime(1, perJob) {
++		t.Errorf("in_progress detail = position %d eta %q, want position 0 eta %q (one job)",
++			inprog.Position, inprog.EstimatedTime, estimateTime(1, perJob))
++	}
++	_, terminal := getQueueEntry(t, s, "sub_stale_00")
++	if terminal.Status != ingest.StatusComplete {
++		t.Fatalf("terminal status = %q, want complete", terminal.Status)
++	}
++	if terminal.Position != 0 || terminal.EstimatedTime != "" {
++		t.Errorf("terminal detail = position %d eta %q, want position 0 eta empty",
++			terminal.Position, terminal.EstimatedTime)
++	}
++
++	// /api/v1/stats reports the same windowed estimate.
++	statsRR := do(t, s, "GET", "/api/v1/stats", nil)
++	if statsRR.Code != http.StatusOK {
++		t.Fatalf("stats status = %d", statsRR.Code)
++	}
++	var st graph.Stats
++	if err := json.Unmarshal(statsRR.Body.Bytes(), &st); err != nil {
++		t.Fatalf("decode stats: %v", err)
++	}
++	if st.AvgSolveTime != "1m34s" {
++		t.Errorf("stats avg_solve_time = %q, want %q (rolling recent window)", st.AvgSolveTime, "1m34s")
++	}
++}
+diff --git a/internal/ingest/queue.go b/internal/ingest/queue.go
+index 02cea686..2f7a51f3 100644
+--- a/internal/ingest/queue.go
++++ b/internal/ingest/queue.go
+@@ -560,16 +560,36 @@ func (q *Queue) Depth(ctx context.Context) (int, error) {
+ 	return n, err
+ }
+ 
+-// AvgSolveTime returns the mean wall-clock solve time across completed
+-// queue entries (completed_at - started_at). Used by the /api/v1/stats
+-// endpoint. Returns 0 when no entries have completed yet — AVG over an
+-// empty set is NULL in SQLite, so we scan into a sql.NullFloat64.
++// avgSolveTimeWindow bounds the sample AvgSolveTime averages over: the
++// most recently completed N solves. Solve conditions (model, sandbox
++// setup, corpus mix) drift over time, so an all-history mean lets
++// months-old fast solves silently underquote a current wait — the live
++// observation behind DF-OFF-BY-ONE-38 (a 6m35s solve quoted as 3m33s).
++// A bounded recent window tracks current conditions as new solves
++// complete: once a solve falls out of the N most recent completions it
++// no longer influences the estimate. With fewer than N completed solves
++// the whole (short) history is the sample, so behaviour on a fresh lab
++// is unchanged.
++const avgSolveTimeWindow = 20
++
++// AvgSolveTime returns the mean wall-clock solve time across the
++// avgSolveTimeWindow most recently completed queue entries
++// (completed_at - started_at). Used by the /api/v1/stats endpoint and
++// the queue ETA derivation. Returns 0 when no entries have completed
++// yet — AVG over an empty set is NULL in SQLite, so we scan into a
++// sql.NullFloat64; callers fall back to a fixed per-job default in that
++// case.
+ func (q *Queue) AvgSolveTime(ctx context.Context) (time.Duration, error) {
+ 	var avg sql.NullFloat64
+ 	err := q.db.QueryRowContext(ctx,
+ 		`SELECT AVG(julianday(completed_at) - julianday(started_at)) * 86400.0
+-		FROM queue_entries
+-		WHERE status = 'complete' AND started_at IS NOT NULL AND completed_at IS NOT NULL`,
++		FROM (
++			SELECT started_at, completed_at
++			FROM queue_entries
++			WHERE status = 'complete' AND started_at IS NOT NULL AND completed_at IS NOT NULL
++			ORDER BY completed_at DESC, id ASC
++			LIMIT ?
++		)`, avgSolveTimeWindow,
+ 	).Scan(&avg)
+ 	if err != nil {
+ 		return 0, err
+diff --git a/internal/ingest/queue_test.go b/internal/ingest/queue_test.go
+index 65a28e65..b719b958 100644
+--- a/internal/ingest/queue_test.go
++++ b/internal/ingest/queue_test.go
+@@ -1045,3 +1045,109 @@ func errIs(err, target error) bool {
+ 	}
+ 	return false
+ }
++
++// seedCompletedSolveAt inserts one completed queue entry that finished
++// at completedAt ("2006-01-02 15:04:05") after a solve of dur, so tests
++// can build a solve history with an explicit completion order.
++func seedCompletedSolveAt(t *testing.T, store *graph.Store, id, completedAt string, dur time.Duration) {
++	t.Helper()
++	end, err := time.Parse("2006-01-02 15:04:05", completedAt)
++	if err != nil {
++		t.Fatalf("parse completedAt %q: %v", completedAt, err)
++	}
++	if _, err := store.DB().Exec(`INSERT INTO queue_entries
++		(id, problem_class, status, stage, started_at, completed_at)
++		VALUES (?, 'cls-observed', 'complete', 'done', ?, ?)`,
++		id, end.Add(-dur).Format("2006-01-02 15:04:05"), completedAt); err != nil {
++		t.Fatalf("insert completed entry %s: %v", id, err)
++	}
++}
++
++// TestQueue_AvgSolveTime_RecentWindow guards DF-OFF-BY-ONE-38: the
++// estimate is a rolling mean over the avgSolveTimeWindow most recently
++// completed solves, not an all-history mean, so old fast solves cannot
++// silently underquote a current wait. Live board observation: a solve
++// took ~6m35s while the API quoted 3m33s because months of faster
++// history dominated the mean.
++//
++// Fixture: avgSolveTimeWindow stale solves of 40s each (completed in
++// January), then 3 recent solves of 400s each (completed in October).
++// The window holds the 3 live solves plus 17 of the stale ones, so the
++// mean is (3x400s + 17x40s) / 20 = 94s — pulled toward current
++// conditions. The all-history mean, (3x400s + 20x40s) / 23 = ~87s,
++// must NOT be what comes back.
++func TestQueue_AvgSolveTime_RecentWindow(t *testing.T) {
++	q, store := newTestQueue(t)
++	ctx := context.Background()
++
++	for i := 0; i < avgSolveTimeWindow; i++ {
++		seedCompletedSolveAt(t, store, fmt.Sprintf("sub_stale_%02d", i),
++			fmt.Sprintf("2026-01-01 00:%02d:00", i), 40*time.Second)
++	}
++	for i := 0; i < 3; i++ {
++		seedCompletedSolveAt(t, store, fmt.Sprintf("sub_live_%d", i),
++			fmt.Sprintf("2026-10-01 00:0%d:00", i), 400*time.Second)
++	}
++
++	got, err := q.AvgSolveTime(ctx)
++	if err != nil {
++		t.Fatalf("AvgSolveTime: %v", err)
++	}
++	const wantWindow = 94 * time.Second
++	if got.Round(time.Second) != wantWindow {
++		t.Errorf("AvgSolveTime = %s, want %s (rolling window: 3x400s + 17x40s over %d rows)",
++			got, wantWindow, avgSolveTimeWindow)
++	}
++	// The all-history mean the pre-fix code returned: (3x400s +
++	// 20x40s)/23 = ~86.96s — closer to the stale 40s than the live 400s.
++	allHistory := time.Duration((3*400+20*40)/23) * time.Second
++	if got.Round(time.Second) == allHistory.Round(time.Second) {
++		t.Errorf("AvgSolveTime = %s matches the all-history mean %s — the recent window is not in effect",
++			got, allHistory)
++	}
++}
++
++// TestQueue_AvgSolveTime_WindowDropsOldest proves the window is bounded:
++// with avgSolveTimeWindow+1 completed solves, the oldest completion — a
++// huge outlier here — drops out of the sample entirely.
++func TestQueue_AvgSolveTime_WindowDropsOldest(t *testing.T) {
++	q, store := newTestQueue(t)
++	ctx := context.Background()
++
++	seedCompletedSolveAt(t, store, "sub_oldest", "2026-01-01 00:00:00", 1000*time.Second)
++	for i := 0; i < avgSolveTimeWindow; i++ {
++		seedCompletedSolveAt(t, store, fmt.Sprintf("sub_recent_%02d", i),
++			fmt.Sprintf("2026-10-01 00:%02d:00", i), 10*time.Second)
++	}
++
++	got, err := q.AvgSolveTime(ctx)
++	if err != nil {
++		t.Fatalf("AvgSolveTime: %v", err)
++	}
++	if got.Round(time.Second) != 10*time.Second {
++		t.Errorf("AvgSolveTime = %s, want 10s: the oldest 1000s solve must fall out of the %d-row window",
++			got, avgSolveTimeWindow)
++	}
++}
++
++// TestQueue_AvgSolveTime_NoCompletes pins the fallback contract: with no
++// completed solves the estimate is 0 (and no error), so handlers fall
++// back to the fixed per-job default rather than quoting a fabricated
++// number.
++func TestQueue_AvgSolveTime_NoCompletes(t *testing.T) {
++	q, store := newTestQueue(t)
++	ctx := context.Background()
++
++	// A pending row with no timing must not affect the estimate.
++	if _, err := store.DB().Exec(`INSERT INTO queue_entries
++		(id, problem_class, status) VALUES ('sub_pend', 'cls-observed', 'pending')`); err != nil {
++		t.Fatalf("insert pending entry: %v", err)
++	}
++	got, err := q.AvgSolveTime(ctx)
++	if err != nil {
++		t.Fatalf("AvgSolveTime: %v", err)
++	}
++	if got != 0 {
++		t.Errorf("AvgSolveTime = %s, want 0 with no completed solves", got)
++	}
++}
+diff --git a/pkg/api/openapi.yaml b/pkg/api/openapi.yaml
+index 20117f37..93386d4f 100644
+--- a/pkg/api/openapi.yaml
++++ b/pkg/api/openapi.yaml
+@@ -511,8 +511,11 @@ components:
+           description: |
+             Best-effort estimate of how long the caller can expect to wait
+             before a pre-verified answer is available for this submission.
+-            Derived from the lab's observed mean solve time and the number of
+-            queued jobs (capped), so it moves as solver throughput changes.
++            Derived from the lab's observed mean solve time — a rolling
++            window over the 20 most recent completed solves, so it tracks
++            current solver conditions rather than all-time history — and
++            the number of queued jobs (capped), so it moves as solver
++            throughput changes.
+             It is not a guarantee: an idle lab with no completed solves yet
+             falls back to a fixed per-job default, and solver availability can
+             change the actual wait.
+@@ -687,7 +690,9 @@ components:
+           type: string
+           description: |
+             Remaining wait as a Go duration string (e.g. "2m13s"), derived
+-            from the lab's observed mean solve time multiplied by the jobs
++            from the lab's observed mean solve time — a rolling window over
++            the 20 most recent completed solves, so stale history cannot
++            underquote current conditions — multiplied by the jobs
+             ahead of the entry. A pending entry waits for its place in the
+             pending queue, an in_progress entry waits for one job, and the
+             field is empty once the entry is complete or failed. Falls back
+@@ -816,6 +821,11 @@ components:
+           description: verified_answers / total_problems. Can exceed 1.0 — a problem class may hold multiple verified answers, so a value above 1 is normal, not corruption.
+         avg_solve_time:
+           type: string
++          description: |
++            Mean wall-clock solve time over the 20 most recent completed
++            solves (a rolling window that tracks current solver conditions
++            rather than all-time history); empty until the first solve
++            completes. The queue's estimated_time fields are derived from it.
+ 
+     Error:
+       type: object
