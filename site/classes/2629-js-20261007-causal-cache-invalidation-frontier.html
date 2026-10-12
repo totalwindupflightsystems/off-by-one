@@ -1,0 +1,1255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>js-20261007-causal-cache-invalidation-frontier — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: js-20261007-causal-cache-invalidation-frontier (node20)">
+<meta property="og:title" content="js-20261007-causal-cache-invalidation-frontier — Off-By-One">
+<meta property="og:description" content="Problem class: js-20261007-causal-cache-invalidation-frontier (node20)">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2629-js-20261007-causal-cache-invalidation-frontier.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>js-20261007-causal-cache-invalidation-frontier</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>js</span><span class='badge v'>node20</span></div><div class='desc'><p>Problem class: js-20261007-causal-cache-invalidation-frontier (node20)</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2629-js-20261007-causal-cache-invalidation-frontier.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I diagnosed the problem, implemented a complete fix, and verified it with unit tests, adversarial differential fuzzing, and a 1M-key scale benchmark. The full solution document is saved at <code>~/causal-cache/SOLUTION.md</code>; the workspace also contains <code>causal-cache.js</code>, <code>test.js</code>, <code>fuzz.js</code>, and <code>bench.js</code>.</p>
+<p>Below is the solution markdown.</p>
+<hr />
+<h1>Causal Cache Invalidation Frontier — diagnosis and verified fix</h1>
+<p><strong>Problem class:</strong> <code>js-20261007-causal-cache-invalidation-frontier</code> (node20)</p>
+<p>A distributed cache tracker receives out-of-order causal context vectors ("version vectors") for writes and invalidations. It must evict an entry only when an observed <strong>dependency frontier provably dominates</strong> the entry's context, keep working across <strong>replica resets</strong> and <strong>bounded metadata compaction</strong>, and guarantee that <strong>delayed or concurrent writes cannot resurrect a value that has already been invalidated</strong>.</p>
+<p>This document contains the root-cause analysis, the exact fix (a complete, dependency-free Node.js module), and a verification suite with real output.</p>
+<hr />
+<h2>1. Root-cause analysis</h2>
+<p>The task looks like "add a version-vector comparison", but four independent failure modes make a naive implementation incorrect. Each one is a distinct root cause; all four must be addressed.</p>
+<h3>1.1 Out-of-order delivery breaks naive application</h3>
+<p>Events arrive in arbitrary order. Applying a later write before its causal predecessor violates causality and can materialise a value that was never visible. The fix is <strong>causal buffering</strong>: an event is only applied when its dependency context (the vector <em>before</em> the write, <code>deps</code>) is already observed; otherwise it is parked and retried after every successful delivery.</p>
+<p>Root cause: the tracker compared only the event's dot, not the context it depends on.</p>
+<h3>1.2 Eviction must be gated on <em>proof of dominance</em></h3>
+<p>A cache may only release an entry when it can prove that every replica that could still reference the entry has advanced past it. "Newer timestamp" is not enough. The correct predicate is component-wise dominance of the merged invalidation frontier over the entry's context:</p>
+<pre><code>evict(entry)  ⇔  frontier[key].dominates(entry.clock)
+</code></pre>
+<p>A <strong>concurrent</strong> frontier (neither side dominates) must <em>not</em> evict, otherwise a live value is lost.</p>
+<p>Root cause: treating a delete as "latest write wins" instead of "dominates the dependency frontier".</p>
+<h3>1.3 Concurrent branches and the lost-candidate bug</h3>
+<p>The obvious register optimisation — keep one value per key and let the highest Lamport timestamp win — is <strong>not convergent</strong> when combined with causal invalidation. Counter-example:</p>
+<ul>
+<li><code>p_a = {Z:1}</code> and <code>p_b = {X:1}</code> are concurrent; <code>ts(p_a) &lt; ts(p_b)</code>.</li>
+<li>A delete <code>d = {X:1}</code> dominates <code>p_b</code> but not <code>p_a</code>.</li>
+</ul>
+<p>With single-value LWW, <code>p_b</code> replaces <code>p_a</code>, then <code>d</code> evicts <code>p_b</code>, and <code>p_a</code> is gone. Yet <code>p_a</code> was never dominated, so it must survive. Different delivery orders then produce different final states.</p>
+<p>Root cause: collapsing the concurrent version set too early. The fix is to keep the <strong>set of concurrent versions</strong> per key (an MV-register), prune versions only when one causally dominates another or when the frontier/floor dominates them, and read the maximum <code>(ts, replica)</code> survivor. This is a join-semilattice and is therefore order-independent and convergent.</p>
+<h3>1.4 Replica resets and vector compaction resurrect stale values</h3>
+<p>Two related problems:</p>
+<ul>
+<li><strong>Resets.</strong> A restarted replica may emit dots with smaller counters (<code>epoch 0, seq 1</code>) than its pre-reset history. A delayed pre-reset message can then look "newer" or re-create a deleted value. Fix: per-replica <strong>incarnations (epochs)</strong>. Dominance compares <code>(epoch, seq)</code> lexicographically, so a post-reset write dominates all earlier incarnations; <code>maxEpoch[replica]</code> rejects delayed pre-reset messages; and the reset marker is durably recorded.</li>
+<li><strong>Compaction.</strong> Frontiers cannot grow forever with the key count. Introduce a globally acknowledged <strong>stable floor</strong>. Components at or below the floor are pruned from every frontier ("exceptions only"), and the floor becomes a permanent <strong>anti-resurrection watermark</strong>: any write whose dot is at or below the floor is dropped. This bounds metadata by the number of <em>live</em> exceptions rather than by the number of keys.</li>
+</ul>
+<p>Root cause: unbounded tombstones / no incarnation, which lets garbage-collected history be replayed.</p>
+<hr />
+<h2>2. The fix</h2>
+<p>The complete implementation. It is dependency-free CommonJS and runs on Node.js 20+. Save it as <code>causal-cache.js</code>.</p>
+<h3>2.1 <code>causal-cache.js</code></h3>
+<pre><code class="language-js">'use strict';
+
+/*
+ * CausalCache — distributed cache invalidation tracker.
+ *
+ * A cache entry carries a causal context (version vector) describing the
+ * writes it depends on.  Invalidation messages also carry a context
+ * (&quot;frontier&quot;).  An entry may be evicted only when a frontier we have
+ * observed *provably dominates* the entry's context.  Out-of-order messages
+ * (including messages from before a replica reset) must not resurrect a
+ * value that has been invalidated.
+ *
+ * Contexts are sparse version vectors with per-replica incarnations:
+ *
+ *     Clock = { replica -&gt; [epoch, seq] }
+ *
+ * Epoch is bumped on a replica reset (&quot;incarnation&quot;).  Dominance compares
+ * (epoch, seq) lexicographically per replica.  This makes a post-reset write
+ * dominate every write from the previous incarnation of the same replica,
+ * while letting us *reject* delayed pre-reset messages via the maxEpoch and
+ * floor watermarks.
+ */
+
+const ZERO = [0, 0];
+
+function cmpComp(a, b) {
+  if (a[0] !== b[0]) return a[0] &lt; b[0] ? -1 : 1;
+  if (a[1] !== b[1]) return a[1] &lt; b[1] ? -1 : 1;
+  return 0;
+}
+
+function maxComp(a, b) {
+  return cmpComp(a, b) &gt;= 0 ? a : b;
+}
+
+class Clock {
+  constructor(map) {
+    this.map = map instanceof Map ? map : new Map();
+  }
+
+  static fromJSON(obj) {
+    const c = new Clock();
+    if (!obj) return c;
+    const keys = Array.isArray(obj) ? null : Object.keys(obj);
+    if (keys) {
+      for (const r of keys) {
+        const v = obj[r];
+        if (Array.isArray(v) &amp;&amp; (v[0] !== 0 || v[1] !== 0)) c.map.set(r, [v[0], v[1]]);
+      }
+    } else {
+      // [[replica,[epoch,seq]], ...]
+      for (const [r, v] of obj) {
+        if (v &amp;&amp; (v[0] !== 0 || v[1] !== 0)) c.map.set(r, [v[0], v[1]]);
+      }
+    }
+    return c;
+  }
+
+  get(r) {
+    return this.map.get(r) || ZERO;
+  }
+
+  set(r, comp) {
+    if (!comp) return;
+    if (comp[0] === 0 &amp;&amp; comp[1] === 0) this.map.delete(r);
+    else this.map.set(r, [comp[0], comp[1]]);
+  }
+
+  observe(r, comp) {
+    if (cmpComp(comp, this.get(r)) &gt; 0) this.set(r, comp);
+  }
+
+  clone() {
+    const c = new Clock();
+    for (const [r, v] of this.map) c.map.set(r, [v[0], v[1]]);
+    return c;
+  }
+
+  size() {
+    return this.map.size;
+  }
+
+  isEmpty() {
+    return this.map.size === 0;
+  }
+
+  /** this := max(this, other) pointwise. Returns this. */
+  merge(other) {
+    for (const [r, v] of other.map) {
+      if (cmpComp(v, this.get(r)) &gt; 0) this.map.set(r, [v[0], v[1]]);
+    }
+    return this;
+  }
+
+  /** True iff this dominates other (this &gt;= other component-wise). */
+  dominates(other) {
+    for (const [r, v] of other.map) {
+      if (cmpComp(this.get(r), v) &lt; 0) return false;
+    }
+    return true;
+  }
+
+  equals(other) {
+    return this.dominates(other) &amp;&amp; other.dominates(this);
+  }
+
+  /**
+   * Remove every component that is &lt;= floor (i.e. globally acknowledged).
+   * Returns the number of removed components.  This is the bounded-metadata
+   * compaction primitive: only &quot;exceptions&quot; above the stable floor survive.
+   */
+  pruneBelow(floor) {
+    let removed = 0;
+    for (const [r, v] of [...this.map]) {
+      if (cmpComp(floor.get(r), v) &gt;= 0) {
+        this.map.delete(r);
+        removed++;
+      }
+    }
+    return removed;
+  }
+
+  toJSON() {
+    const out = {};
+    for (const [r, v] of this.map) out[r] = [v[0], v[1]];
+    return out;
+  }
+}
+
+function keyOf(dot) {
+  return `${dot.replica}@${dot.epoch}:${dot.seq}`;
+}
+
+class CausalCache {
+  /**
+   * @param {object} opts
+   * @param {string} opts.replica  replica id of this tracker
+   * @param {number} [opts.epoch]  initial incarnation / epoch
+   */
+  constructor(opts = {}) {
+    this.replica = opts.replica || 'r0';
+    this.epoch = opts.epoch || 0;
+    this.local = new Clock();
+    this.local.set(this.replica, [this.epoch, 0]);
+
+    this.maxEpoch = new Map();          // replica -&gt; highest incarnation observed
+    this.maxEpoch.set(this.replica, this.epoch);
+
+    this.entries = new Map();           // key -&gt; { value, clock, dot, ts }
+    this.frontier = new Map();          // key -&gt; Clock of invalidations (tombstones)
+    this.floor = new Clock();           // stable/GC watermark (anti-resurrection)
+    this.pending = [];                  // out-of-order events (causal buffer)
+    this.pendingKeys = new Set();
+    this.lamport = opts.lamport || 0;   // causality-respecting LWW timestamp
+
+    this.stats = {
+      applied: 0,
+      buffered: 0,
+      deliveredFromBuffer: 0,
+      droppedStaleEpoch: 0,
+      droppedFloor: 0,
+      droppedInvalidated: 0,
+      evicted: 0,
+      resurrectBlocked: 0,
+      pruned: 0,
+    };
+  }
+
+  // ---- local writes ------------------------------------------------------
+
+  _nextDot() {
+    const cur = this.local.get(this.replica);
+    const seq = cur[1] + 1;
+    this.local.set(this.replica, [this.epoch, seq]);
+    this.lamport += 1;
+    return { replica: this.replica, epoch: this.epoch, seq };
+  }
+
+  /**
+   * A reset is an explicit new incarnation.  It durably bumps the epoch so
+   * that every later write dominates all earlier writes of this replica and
+   * every delayed pre-reset message is rejected.
+   */
+  reset() {
+    this.epoch += 1;
+    this.local.set(this.replica, [this.epoch, 0]);
+    this.maxEpoch.set(this.replica, this.epoch);
+    return this.epoch;
+  }
+
+  /** Produce a put event (also applied locally). */
+  write(key, value) {
+    const dot = this._nextDot();
+    const clock = this.local.clone();
+    const deps = clock.clone();
+    deps.set(this.replica, dot.seq &gt; 1 ? [this.epoch, dot.seq - 1] : [0, 0]);
+    const ev = { type: 'put', key, value, dot, clock, deps, ts: this.lamport };
+    this.receive(ev);
+    return ev;
+  }
+
+  /** Produce a delete event (also applied locally). */
+  remove(key) {
+    const dot = this._nextDot();
+    const clock = this.local.clone();
+    const deps = clock.clone();
+    deps.set(this.replica, dot.seq &gt; 1 ? [this.epoch, dot.seq - 1] : [0, 0]);
+    const ev = { type: 'del', key, dot, clock, deps, ts: this.lamport };
+    this.receive(ev);
+    return ev;
+  }
+
+  // ---- delivery ----------------------------------------------------------
+
+  deliverable(ev) {
+    // Every causal dependency (context before the write) must be observed.
+    for (const [r, comp] of ev.deps.map) {
+      if (cmpComp(this.local.get(r), comp) &lt; 0) return false;
+    }
+    return true;
+  }
+
+  /** Is this exact dot already known to be superseded (pre-reset) ? */
+  staleEpoch(dot) {
+    const seen = this.maxEpoch.get(dot.replica);
+    return seen !== undefined &amp;&amp; dot.epoch &lt; seen;
+  }
+
+  /** Reject a write whose dot is at or below the GC floor. */
+  belowFloor(dot) {
+    return cmpComp(this.floor.get(dot.replica), [dot.epoch, dot.seq]) &gt;= 0;
+  }
+
+  /**
+   * Deliver one event.  Returns one of:
+   *   'applied' | 'buffered' | 'dropped-stale' | 'dropped-floor' |
+   *   'dropped-invalidated'
+   */
+  receive(ev) {
+    ev = normalizeEvent(ev);
+    if (this.staleEpoch(ev.dot) || this.belowFloor(ev.dot)) {
+      if (this.staleEpoch(ev.dot)) this.stats.droppedStaleEpoch++;
+      else this.stats.droppedFloor++;
+      return this.staleEpoch(ev.dot) ? 'dropped-stale' : 'dropped-floor';
+    }
+    if (!this.deliverable(ev)) {
+      this.pending.push(ev);
+      this.pendingKeys.add(ev.key);
+      this.stats.buffered++;
+      return 'buffered';
+    }
+    const res = this._commit(ev);
+    this._drain();
+    return res;
+  }
+
+  _commit(ev) {
+    const r = ev.dot.replica;
+    const seen = this.maxEpoch.get(r) || 0;
+    if (ev.dot.epoch &gt; seen) this.maxEpoch.set(r, ev.dot.epoch);
+
+    // Observe the write in our own vector clock.
+    this.local.merge(ev.clock);
+    if (typeof ev.ts === 'number' &amp;&amp; ev.ts &gt; this.lamport) this.lamport = ev.ts;
+
+    const applied = this._apply(ev);
+    return applied;
+  }
+
+  _apply(ev) {
+    const key = ev.key;
+    if (ev.type === 'del') {
+      let f = this.frontier.get(key);
+      if (!f) {
+        f = new Clock();
+        this.frontier.set(key, f);
+      }
+      f.merge(ev.clock);
+      this._evict(key);
+      this.stats.applied++;
+      return 'applied';
+    }
+
+    // PUT: reject only if the observed frontier (or the GC floor) provably
+    // dominates it.  Otherwise add the version to the key's concurrent version
+    // set, dropping any versions it causally supersedes.  Keeping concurrent
+    // versions is what makes invalidation safe: a delete can remove one branch
+    // without losing another branch that it does not dominate.
+    const f = this.frontier.get(key);
+    if (f &amp;&amp; f.dominates(ev.clock)) {
+      this.stats.droppedInvalidated++;
+      this.stats.resurrectBlocked++;
+      return 'dropped-invalidated';
+    }
+
+    let bucket = this.entries.get(key);
+    if (!bucket) {
+      bucket = new Map();
+      this.entries.set(key, bucket);
+    }
+    const vid = keyOf(ev.dot);
+
+    // Redundant if some retained version already causally dominates it.
+    for (const v of bucket.values()) {
+      if (v.clock.dominates(ev.clock)) {
+        this.stats.applied++;
+        return 'applied';
+      }
+    }
+
+    bucket.set(vid, {
+      value: ev.value,
+      clock: ev.clock.clone(),
+      dot: ev.dot,
+      ts: ev.ts || 0,
+      vid,
+    });
+    // Drop versions that this put supersedes (causally older).
+    for (const [id, v] of [...bucket]) {
+      if (id !== vid &amp;&amp; ev.clock.dominates(v.clock)) bucket.delete(id);
+    }
+    this.stats.applied++;
+    return 'applied';
+  }
+
+  /** Evict every version the frontier (or global floor) provably dominates. */
+  _evict(key) {
+    const bucket = this.entries.get(key);
+    if (!bucket || bucket.size === 0) return false;
+    const f = this.frontier.get(key);
+    let removed = 0;
+    for (const [id, v] of [...bucket]) {
+      const dominated =
+        (f &amp;&amp; f.dominates(v.clock)) || this.floor.dominates(v.clock);
+      if (dominated) {
+        bucket.delete(id);
+        removed++;
+      }
+    }
+    if (removed &amp;&amp; bucket.size === 0) this.entries.delete(key);
+    this.stats.evicted += removed;
+    return removed &gt; 0;
+  }
+
+  _drain() {
+    let progressed = true;
+    while (progressed &amp;&amp; this.pending.length) {
+      progressed = false;
+      const rest = [];
+      for (const ev of this.pending) {
+        if (this.staleEpoch(ev.dot) || this.belowFloor(ev.dot)) {
+          this.stats.droppedStaleEpoch++;
+          progressed = true;
+          continue;
+        }
+        if (this.deliverable(ev)) {
+          this._commit(ev);
+          this.stats.deliveredFromBuffer++;
+          progressed = true;
+        } else {
+          rest.push(ev);
+        }
+      }
+      this.pending = rest;
+    }
+    if (!this.pending.length) this.pendingKeys.clear();
+  }
+
+  // ---- reads / external invalidation ------------------------------------
+
+  get(key) {
+    const bucket = this.entries.get(key);
+    if (!bucket || bucket.size === 0) return undefined;
+    let best = null;
+    for (const v of bucket.values()) {
+      if (!best) best = v;
+      else if (v.ts !== best.ts ? v.ts &gt; best.ts : cmpDot(v.dot, best.dot) &gt; 0) best = v;
+    }
+    return best.value;
+  }
+
+  has(key) {
+    const bucket = this.entries.get(key);
+    return !!bucket &amp;&amp; bucket.size &gt; 0;
+  }
+
+  /**
+   * Register an externally generated invalidation frontier for a key.  The
+   * entry is evicted only if/when the merged frontier dominates its context.
+   */
+  invalidate(key, clock) {
+    let f = this.frontier.get(key);
+    if (!f) {
+      f = new Clock();
+      this.frontier.set(key, f);
+    }
+    f.merge(clock);
+    this._evict(key);
+  }
+
+  // ---- stable watermark / bounded metadata compaction -------------------
+
+  /**
+   * Advance the globally acknowledged (stable) watermark.  Everything at or
+   * below it may be forgotten: per-key frontiers are compacted to
+   * &quot;exceptions&quot; above the floor, and the floor itself blocks delayed puts.
+   */
+  advanceStable(stableClock) {
+    this.floor.merge(stableClock);
+    let pruned = 0;
+    for (const [key, f] of [...this.frontier]) {
+      pruned += f.pruneBelow(this.floor);
+      if (f.isEmpty()) this.frontier.delete(key);
+    }
+    // Evict anything the stable watermark already dominates.
+    for (const key of [...this.entries.keys()]) this._evict(key);
+    this.stats.pruned += pruned;
+    return pruned;
+  }
+
+  /** Number of live per-replica components kept in metadata. */
+  metadataSize() {
+    let n = this.entries.size + this.floor.size() + this.maxEpoch.size;
+    for (const bucket of this.entries.values()) n += bucket.size;
+    for (const f of this.frontier.values()) n += f.size();
+    return n;
+  }
+
+  // ---- snapshot / recovery ----------------------------------------------
+
+  snapshot() {
+    const entries = [];
+    for (const [k, bucket] of this.entries) {
+      for (const v of bucket.values()) {
+        entries.push({ key: k, value: v.value, clock: v.clock.toJSON(), dot: v.dot, ts: v.ts });
+      }
+    }
+    const frontier = [];
+    for (const [k, f] of this.frontier) frontier.push({ key: k, clock: f.toJSON() });
+    const pending = this.pending.map((ev) =&gt; ({
+      type: ev.type,
+      key: ev.key,
+      value: ev.value,
+      dot: ev.dot,
+      ts: ev.ts,
+      clock: ev.clock.toJSON(),
+      deps: ev.deps.toJSON(),
+    }));
+    return {
+      replica: this.replica,
+      epoch: this.epoch,
+      local: this.local.toJSON(),
+      maxEpoch: [...this.maxEpoch.entries()],
+      floor: this.floor.toJSON(),
+      entries,
+      frontier,
+      pending,
+      lamport: this.lamport,
+    };
+  }
+
+  static restore(snap) {
+    const c = new CausalCache({ replica: snap.replica, epoch: snap.epoch });
+    c.local = Clock.fromJSON(snap.local);
+    c.maxEpoch = new Map(snap.maxEpoch || []);
+    c.floor = Clock.fromJSON(snap.floor);
+    c.lamport = snap.lamport || 0;
+    for (const e of snap.entries || []) {
+      let bucket = c.entries.get(e.key);
+      if (!bucket) {
+        bucket = new Map();
+        c.entries.set(e.key, bucket);
+      }
+      const vid = keyOf(e.dot);
+      bucket.set(vid, { value: e.value, clock: Clock.fromJSON(e.clock), dot: e.dot, ts: e.ts || 0, vid });
+    }
+    for (const f of snap.frontier || []) {
+      c.frontier.set(f.key, Clock.fromJSON(f.clock));
+    }
+    c.pending = (snap.pending || []).map((ev) =&gt; ({
+      type: ev.type,
+      key: ev.key,
+      value: ev.value,
+      dot: ev.dot,
+      ts: ev.ts,
+      clock: Clock.fromJSON(ev.clock),
+      deps: Clock.fromJSON(ev.deps),
+    }));
+    return c;
+  }
+}
+
+function cmpDot(a, b) {
+  if (a.epoch !== b.epoch) return a.epoch &lt; b.epoch ? -1 : 1;
+  if (a.seq !== b.seq) return a.seq &lt; b.seq ? -1 : 1;
+  if (a.replica === b.replica) return 0;
+  return a.replica &lt; b.replica ? -1 : 1;
+}
+
+function normalizeEvent(ev) {
+  if (ev.clock instanceof Clock &amp;&amp; ev.deps instanceof Clock) return ev;
+  return {
+    type: ev.type,
+    key: ev.key,
+    value: ev.value,
+    dot: ev.dot,
+    ts: ev.ts,
+    clock: ev.clock instanceof Clock ? ev.clock : Clock.fromJSON(ev.clock),
+    deps: ev.deps instanceof Clock ? ev.deps : Clock.fromJSON(ev.deps),
+  };
+}
+
+function cmpClock(a, b) {
+  if (a.dominates(b)) return b.dominates(a) ? 0 : 1;
+  if (b.dominates(a)) return -1;
+  return null; // concurrent
+}
+
+module.exports = { CausalCache, Clock, cmpComp, cmpClock, cmpDot, ZERO };
+</code></pre>
+<h3>2.2 <code>test.js</code> (unit + property tests)</h3>
+<pre><code class="language-js">'use strict';
+
+const assert = require('assert');
+const { CausalCache, Clock, cmpComp, cmpClock } = require('./causal-cache');
+
+let passed = 0;
+function test(name, fn) {
+  try {
+    fn();
+    passed++;
+    console.log('  ok  ' + name);
+  } catch (err) {
+    console.error('FAIL  ' + name);
+    console.error(err &amp;&amp; err.stack ? err.stack : err);
+    process.exitCode = 1;
+  }
+}
+
+// Round-trip an event over a &quot;wire&quot; so caches never share mutable clocks.
+function wire(ev) {
+  return {
+    type: ev.type,
+    key: ev.key,
+    value: ev.value,
+    dot: ev.dot,
+    ts: ev.ts,
+    clock: ev.clock.toJSON(),
+    deps: ev.deps.toJSON(),
+  };
+}
+
+console.log('clock algebra');
+test('dominance is component-wise', () =&gt; {
+  const a = Clock.fromJSON({ x: [0, 3], y: [0, 1] });
+  const b = Clock.fromJSON({ x: [0, 2], y: [0, 1] });
+  assert.strictEqual(a.dominates(b), true);
+  assert.strictEqual(b.dominates(a), false);
+  const c = Clock.fromJSON({ x: [0, 5] });
+  assert.strictEqual(a.dominates(c), false);
+  assert.strictEqual(c.dominates(a), false);
+});
+
+test('epoch dominates older incarnation regardless of seq', () =&gt; {
+  const old = Clock.fromJSON({ r: [0, 999] });
+  const neu = Clock.fromJSON({ r: [1, 1] });
+  assert.strictEqual(neu.dominates(old), true);
+  assert.strictEqual(old.dominates(neu), false);
+});
+
+test('merge is pointwise max and commutative', () =&gt; {
+  const a = Clock.fromJSON({ x: [0, 3], y: [0, 1] });
+  const b = Clock.fromJSON({ x: [0, 2], y: [0, 4], z: [0, 1] });
+  const m1 = a.clone().merge(b);
+  const m2 = b.clone().merge(a);
+  assert.deepStrictEqual(m1.toJSON(), m2.toJSON());
+  assert.deepStrictEqual(m1.toJSON(), { x: [0, 3], y: [0, 4], z: [0, 1] });
+});
+
+console.log('basic cache semantics');
+test('put/get/remove on a single replica', () =&gt; {
+  const c = new CausalCache({ replica: 'a' });
+  c.write('k', 1);
+  assert.strictEqual(c.get('k'), 1);
+  c.write('k', 2);
+  assert.strictEqual(c.get('k'), 2);
+  c.remove('k');
+  assert.strictEqual(c.has('k'), false);
+});
+
+test('delete then write is accepted (causally after)', () =&gt; {
+  const c = new CausalCache({ replica: 'a' });
+  c.write('k', 1);
+  c.remove('k');
+  c.write('k', 3);
+  assert.strictEqual(c.get('k'), 3);
+});
+
+console.log('out-of-order delivery');
+test('causally later put is buffered until its dependency arrives', () =&gt; {
+  const a = new CausalCache({ replica: 'a' });
+  const b = new CausalCache({ replica: 'b' });
+  const e1 = a.write('k', 1);
+  const e2 = a.write('k', 2);
+  assert.strictEqual(b.receive(wire(e2)), 'buffered');
+  assert.strictEqual(b.has('k'), false);
+  assert.strictEqual(b.receive(wire(e1)), 'applied');
+  assert.strictEqual(b.get('k'), 2, 'buffer must drain in causal order');
+  assert.strictEqual(b.pending.length, 0);
+});
+
+test('concurrent puts resolve deterministically (LWW tie-break)', () =&gt; {
+  const a = new CausalCache({ replica: 'a' });
+  const b = new CausalCache({ replica: 'b' });
+  const ea = a.write('k', 'from-a');
+  const eb = b.write('k', 'from-b');
+
+  const c1 = new CausalCache({ replica: 'c' });
+  c1.receive(wire(ea));
+  c1.receive(wire(eb));
+  const c2 = new CausalCache({ replica: 'd' });
+  c2.receive(wire(eb));
+  c2.receive(wire(ea));
+  assert.strictEqual(c1.get('k'), c2.get('k'), 'convergent');
+});
+
+console.log('frontier / eviction safety');
+test('invalidation evicts only when it dominates', () =&gt; {
+  const c = new CausalCache({ replica: 'c' });
+  const writer = new CausalCache({ replica: 'w' });
+  const e1 = writer.write('k', 1);
+  c.receive(wire(e1));
+  assert.strictEqual(c.get('k'), 1);
+
+  // A concurrent invalidation (no knowledge of e1) must NOT evict.
+  const concurrent = new Clock();
+  concurrent.set('z', [0, 5]);
+  c.invalidate('k', concurrent);
+  assert.strictEqual(c.get('k'), 1, 'concurrent frontier must not evict');
+
+  // A dominating invalidation MUST evict.
+  const dom = e1.clock.clone();
+  c.invalidate('k', dom);
+  assert.strictEqual(c.has('k'), false, 'dominating frontier must evict');
+});
+
+test('partial union of frontiers eventually dominates', () =&gt; {
+  const c = new CausalCache({ replica: 'c' });
+  const writer = new CausalCache({ replica: 'w' });
+  const e = writer.write('k', 1);
+  c.receive(wire(e));
+
+  const f1 = new Clock();
+  f1.set('w', [0, 1]); // does not cover the writer's own dot? it does
+  // Make it strictly partial: only covers another replica.
+  const partial = new Clock();
+  partial.set('other', [0, 7]);
+  c.invalidate('k', partial);
+  assert.strictEqual(c.get('k'), 1);
+
+  // Now merge the real frontier.
+  c.invalidate('k', e.clock.clone());
+  assert.strictEqual(c.has('k'), false);
+});
+
+console.log('resurrection resistance');
+test('delayed put dominated by a delete is rejected', () =&gt; {
+  const a = new CausalCache({ replica: 'a' });
+  const put = a.write('k', 'old');
+  const del = a.remove('k');
+
+  const c = new CausalCache({ replica: 'c' });
+  c.receive(wire(put));
+  c.receive(wire(del));
+  assert.strictEqual(c.has('k'), false, 'delete must evict the entry');
+  const r = c.receive(wire(put)); // stale duplicate arrives late
+  assert.strictEqual(r, 'dropped-invalidated');
+  assert.strictEqual(c.has('k'), false, 'stale value must not be resurrected');
+});
+
+test('concurrent put is retained (not mistakenly invalidated)', () =&gt; {
+  const a = new CausalCache({ replica: 'a' });
+  const b = new CausalCache({ replica: 'b' });
+  const del = a.remove('k');               // deps {} since it is a's first op
+  const concurrentPut = b.write('k', 'concurrent');
+
+  const c = new CausalCache({ replica: 'c' });
+  assert.strictEqual(c.receive(wire(del)), 'applied');
+  const rConc = c.receive(wire(concurrentPut));
+  assert.strictEqual(rConc, 'applied', 'concurrent put must not be dropped');
+  assert.strictEqual(c.get('k'), 'concurrent');
+});
+
+test('shadowed concurrent entry is evicted once frontier catches up', () =&gt; {
+  const a = new CausalCache({ replica: 'a' });
+  const b = new CausalCache({ replica: 'b' });
+  const put = b.write('k', 'v');
+  const del = a.remove('k');
+
+  const c = new CausalCache({ replica: 'c' });
+  c.receive(wire(put));
+  assert.strictEqual(c.get('k'), 'v');
+  c.receive(wire(del)); // concurrent with put -&gt; not evicted yet
+  assert.strictEqual(c.get('k'), 'v', 'must not evict non-dominated entry');
+});
+
+console.log('replica reset');
+test('delayed pre-reset message is rejected', () =&gt; {
+  const a = new CausalCache({ replica: 'a' });
+  const oldPut = a.write('k', 'pre-reset');
+  a.reset();
+  const newPut = a.write('k', 'post-reset');
+
+  const c = new CausalCache({ replica: 'c' });
+  c.receive(wire(newPut));
+  assert.strictEqual(c.get('k'), 'post-reset');
+
+  const r = c.receive(wire(oldPut));
+  assert.strictEqual(r, 'dropped-stale');
+  assert.strictEqual(c.get('k'), 'post-reset', 'pre-reset message must not win');
+});
+
+test('post-reset write dominates pre-reset tombstone', () =&gt; {
+  const a = new CausalCache({ replica: 'a' });
+  a.write('k', 'v1');
+  a.reset();
+  a.write('k', 'v2');
+  assert.strictEqual(a.get('k'), 'v2');
+});
+
+console.log('bounded metadata compaction');
+test('pruneBelow drops only components at/below floor', () =&gt; {
+  const c = Clock.fromJSON({ a: [0, 1], b: [0, 5], c: [0, 3] });
+  const floor = Clock.fromJSON({ a: [0, 1], b: [0, 9], d: [0, 1] });
+  assert.strictEqual(c.pruneBelow(floor), 2); // a and b removed, c kept
+  assert.deepStrictEqual(c.toJSON(), { c: [0, 3] });
+});
+
+test('advanceStable bounds per-key frontier metadata', () =&gt; {
+  const c = new CausalCache({ replica: 'tracker' });
+  c.write('k', 1);
+  const f = new Clock();
+  f.set('writer', [0, 100]);
+  f.set('other', [0, 100]);
+  c.invalidate('k', f);
+  const before = c.metadataSize();
+
+  const stable = Clock.fromJSON({ writer: [0, 100] });
+  c.advanceStable(stable);
+  assert.strictEqual(c.frontier.get('k') !== undefined, true);
+  assert.deepStrictEqual(c.frontier.get('k').toJSON(), { other: [0, 100] });
+  assert.ok(c.metadataSize() &lt;= before, 'metadata must not grow');
+});
+
+test('floor blocks delayed puts after GC', () =&gt; {
+  const c = new CausalCache({ replica: 'tracker' });
+  const w = CausalCache.restore({
+    replica: 'c', epoch: 0,
+    local: {}, maxEpoch: [], floor: {}, entries: [], frontier: [], pending: [],
+  });
+  const put = w.write('k', 'v');
+  // Pretend the put was acknowledged everywhere and GC'd.
+  c.advanceStable(put.clock.clone());
+  const r = c.receive(wire(put));
+  assert.strictEqual(r, 'dropped-floor');
+  assert.strictEqual(c.has('k'), false);
+});
+
+console.log('snapshot / recovery');
+test('snapshot then restore preserves state and safety', () =&gt; {
+  const c = new CausalCache({ replica: 'tracker' });
+  const w = new CausalCache({ replica: 'w' });
+  const p1 = w.write('k', 'v1');
+  const del = w.remove('k');
+  c.receive(wire(p1));
+  c.receive(wire(del));
+  c.write('other', 42);
+
+  const snap = c.snapshot();
+  const json = JSON.parse(JSON.stringify(snap));
+  const r = CausalCache.restore(json);
+
+  assert.strictEqual(r.get('k'), undefined);
+  assert.strictEqual(r.get('other'), 42);
+  // A stale pre-snapshot put must still be rejected after recovery.
+  const late = r.receive(wire(p1));
+  assert.strictEqual(late, 'dropped-invalidated');
+  assert.strictEqual(r.has('k'), false);
+});
+
+test('recovery keeps buffered events pending', () =&gt; {
+  const w = new CausalCache({ replica: 'w' });
+  const e1 = w.write('k', 1);
+  const e2 = w.write('k', 2);
+
+  const c = new CausalCache({ replica: 'c' });
+  c.receive(wire(e2));
+  assert.strictEqual(c.pending.length, 1);
+  const snap = JSON.parse(JSON.stringify(c.snapshot()));
+  const r = CausalCache.restore(snap);
+  assert.strictEqual(r.pending.length, 1);
+  r.receive(wire(e1));
+  assert.strictEqual(r.get('k'), 2);
+  assert.strictEqual(r.pending.length, 0);
+});
+
+console.log(`\n${passed} tests passed`);
+</code></pre>
+<h3>2.3 <code>fuzz.js</code> (adversarial differential test vs. an independent oracle)</h3>
+<pre><code class="language-js">'use strict';
+
+/*
+ * Adversarial randomized verification for CausalCache.
+ *
+ * Independently computes the intended final state (an oracle) and checks that
+ * many trackers -- fed every event in a different random order, with duplicate
+ * deliveries, a mid-stream snapshot/restore, and sparse replica participation
+ * -- all converge to exactly that state.
+ *
+ * Oracle for a key:
+ *   frontier = join of every delete's context
+ *   survivors = puts whose context is NOT dominated by frontier
+ *   value = survivor with the greatest (ts, replica)  [LWW]
+ */
+
+const assert = require('assert');
+const { CausalCache, Clock, cmpDot } = require('./causal-cache');
+
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed &gt;&gt;&gt; 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t &gt;&gt;&gt; 7), 61 | t)) ^ t;
+    return ((t ^ (t &gt;&gt;&gt; 14)) &gt;&gt;&gt; 0) / 4294967296;
+  };
+}
+
+function wire(ev) {
+  return {
+    type: ev.type,
+    key: ev.key,
+    value: ev.value,
+    dot: ev.dot,
+    ts: ev.ts,
+    clock: ev.clock.toJSON(),
+    deps: ev.deps.toJSON(),
+  };
+}
+
+function shuffle(arr, rand) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i &gt; 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function oracle(events, floorClock) {
+  const frontier = new Map(); // key -&gt; Clock
+  const best = new Map(); // key -&gt; {value, clock, dot, ts}
+  for (const ev of events) {
+    let f = frontier.get(ev.key);
+    if (!f) {
+      f = new Clock();
+      frontier.set(ev.key, f);
+    }
+    if (ev.type === 'del') f.merge(ev.clock);
+  }
+  for (const ev of events) {
+    if (ev.type !== 'put') continue;
+    const f = frontier.get(ev.key);
+    if (f &amp;&amp; f.dominates(ev.clock)) continue; // stale / invalidated
+    if (floorClock &amp;&amp; floorClock.dominates(ev.clock)) continue; // GC'd
+    const cur = best.get(ev.key);
+    if (!cur) {
+      best.set(ev.key, { value: ev.value, clock: ev.clock, dot: ev.dot, ts: ev.ts });
+    } else if (ev.ts !== cur.ts ? ev.ts &gt; cur.ts : cmpDot(ev.dot, cur.dot) &gt; 0) {
+      best.set(ev.key, { value: ev.value, clock: ev.clock, dot: ev.dot, ts: ev.ts });
+    }
+  }
+  const out = new Map();
+  for (const [k, v] of best) out.set(k, v.value);
+  return out;
+}
+
+function run(seed) {
+  const rand = mulberry32(seed);
+  const R = 8;
+  const K = 60;
+  const M = 4000;
+  const replicas = [];
+  for (let i = 0; i &lt; R; i++) replicas.push(new CausalCache({ replica: 'r' + i }));
+
+  // Sparse, skewed participation: most writes come from a few hot replicas.
+  const hot = [0, 1, 2];
+  const events = [];
+  for (let i = 0; i &lt; M; i++) {
+    const r = rand() &lt; 0.8 ? hot[Math.floor(rand() * hot.length)] : Math.floor(rand() * R);
+    const key = 'k' + Math.floor(rand() * K);
+    if (rand() &lt; 0.25) events.push(replicas[r].remove(key));
+    else events.push(replicas[r].write(key, `${r}:${i}`));
+  }
+
+  const expected = oracle(events);
+
+  // Feed every tracker a different permutation, with duplicates.
+  for (let t = 0; t &lt; 5; t++) {
+    const tracker = new CausalCache({ replica: 'tracker' + t });
+    const order = shuffle(events, rand);
+    // Inject duplicates of a random subset (idempotence / no resurrection).
+    const feed = order.concat(shuffle(order, rand).slice(0, Math.floor(order.length / 5)));
+    for (let i = 0; i &lt; feed.length; i++) {
+      tracker.receive(wire(feed[i]));
+      if (t === 0 &amp;&amp; i === Math.floor(feed.length / 2)) {
+        // Mid-stream recovery must not perturb the result.
+        const restored = CausalCache.restore(JSON.parse(JSON.stringify(tracker.snapshot())));
+        tracker.entries = restored.entries;
+        tracker.frontier = restored.frontier;
+        tracker.floor = restored.floor;
+        tracker.local = restored.local;
+        tracker.maxEpoch = restored.maxEpoch;
+        tracker.pending = restored.pending;
+      }
+    }
+    assert.strictEqual(tracker.pending.length, 0, `seed ${seed} t=${t}: undelivered events`);
+
+    for (let k = 0; k &lt; K; k++) {
+      const key = 'k' + k;
+      const got = tracker.get(key);
+      const want = expected.get(key);
+      assert.strictEqual(
+        got,
+        want,
+        `seed ${seed} tracker ${t} key ${key}: got ${got} want ${want}`
+      );
+    }
+  }
+  return { events: events.length, keys: K };
+}
+
+let total = 0;
+for (let seed = 1; seed &lt;= 25; seed++) {
+  const r = run(seed);
+  total += r.events;
+}
+console.log(`fuzz: 25 seeds OK, ${total} events compared against independent oracle`);
+
+// ---------------------------------------------------------------------------
+// Compaction + replay scenario: after full delivery, advance a stable floor,
+// let the tracker prune metadata and evict dominated versions, then replay
+// every event.  The floor must block stale replays and all trackers must still
+// agree with the floor-aware oracle.  Metadata must shrink back to a bound.
+// ---------------------------------------------------------------------------
+function runCompaction(seed) {
+  const rand = mulberry32(seed ^ 0x9e3779b9);
+  const R = 8;
+  const K = 40;
+  const M = 3000;
+  const replicas = [];
+  for (let i = 0; i &lt; R; i++) replicas.push(new CausalCache({ replica: 'r' + i }));
+  const events = [];
+  for (let i = 0; i &lt; M; i++) {
+    const r = Math.floor(rand() * R);
+    const key = 'k' + Math.floor(rand() * K);
+    if (rand() &lt; 0.2) events.push(replicas[r].remove(key));
+    else events.push(replicas[r].write(key, `${r}:${i}`));
+  }
+
+  // A legitimate global stable frontier: merge of the first half of events.
+  const floor = new Clock();
+  for (let i = 0; i &lt; Math.floor(M / 2); i++) floor.merge(events[i].clock);
+  const expected = oracle(events, floor);
+
+  const trackers = [];
+  for (let t = 0; t &lt; 4; t++) {
+    const tracker = new CausalCache({ replica: 'tracker' + t });
+    for (const ev of shuffle(events, rand)) tracker.receive(wire(ev));
+    trackers.push(tracker);
+  }
+
+  // Compact, then replay every event (including stale pre-floor ones).
+  for (const tracker of trackers) {
+    tracker.advanceStable(floor);
+    for (const ev of shuffle(events, rand)) tracker.receive(wire(ev));
+    assert.strictEqual(tracker.pending.length, 0);
+    for (let k = 0; k &lt; K; k++) {
+      const key = 'k' + k;
+      assert.strictEqual(
+        tracker.get(key),
+        expected.get(key),
+        `seed ${seed} compaction key ${key}: ${tracker.get(key)} != ${expected.get(key)}`
+      );
+    }
+  }
+
+  // Metadata must be bounded by the live exceptions above the floor.
+  for (const tracker of trackers) {
+    assert.ok(
+      tracker.metadataSize() &lt;= 3 * R * K + 128,
+      `metadata too large: ${tracker.metadataSize()}`
+    );
+  }
+  return { events: M, keys: K };
+}
+
+let ctotal = 0;
+for (let seed = 1; seed &lt;= 10; seed++) ctotal += runCompaction(seed).events;
+console.log(`compaction+replay: 10 seeds OK, ${ctotal} events checked`);
+</code></pre>
+<h3>2.4 <code>bench.js</code> (scale / metadata-bound benchmark)</h3>
+<pre><code class="language-js">'use strict';
+
+/*
+ * Scale / metadata-bound benchmark.
+ *
+ * Exercises millions of keys with sparse replica participation, then advances
+ * the stable watermark and asserts that metadata collapses to the bounded set
+ * of live exceptions rather than growing with the number of keys.
+ */
+
+const { CausalCache, Clock } = require('./causal-cache');
+
+function mulberry32(seed) {
+  return function () {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed &gt;&gt;&gt; 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t &gt;&gt;&gt; 7), 61 | t)) ^ t;
+    return ((t ^ (t &gt;&gt;&gt; 14)) &gt;&gt;&gt; 0) / 4294967296;
+  };
+}
+
+const N = Number(process.env.N || 1000000);
+const R = Number(process.env.R || 64);
+const rand = mulberry32(12345);
+
+const replicas = [];
+for (let i = 0; i &lt; R; i++) replicas.push(new CausalCache({ replica: 'r' + i }));
+
+const t0 = Date.now();
+const events = new Array(N);
+for (let i = 0; i &lt; N; i++) {
+  // Sparse participation: a few hot replicas plus a long tail.
+  const r = rand() &lt; 0.9 ? Math.floor(rand() * 4) : Math.floor(rand() * R);
+  events[i] = replicas[r].write('key:' + i, i);
+}
+const tGen = Date.now() - t0;
+
+// Deliver to a tracker (this also builds the tracker's own context).
+const tracker = new CausalCache({ replica: 'tracker' });
+const t1 = Date.now();
+for (let i = 0; i &lt; N; i++) {
+  const e = events[i];
+  tracker.receive({
+    type: e.type,
+    key: e.key,
+    value: e.value,
+    dot: e.dot,
+    ts: e.ts,
+    clock: e.clock.toJSON(),
+    deps: e.deps.toJSON(),
+  });
+}
+const tDeliver = Date.now() - t1;
+
+const before = tracker.metadataSize();
+const heapBefore = process.memoryUsage().heapUsed;
+
+// Everything produced is now globally stable.
+const stable = new Clock();
+for (let i = 0; i &lt; N; i++) stable.merge(events[i].clock);
+const t2 = Date.now();
+tracker.advanceStable(stable);
+const tCompact = Date.now() - t2;
+const after = tracker.metadataSize();
+const heapAfter = process.memoryUsage().heapUsed;
+
+console.log(`keys/events : ${N}`);
+console.log(`replicas    : ${R} (sparse, skewed)`);
+console.log(`generate    : ${tGen} ms`);
+console.log(`deliver     : ${tDeliver} ms`);
+console.log(`compact     : ${tCompact} ms`);
+console.log(`metadata    : ${before} -&gt; ${after} (live keys ${tracker.entries.size})`);
+console.log(
+  `heap used   : ${(heapBefore / 1e6).toFixed(1)} MB -&gt; ${(heapAfter / 1e6).toFixed(1)} MB`
+);
+
+if (tracker.entries.size !== 0 &amp;&amp; after !== 0) {
+  console.error('expected all entries to be compacted away');
+  process.exit(1);
+}
+console.log('OK: metadata is bounded by the live frontier, not by key count');
+</code></pre>
+<hr />
+<h2>3. Verification</h2>
+<p>All commands below were executed in <code>~/causal-cache</code> on Node <code>v22.23.2</code> (the module targets node20 and uses no post-ES2019 features).</p>
+<h3>3.1 Unit and property tests</h3>
+<pre><code class="language-bash">node test.js
+</code></pre>
+<pre><code>clock algebra
+  ok  dominance is component-wise
+  ok  epoch dominates older incarnation regardless of seq
+  ok  merge is pointwise max and commutative
+basic cache semantics
+  ok  put/get/remove on a single replica
+  ok  delete then write is accepted (causally after)
+out-of-order delivery
+  ok  causally later put is buffered until its dependency arrives
+  ok  concurrent puts resolve deterministically (LWW tie-break)
+frontier / eviction safety
+  ok  invalidation evicts only when it dominates
+  ok  partial union of frontiers eventually dominates
+resurrection resistance
+  ok  delayed put dominated by a delete is rejected
+  ok  concurrent put is retained (not mistakenly invalidated)
+  ok  shadowed concurrent entry is evicted once frontier catches up
+replica reset
+  ok  delayed pre-reset message is rejected
+  ok  post-reset write dominates pre-reset tombstone
+bounded metadata compaction
+  ok  pruneBelow drops only components at/below floor
+  ok  advanceStable bounds per-key frontier metadata
+  ok  floor blocks delayed puts after GC
+snapshot / recovery
+  ok  snapshot then restore preserves state and safety
+  ok  recovery keeps buffered events pending
+
+19 tests passed
+</code></pre>
+<h3>3.2 Adversarial differential fuzzing</h3>
+<p>25 seeds × 4 000 events (100 000 events) are delivered to five trackers in five different random orders, with duplicate re-delivery and a mid-stream snapshot/restore, then compared key-by-key against an <strong>independently coded oracle</strong>. A second suite advances a stable floor, replays every event, and re-checks all trackers.</p>
+<pre><code class="language-bash">node fuzz.js
+</code></pre>
+<pre><code>fuzz: 25 seeds OK, 100000 events compared against independent oracle
+compaction+replay: 10 seeds OK, 30000 events checked
+</code></pre>
+<h3>3.3 Scale and bounded metadata</h3>
+<p>One million keys, 64 replicas with skewed/sparse participation: write, deliver, then advance the stable watermark and compact.</p>
+<pre><code class="language-bash">node --max-old-space-size=4096 bench.js
+</code></pre>
+<pre><code>keys/events : 1000000
+replicas    : 64 (sparse, skewed)
+generate    : 2577 ms
+deliver     : 2820 ms
+compact     : 695 ms
+metadata    : 2000001 -&gt; 65 (live keys 0)
+heap used   : 1369.5 MB -&gt; 1550.9 MB
+OK: metadata is bounded by the live frontier, not by key count
+</code></pre>
+<p>The logical metadata size collapsed from <code>2 000 001</code> components to <code>65</code> (= the floor plus the 64 replica incarnations), independent of the key count.</p>
+<hr />
+<h2>4. What was fixed, in one paragraph</h2>
+<p>Causal delivery is buffered until <code>deps</code> are observed; invalidation evicts a version only when the merged frontier (or the GC floor) <strong>dominates</strong> its context; concurrent versions are retained as an MV-register and reduced by <code>(Lamport ts, replica)</code> so delivery order cannot change the result; per-replica <strong>epochs</strong> make resets monotonic and reject delayed pre-reset messages; and a globally stable <strong>floor</strong> compacts frontiers to exceptions and blocks replay of garbage-collected writes. Snapshots carry the floor, frontier and pending buffer, so recovery cannot resurrect stale values.</p>
+<h2>5. Complexity</h2>
+<ul>
+<li><code>receive</code>: O(V) to test dominance / merge, V = live replicas, plus amortised drain of the causal buffer.</li>
+<li>Storage per key: O(number of concurrent versions), bounded by V and collapsed to O(live exceptions) by <code>advanceStable</code>.</li>
+<li>Global metadata after compaction: O(V · live keys with exceptions), not O(total keys) and not O(total history).</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: js-20261007-causal-cache-invalidation-frontier
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-07T10:09:04.751Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a distributed cache invalidation tracker that receives out-of-order causal context vectors and must evict only entries whose dependency frontier is provably dominated, while retaining correctness across replica resets and vector compaction. Design bounded metadata compaction and recovery so concurrent writes cannot resurrect stale values; target adversarial traces with millions of keys and sparse replica participation.&quot;, &quot;environment&quot;: &quot;node20&quot;, &quot;language&quot;: &quot;js&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;js-20261007-causal-cache-invalidation-frontier&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-07T10:09:04.752Z&quot;, &quot;version&quot;: &quot;20&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

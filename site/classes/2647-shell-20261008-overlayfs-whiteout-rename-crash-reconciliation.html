@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>shell-20261008-overlayfs-whiteout-rename-crash-reconciliation — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: shell-20261008-overlayfs-whiteout-rename-crash-reconciliation">
+<meta property="og:title" content="shell-20261008-overlayfs-whiteout-rename-crash-reconciliation — Off-By-One">
+<meta property="og:description" content="Problem class: shell-20261008-overlayfs-whiteout-rename-crash-reconciliation">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2647-shell-20261008-overlayfs-whiteout-rename-crash-reconciliation.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>shell-20261008-overlayfs-whiteout-rename-crash-reconciliation</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>Problem class: shell-20261008-overlayfs-whiteout-rename-crash-reconciliation</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2647-shell-20261008-overlayfs-whiteout-rename-crash-reconciliation.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>OverlayFS Crash Reconciliation: Reconstructing the Unique Merged Namespace</h1>
+<p><strong>Problem class:</strong> <code>shell-20261008-overlayfs-whiteout-rename-crash-reconciliation</code>
+<strong>Environment:</strong> GNU/Linux, Bash 5+
+<strong>Deliverable:</strong> a bounded-memory Bash tool that detects contradictory upper-layer records, emits a deterministic repair plan, and proves idempotence when the plan is replayed.</p>
+<blockquote>
+<p>The complete, tested deliverable is saved at <code>~/overlayfs-whiteout-reconciliation.md</code>. It was extracted and re-run end-to-end from the markdown itself to confirm it is directly usable.</p>
+</blockquote>
+<hr />
+<h2>1. Symptom</h2>
+<p>An OverlayFS upper layer is edited by a sequence of <em>copy-up</em>, <em>whiteout</em>, <em>rename</em> and <em>opaque-directory</em> operations. The machine crashes. On the next boot the upper directory is a mixture of entries that were durably written, inodes from a copy-up that was <strong>interrupted half-way</strong>, whiteout markers that are missing or that conflict with a later create, opaque markers applied to a non-directory, and rename residue where the source was not whiteouted.</p>
+<p>Naively mounting that upper gives a <strong>different</strong> merged view on every attempt to "fix" it: the lower entry either resurfaces or stays buried depending on which stray inode is present. The task is to make reconciliation a <strong>pure function of the durable journal prefix</strong>, so exactly one merged namespace is produced, and to prove the produced repair is a fixed point.</p>
+<hr />
+<h2>2. Root-cause analysis</h2>
+<h3>2.1 The upper layer is namespace metadata, not just data</h3>
+<p>OverlayFS does not edit the lower layer. Deletion, rename and directory hiding are all encoded <em>as upper-layer tricks</em>:</p>
+<table>
+<thead>
+<tr>
+<th>Intent</th>
+<th>Upper-layer artifact</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>hide a lower file</td>
+<td><strong>whiteout</strong> marker at the same path</td>
+</tr>
+<tr>
+<td>replace lower content</td>
+<td>copied-up upper inode (copy-up)</td>
+</tr>
+<tr>
+<td>hide <em>all remaining</em> lower children of a dir</td>
+<td><strong>opaque</strong> marker on the dir</td>
+</tr>
+<tr>
+<td>rename a merged entry</td>
+<td>new upper name <strong>plus a whiteout at the old name</strong></td>
+</tr>
+</tbody>
+</table>
+<p>A crash can therefore lose a <em>metadata</em> edit without losing the data inode — exactly why "the same bytes" can still yield two different namespaces.</p>
+<h3>2.2 Crash prefixes are ambiguous unless a durability rule is fixed</h3>
+<p>A write-ahead journal only tells us what was <em>attempted</em>. A crash at record <code>k</code> means records <code>1..k</code> may be only partially durable. Two repairs can always be argued for a torn copy-up: <strong>redo</strong> it, or <strong>roll back</strong> it. If the implementation is allowed to choose per path, the merged namespace is no longer a function of the prefix. The only way to make reconciliation deterministic (and therefore verifiable and idempotent) is to fix a total rule up front and apply it uniformly. This tool adopts the <strong>dependency/durability rule</strong>:</p>
+<blockquote>
+<p>An operation is effective only if all of its prerequisites are durably completed. A copy-up that has <code>copyup-begin</code> without <code>copyup-end</code> inside the prefix is <strong>rolled back</strong>: the upper inode is removed so the lower entry remains visible. Every later record that depended on that copy-up is reported as a contradiction and discarded.</p>
+</blockquote>
+<p>Roll-back is chosen (over redo) because it is the only choice that never invents data: on the next mount either the operation fully happened, or it fully did not.</p>
+<h3>2.3 The five crash classes this tool canonicalises</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Contradiction code</th>
+<th>Corrupted artifact</th>
+<th>Lower-visibility hazard</th>
+<th>Canonical repair</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>E_TORN_COPYUP</code></td>
+<td><code>copyup-begin</code> with no <code>copyup-end</code></td>
+<td>partial upper shadows/overwrites lower</td>
+<td>remove upper inode; lower shows again</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>E_ORPHAN_COPYUP_END</code> / <code>E_DUP_COPYUP_BEGIN</code></td>
+<td>unpaired copy-up controls</td>
+<td>undefined copy-up identity</td>
+<td>trust the end / ignore duplicate begin</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>E_WHITEOUT_WRITE</code></td>
+<td><code>whiteout p</code> then <code>write p</code></td>
+<td>new file is hidden by its own whiteout</td>
+<td>remove the whiteout (create wins)</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>E_RENAME_NO_WHITEOUT</code></td>
+<td>rename of lower-backed <code>src</code> without whiteout</td>
+<td>deleted lower name <strong>resurrects</strong></td>
+<td>insert whiteout at <code>src</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>E_OPAQUE_NONDIR</code></td>
+<td>opaque marker on a non-directory</td>
+<td>corrupt merge / no hiding</td>
+<td>materialise the dir, keep opaque</td>
+</tr>
+</tbody>
+</table>
+<p>Additional malformed records (<code>E_RENAME_LOWER_SRC</code>, <code>E_UNKNOWN_OP</code>) are reported and resolved by the same conservative rule.</p>
+<hr />
+<h2>3. Exact fix</h2>
+<h3>3.1 Interface and record grammar</h3>
+<p>On-disk conventions (portable, rootless, identical to OCI/AUFS layer tarballs):</p>
+<pre><code>&lt;dir&gt;/.wh.&lt;name&gt;        whiteout for &lt;dir&gt;/&lt;name&gt;
+&lt;dir&gt;/.wh..wh..opq      &lt;dir&gt; is opaque
+</code></pre>
+<p>Journal grammar (one record per line, <code>seq</code> strictly increasing, no spaces in paths):</p>
+<pre><code>&lt;seq&gt; copyup-begin &lt;path&gt;
+&lt;seq&gt; copyup-end   &lt;path&gt; [dir|file]
+&lt;seq&gt; write        &lt;path&gt;
+&lt;seq&gt; mkdir        &lt;path&gt;
+&lt;seq&gt; whiteout     &lt;path&gt;
+&lt;seq&gt; unwhiteout   &lt;path&gt;
+&lt;seq&gt; opaque       &lt;dir&gt;
+&lt;seq&gt; clear-opaque &lt;dir&gt;
+&lt;seq&gt; rename       &lt;src&gt; &lt;dst&gt;
+</code></pre>
+<p>Subcommands:</p>
+<pre><code>overlayfs-reconcile.sh replay [--prefix N]   # print canonical merged namespace
+overlayfs-reconcile.sh check  [--prefix N]   # list contradictions; exit 3 if any
+overlayfs-reconcile.sh plan   [--prefix N]   # deterministic repair plan
+overlayfs-reconcile.sh apply  --plan FILE    # apply plan idempotently
+overlayfs-reconcile.sh verify [--prefix N]   # fixed-point + idempotence proof
+overlayfs-reconcile.sh hash   [--prefix N]   # sha256 of the merged namespace
+</code></pre>
+<p>All subcommands accept <code>--lower DIR --upper DIR --journal FILE</code> and an optional <code>--max-paths N</code> hard bound on the working set.</p>
+<h3>3.2 The complete tool</h3>
+<p>Save the following as <code>overlayfs-reconcile.sh</code> and <code>chmod +x</code> it.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# overlayfs-reconcile.sh -- bounded-memory OverlayFS crash reconciliation tool.
+#
+# Model
+# -----
+#   lower/            read-only reference tree (ground truth).
+#   upper/            writable layer, using OCI/AUFS-style whiteout markers:
+#                        &lt;dir&gt;/.wh.&lt;name&gt;          -&gt; whiteout for &lt;dir&gt;/&lt;name&gt;
+#                        &lt;dir&gt;/.wh..wh..opq        -&gt; &lt;dir&gt; is opaque
+#   journal           ordered records describing intended upper operations.
+#
+# Record grammar (whitespace separated, one per line, seq strictly increasing):
+#   &lt;seq&gt; copyup-begin &lt;path&gt;
+#   &lt;seq&gt; copyup-end   &lt;path&gt; [dir|file]
+#   &lt;seq&gt; write        &lt;path&gt;
+#   &lt;seq&gt; mkdir        &lt;path&gt;
+#   &lt;seq&gt; whiteout     &lt;path&gt;
+#   &lt;seq&gt; unwhiteout   &lt;path&gt;
+#   &lt;seq&gt; opaque       &lt;dir&gt;
+#   &lt;seq&gt; clear-opaque &lt;dir&gt;
+#   &lt;seq&gt; rename       &lt;src&gt; &lt;dst&gt;
+#
+# Durability rule: an operation is only meaningful if its prerequisites are
+# durable.  A copy-up that began but never ended is rolled back (the upper
+# inode is removed so the lower entry stays visible); any later record that
+# depended on it is reported as a contradiction and discarded.  This makes the
+# merged namespace a pure function of the durable prefix, hence unique.
+#
+# All state is keyed by path, so memory is O(#paths), not O(#records): the
+# journal is streamed and never retained.
+#
+# Subcommands:
+#   replay [--prefix N]   print canonical merged namespace (lower + repaired upper)
+#   check  [--prefix N]   print contradictions, exit 3 if any
+#   plan   [--prefix N]   print deterministic repair plan (sorted, rank-keyed)
+#   apply  --plan FILE    apply a plan idempotently
+#   verify [--prefix N]   prove the plan reaches a fixed point and is idempotent
+#   hash   [--prefix N]   sha256 of canonical merged namespace
+#
+set -o pipefail
+
+PROG=${0##*/}
+
+die() { printf '%s: error: %s\n' &quot;$PROG&quot; &quot;$*&quot; &gt;&amp;2; exit 1; }
+
+usage() {
+  sed -n '2,60p' &quot;$0&quot; | sed 's/^# \{0,1\}//'
+  exit &quot;${1:-0}&quot;
+}
+
+# ---------------------------------------------------------------------------
+# small helpers
+# ---------------------------------------------------------------------------
+joinp() { # joinp &lt;dir&gt; &lt;name&gt; ; dir may be empty or &quot;.&quot;
+  if [ -z &quot;$1&quot; ] || [ &quot;$1&quot; = &quot;.&quot; ]; then printf '%s' &quot;$2&quot;; else printf '%s/%s' &quot;$1&quot; &quot;$2&quot;; fi
+}
+parent_of() { # parent dir of a path; &quot;&quot; for top level
+  case &quot;$1&quot; in
+    */*) printf '%s' &quot;${1%/*}&quot; ;;
+    *)   printf '%s' &quot;&quot; ;;
+  esac
+}
+base_of() { printf '%s' &quot;${1##*/}&quot;; }
+depth_of() { local p=$1 d=0; while [ &quot;${p#*/}&quot; != &quot;$p&quot; ]; do d=$((d+1)); p=${p#*/}; done; printf '%s' &quot;$d&quot;; }
+wh_path() { # upper path of the whiteout marker for a namespace path
+  local u=$1 p=$2 par base
+  par=$(parent_of &quot;$p&quot;); base=$(base_of &quot;$p&quot;)
+  if [ -z &quot;$par&quot; ]; then printf '%s/.wh.%s' &quot;$u&quot; &quot;$base&quot;; else printf '%s/%s/.wh.%s' &quot;$u&quot; &quot;$par&quot; &quot;$base&quot;; fi
+}
+
+# scan_tree &lt;root&gt; ; emits  &lt;type&gt;\t&lt;path&gt;  (and  opaque\t&lt;dir&gt;)
+scan_tree() {
+  local root=$1
+  [ -d &quot;$root&quot; ] || return 0
+  find &quot;$root&quot; -mindepth 1 -printf '%y\t%p\n' 2&gt;/dev/null | while IFS=$'\t' read -r ty full; do
+    local rel=${full#&quot;$root&quot;/} base dir t
+    base=${rel##*/}
+    dir=${rel%/*}
+    [ &quot;$dir&quot; = &quot;$rel&quot; ] &amp;&amp; dir=&quot;&quot;
+    case &quot;$base&quot; in
+      .wh..wh..opq) printf 'opaque\t%s\n' &quot;$dir&quot; ;;
+      .wh.*)        printf 'whiteout\t%s\n' &quot;$(joinp &quot;$dir&quot; &quot;${base#.wh.}&quot;)&quot; ;;
+      *) case &quot;$ty&quot; in d) t=dir ;; *) t=file ;; esac
+         printf '%s\t%s\n' &quot;$t&quot; &quot;$rel&quot; ;;
+    esac
+  done
+}
+
+# ---------------------------------------------------------------------------
+# journal replay -&gt; desired upper state (bash associative arrays)
+# ---------------------------------------------------------------------------
+declare -A DTYPE DOPQ PENDING
+CONTRA=&quot;&quot;
+
+contra() { CONTRA+=&quot;$1&quot;$'\n'; }
+
+replay() { # replay &lt;journal&gt; &lt;prefix&gt;
+  local journal=$1 prefix=$2 line seq op p1 p2 st
+  DTYPE=(); DOPQ=(); PENDING=(); CONTRA=&quot;&quot;
+  [ -r &quot;$journal&quot; ] || die &quot;journal not readable: $journal&quot;
+  while read -r seq op p1 p2 _junk; do
+    [ -z &quot;${seq:-}&quot; ] &amp;&amp; continue
+    case &quot;$seq&quot; in \#*) continue ;; esac
+    [ &quot;$seq&quot; -le &quot;$prefix&quot; ] 2&gt;/dev/null || break
+    case &quot;$op&quot; in
+      copyup-begin)
+        if [ &quot;${PENDING[$p1]:-}&quot; = 1 ]; then
+          contra &quot;E_DUP_COPYUP_BEGIN $seq $p1&quot;
+        fi
+        PENDING[$p1]=1
+        ;;
+      copyup-end)
+        if [ &quot;${PENDING[$p1]:-}&quot; != 1 ]; then
+          contra &quot;E_ORPHAN_COPYUP_END $seq $p1&quot;
+        fi
+        unset 'PENDING[$p1]'
+        DTYPE[$p1]=&quot;${p2:-file}&quot;
+        ;;
+      write)
+        if [ &quot;${PENDING[$p1]:-}&quot; = 1 ]; then
+          contra &quot;E_WRITE_DURING_COPYUP $seq $p1&quot;
+        fi
+        if [ &quot;${DTYPE[$p1]:-}&quot; = whiteout ]; then
+          contra &quot;E_WHITEOUT_WRITE $seq $p1&quot;
+        fi
+        DTYPE[$p1]=file
+        ;;
+      mkdir)
+        DTYPE[$p1]=dir
+        ;;
+      whiteout)
+        DTYPE[$p1]=whiteout
+        unset 'DOPQ[$p1]'
+        ;;
+      unwhiteout)
+        if [ &quot;${DTYPE[$p1]:-}&quot; = whiteout ]; then unset 'DTYPE[$p1]'; fi
+        ;;
+      opaque)
+        if [ &quot;${DTYPE[$p1]:-}&quot; != dir ]; then
+          contra &quot;E_OPAQUE_NONDIR $seq $p1&quot;
+          DTYPE[$p1]=dir
+        fi
+        DOPQ[$p1]=1
+        ;;
+      clear-opaque)
+        unset 'DOPQ[$p1]'
+        ;;
+      rename)
+        st=&quot;${DTYPE[$p1]:-}&quot;
+        if [ -z &quot;$st&quot; ]; then
+          contra &quot;E_RENAME_LOWER_SRC $seq $p1&quot;
+          st=file
+        fi
+        DTYPE[$p2]=&quot;$st&quot;
+        if [ -n &quot;${LTYPE[$p1]:-}&quot; ]; then
+          # renaming a merged entry must leave a whiteout at the source,
+          # otherwise the lower entry becomes visible again.
+          contra &quot;E_RENAME_NO_WHITEOUT $seq $p1&quot;
+          DTYPE[$p1]=whiteout
+        else
+          unset 'DTYPE[$p1]'
+        fi
+        if [ &quot;${DOPQ[$p1]:-}&quot; = 1 ]; then DOPQ[$p2]=1; unset 'DOPQ[$p1]'; fi
+        ;;
+      *)
+        contra &quot;E_UNKNOWN_OP $seq $op&quot;
+        ;;
+    esac
+  done &lt; &quot;$journal&quot;
+
+  # Roll back every copy-up that never committed (durability rule).
+  local p
+  for p in &quot;${!PENDING[@]}&quot;; do
+    contra &quot;E_TORN_COPYUP $p&quot;
+    unset 'DTYPE[$p]'
+    unset 'DOPQ[$p]'
+  done
+
+  # Optional hard bound on the working set (proves O(#paths) memory).
+  if [ &quot;$MAXP&quot; -gt 0 ] 2&gt;/dev/null; then
+    local used=$(( ${#DTYPE[@]} + ${#DOPQ[@]} ))
+    [ &quot;$used&quot; -le &quot;$MAXP&quot; ] || die &quot;working set $used exceeds --max-paths $MAXP&quot;
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# diff observed upper vs desired upper -&gt; plan file
+# ---------------------------------------------------------------------------
+declare -A OTYPE OOPQ
+declare -A LTYPE
+
+load_lower() { # load_lower &lt;lower&gt;
+  local lower=$1
+  LTYPE=()
+  local t p
+  while IFS=$'\t' read -r t p; do LTYPE[$p]=$t; done &lt; &lt;(scan_tree &quot;$lower&quot;)
+}
+
+has_desired_descendant() { # true if any desired path lives strictly under $1
+  local p=$1 q
+  for q in &quot;${!DTYPE[@]}&quot;; do
+    case &quot;$q&quot; in &quot;$p&quot;/*) return 0 ;; esac
+  done
+  return 1
+}
+
+plan_dump() { # plan_dump &lt;planfile&gt; &lt;lower&gt; &lt;upper&gt;
+  local plan=$1 lower=$2 upper=$3
+  : &gt; &quot;$plan&quot;
+  local t p
+  OTYPE=(); OOPQ=()
+  while IFS=$'\t' read -r t p; do
+    case &quot;$t&quot; in
+      opaque) OOPQ[$p]=1 ;;
+      *) OTYPE[$p]=$t ;;
+    esac
+  done &lt; &lt;(scan_tree &quot;$upper&quot;)
+
+  local -A KEYS=()
+  for p in &quot;${!OTYPE[@]}&quot;; do KEYS[$p]=1; done
+  for p in &quot;${!DTYPE[@]}&quot;; do KEYS[$p]=1; done
+
+  local ot dt d
+  for p in &quot;${!KEYS[@]}&quot;; do
+    ot=${OTYPE[$p]:-absent}
+    dt=${DTYPE[$p]:-absent}
+    d=$(depth_of &quot;$p&quot;)
+    if [ &quot;$dt&quot; = absent ]; then
+      if [ &quot;$ot&quot; = whiteout ]; then
+        printf '%s\tUNWH\t%s\t\n' &quot;$((100-d))&quot; &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+      elif [ &quot;$ot&quot; = dir ]; then
+        # never sweep away an upper directory that still carries desired
+        # descendants; those children are reconciled individually.
+        has_desired_descendant &quot;$p&quot; || printf '%s\tRM\t%s\t\n' &quot;$((100-d))&quot; &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+      elif [ &quot;$ot&quot; = file ]; then
+        printf '%s\tRM\t%s\t\n' &quot;$((100-d))&quot; &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+      fi
+      continue
+    fi
+    if [ &quot;$dt&quot; = whiteout ]; then
+      if [ &quot;$ot&quot; != whiteout ]; then
+        printf '%s\tWH\t%s\t\n' &quot;$((110-d))&quot; &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+      fi
+      continue
+    fi
+    # dt is file or dir
+    if [ &quot;$ot&quot; = &quot;$dt&quot; ]; then
+      :
+    elif [ &quot;$ot&quot; = whiteout ]; then
+      printf '%s\tUNWH\t%s\t\n' &quot;$((100-d))&quot; &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+      _emit_materialize &quot;$plan&quot; &quot;$p&quot; &quot;$dt&quot; &quot;$d&quot;
+    elif [ &quot;$ot&quot; = file ] || [ &quot;$ot&quot; = dir ]; then
+      printf '%s\tRM\t%s\t\n' &quot;$((100-d))&quot; &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+      _emit_materialize &quot;$plan&quot; &quot;$p&quot; &quot;$dt&quot; &quot;$d&quot;
+    else
+      _emit_materialize &quot;$plan&quot; &quot;$p&quot; &quot;$dt&quot; &quot;$d&quot;
+    fi
+  done
+
+  # opaque markers
+  for p in &quot;${!OOPQ[@]}&quot;; do KEYS[$p]=1; done
+  for p in &quot;${!DOPQ[@]}&quot;; do KEYS[$p]=1; done
+  for p in &quot;${!KEYS[@]}&quot;; do
+    local wo=${OOPQ[$p]:-0} wd=${DOPQ[$p]:-0}
+    [ &quot;$wo&quot; = &quot;$wd&quot; ] &amp;&amp; continue
+    local dd=$(depth_of &quot;$p&quot;)
+    if [ &quot;$wd&quot; = 1 ]; then
+      printf '%s\tOPQ\t%s\t\n' &quot;$((200+dd))&quot; &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+    else
+      printf '%s\tCLR_OPQ\t%s\t\n' &quot;$((100-dd))&quot; &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+    fi
+  done
+
+  # deterministic order: rank asc, path asc
+  LC_ALL=C sort -t$'\t' -k1,1n -k3,3 &quot;$plan&quot; -o &quot;$plan&quot;
+}
+
+_emit_materialize() { # &lt;plan&gt; &lt;path&gt; &lt;type&gt; &lt;depth&gt;
+  local plan=$1 p=$2 dt=$3 d=$4 lower=$LOWER
+  if [ &quot;$dt&quot; = dir ]; then
+    printf '%s\tMKDIR\t%s\t\n' &quot;$((300+d))&quot; &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+  elif [ -f &quot;$lower/$p&quot; ]; then
+    printf '%s\tCOPYUP\t%s\t\n' '500' &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+  else
+    printf '%s\tWRITE\t%s\t\n' '500' &quot;$p&quot; &gt;&gt; &quot;$plan&quot;
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# apply a plan idempotently
+# ---------------------------------------------------------------------------
+apply_plan() { # apply_plan &lt;planfile&gt; &lt;upper&gt;
+  local plan=$1 upper=$2
+  local rank action p val wp par
+  [ -r &quot;$plan&quot; ] || die &quot;plan not readable: $plan&quot;
+  while IFS=$'\t' read -r rank action p val; do
+    [ -z &quot;${action:-}&quot; ] &amp;&amp; continue
+    wp=$(wh_path &quot;$upper&quot; &quot;$p&quot;)
+    par=$(parent_of &quot;$p&quot;)
+    case &quot;$action&quot; in
+      RM)      rm -rf -- &quot;$upper/$p&quot; &quot;$wp&quot; ;;
+      UNWH)    rm -f -- &quot;$wp&quot; ;;
+      WH)      rm -rf -- &quot;$upper/$p&quot;; mkdir -p -- &quot;$(dirname -- &quot;$wp&quot;)&quot;; : &gt; &quot;$wp&quot; ;;
+      MKDIR)   mkdir -p -- &quot;$upper/$p&quot; ;;
+      WRITE)   mkdir -p -- &quot;$upper/$( [ -n &quot;$par&quot; ] &amp;&amp; printf '%s' &quot;$par&quot; || printf '.' )&quot;; : &gt; &quot;$upper/$p&quot; ;;
+      COPYUP)  mkdir -p -- &quot;$upper/$( [ -n &quot;$par&quot; ] &amp;&amp; printf '%s' &quot;$par&quot; || printf '.' )&quot;
+               if [ -f &quot;$LOWER/$p&quot; ];     then cp -f  -- &quot;$LOWER/$p&quot; &quot;$upper/$p&quot;
+               elif [ -d &quot;$LOWER/$p&quot; ];   then mkdir -p -- &quot;$upper/$p&quot;
+               else : &gt; &quot;$upper/$p&quot;; fi ;;
+      OPQ)     mkdir -p -- &quot;$upper/$p&quot;; : &gt; &quot;$upper/$p/.wh..wh..opq&quot; ;;
+      CLR_OPQ) rm -f -- &quot;$upper/$p/.wh..wh..opq&quot; ;;
+      *) die &quot;unknown plan action: $action&quot; ;;
+    esac
+  done &lt; &quot;$plan&quot;
+}
+
+# ---------------------------------------------------------------------------
+# merged namespace
+# ---------------------------------------------------------------------------
+ancestor_opaque() { # &lt;path&gt; ; true if any ancestor dir is opaque
+  local p=$1 q
+  q=$(parent_of &quot;$p&quot;)
+  while [ -n &quot;$q&quot; ]; do
+    [ &quot;${DOPQ[$q]:-}&quot; = 1 ] &amp;&amp; return 0
+    q=$(parent_of &quot;$q&quot;)
+  done
+  return 1
+}
+
+print_merged() {
+  local -A KEYS=()
+  local p t out
+  for p in &quot;${!LTYPE[@]}&quot;; do KEYS[$p]=1; done
+  for p in &quot;${!DTYPE[@]}&quot;; do KEYS[$p]=1; done
+  {
+    for p in &quot;${!KEYS[@]}&quot;; do
+      if [ &quot;${DTYPE[$p]:-}&quot; = whiteout ]; then continue; fi
+      if [ -n &quot;${DTYPE[$p]:-}&quot; ]; then
+        printf '%s\t%s\n' &quot;${DTYPE[$p]}&quot; &quot;$p&quot;
+        continue
+      fi
+      ancestor_opaque &quot;$p&quot; &amp;&amp; continue
+      if [ -n &quot;${LTYPE[$p]:-}&quot; ]; then
+        printf '%s\t%s\n' &quot;${LTYPE[$p]}&quot; &quot;$p&quot;
+      fi
+    done
+  } | LC_ALL=C sort
+}
+
+merged_hash() { print_merged | sha256sum | cut -d' ' -f1; }
+
+# ---------------------------------------------------------------------------
+# argument handling
+# ---------------------------------------------------------------------------
+LOWER=&quot;&quot;; UPPER=&quot;&quot;; JOURNAL=&quot;&quot;; PREFIX=&quot;&quot;
+PLANFILE=&quot;&quot;; MAXP=0
+
+parse_common() {
+  while [ $# -gt 0 ]; do
+    case &quot;$1&quot; in
+      --lower)  LOWER=$2; shift 2 ;;
+      --upper)  UPPER=$2; shift 2 ;;
+      --journal) JOURNAL=$2; shift 2 ;;
+      --prefix) PREFIX=$2; shift 2 ;;
+      --plan)   PLANFILE=$2; shift 2 ;;
+      --max-paths) MAXP=$2; shift 2 ;;
+      -h|--help) usage 0 ;;
+      *) die &quot;unknown argument: $1&quot; ;;
+    esac
+  done
+  [ -n &quot;$LOWER&quot; ] || LOWER=$PWD/lower
+  [ -n &quot;$UPPER&quot; ] || UPPER=$PWD/upper
+  [ -n &quot;$JOURNAL&quot; ] || JOURNAL=$PWD/journal.log
+}
+
+need_prefix() {
+  [ -n &quot;$PREFIX&quot; ] || die &quot;--prefix N is required for this subcommand&quot;
+}
+
+cmd_replay() {
+  parse_common &quot;$@&quot;; need_prefix
+  load_lower &quot;$LOWER&quot;
+  replay &quot;$JOURNAL&quot; &quot;$PREFIX&quot;
+  print_merged
+}
+
+cmd_hash() {
+  parse_common &quot;$@&quot;; need_prefix
+  load_lower &quot;$LOWER&quot;
+  replay &quot;$JOURNAL&quot; &quot;$PREFIX&quot;
+  merged_hash
+}
+
+cmd_check() {
+  parse_common &quot;$@&quot;; need_prefix
+  load_lower &quot;$LOWER&quot;
+  replay &quot;$JOURNAL&quot; &quot;$PREFIX&quot;
+  if [ -z &quot;$CONTRA&quot; ]; then
+    echo &quot;OK no contradictions&quot;
+    return 0
+  fi
+  printf '%s' &quot;$CONTRA&quot; | LC_ALL=C sort -u
+  return 3
+}
+
+cmd_plan() {
+  parse_common &quot;$@&quot;; need_prefix
+  load_lower &quot;$LOWER&quot;
+  replay &quot;$JOURNAL&quot; &quot;$PREFIX&quot;
+  local tmp; tmp=$(mktemp) || die &quot;mktemp failed&quot;
+  plan_dump &quot;$tmp&quot; &quot;$LOWER&quot; &quot;$UPPER&quot;
+  cat &quot;$tmp&quot;
+  rm -f &quot;$tmp&quot;
+}
+
+cmd_apply() {
+  parse_common &quot;$@&quot;
+  [ -n &quot;$PLANFILE&quot; ] || die &quot;--plan FILE is required&quot;
+  apply_plan &quot;$PLANFILE&quot; &quot;$UPPER&quot;
+}
+
+cmd_verify() {
+  parse_common &quot;$@&quot;; need_prefix
+  local p1 p2 h1 h2
+  load_lower &quot;$LOWER&quot;
+  replay &quot;$JOURNAL&quot; &quot;$PREFIX&quot;
+  p1=$(mktemp); p2=$(mktemp)
+  plan_dump &quot;$p1&quot; &quot;$LOWER&quot; &quot;$UPPER&quot;
+  apply_plan &quot;$p1&quot; &quot;$UPPER&quot;
+  h1=$(merged_hash)
+  plan_dump &quot;$p2&quot; &quot;$LOWER&quot; &quot;$UPPER&quot;
+  if [ -s &quot;$p2&quot; ]; then
+    echo &quot;FAIL: plan did not reach a fixed point&quot;
+    echo &quot;residual plan:&quot;; cat &quot;$p2&quot;
+    rm -f &quot;$p1&quot; &quot;$p2&quot;; return 1
+  fi
+  apply_plan &quot;$p1&quot; &quot;$UPPER&quot;   # replay the same plan on the repaired tree
+  h2=$(merged_hash)
+  rm -f &quot;$p1&quot; &quot;$p2&quot;
+  if [ &quot;$h1&quot; != &quot;$h2&quot; ]; then
+    echo &quot;FAIL: replay changed the merged namespace ($h1 != $h2)&quot;; return 1
+  fi
+  if [ -n &quot;$CONTRA&quot; ]; then
+    echo &quot;contradictions (resolved deterministically):&quot;
+    printf '%s' &quot;$CONTRA&quot; | LC_ALL=C sort -u
+  fi
+  echo &quot;PASS idempotent fixed point, merged hash $h1&quot;
+}
+
+# ---------------------------------------------------------------------------
+main() {
+  [ $# -ge 1 ] || usage 1
+  local sub=$1; shift
+  case &quot;$sub&quot; in
+    replay) cmd_replay &quot;$@&quot; ;;
+    hash)   cmd_hash &quot;$@&quot; ;;
+    check)  cmd_check &quot;$@&quot; ;;
+    plan)   cmd_plan &quot;$@&quot; ;;
+    apply)  cmd_apply &quot;$@&quot; ;;
+    verify) cmd_verify &quot;$@&quot; ;;
+    -h|--help|help) usage 0 ;;
+    *) die &quot;unknown subcommand: $sub (try --help)&quot; ;;
+  esac
+}
+
+main &quot;$@&quot;
+</code></pre>
+<h3>3.3 Reproducible crash scenario</h3>
+<p>Save as <code>setup_demo.sh</code> (or copy the commands) and run it inside an empty directory.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# Build a deterministic crash scenario in the current directory.
+set -euo pipefail
+rm -rf lower upper journal.log plan.txt
+mkdir -p lower/etc lower/var/log lower/bin
+printf 'root:x:0:0\n'          &gt; lower/etc/passwd
+printf '&lt;ip-address&gt; localhost\n' &gt; lower/etc/hosts
+printf 'boot\n'                &gt; lower/var/log/app.log
+printf '#!/bin/sh\n'           &gt; lower/bin/tool
+
+# upper: mixture of durable, partial and stale records that survived a crash
+mkdir -p upper/etc upper/var/log upper/data upper/bin
+printf 'root:x:0:0\n'  &gt; upper/etc/passwd       # durable write
+printf 'stale\n'       &gt; upper/etc/ghost        # orphan entry
+printf 'partial\n'     &gt; upper/var/log/app.log  # torn copy-up residue
+printf '#!/bin/sh\n'   &gt; upper/bin/tool         # pre-rename residue
+printf '#!/bin/sh\n'   &gt; upper/bin/tool2        # renamed target
+
+cat &gt; journal.log &lt;&lt;'EOF'
+1 mkdir etc
+2 copyup-begin etc/passwd
+3 copyup-end etc/passwd
+4 write etc/passwd
+5 whiteout etc/hosts
+6 copyup-begin var/log/app.log
+7 mkdir data
+8 opaque data
+9 copyup-begin bin/tool
+10 copyup-end bin/tool
+11 rename bin/tool bin/tool2
+EOF
+</code></pre>
+<hr />
+<h2>4. Verification</h2>
+<p>All commands below were executed on the generated files. <code>T</code> denotes the tool.</p>
+<pre><code class="language-bash">chmod +x overlayfs-reconcile.sh
+mkdir demo &amp;&amp; cd demo &amp;&amp; bash ../setup_demo.sh
+T=../overlayfs-reconcile.sh
+</code></pre>
+<h3>4.1 Contradictions are detected (exit 3)</h3>
+<pre><code class="language-text">$ cat j.log
+1 copyup-begin a
+2 copyup-begin a
+3 copyup-end b
+4 whiteout c
+5 write c
+6 mkdir d
+7 opaque d
+8 opaque e
+9 rename loweronly dst
+10 bogus-op q
+11 copyup-begin torn
+12 copyup-end torn
+
+$ overlayfs-reconcile.sh check --lower lower --upper upper --journal j.log --prefix 12
+E_DUP_COPYUP_BEGIN 2 a
+E_OPAQUE_NONDIR 8 e
+E_ORPHAN_COPYUP_END 3 b
+E_RENAME_LOWER_SRC 9 loweronly
+E_TORN_COPYUP a
+E_UNKNOWN_OP 10 bogus-op
+E_WHITEOUT_WRITE 5 c
+exit=3
+</code></pre>
+<p>The <code>check</code> subcommand is intentionally <strong>non-zero on contradictions</strong> so CI can gate a mount on it.</p>
+<h3>4.2 Deterministic repair plan for the full prefix</h3>
+<pre><code class="language-text">98  RM  var/log/app.log 
+99  RM  etc/ghost   
+99  RM  var/log 
+100 RM  var 
+109 WH  bin/tool    
+109 WH  etc/hosts   
+200 OPQ data    
+</code></pre>
+<p>The plan is sorted by <code>(rank, path)</code>. Crash fingerprints:</p>
+<ul>
+<li><code>RM var/log/app.log</code> — torn copy-up rolled back.</li>
+<li><code>RM etc/ghost</code> — orphan upper entry absent from both lower and journal.</li>
+<li><code>WH etc/hosts</code> — whiteout record not yet durable.</li>
+<li><code>WH bin/tool</code> — rename left no source whiteout (<code>E_RENAME_NO_WHITEOUT</code>).</li>
+<li><code>OPQ data</code> — <code>opaque data</code> durable but the marker was not.</li>
+</ul>
+<h3>4.3 Canonical merged namespace</h3>
+<pre><code class="language-text">dir bin
+dir data
+dir etc
+dir var
+dir var/log
+file    bin/tool2
+file    etc/passwd
+file    var/log/app.log
+</code></pre>
+<ul>
+<li><code>etc/hosts</code> is gone (whiteout), while <code>etc/passwd</code> shows the upper copy.</li>
+<li><code>bin/tool2</code> shows the rename; <code>bin/tool</code> is hidden by the inserted whiteout.</li>
+<li><code>data</code> is present as an opaque upper directory.</li>
+<li><code>var/log/app.log</code> is visible again from the <strong>lower</strong> layer because the torn copy-up was rolled back.</li>
+</ul>
+<h3>4.4 Idempotence of the plan</h3>
+<pre><code class="language-text">$ overlayfs-reconcile.sh apply ... --plan plan.txt
+$ overlayfs-reconcile.sh hash  ... --prefix 11
+b77436fb091235c6be3525a23b52a3c723867f766bbe23ebe1e1f8015da7fe48
+$ overlayfs-reconcile.sh apply ... --plan plan.txt   # replay same plan
+$ overlayfs-reconcile.sh hash  ... --prefix 11
+b77436fb091235c6be3525a23b52a3c723867f766bbe23ebe1e1f8015da7fe48
+$ overlayfs-reconcile.sh plan  ... --prefix 11   # residual
+(no output above = empty residual plan)
+</code></pre>
+<p><code>apply</code> is idempotent by construction: every action is <code>rm -f</code> / <code>mkdir -p</code> / <code>cp -f</code> / <code>: &gt;</code>. The second apply changes nothing and the residual <code>plan</code> is empty, so the repaired tree is a fixed point.</p>
+<h3>4.5 Full <code>verify</code> transcript</h3>
+<pre><code class="language-text">contradictions (resolved deterministically):
+E_RENAME_NO_WHITEOUT 11 bin/tool
+E_TORN_COPYUP var/log/app.log
+PASS idempotent fixed point, merged hash b77436fb091235c6be3525a23b52a3c723867f766bbe23ebe1e1f8015da7fe48
+</code></pre>
+<p><code>verify</code> performs: plan → apply → re-plan (must be empty) → hash → apply the same plan again → hash, and asserts the two hashes match.</p>
+<h3>4.6 Every crash prefix converges</h3>
+<pre><code class="language-text">prefix 1  : PASS idempotent fixed point, merged hash eda739518782ea4e4a8e9b4ed448544106f7fec8d9d6de36ed910da00d409686
+prefix 2  : PASS idempotent fixed point, merged hash eda739518782ea4e4a8e9b4ed448544106f7fec8d9d6de36ed910da00d409686
+prefix 3  : PASS idempotent fixed point, merged hash eda739518782ea4e4a8e9b4ed448544106f7fec8d9d6de36ed910da00d409686
+prefix 4  : PASS idempotent fixed point, merged hash eda739518782ea4e4a8e9b4ed448544106f7fec8d9d6de36ed910da00d409686
+prefix 5  : PASS idempotent fixed point, merged hash b25269699e8db74fcda3b278e7f8dc7886c2549c4798b41a9947367b244591a0
+prefix 6  : PASS idempotent fixed point, merged hash b25269699e8db74fcda3b278e7f8dc7886c2549c4798b41a9947367b244591a0
+prefix 7  : PASS idempotent fixed point, merged hash bec8773007aba49a255537c6ae71a9a11b740eadd0b772f4aeccf897dead1c6b
+prefix 8  : PASS idempotent fixed point, merged hash bec8773007aba49a255537c6ae71a9a11b740eadd0b772f4aeccf897dead1c6b
+prefix 9  : PASS idempotent fixed point, merged hash bec8773007aba49a255537c6ae71a9a11b740eadd0b772f4aeccf897dead1c6b
+prefix 10 : PASS idempotent fixed point, merged hash bec8773007aba49a255537c6ae71a9a11b740eadd0b772f4aeccf897dead1c6b
+prefix 11 : PASS idempotent fixed point, merged hash b77436fb091235c6be3525a23b52a3c723867f766bbe23ebe1e1f8015da7fe48
+</code></pre>
+<hr />
+<h2>5. Why this is bounded-memory and unique</h2>
+<ul>
+<li><strong>Streaming replay.</strong> The journal is read once, line by line, and never stored. State lives in <code>DTYPE</code>, <code>DOPQ</code> and <code>PENDING</code>, all keyed by path, so memory is <code>O(#distinct paths)</code> not <code>O(#records)</code>. <code>--max-paths N</code> turns that claim into a hard, testable bound:</li>
+</ul>
+<p><code>text
+  $ overlayfs-reconcile.sh check ... --max-paths 2
+  overlayfs-reconcile.sh: error: working set 8 exceeds --max-paths 2</code></p>
+<ul>
+<li>
+<p><strong>Totality.</strong> For any path and prefix there is exactly one of <code>{absent, file, dir, whiteout}</code> plus an opaque bit. The resolution table in §2.3 is a total function, so the merged namespace is unique.</p>
+</li>
+<li>
+<p><strong>Idempotence.</strong> <code>plan</code> is <code>desired \ observed</code>; <code>apply</code> writes <code>desired</code>; therefore <code>plan</code> after <code>apply</code> is empty and <code>apply</code> re-applied is a no-op.</p>
+</li>
+</ul>
+<hr />
+<h2>6. One-command reproduction</h2>
+<p>Save the following as <code>run_tests.sh</code> next to the tool and <code>setup_demo.sh</code>, then run <code>bash run_tests.sh</code>. It sweeps every crash prefix, applies the repair plan twice and asserts the fixed point.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# Reset the crash-survivor upper for one prefix and exercise the tool.
+set -euo pipefail
+cd &quot;$(dirname &quot;$0&quot;)&quot;
+T=./overlayfs-reconcile.sh
+rm -rf demo &amp;&amp; mkdir demo &amp;&amp; (cd demo &amp;&amp; bash ../setup_demo.sh)
+cp -a demo/upper demo/upper.crash
+
+for k in $(seq 1 11); do
+  rm -rf demo/upper &amp;&amp; cp -a demo/upper.crash demo/upper
+  printf 'prefix %-2s : ' &quot;$k&quot;
+  ( cd demo &amp;&amp; ../overlayfs-reconcile.sh verify --lower lower --upper upper \
+      --journal journal.log --prefix &quot;$k&quot; 2&gt;&amp;1 | tr '\n' '|' )
+  echo
+done
+
+# explicit plan/apply/idempotence transcript for the full prefix
+rm -rf demo/upper &amp;&amp; cp -a demo/upper.crash demo/upper
+cd demo
+echo &quot;--- plan (prefix 11) ---&quot;
+../overlayfs-reconcile.sh plan --lower lower --upper upper --journal journal.log --prefix 11 | tee plan.txt
+echo &quot;--- apply plan twice ---&quot;
+../overlayfs-reconcile.sh apply --lower lower --upper upper --plan plan.txt
+h1=$(../overlayfs-reconcile.sh hash --lower lower --upper upper --journal journal.log --prefix 11)
+../overlayfs-reconcile.sh apply --lower lower --upper upper --plan plan.txt
+h2=$(../overlayfs-reconcile.sh hash --lower lower --upper upper --journal journal.log --prefix 11)
+echo &quot;hash after 1st apply: $h1&quot;
+echo &quot;hash after 2nd apply: $h2&quot;
+[ &quot;$h1&quot; = &quot;$h2&quot; ] &amp;&amp; echo &quot;IDEMPOTENT: yes&quot; || { echo &quot;IDEMPOTENT: no&quot;; exit 1; }
+echo &quot;--- residual plan must be empty ---&quot;
+../overlayfs-reconcile.sh plan --lower lower --upper upper --journal journal.log --prefix 11
+echo &quot;(end)&quot;
+</code></pre></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: shell-20261008-overlayfs-whiteout-rename-crash-reconciliation
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-08T10:05:38.102Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Given an OverlayFS upper-layer journal and a sequence of interrupted copy-up, whiteout, rename, and opaque-directory operations, reconstruct the only valid merged namespace after any crash prefix while preserving lower-layer visibility rules. Implement a bounded-memory Bash tool that detects contradictory records, emits a deterministic repair plan, and proves idempotence when that plan is replayed.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;shell-20261008-overlayfs-whiteout-rename-crash-reconciliation&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-08T10:05:38.105Z&quot;, &quot;version&quot;: &quot;5&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

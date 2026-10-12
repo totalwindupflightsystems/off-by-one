@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>shell-20261006-bitemporal-ledger-recovery — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: shell-20261006-bitemporal-ledger-recovery">
+<meta property="og:title" content="shell-20261006-bitemporal-ledger-recovery — Off-By-One">
+<meta property="og:description" content="Problem class: shell-20261006-bitemporal-ledger-recovery">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2613-shell-20261006-bitemporal-ledger-recovery.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>shell-20261006-bitemporal-ledger-recovery</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>Problem class: shell-20261006-bitemporal-ledger-recovery</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2613-shell-20261006-bitemporal-ledger-recovery.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is complete and verified. Everything is in <code>~/ledger-recovery/</code>: <code>SOLUTION.md</code>, <code>ledger_recover.sh</code>, <code>ledger_validate.awk</code>, <code>ledger_merge.awk</code>, <code>gen_record.sh</code>, <code>test_recovery.sh</code>, <code>scaling.sh</code>.</p>
+<p>Here is the solution as markdown:</p>
+<hr />
+<h1>Recovery for a Segmented, Append-Only Ledger</h1>
+<p><strong>Problem class:</strong> <code>shell-20261006-bitemporal-ledger-recovery</code>
+<strong>Environment:</strong> GNU bash 5.2+ (verified on 5.3.9), <code>awk</code> (mawk), <code>flock</code>, <code>truncate</code></p>
+<h2>1. Root-cause analysis</h2>
+<p>A ledger is a directory of append-only segments (<code>seg-*.log</code>) plus compaction metadata (<code>MANIFEST</code>). The safe assumption is that <strong>every byte written after the last flush may be missing, partial, or garbage</strong>, and a crashed compactor may leave duplicates, overlaps, and out-of-order markers.</p>
+<table>
+<thead>
+<tr>
+<th>Failure</th>
+<th>Naive behaviour</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Torn write at segment tail</td>
+<td>parser reads half a record / bad checksum</td>
+<td>corrupt value injected, or whole segment refused</td>
+</tr>
+<tr>
+<td>Duplicate / overlapping seq ranges</td>
+<td>"last file read wins"</td>
+<td>result depends on <code>readdir</code> order → <strong>non-deterministic</strong></td>
+</tr>
+<tr>
+<td>Compaction markers out of order</td>
+<td>applied in file order</td>
+<td>an older marker overrides a newer one</td>
+</tr>
+<tr>
+<td>Full-history recovery</td>
+<td>load all records into RAM</td>
+<td>OOM on large ledgers</td>
+</tr>
+<tr>
+<td>Repair crash</td>
+<td>delete originals, then rewrite</td>
+<td><strong>data loss</strong> mid-rewrite</td>
+</tr>
+</tbody>
+</table>
+<p>Diagnosis: recovery must be a <strong>pure, deterministic function of the set of valid records</strong>, computed with bounded memory, and structured so any interruption leaves a state from which the same function converges.</p>
+<h2>2. On-disk contract</h2>
+<pre><code>&lt;ledger-dir&gt;/
+  seg-&lt;id&gt;.log         append-only segment; records sorted ascending by seq
+  MANIFEST             compaction markers: &quot;&lt;lo&gt; &lt;hi&gt; &lt;gen&gt; &lt;seg-id&gt;&quot;
+  snapshot.g&lt;gen&gt;.log  canonical output produced by recovery
+  .recovery.lock       lock file (never data)
+</code></pre>
+<p>Record line (fields tab-free):</p>
+<pre><code>&lt;seq&gt;\t&lt;key&gt;\t&lt;value&gt;\t&lt;cksum&gt;\n
+cksum = poly31(&quot;seq\tkey\tvalue&quot;) mod (2^31-1),  poly31: h = h*131 + byte
+</code></pre>
+<h2>3. Deterministic conflict resolution</h2>
+<p>Winner for sequence <code>q</code> maximises the tuple:</p>
+<pre><code>( generation(q, source), source.segid, -source.byte_offset )
+</code></pre>
+<p>where <code>generation(q, source)</code> is the pointwise <strong>maximum</strong> generation over all manifest markers <code>"&lt;lo&gt; &lt;hi&gt; &lt;gen&gt; &lt;segid&gt;"</code> covering <code>q</code> and naming that source (<code>0</code> if none). A canonical snapshot has <code>segid = 2147483646</code>.</p>
+<ul>
+<li>The pointwise maximum is commutative/associative → duplicated, overlapping, or out-of-order markers give the same answer.</li>
+<li><code>segid</code> + <code>byte_offset</code> make the order total → no physical ties, independent of processing order.</li>
+<li>Each source is already seq-sorted, so a streaming k-way merge suffices.</li>
+</ul>
+<h2>4. The fix</h2>
+<p>Phases:</p>
+<ol>
+<li><strong>Lock</strong> with <code>flock</code> (single writer).</li>
+<li><strong>Crash-recover:</strong> delete any half-written <code>.stage.*</code> directory. A snapshot only becomes visible via a single <code>rename(2)</code> after being fully written.</li>
+<li><strong>Heal torn tails:</strong> truncate to the longest well-formed prefix, restore a lost final newline. Idempotent.</li>
+<li><strong>Stream + merge:</strong> one record per source in memory; emit the winner per seq; fsync; atomic rename; remove superseded files.</li>
+</ol>
+<h3><code>ledger_recover.sh</code></h3>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# ledger_recover.sh -- crash-safe, idempotent, bounded-memory recovery for a
+# segmented append-only ledger.
+#
+# Usage:
+#   ledger_recover.sh &lt;ledger-dir&gt;            # heal + merge + install
+#   ledger_recover.sh &lt;ledger-dir&gt; --check    # verify already-canonical
+#
+# Layout of a ledger directory:
+#   seg-&lt;id&gt;.log         append-only data segment, records sorted by seq
+#   MANIFEST             compaction markers: &quot;&lt;lo&gt; &lt;hi&gt; &lt;gen&gt; &lt;seg-id&gt;&quot;
+#   snapshot.g&lt;gen&gt;.log  canonical recovery output (produced by this tool)
+#
+# Record line (tab separated):
+#   &lt;seq&gt;\t&lt;key&gt;\t&lt;value&gt;\t&lt;ck&gt;\n
+#   ck = poly31(&quot;seq\tkey\tvalue&quot;) mod 2^31-1, poly31 base 131
+#
+# Exit codes: 0 ok, 1 not canonical (check) / bad snapshot,
+#             2 usage, 75 lock busy.
+set -euo pipefail
+
+SELF_DIR=$(cd -- &quot;$(dirname -- &quot;${BASH_SOURCE[0]}&quot;)&quot; &amp;&amp; pwd)
+DIR=${1:-}
+MODE=${2:-recover}
+[[ -n $DIR &amp;&amp; -d $DIR ]] || { echo &quot;usage: $0 &lt;ledger-dir&gt; [--check]&quot; &gt;&amp;2; exit 2; }
+[[ $MODE == recover || $MODE == --check ]] || { echo &quot;bad mode: $MODE&quot; &gt;&amp;2; exit 2; }
+
+LOCK=&quot;$DIR/.recovery.lock&quot;
+MANIFEST=&quot;$DIR/MANIFEST&quot;
+
+# ---------------------------------------------------------------- locking ---
+exec 9&gt;&quot;$LOCK&quot;
+flock -w 30 9 || { echo &quot;ledger_recover: directory busy&quot; &gt;&amp;2; exit 75; }
+
+STAGE=&quot;&quot;
+cleanup() { if [[ -n $STAGE ]]; then rm -rf &quot;$STAGE&quot;; fi; return 0; }
+trap cleanup EXIT
+
+# ------------------------------------------------ phase 0: crash recovery ---
+rm -rf &quot;$DIR&quot;/.stage.*
+
+# --------------------------------------------- phase 1: heal torn tails -----
+heal_segment() {
+    local f=$1 size last total lvalid
+    read -r last total lvalid &lt; &lt;(awk -f &quot;$SELF_DIR/ledger_validate.awk&quot; &quot;$f&quot;)
+    size=$(wc -c &lt;&quot;$f&quot;)
+    if (( size == total )); then
+        truncate -s &quot;$last&quot; &quot;$f&quot;
+    elif (( size == total - 1 )); then          # final record lost its newline
+        if (( lvalid == 1 )); then
+            truncate -s &quot;$size&quot; &quot;$f&quot;
+            printf '\n' &gt;&gt;&quot;$f&quot;
+        else
+            truncate -s &quot;$last&quot; &quot;$f&quot;
+        fi
+    else
+        truncate -s &quot;$last&quot; &quot;$f&quot;
+    fi
+}
+
+shopt -s nullglob
+for f in &quot;$DIR&quot;/seg-*.log; do heal_segment &quot;$f&quot;; done
+
+# --------------------------------------------------------- phase 2: merge ---
+merge_into() {  # $1 = output path
+    local out=$1
+    local -a sources=()
+    local f maxgen newgen b
+    for f in &quot;$DIR&quot;/snapshot.g*.log &quot;$DIR&quot;/seg-*.log; do
+        [[ -f $f ]] &amp;&amp; sources+=(&quot;$f&quot;)
+    done
+    maxgen=0
+    if [[ -f $MANIFEST ]]; then
+        read -r maxgen &lt; &lt;(awk -v m=0 'NF==4 &amp;&amp; $3~/^[0-9]+$/ &amp;&amp; $3+0&gt;m {m=$3+0} END{print m}' &quot;$MANIFEST&quot;)
+    fi
+    for f in &quot;$DIR&quot;/snapshot.g*.log; do
+        [[ -f $f ]] || continue
+        b=${f##*/snapshot.g}; b=${b%.log}
+        (( b &gt; maxgen )) &amp;&amp; maxgen=$b
+    done
+    newgen=$((maxgen + 1))
+    if (( ${#sources[@]} == 0 )); then
+        : &gt;&quot;$out&quot;
+    else
+        awk -v out=&quot;$out&quot; -v manifest=&quot;$MANIFEST&quot; \
+            -f &quot;$SELF_DIR/ledger_merge.awk&quot; &quot;${sources[@]}&quot;
+    fi
+}
+
+# A canonical state is exactly one snapshot, no raw segments, no manifest,
+# whose content reproduces itself. Detecting it makes reruns true no-ops.
+SNAPS=(&quot;$DIR&quot;/snapshot.g*.log)
+SEGS=(&quot;$DIR&quot;/seg-*.log)
+
+reproduces_itself() {
+    (( ${#SNAPS[@]} == 1 &amp;&amp; ${#SEGS[@]} == 0 )) || return 1
+    [[ -e $MANIFEST ]] &amp;&amp; return 1
+    local t rc=0
+    t=$(mktemp -d &quot;$DIR/.stage.XXXXXX&quot;)
+    merge_into &quot;$t/canon&quot; || rc=$?
+    cmp -s &quot;${SNAPS[0]}&quot; &quot;$t/canon&quot; || rc=1
+    rm -rf &quot;$t&quot;
+    return $rc
+}
+
+if [[ $MODE == --check ]]; then
+    if reproduces_itself; then
+        echo &quot;check: canonical and idempotent&quot;; exit 0
+    fi
+    echo &quot;check: state would change -&gt; not canonical&quot; &gt;&amp;2; exit 1
+fi
+
+if reproduces_itself; then
+    echo &quot;already canonical: ${SNAPS[0]}&quot;; exit 0
+fi
+
+# ------------------------------------------------- phase 3: atomic install --
+STAGE=$(mktemp -d &quot;$DIR/.stage.XXXXXX&quot;)
+merge_into &quot;$STAGE/snapshot.canon&quot;
+newgen=1
+for f in &quot;$DIR&quot;/snapshot.g*.log; do
+    [[ -f $f ]] || continue
+    b=${f##*/snapshot.g}; b=${b%.log}; (( b &gt;= newgen )) &amp;&amp; newgen=$((b + 1))
+done
+if [[ -f $MANIFEST ]]; then
+    read -r mg &lt; &lt;(awk 'NF==4 &amp;&amp; $3~/^[0-9]+$/ &amp;&amp; $3+0&gt;=m {m=$3+0} END{print m+0}' &quot;$MANIFEST&quot;)
+    (( mg + 1 &gt; newgen )) &amp;&amp; newgen=$((mg + 1))
+fi
+
+cp -f &quot;$STAGE/snapshot.canon&quot; &quot;$STAGE/snapshot.g${newgen}.log&quot;
+sync &quot;$STAGE/snapshot.g${newgen}.log&quot;
+# Atomic publish: single rename(2); previous state is untouched until here.
+mv -f &quot;$STAGE/snapshot.g${newgen}.log&quot; &quot;$DIR/snapshot.g${newgen}.log&quot;
+
+# Garbage collection (idempotent, safe to crash anywhere in this block).
+rm -f &quot;$DIR&quot;/seg-*.log &quot;$MANIFEST&quot;
+for f in &quot;$DIR&quot;/snapshot.g*.log; do
+    [[ $f == &quot;$DIR/snapshot.g${newgen}.log&quot; ]] &amp;&amp; continue
+    rm -f &quot;$f&quot;
+done
+
+echo &quot;recovered: $DIR/snapshot.g${newgen}.log&quot;
+</code></pre>
+<h3><code>ledger_validate.awk</code></h3>
+<pre><code class="language-awk"># ledger_validate.awk -- streaming validator for one append-only segment.
+# Prints: &lt;last_valid_end&gt; &lt;total_bytes&gt; &lt;last_line_valid&gt;
+BEGIN {
+    for (i = 1; i &lt; 128; i++) ord[sprintf(&quot;%c&quot;, i)] = i
+    last_end = 0; pos = 0; last_line_valid = 0
+}
+function poly31(s,   h, i, c) {
+    h = 0
+    for (i = 1; i &lt;= length(s); i++) {
+        c = ord[substr(s, i, 1)]
+        if (c == &quot;&quot;) c = 0
+        h = (h * 131 + c) % 2147483647
+    }
+    return h
+}
+{
+    line = $0; good = 0
+    n = split(line, f, &quot;\t&quot;)
+    if (n == 4 &amp;&amp; f[1] ~ /^[0-9]+$/ &amp;&amp; f[4] ~ /^[0-9]+$/) {
+        if (poly31(f[1] &quot;\t&quot; f[2] &quot;\t&quot; f[3]) == f[4] + 0) good = 1
+    }
+    pos += length(line) + 1
+    if (good) { last_end = pos; last_line_valid = 1 }
+    else { last_line_valid = 0; exit }
+}
+END { printf &quot;%d %d %d\n&quot;, last_end, pos, last_line_valid }
+</code></pre>
+<h3><code>ledger_merge.awk</code></h3>
+<pre><code class="language-awk"># ledger_merge.awk -- bounded-memory k-way merge of ledger sources.
+# Peak memory O(#sources + #markers), never O(#records).
+BEGIN {
+    for (i = 1; i &lt; 128; i++) ord[sprintf(&quot;%c&quot;, i)] = i
+
+    nm = 0
+    while ((getline mline &lt; manifest) &gt; 0) {
+        if (split(mline, mf, /[ \t]+/) &gt;= 4 &amp;&amp; mf[1] ~ /^[0-9]+$/ &amp;&amp; \
+            mf[2] ~ /^[0-9]+$/ &amp;&amp; mf[3] ~ /^[0-9]+$/ &amp;&amp; mf[4] ~ /^[0-9]+$/) {
+            nm++
+            mlo[nm] = mf[1] + 0; mhi[nm] = mf[2] + 0
+            mgen[nm] = mf[3] + 0; mseg[nm] = mf[4] + 0
+        }
+    }
+    close(manifest)
+
+    nsrc = 0
+    for (a = 1; a &lt; ARGC; a++) {
+        fn = ARGV[a]; ARGV[a] = &quot;&quot;
+        k = split(fn, parts, &quot;/&quot;); base = parts[k]
+        if (base ~ /^snapshot\.g[0-9]+\.log$/) {
+            g = base; sub(/^snapshot\.g/, &quot;&quot;, g); sub(/\.log$/, &quot;&quot;, g)
+            gen = g + 0; seg = 2147483646
+        } else if (base ~ /^seg-[0-9]+\.log$/) {
+            g = base; sub(/^seg-/, &quot;&quot;, g); sub(/\.log$/, &quot;&quot;, g)
+            gen = 0; seg = g + 0
+        } else continue
+        nsrc++
+        sfile[nsrc] = fn; sseg[nsrc] = seg; sbase[nsrc] = gen
+        soff[nsrc] = 0; s_seq[nsrc] = &quot;&quot;
+        read_source(nsrc)
+    }
+    if (nsrc == 0) exit
+
+    while (1) {
+        best = 0; bq = &quot;&quot;
+        for (i = 1; i &lt;= nsrc; i++) {
+            if (s_seq[i] == &quot;&quot;) continue
+            if (best == 0) { best = i; bq = s_seq[i]; continue }
+            q = s_seq[i]
+            if (q + 0 &lt; bq + 0) { best = i; bq = q; continue }
+            if (q + 0 &gt; bq + 0) continue
+            gi = eff_gen(i, q); gb = eff_gen(best, q)
+            if (gi &gt; gb) { best = i; continue }
+            if (gi &lt; gb) continue
+            if (sseg[i] &gt; sseg[best]) { best = i; continue }
+            if (sseg[i] &lt; sseg[best]) continue
+            if (soff[i] &lt; soff[best]) { best = i; continue }
+        }
+        if (best == 0) break
+        printf &quot;%s\t%s\t%s\t%s\n&quot;, s_seq[best], s_key[best], s_val[best], s_ck[best] &gt;&gt; out
+        wq = s_seq[best] + 0
+        for (i = 1; i &lt;= nsrc; i++)
+            if (s_seq[i] != &quot;&quot; &amp;&amp; s_seq[i] + 0 == wq) read_source(i)
+    }
+    close(out); exit
+}
+function eff_gen(i, q,   g, k) {
+    g = sbase[i]
+    for (k = 1; k &lt;= nm; k++)
+        if (mseg[k] == sseg[i] &amp;&amp; q + 0 &gt;= mlo[k] &amp;&amp; q + 0 &lt;= mhi[k] &amp;&amp; mgen[k] &gt; g)
+            g = mgen[k]
+    return g
+}
+function read_source(i,   line, f, n) {
+    if ((getline line &lt; sfile[i]) &lt;= 0) { s_seq[i] = &quot;&quot;; return 0 }
+    soff[i] += length(line) + 1
+    n = split(line, f, &quot;\t&quot;)
+    if (n != 4 || f[1] !~ /^[0-9]+$/ || f[4] !~ /^[0-9]+$/ || \
+        poly31(f[1] &quot;\t&quot; f[2] &quot;\t&quot; f[3]) != f[4] + 0) { s_seq[i] = &quot;&quot;; return 0 }
+    s_seq[i] = f[1]; s_key[i] = f[2]; s_val[i] = f[3]; s_ck[i] = f[4]
+    return 1
+}
+function poly31(s,   h, i, c) {
+    h = 0
+    for (i = 1; i &lt;= length(s); i++) {
+        c = ord[substr(s, i, 1)]
+        if (c == &quot;&quot;) c = 0
+        h = (h * 131 + c) % 2147483647
+    }
+    return h
+}
+</code></pre>
+<h2>5. Correctness: idempotence and crash safety</h2>
+<p>Let <code>F</code> be one recovery run and <code>S</code> a set of sources.</p>
+<ul>
+<li><strong>Completeness.</strong> <code>F(S)</code> emits exactly one record per distinct <code>seq</code>: the merge stops only when all heads are consumed, and each iteration consumes every source whose head equals the emitted <code>seq</code>.</li>
+<li><strong>Determinism.</strong> The winner tuple is a strict total order, so <code>F(S)</code> is independent of source enumeration and marker order.</li>
+<li><strong>Idempotence / fixed point.</strong> <code>R = F(S)</code> is one <code>snapshot.g&lt;g&gt;.log</code> with <code>g</code> above all inputs. <code>F(R) = R</code>, because <code>R</code> is the only source, its generation dominates, its seqs strictly increase, and no marker can raise anything above it. The implementation detects this (<code>reproduces_itself</code>) and changes nothing—not even the file name.</li>
+<li><strong>Crash safety.</strong></li>
+<li>During healing/merge, before publish: only a <code>.stage.*</code> exists → deleted, inputs untouched, re-derived next run.</li>
+<li>After <code>rename(2)</code>, before GC: snapshot + leftovers present; the snapshot's generation is strictly greater, so it wins every seq; next run re-derives it and finishes GC.</li>
+<li>During GC: <code>rm -f</code> is idempotent; leftovers handled as above.</li>
+<li><strong>Bounded memory.</strong> One record per source + markers: <code>O(#sources + #markers)</code>, independent of <code>#records</code> (confirmed in §6.3).</li>
+</ul>
+<h2>6. Verification</h2>
+<pre><code class="language-bash">chmod +x ledger_recover.sh gen_record.sh test_recovery.sh
+./test_recovery.sh
+</code></pre>
+<h3>6.1 Test suite output</h3>
+<pre><code class="language-text">== T1: disjoint segments merge in seq order ==
+  ok   merge order/content
+  ok   gc removed raw segments
+== T2: torn / corrupt tail is truncated and ignored ==
+  ok   torn suffix dropped
+== T3: duplicated overlapping ranges, newest id wins ==
+  ok   duplicate resolution
+== T4: out-of-order / overlapping compaction markers ==
+  ok   marker max-generation wins
+== T5: idempotence across repeated runs ==
+  ok   rerun byte-identical
+  ok   rerun same fixed-point file
+  ok   --check agrees canonical
+== T6: crash during repair ==
+  ok   stale stage discarded
+  ok   recovered from post-publish crash
+  ok   exactly one snapshot after crash
+== T7: bounded memory on large ledger ==
+  ok   all records retained
+  ok   peak RSS 7776 kB &lt;&lt; data (7.6M)
+
+PASS=13 FAIL=0
+</code></pre>
+<h3>6.2 Torn write heals</h3>
+<pre><code class="language-bash">$ d=$(mktemp -d)
+$ ./gen_record.sh &quot;$d/seg-1.log&quot; 1 a one
+$ ./gen_record.sh &quot;$d/seg-1.log&quot; 2 b two
+$ printf '3\tc\tthr' &gt;&gt;&quot;$d/seg-1.log&quot;     # torn: no newline
+$ ./ledger_recover.sh &quot;$d&quot;
+recovered: /tmp/.../snapshot.g1.log
+$ cat &quot;$d&quot;/snapshot.g*.log               # 1 and 2 survive; 3 is gone
+</code></pre>
+<h3>6.3 Memory independent of ledger size</h3>
+<pre><code class="language-text">records=200000   data=7296397      peakRSS=7784 kB
+records=800000   data=29186056     peakRSS=7816 kB
+records=3200000  data=116744229    peakRSS=7880 kB
+</code></pre>
+<p>~16× data growth, ~1% RSS change.</p>
+<h3>6.4 Idempotence and crash injection</h3>
+<ul>
+<li><code>T5</code> runs recovery twice: byte-identical output <strong>and</strong> unchanged snapshot file name; <code>--check</code> confirms the fixed point.</li>
+<li><code>T6a</code> plants a garbage <code>.stage.partial/</code> → discarded with no effect.</li>
+<li><code>T6b</code> simulates a crash after atomic publish before GC (newer <code>snapshot.g99.log</code> + leftover <code>seg-*.log</code> + marker) → recovery re-derives the same canonical content and leaves exactly one snapshot.</li>
+</ul>
+<h2>7. Operational notes</h2>
+<ul>
+<li>Run <code>ledger_recover.sh &lt;dir&gt;</code> after unclean shutdown; <code>--check</code> is a readiness probe (0 = canonical, 1 = would change).</li>
+<li>Exit <code>75</code> = another recoverer holds the lock; retry.</li>
+<li>Fields must not contain tabs/newlines (unambiguous checksum framing).</li>
+<li>A producer must keep segments seq-sorted; healing only removes suffixes, so sorted input stays sorted.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: shell-20261006-bitemporal-ledger-recovery
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-06T10:07:38.615Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Given a directory of segmented append-only ledger files, implement recovery that reconstructs the latest valid state after arbitrary torn writes, duplicated segments, and out-of-order compaction markers without loading the full history into memory. Define deterministic conflict resolution for overlapping sequence ranges and prove that recovery is idempotent across repeated runs, including when a crash occurs during repair.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;shell-20261006-bitemporal-ledger-recovery&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-06T10:07:38.618Z&quot;, &quot;version&quot;: &quot;5.2&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

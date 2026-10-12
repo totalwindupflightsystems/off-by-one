@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>shell-20261011-bpf-map-freeze-crash-consistency — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: shell-20261011-bpf-map-freeze-crash-consistency">
+<meta property="og:title" content="shell-20261011-bpf-map-freeze-crash-consistency — Off-By-One">
+<meta property="og:description" content="Problem class: shell-20261011-bpf-map-freeze-crash-consistency">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2707-shell-20261011-bpf-map-freeze-crash-consistency.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>shell-20261011-bpf-map-freeze-crash-consistency</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>Problem class: shell-20261011-bpf-map-freeze-crash-consistency</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2707-shell-20261011-bpf-map-freeze-crash-consistency.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I've diagnosed the problem, implemented the fix, and verified it under exhaustive crash injection. The full solution is written to <strong><code>/workspace/solution.md</code></strong>, with the runnable artifacts alongside it. Here is the solution.</p>
+<hr />
+<h1>Crash-Consistent Snapshot &amp; Recovery for Pinned eBPF Map Sets</h1>
+<p><strong>Problem class:</strong> <code>shell-20261011-bpf-map-freeze-crash-consistency</code></p>
+<h2>TL;DR</h2>
+<p>A "torn generation" is a set of files that mixes two writer generations. It happens because a filesystem guarantees atomicity <em>per file</em>, while a map set is many files plus metadata. The fix is to give the whole set <strong>one atomic commit point</strong>: write every member into a private staging directory, build a manifest that binds every member by size + SHA-256, seal the manifest, then publish the directory with a single <code>rename(2)</code>. Recovery only considers <strong>sealed, fully verified</strong> generations and picks the greatest <strong>explicit generation integer</strong> — never <code>mtime</code>, never <code>readdir</code> order.</p>
+<p>All 14 verification checks pass, including <code>SIGKILL</code> after every filesystem operation (commit: 5 windows, snapshot: 3, recover: 2).</p>
+<h2>1. Root-cause analysis</h2>
+<h3>1.1 The real defect is cross-file atomicity</h3>
+<p>Updating <code>N</code> pinned maps plus <code>M</code> pin-metadata files is a multi-syscall operation. The kernel makes each <code>write</code>/<code>rename</code> atomic, but there is no kernel object representing "the map set". At any instant a crashed/frozen writer can leave a mix:</p>
+<pre><code>map/conn   = generation 8   &lt;- updated
+map/rules  = generation 7   &lt;- not yet updated
+meta/conn  = generation 8
+meta/rules = generation 7
+</code></pre>
+<p>Every file is valid; the <strong>set</strong> is torn. A recovery tool that accepts it runs the application on incompatible generations.</p>
+<h3>1.2 Why the usual shortcuts fail</h3>
+<table>
+<thead>
+<tr>
+<th>Shortcut</th>
+<th>Why it fails</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"Newest <code>mtime</code> wins"</td>
+<td>Coarse granularity, equal mtimes, arbitrary <code>touch</code>, clock skew; the half-written file looks newest.</td>
+</tr>
+<tr>
+<td>"Read <code>readdir</code> order"</td>
+<td>POSIX leaves directory order unspecified and it changes with <code>dir_index</code>/<code>tmpfs</code> hashing.</td>
+</tr>
+<tr>
+<td>"Copy in place"</td>
+<td>A crash between copies leaves an indistinguishable mixed destination.</td>
+</tr>
+<tr>
+<td>"Checksum each file"</td>
+<td>Validates files, not the set; a mixed set of valid files passes.</td>
+</tr>
+<tr>
+<td>"Write the marker first"</td>
+<td>A reader trusting an early marker accepts a payload that was never written.</td>
+</tr>
+<tr>
+<td>"<code>BPF_MAP_FREEZE</code> alone"</td>
+<td>Freezing one map does not freeze the set; map B can still be mid-update. Freeze is irreversible, so it must be the last mutating step of a global commit.</td>
+</tr>
+<tr>
+<td>"Overwrite on resume"</td>
+<td>Not idempotent; a partial generation is indistinguishable from an empty one.</td>
+</tr>
+</tbody>
+</table>
+<h3>1.3 Invariants</h3>
+<ul>
+<li><strong>I1</strong> Every committed generation has a canonical manifest binding each member by type/name/size/SHA-256 plus a set hash over the generation integer.</li>
+<li><strong>I2</strong> A generation becomes visible only via one <code>rename(2)</code>; no intermediate visible state.</li>
+<li><strong>I3</strong> "Latest" = greatest integer among <em>verified</em> generations. Timestamps and directory order are never read.</li>
+<li><strong>I4</strong> An unverified generation is inert: ignored, never selected, never required.</li>
+<li><strong>I5</strong> Re-running any command after a crash is idempotent.</li>
+</ul>
+<h2>2. Design</h2>
+<h3>2.1 Layout</h3>
+<pre><code>live/
+  CURRENT                # cached pointer; NEVER authoritative
+  .lock .staging/
+  gens/&lt;n&gt;/
+    MANIFEST             # canonical, content-hashed member list
+    MANIFEST.sha256      # seal over MANIFEST
+    map/&lt;name&gt;           # pin payload (map dump)
+    meta/&lt;name&gt;          # pin metadata (bpftool show JSON + gen token)
+store/
+  by-gen/&lt;n&gt;-&lt;sethash16&gt;/  # immutable snapshot
+  LATEST .lock .staging/
+</code></pre>
+<h3>2.2 Manifest format</h3>
+<pre><code>format 1
+gen &lt;integer&gt;
+member map &lt;name&gt; &lt;size&gt; &lt;sha256&gt;
+member meta &lt;name&gt; &lt;size&gt; &lt;sha256&gt;
+set &lt;sha256(&quot;gen &lt;n&gt;\n&quot; + sorted member lines, LC_ALL=C)&gt;
+</code></pre>
+<p>Verification is three independent layers, all required: (1) seal matches <code>MANIFEST</code>; (2) <code>set</code> recomputes; (3) every member exists with the recorded size and hash. Sorting with <code>LC_ALL=C</code> removes locale/dir-order dependence.</p>
+<h3>2.3 Commit protocol</h3>
+<ol>
+<li><code>flock</code> the directory; remove orphaned staging dirs (safe under lock).</li>
+<li>Copy all members into <code>.staging/&lt;unique&gt;/</code>.</li>
+<li>Build + seal <code>MANIFEST</code>; <code>fsync</code> members, manifest, directory.</li>
+<li><code>mv -T .staging/&lt;unique&gt; gens/&lt;n&gt;</code> — the single atomic commit.</li>
+<li><code>fsync</code> parent; update cached pointer atomically.</li>
+</ol>
+<p>A crash yields either a complete sealed generation or nothing visible.</p>
+<h3>2.4 Uncooperative writers (raw capture)</h3>
+<p>If there is no <code>gens/</code>, use <strong>read-verify-read</strong>: hash source, copy, hash copy, hash source again; commit only if all three agree, retrying up to <code>BPFSNAP_RAW_ATTEMPTS</code> then refusing. This catches per-file tearing but <em>not</em> a cross-map mix where a writer paused between two in-place updates. For that, <code>BPFSNAP_REQUIRE_GEN=1</code> requires every <code>meta/&lt;name&gt;</code> to contain one <code>gen=&lt;token&gt;</code> line with all tokens equal. Since the writer updates payload then token, a uniform token set implies every payload of that generation is present.</p>
+<h3>2.5 Real eBPF mapping</h3>
+<table>
+<thead>
+<tr>
+<th>Abstract</th>
+<th>Real object</th>
+<th>Command</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>map/&lt;name&gt;</code></td>
+<td>map contents</td>
+<td><code>bpftool map dump pinned &lt;pin&gt; --json</code></td>
+</tr>
+<tr>
+<td><code>meta/&lt;name&gt;</code></td>
+<td>pin metadata</td>
+<td><code>bpftool map show pinned &lt;pin&gt; --json</code></td>
+</tr>
+<tr>
+<td>commit</td>
+<td>freeze + publish</td>
+<td><code>bpftool map freeze pinned &lt;pin&gt;</code> then seal one generation</td>
+</tr>
+</tbody>
+</table>
+<h2>3. Exact fix: <code>bpfsnap.sh</code></h2>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# bpfsnap - crash-consistent snapshot/recovery for a set of pinned eBPF maps
+# plus their pin metadata.
+#
+# Invariants (see solution.md):
+#   I1  Every committed generation is self-describing, content-hashed and
+#       sealed.  Verification is a pure function of the bytes on disk.
+#   I2  Publication is a single atomic rename(2); a generation directory
+#       that is visible under gens/ (or by-gen/) always verifies.
+#   I3  Selection of &quot;latest&quot; uses the explicit generation integer only.
+#       Never mtime, never readdir order.
+#   I4  A generation that does not verify is torn and is ignored, never
+#       deleted, never selected.
+#   I5  Re-running any command after a crash is idempotent.
+
+set -euo pipefail
+
+BPFSNAP_FORMAT=1
+
+log() { printf 'bpfsnap: %s\n' &quot;$*&quot; &gt;&amp;2; }
+die() { printf 'bpfsnap: error: %s\n' &quot;$*&quot; &gt;&amp;2; exit 1; }
+
+# Fault injection used by the test suite.  BPFSNAP_CRASH_AT=&lt;n&gt; makes the
+# process commit suicide right after the n-th filesystem-ish operation.
+_ops=0
+crashpoint() {
+  _ops=$((_ops + 1))
+  if [ -n &quot;${BPFSNAP_CRASH_AT:-}&quot; ] &amp;&amp; [ &quot;$_ops&quot; -eq &quot;$BPFSNAP_CRASH_AT&quot; ]; then
+    printf 'bpfsnap: injected crash after op %d (%s)\n' &quot;$_ops&quot; &quot;$1&quot; &gt;&amp;2
+    kill -9 &quot;$$&quot;
+  fi
+}
+
+sha256_file() { sha256sum -- &quot;$1&quot; | awk '{print $1}'; }
+size_of()     { stat -c %s -- &quot;$1&quot;; }
+valid_name()  { [[ &quot;$1&quot; =~ ^[A-Za-z0-9_.-]+$ ]]; }
+
+fsync_path() {
+  [ -e &quot;$1&quot; ] || return 0
+  sync -d -- &quot;$1&quot; 2&gt;/dev/null || sync 2&gt;/dev/null || true
+}
+fsync_dir() {
+  [ -d &quot;$1&quot; ] || return 0
+  sync -d -- &quot;$1&quot; 2&gt;/dev/null || sync 2&gt;/dev/null || true
+}
+
+# Deterministic, locale-independent member enumeration.
+collect_members() {
+  local root=&quot;$1&quot; type f base
+  for type in map meta; do
+    [ -d &quot;$root/$type&quot; ] || continue
+    for f in &quot;$root/$type&quot;/*; do
+      [ -f &quot;$f&quot; ] || continue
+      base=&quot;${f##*/}&quot;
+      valid_name &quot;$base&quot; || { log &quot;ignoring member with invalid name: $base&quot;; continue; }
+      printf '%s\t%s\n' &quot;$type&quot; &quot;$base&quot;
+    done
+  done | LC_ALL=C sort
+}
+
+# build_manifest &lt;gen&gt; &lt;root&gt; &lt;body-out&gt; &lt;manifest-out&gt;  (sets SET_HASH)
+SET_HASH=&quot;&quot;
+build_manifest() {
+  local gen=&quot;$1&quot; root=&quot;$2&quot; body=&quot;$3&quot; manifest=&quot;$4&quot;
+  local type name f size hash
+  : &gt; &quot;$body&quot;
+  while IFS=$'\t' read -r type name; do
+    f=&quot;$root/$type/$name&quot;
+    size=&quot;$(size_of &quot;$f&quot;)&quot;
+    hash=&quot;$(sha256_file &quot;$f&quot;)&quot;
+    printf 'member %s %s %s %s\n' &quot;$type&quot; &quot;$name&quot; &quot;$size&quot; &quot;$hash&quot; &gt;&gt; &quot;$body&quot;
+    crashpoint &quot;hash $type/$name&quot;
+  done &lt; &lt;(collect_members &quot;$root&quot;)
+
+  SET_HASH=&quot;$( { printf 'gen %s\n' &quot;$gen&quot;; cat &quot;$body&quot;; } | sha256sum | awk '{print $1}' )&quot;
+  {
+    printf 'format %s\n' &quot;$BPFSNAP_FORMAT&quot;
+    printf 'gen %s\n' &quot;$gen&quot;
+    cat &quot;$body&quot;
+    printf 'set %s\n' &quot;$SET_HASH&quot;
+  } &gt; &quot;$manifest&quot;
+}
+
+# verify_gen &lt;dir&gt; ; all three layers must agree
+verify_gen() {
+  local dir=&quot;$1&quot;
+  [ -f &quot;$dir/MANIFEST&quot; ] || return 1
+  [ -f &quot;$dir/MANIFEST.sha256&quot; ] || return 1
+
+  local seal expected
+  seal=&quot;$(awk 'NR==1{print $1}' &quot;$dir/MANIFEST.sha256&quot;)&quot;
+  expected=&quot;$(sha256_file &quot;$dir/MANIFEST&quot;)&quot;
+  [ -n &quot;$seal&quot; ] &amp;&amp; [ &quot;$seal&quot; = &quot;$expected&quot; ] || return 1
+
+  local format=&quot;&quot; gen=&quot;&quot; set=&quot;&quot; tag=&quot;&quot;
+  local body; body=&quot;$(mktemp)&quot;
+  while IFS= read -r line; do
+    case &quot;$line&quot; in
+      &quot;format &quot;*) format=&quot;${line#format }&quot; ;;
+      &quot;gen &quot;*)    gen=&quot;${line#gen }&quot; ;;
+      &quot;set &quot;*)    set=&quot;${line#set }&quot; ;;
+      &quot;member &quot;*) printf '%s\n' &quot;$line&quot; &gt;&gt; &quot;$body&quot; ;;
+      *) return 1 ;;
+    esac
+  done &lt; &quot;$dir/MANIFEST&quot;
+
+  [ &quot;$format&quot; = &quot;$BPFSNAP_FORMAT&quot; ] || { rm -f &quot;$body&quot;; return 1; }
+  [ -n &quot;$gen&quot; ] &amp;&amp; [ -n &quot;$set&quot; ] || { rm -f &quot;$body&quot;; return 1; }
+
+  local recomputed
+  recomputed=&quot;$( { printf 'gen %s\n' &quot;$gen&quot;; cat &quot;$body&quot;; } | sha256sum | awk '{print $1}' )&quot;
+  rm -f &quot;$body&quot;
+  [ &quot;$recomputed&quot; = &quot;$set&quot; ] || return 1
+
+  local type name size hash f
+  while IFS=' ' read -r tag type name size hash; do
+    [ &quot;$tag&quot; = &quot;member&quot; ] || return 1
+    f=&quot;$dir/$type/$name&quot;
+    [ -f &quot;$f&quot; ] || return 1
+    [ &quot;$(size_of &quot;$f&quot;)&quot; = &quot;$size&quot; ] || return 1
+    [ &quot;$(sha256_file &quot;$f&quot;)&quot; = &quot;$hash&quot; ] || return 1
+  done &lt; &lt;(grep '^member ' &quot;$dir/MANIFEST&quot; || true)
+  return 0
+}
+
+# commit_gen &lt;live&gt; &lt;workdir&gt; &lt;gen&gt;
+commit_gen() {
+  local live=&quot;$1&quot; work=&quot;$2&quot; gen=&quot;$3&quot;
+  case &quot;$gen&quot; in ''|*[!0-9]*) die &quot;generation must be a non-negative integer&quot; ;; esac
+  mkdir -p &quot;$live/gens&quot; &quot;$live/.staging&quot;
+
+  exec 8&gt;&quot;$live/.lock&quot;
+  flock 8
+  local stage=&quot;$live/.staging/commit-$gen-$$&quot;
+  rm -rf &quot;$stage&quot;; mkdir -p &quot;$stage/map&quot; &quot;$stage/meta&quot;
+  cp -a &quot;$work/map/.&quot; &quot;$stage/map/&quot; 2&gt;/dev/null || true
+  cp -a &quot;$work/meta/.&quot; &quot;$stage/meta/&quot; 2&gt;/dev/null || true
+  crashpoint &quot;copy work -&gt; commit stage&quot;
+
+  build_manifest &quot;$gen&quot; &quot;$stage&quot; &quot;$stage/.body&quot; &quot;$stage/MANIFEST&quot;
+  rm -f &quot;$stage/.body&quot;
+  ( cd &quot;$stage&quot; &amp;&amp; sha256sum MANIFEST &gt; MANIFEST.sha256 )
+  fsync_path &quot;$stage/MANIFEST&quot;
+  fsync_path &quot;$stage/MANIFEST.sha256&quot;
+  fsync_dir &quot;$stage&quot;
+
+  rm -rf &quot;$live/gens/$gen&quot;
+  mv -T &quot;$stage&quot; &quot;$live/gens/$gen&quot;
+  crashpoint &quot;publish live generation&quot;
+  fsync_dir &quot;$live/gens&quot;
+
+  printf '%s\n' &quot;$gen&quot; &gt; &quot;$live/.current.tmp.$$&quot;
+  mv -T &quot;$live/.current.tmp.$$&quot; &quot;$live/CURRENT&quot;
+  crashpoint &quot;publish CURRENT pointer&quot;
+  fsync_dir &quot;$live&quot;
+  flock -u 8
+  log &quot;committed live generation $gen&quot;
+}
+
+list_verified_gens() {
+  local live=&quot;$1&quot; d name
+  for d in &quot;$live/gens&quot;/*; do
+    [ -d &quot;$d&quot; ] || continue
+    name=&quot;${d##*/}&quot;
+    case &quot;$name&quot; in ''|*[!0-9]*) continue ;; esac
+    if verify_gen &quot;$d&quot;; then printf '%s\n' &quot;$name&quot;; fi
+  done
+}
+
+pick_latest_live() { list_verified_gens &quot;$1&quot; | sort -n | tail -n1; }
+
+# ---- raw (uncooperative writer) capture --------------------------------
+hash_members() {
+  local root=&quot;$1&quot; type name f
+  while IFS=$'\t' read -r type name; do
+    f=&quot;$root/$type/$name&quot;
+    if [ ! -f &quot;$f&quot; ]; then printf 'MISSING %s %s\n' &quot;$type&quot; &quot;$name&quot;; continue; fi
+    printf '%s %s %s %s\n' &quot;$type&quot; &quot;$name&quot; &quot;$(size_of &quot;$f&quot;)&quot; &quot;$(sha256_file &quot;$f&quot;)&quot;
+  done &lt; &lt;(collect_members &quot;$root&quot;)
+}
+
+copy_raw() {
+  local src=&quot;$1&quot; dst=&quot;$2&quot;
+  mkdir -p &quot;$dst/map&quot; &quot;$dst/meta&quot;
+  cp -a &quot;$src/map/.&quot; &quot;$dst/map/&quot; 2&gt;/dev/null || true
+  cp -a &quot;$src/meta/.&quot; &quot;$dst/meta/&quot; 2&gt;/dev/null || true
+}
+
+raw_gen_tokens() {
+  local root=&quot;$1&quot; type name f token
+  while IFS=$'\t' read -r type name; do
+    [ &quot;$type&quot; = meta ] || continue
+    f=&quot;$root/meta/$name&quot;
+    [ -f &quot;$f&quot; ] || { printf '&lt;missing&gt;\n'; continue; }
+    token=&quot;$(sed -n 's/^gen[=:][[:space:]]*\([A-Za-z0-9_.-]\{1,\}\).*/\1/p' &quot;$f&quot; | head -n1)&quot;
+    printf '%s\n' &quot;${token:-&lt;none&gt;}&quot;
+  done &lt; &lt;(collect_members &quot;$root&quot;)
+}
+
+raw_gen_uniform() {
+  local root=&quot;$1&quot; tokens distinct
+  [ &quot;${BPFSNAP_REQUIRE_GEN:-0}&quot; = &quot;1&quot; ] || return 0
+  tokens=&quot;$(raw_gen_tokens &quot;$root&quot;)&quot;
+  printf '%s' &quot;$tokens&quot; | grep -q '&lt;none&gt;\|&lt;missing&gt;' &amp;&amp; return 1
+  distinct=&quot;$(printf '%s\n' &quot;$tokens&quot; | LC_ALL=C sort -u | wc -l)&quot;
+  [ &quot;$distinct&quot; -eq 1 ]
+}
+
+next_seq_for() {
+  local store=&quot;$1&quot; d n max=0
+  for d in &quot;$store/by-gen&quot;/*; do
+    [ -d &quot;$d&quot; ] || continue
+    n=&quot;${d##*/}&quot;; n=&quot;${n%%-*}&quot;
+    case &quot;$n&quot; in ''|*[!0-9]*) continue ;; esac
+    [ &quot;$n&quot; -gt &quot;$max&quot; ] &amp;&amp; max=&quot;$n&quot;
+  done
+  printf '%s\n' &quot;$((max + 1))&quot;
+}
+
+snapshot_raw() {
+  local src=&quot;$1&quot; store=&quot;$2&quot; max_attempts=&quot;${BPFSNAP_RAW_ATTEMPTS:-8}&quot;
+  local attempt=0 h0 h1 hs stage seq id final set
+
+  exec 9&gt;&quot;$store/.lock&quot;
+  flock 9
+  rm -rf &quot;$store/.staging&quot;/*
+
+  collect_members &quot;$src&quot; | grep -q . || die &quot;live source $src has no members&quot;
+
+  while [ &quot;$attempt&quot; -lt &quot;$max_attempts&quot; ]; do
+    attempt=$((attempt + 1))
+    h0=&quot;$(hash_members &quot;$src&quot;)&quot;
+    stage=&quot;$store/.staging/raw-$$&quot;
+    rm -rf &quot;$stage&quot;; mkdir -p &quot;$stage&quot;
+    copy_raw &quot;$src&quot; &quot;$stage&quot;
+    crashpoint &quot;raw copy live -&gt; store stage&quot;
+    hs=&quot;$(hash_members &quot;$stage&quot;)&quot;
+    h1=&quot;$(hash_members &quot;$src&quot;)&quot;
+    if [ &quot;$h0&quot; = &quot;$h1&quot; ] &amp;&amp; [ &quot;$h0&quot; = &quot;$hs&quot; ] &amp;&amp; raw_gen_uniform &quot;$src&quot;; then
+      set=&quot;$(printf '%s\n' &quot;$hs&quot; | sha256sum | awk '{print $1}')&quot;
+      local suf=&quot;${set:0:16}&quot; existing=&quot;&quot;
+      for d in &quot;$store/by-gen&quot;/*-raw&quot;$suf&quot;; do
+        [ -d &quot;$d&quot; ] || continue
+        if verify_gen &quot;$d&quot;; then existing=&quot;${d##*/}&quot;; break; fi
+      done
+      if [ -n &quot;$existing&quot; ]; then
+        rm -rf &quot;$stage&quot;
+        log &quot;raw snapshot content $suf already present as $existing (idempotent)&quot;
+        update_latest &quot;$store&quot; &quot;$existing&quot;; flock -u 9; return 0
+      fi
+      seq=&quot;$(next_seq_for &quot;$store&quot;)&quot;
+      id=&quot;$seq-raw$suf&quot;
+      final=&quot;$store/by-gen/$id&quot;
+      build_manifest &quot;$seq&quot; &quot;$stage&quot; &quot;$stage/.body&quot; &quot;$stage/MANIFEST&quot;
+      rm -f &quot;$stage/.body&quot;
+      ( cd &quot;$stage&quot; &amp;&amp; sha256sum MANIFEST &gt; MANIFEST.sha256 )
+      verify_gen &quot;$stage&quot; || { rm -rf &quot;$stage&quot;; die &quot;raw staged copy failed verification&quot;; }
+      fsync_dir &quot;$stage&quot;
+      rm -rf &quot;$final&quot;
+      mv -T &quot;$stage&quot; &quot;$final&quot;
+      crashpoint &quot;publish raw store generation&quot;
+      fsync_dir &quot;$store/by-gen&quot;
+      update_latest &quot;$store&quot; &quot;$final&quot;
+      flock -u 9
+      log &quot;raw snapshotted seq $seq as $id (attempt $attempt)&quot;
+      return 0
+    fi
+    rm -rf &quot;$stage&quot;
+    log &quot;live source changed during capture (attempt $attempt); retrying&quot;
+  done
+  flock -u 9
+  die &quot;live source $src did not stabilise after $max_attempts attempts; refusing to publish a torn set&quot;
+}
+
+# ---- snapshot ----------------------------------------------------------
+update_latest() {
+  local store=&quot;$1&quot; id=&quot;$2&quot;
+  printf '%s\n' &quot;$id&quot; &gt; &quot;$store/.latest.tmp.$$&quot;
+  mv -T &quot;$store/.latest.tmp.$$&quot; &quot;$store/LATEST&quot;
+  crashpoint &quot;publish store LATEST&quot;
+  fsync_dir &quot;$store&quot;
+}
+
+copy_payload() {
+  local src=&quot;$1&quot; dst=&quot;$2&quot;
+  mkdir -p &quot;$dst/map&quot; &quot;$dst/meta&quot;
+  cp -a &quot;$src/map/.&quot; &quot;$dst/map/&quot; 2&gt;/dev/null || true
+  cp -a &quot;$src/meta/.&quot; &quot;$dst/meta/&quot; 2&gt;/dev/null || true
+  cp -a &quot;$src/MANIFEST&quot; &quot;$src/MANIFEST.sha256&quot; &quot;$dst/&quot;
+}
+
+snapshot() {
+  local live=&quot;$1&quot; store=&quot;$2&quot;
+  mkdir -p &quot;$store/by-gen&quot; &quot;$store/.staging&quot;
+
+  if [ ! -d &quot;$live/gens&quot; ]; then
+    snapshot_raw &quot;$live&quot; &quot;$store&quot;
+    return 0
+  fi
+
+  exec 9&gt;&quot;$store/.lock&quot;
+  flock 9
+  rm -rf &quot;$store/.staging&quot;/*
+
+  local lgen; lgen=&quot;$(pick_latest_live &quot;$live&quot;)&quot;
+  [ -n &quot;$lgen&quot; ] || die &quot;no verified live generation under $live/gens&quot;
+  local srcdir=&quot;$live/gens/$lgen&quot;
+  local set; set=&quot;$(awk '/^set /{print $2; exit}' &quot;$srcdir/MANIFEST&quot;)&quot;
+  local id=&quot;$lgen-${set:0:16}&quot;
+  local final=&quot;$store/by-gen/$id&quot;
+
+  if [ -d &quot;$final&quot; ] &amp;&amp; verify_gen &quot;$final&quot;; then
+    log &quot;store already has $id (idempotent)&quot;
+    update_latest &quot;$store&quot; &quot;$id&quot;; flock -u 9; return 0
+  fi
+
+  local stage=&quot;$store/.staging/$id.$$&quot;
+  rm -rf &quot;$stage&quot;; mkdir -p &quot;$stage&quot;
+  copy_payload &quot;$srcdir&quot; &quot;$stage&quot;
+  crashpoint &quot;copy live -&gt; store stage&quot;
+
+  if ! verify_gen &quot;$stage&quot;; then
+    rm -rf &quot;$stage&quot;; die &quot;staged copy of live generation $lgen failed verification&quot;
+  fi
+  fsync_dir &quot;$stage&quot;
+  rm -rf &quot;$final&quot;
+  mv -T &quot;$stage&quot; &quot;$final&quot;
+  crashpoint &quot;publish store generation&quot;
+  fsync_dir &quot;$store/by-gen&quot;
+  update_latest &quot;$store&quot; &quot;$id&quot;
+  flock -u 9
+  log &quot;snapshotted live generation $lgen as $id&quot;
+}
+
+list_verified_store() {
+  local store=&quot;$1&quot; d name g
+  for d in &quot;$store/by-gen&quot;/*; do
+    [ -d &quot;$d&quot; ] || continue
+    name=&quot;${d##*/}&quot;; g=&quot;${name%%-*}&quot;
+    case &quot;$g&quot; in ''|*[!0-9]*) continue ;; esac
+    if verify_gen &quot;$d&quot;; then printf '%s\n' &quot;$name&quot;; fi
+  done
+}
+
+pick_latest_store() {
+  list_verified_store &quot;$1&quot; | LC_ALL=C sort -t- -k1,1n -k2,2 | tail -n1
+}
+
+# ---- recover -----------------------------------------------------------
+recover() {
+  local store=&quot;$1&quot; dest=&quot;$2&quot;
+  mkdir -p &quot;$store/by-gen&quot;
+  mkdir -p &quot;$(dirname &quot;$dest&quot;)&quot;
+  local dest_abs
+  dest_abs=&quot;$(cd &quot;$(dirname &quot;$dest&quot;)&quot; &amp;&amp; pwd)/$(basename &quot;$dest&quot;)&quot;
+
+  exec 9&gt;&quot;$store/.lock&quot;
+  flock 9
+  rm -rf &quot;$store/.staging&quot;/*
+
+  local id; id=&quot;$(pick_latest_store &quot;$store&quot;)&quot;
+  [ -n &quot;$id&quot; ] || die &quot;no verified snapshot under $store/by-gen&quot;
+  local src=&quot;$store/by-gen/$id&quot;
+  local versions=&quot;$dest_abs.versions&quot;
+  mkdir -p &quot;$versions&quot;
+  rm -rf &quot;$versions&quot;/.stage.*
+  local target=&quot;$versions/$id&quot;
+
+  if [ ! -d &quot;$target&quot; ] || ! verify_gen &quot;$target&quot; 2&gt;/dev/null; then
+    local stage=&quot;$versions/.stage.$$&quot;
+    rm -rf &quot;$stage&quot;; mkdir -p &quot;$stage&quot;
+    copy_payload &quot;$src&quot; &quot;$stage&quot;
+    if ! verify_gen &quot;$stage&quot;; then rm -rf &quot;$stage&quot;; die &quot;recover copy failed verification&quot;; fi
+    fsync_dir &quot;$stage&quot;
+    rm -rf &quot;$target&quot;
+    mv -T &quot;$stage&quot; &quot;$target&quot;
+    crashpoint &quot;materialise recovery&quot;
+    fsync_dir &quot;$versions&quot;
+  fi
+
+  if [ -e &quot;$dest_abs&quot; ] &amp;&amp; [ ! -L &quot;$dest_abs&quot; ]; then
+    mv -T &quot;$dest_abs&quot; &quot;$dest_abs.pre-recover.$$&quot;
+  fi
+  ln -sfn &quot;$target&quot; &quot;$dest_abs.tmp.$$&quot;
+  mv -T &quot;$dest_abs.tmp.$$&quot; &quot;$dest_abs&quot;
+  crashpoint &quot;publish recovery symlink&quot;
+  fsync_dir &quot;$(dirname &quot;$dest_abs&quot;)&quot;
+  flock -u 9
+  log &quot;recovered $id -&gt; $dest_abs&quot;
+}
+
+usage() {
+  cat &gt;&amp;2 &lt;&lt;'EOF'
+usage: bpfsnap &lt;command&gt; [args]
+  commit &lt;live&gt; &lt;workdir&gt; &lt;gen&gt;   seal+atomically publish a live generation
+  snapshot &lt;live&gt; &lt;store&gt;         copy newest verified live gen into store
+  recover &lt;store&gt; &lt;dest&gt;          atomically expose newest verified snapshot
+  verify &lt;dir&gt;                    verify any generation directory
+  latest &lt;live|store&gt;             print newest verified generation id
+EOF
+  exit 2
+}
+
+main() {
+  local cmd=&quot;${1:-}&quot;
+  case &quot;$cmd&quot; in
+    commit)   [ $# -eq 4 ] || usage; shift; commit_gen &quot;$@&quot; ;;
+    snapshot) [ $# -eq 3 ] || usage; shift; snapshot &quot;$@&quot; ;;
+    recover)  [ $# -eq 3 ] || usage; shift; recover &quot;$@&quot; ;;
+    verify)   [ $# -eq 2 ] || usage; verify_gen &quot;$2&quot; &amp;&amp; echo &quot;OK $2&quot; ;;
+    latest)   [ $# -eq 2 ] || usage
+              if [ -d &quot;$2/gens&quot; ]; then pick_latest_live &quot;$2&quot;; else pick_latest_store &quot;$2&quot;; fi ;;
+    *) usage ;;
+  esac
+}
+
+main &quot;$@&quot;
+</code></pre>
+<p>Usage:</p>
+<pre><code class="language-bash">bpfsnap.sh commit   &lt;live&gt; &lt;workdir&gt; &lt;gen&gt;   # writer: seal + publish
+bpfsnap.sh snapshot &lt;live&gt; &lt;store&gt;           # copy newest verified set
+bpfsnap.sh recover  &lt;store&gt; &lt;dest&gt;           # atomically expose newest
+bpfsnap.sh verify   &lt;generation-dir&gt;
+bpfsnap.sh latest   &lt;live-or-store&gt;
+</code></pre>
+<h2>4. Production adapter (<code>bpfsnap-bpftool.sh</code>, full source in <code>/workspace</code>)</h2>
+<p>Walks the bpffs tree in <code>LC_ALL=C</code> order, writes one <code>gen=&lt;n&gt;</code> token into each metadata file, and dumps each map:</p>
+<pre><code class="language-bash">bpftool map show pinned &quot;$pin&quot; --json   &gt; meta-run   # metadata
+bpftool map dump pinned &quot;$pin&quot; --json   &gt; map-run     # payload
+# then: bpfsnap.sh commit &quot;$(dirname &quot;$WORK&quot;)/live&quot; &quot;$WORK&quot; &quot;$GEN&quot;
+</code></pre>
+<p>Example:</p>
+<pre><code class="language-bash">sudo mount -t bpf bpffs /sys/fs/bpf
+sudo bpfsnap-bpftool.sh /sys/fs/bpf /var/lib/bpfsnap/work 42
+sudo bpfsnap.sh snapshot /var/lib/bpfsnap/live  /var/lib/bpfsnap/store
+sudo bpfsnap.sh recover  /var/lib/bpfsnap/store /run/bpf/active
+</code></pre>
+<h2>5. Verification</h2>
+<p>Harnesses (<code>/workspace/test_bpfsnap.sh</code>, <code>/workspace/test_raw.sh</code>) <code>SIGKILL</code> the process after the <em>n</em>-th filesystem operation for every <code>n</code>, then assert recovery lands on a fully verified, mutually consistent set and that re-running is idempotent.</p>
+<p><strong>Crash-window coverage (probed directly):</strong></p>
+<pre><code>commit    crashpoints: 1 2 3 4 5   (copy, hash map, hash meta, publish gen, publish CURRENT)
+snapshot  crashpoints: 1 2 3       (copy, publish gen, publish LATEST)
+recover   crashpoints: 1 2         (materialise, publish symlink)
+</code></pre>
+<p><strong>Observed results:</strong></p>
+<pre><code class="language-console">$ ./test_bpfsnap.sh
+== 1. baseline: seal + snapshot + recover ==
+  ok   latest live = 3
+  ok   recover reproduces live gen 3
+== 2. torn generations are detected and never selected ==
+  ok   torn gen 4 rejected
+  ok   torn gen 5 rejected
+  ok   torn gens ignored, latest still 3
+== 3. selection ignores mtimes and readdir order ==
+  ok   higher generation wins despite older mtime
+== 4. exhaustive crash injection: commit (writer) ==
+  ok   all commit crashpoints consistent
+== 5. exhaustive crash injection: snapshot ==
+  ok   all snapshot crashpoints recover to live gen 3
+== 6. exhaustive crash injection: recover ==
+  ok   all recover crashpoints re-run to live gen 3
+== 7. idempotency: repeated snapshot/recover does not grow state ==
+  ok   snapshot idempotent (1 generations)
+RESULT: 10 passed, 0 failed
+
+$ ./test_raw.sh
+== raw snapshot/recover ==
+  ok   raw capture reproduces source
+== raw idempotency ==
+  ok   raw snapshot idempotent (1 generations)
+== cross-map tear is rejected (token check) ==
+  ok   mixed-generation source refused (non-zero exit)
+== concurrent writer: every committed set is mutually consistent ==
+  ok   12 concurrent captures all mutually consistent
+RESULT: 4 passed, 0 failed
+</code></pre>
+<p>Direct proof of the two anti-patterns:</p>
+<pre><code class="language-console"># no seal -&gt; never selected
+$ mkdir -p live/gens/4/map; echo half &gt; live/gens/4/map/conn
+$ ./bpfsnap.sh latest live
+3
+
+# tampered member -&gt; verification fails
+$ cp -a live/gens/3 live/gens/5; echo tamper &gt; live/gens/5/map/conn
+$ ./bpfsnap.sh verify live/gens/5; echo &quot;rc=$?&quot;
+rc=1
+
+# mtime is irrelevant; the integer generation wins
+$ touch -d 2035-01-01 live/gens/1 live/gens/3
+$ ./bpfsnap.sh latest live
+3
+</code></pre>
+<h2>6. Operational notes</h2>
+<ul>
+<li><strong>Same filesystem required</strong> for staging and destination so <code>rename(2)</code> is atomic.</li>
+<li><strong>Durability</strong>: <code>sync -d</code> is applied to members, manifests and parent directories around the commit rename; a surviving directory entry is re-verified next run.</li>
+<li><strong>Concurrency</strong>: writers and the utility share <code>flock</code> on <code>.lock</code>; sealed capture only reads immutable published dirs, so it never blocks on a frozen writer.</li>
+<li><strong>GC</strong>: generations are immutable; oldest deletion never harms newest recovery, so GC is kept out of the hot path.</li>
+<li><strong>Limitation</strong>: raw capture guarantees per-file integrity and (with <code>BPFSNAP_REQUIRE_GEN=1</code>) cross-map consistency; a writer that publishes no generation token requires the sealed generation protocol.</li>
+</ul>
+<p><strong>Artifacts:</strong> <code>/workspace/solution.md</code> (this document, fully rendered), <code>/workspace/bpfsnap.sh</code>, <code>/workspace/bpfsnap-bpftool.sh</code>, <code>/workspace/test_bpfsnap.sh</code>, <code>/workspace/test_raw.sh</code>, <code>/workspace/test/mock-bpftool</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: shell-20261011-bpf-map-freeze-crash-consistency
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-11T22:21:28.123Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Build a recovery utility that snapshots multiple pinned eBPF maps and their pin metadata while writers may be frozen, killed, or restarted between any two filesystem operations. It must detect torn generations, preserve the last mutually consistent map set across crashes, and resume idempotently without trusting timestamps or directory order.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;shell-20261011-bpf-map-freeze-crash-consistency&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-11T22:21:28.124Z&quot;, &quot;version&quot;: &quot;5&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
