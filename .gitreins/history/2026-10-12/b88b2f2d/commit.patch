@@ -1,0 +1,190 @@
+commit 336c3e112b6ef8098decc766ee04ff9fb649845f
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Mon Oct 12 14:42:34 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Mon Oct 12 14:42:34 2026 -0500
+
+    fix(docs): mark export pr_url as reserved and never populated. Addresses DF-OFF-BY-ONE-40.
+    
+    PRURL has no assignment site and internal/export has no pull-request
+    creation, so the old claim that pr_url is "omitted when the repo does not
+    support pull requests" implied a population path that cannot exist.
+    docs/api-reference.md, docs/integration.md and pkg/api/openapi.yaml now
+    state the field is reserved and never populated; the JSON field stays in
+    the schema (omitempty) as the least-breaking contract. Adds focused
+    regression tests pinning the reserved wording in the served spec and
+    blocking the misleading conditional-population sentence from returning.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ docs/api-reference.md         |  3 +-
+ docs/integration.md           |  3 +-
+ internal/api/handlers.go      |  4 +-
+ pkg/api/export_pr_url_test.go | 95 +++++++++++++++++++++++++++++++++++++++++++
+ pkg/api/openapi.yaml          |  1 +
+ 5 files changed, 102 insertions(+), 4 deletions(-)
+
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index 376e99e0..297b539d 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -466,12 +466,11 @@ Export verified answers to a git repository as a subtree commit.
+ ```json
+ {
+   "commit_sha": "abc123...",
+-  "pr_url": "...",
+   "files_changed": 2
+ }
+ ```
+ 
+-`pr_url` is omitted when the repo does not support pull requests.
++`pr_url` is a **reserved** field: it is declared in the response schema (`ExportResponse.pr_url`) for backward compatibility but is **never populated** — there is currently no pull-request creation implementation, so no export response ever carries a PR URL.
+ 
+ **Non-bare target (`400`).** Pointing `target_repo` at a local non-bare working repository fails validation **before** any clone, write, or commit when the push would update the branch that repo currently has checked out — git always refuses such a push ("refusing to update checked out branch"). The export answers `400 invalid_target_repo` with a message naming `target_repo`; create a bare sibling (`git init --bare`) or push to a remote instead. Pushes to a branch that is *not* checked out, and repos configured with `receive.denyCurrentBranch=ignore/warn/updateInstead`, are accepted as before.
+ 
+diff --git a/docs/integration.md b/docs/integration.md
+index e7a0a70d..62c2a7c4 100644
+--- a/docs/integration.md
++++ b/docs/integration.md
+@@ -268,11 +268,12 @@ curl -s -X POST http://localhost:8766/api/v1/export \
+ ```json
+ {
+   "commit_sha": "abc123...",
+-  "pr_url": "...",
+   "files_changed": 2
+ }
+ ```
+ 
++(`pr_url` is a reserved field in the response schema and is never populated — see [Export answers to a git repo](api-reference.md#export--import).)
++
+ ### Import answers from a git repo
+ 
+ ```bash
+diff --git a/internal/api/handlers.go b/internal/api/handlers.go
+index f84e0434..e1f90975 100644
+--- a/internal/api/handlers.go
++++ b/internal/api/handlers.go
+@@ -179,7 +179,9 @@ type exportRequest struct {
+ 
+ // exportResponse mirrors ExportResponse from the OpenAPI spec.
+ type exportResponse struct {
+-	CommitSHA    string `json:"commit_sha"`
++	CommitSHA string `json:"commit_sha"`
++	// PRURL is reserved for future pull-request creation. Nothing assigns
++	// it today, so omitempty keeps it out of every response.
+ 	PRURL        string `json:"pr_url,omitempty"`
+ 	FilesChanged int    `json:"files_changed"`
+ }
+diff --git a/pkg/api/export_pr_url_test.go b/pkg/api/export_pr_url_test.go
+new file mode 100644
+index 00000000..da8eaf34
+--- /dev/null
++++ b/pkg/api/export_pr_url_test.go
+@@ -0,0 +1,95 @@
++package api
++
++import (
++	"encoding/json"
++	"os"
++	"strings"
++	"testing"
++)
++
++// TestOpenAPISpec_ExportResponsePRURLIsReserved pins the DF-OFF-BY-ONE-40
++// contract: pr_url is a RESERVED field. No code path can ever assign it
++// (internal/api builds exportResponse with only CommitSHA and FilesChanged,
++// and internal/export has no pull-request creation), so the served spec must
++// describe it as reserved and never populated — it must not suggest that a
++// PR URL can appear under some conditions.
++func TestOpenAPISpec_ExportResponsePRURLIsReserved(t *testing.T) {
++	raw, err := JSONBytes()
++	if err != nil {
++		t.Fatalf("JSONBytes: %v", err)
++	}
++	var doc map[string]any
++	if err := json.Unmarshal(raw, &doc); err != nil {
++		t.Fatalf("json.Unmarshal: %v", err)
++	}
++
++	schema := mustMap(t, mustMap(t, mustMap(t, doc, "components"), "schemas"), "ExportResponse")
++	props := mustMap(t, schema, "properties")
++
++	// The field stays in the wire schema (least breaking contract) but must
++	// be documented as reserved.
++	prURL, ok := props["pr_url"].(map[string]any)
++	if !ok {
++		t.Fatalf("ExportResponse.properties.pr_url = %#v (%T), want a mapping", props["pr_url"], props["pr_url"])
++	}
++	if got := prURL["type"]; got != "string" {
++		t.Errorf("pr_url.type = %#v, want %q", got, "string")
++	}
++	desc, _ := prURL["description"].(string)
++	descLower := strings.ToLower(desc)
++	if !strings.Contains(descLower, "reserved") {
++		t.Errorf("pr_url.description = %q, want it to state the field is reserved", desc)
++	}
++	if !strings.Contains(descLower, "never") {
++		t.Errorf("pr_url.description = %q, want it to state the field is never populated", desc)
++	}
++
++	// A reserved field cannot be required.
++	if required, ok := schema["required"].([]any); ok {
++		for _, r := range required {
++			if r == "pr_url" {
++				t.Errorf("pr_url must stay optional, but it is in required: %v", required)
++			}
++		}
++	}
++}
++
++// TestDocs_ExportPRURLReservedWording keeps docs/api-reference.md honest about
++// pr_url: the old sentence claimed the field "is omitted when the repo does
++// not support pull requests", implying a populated PR URL is possible. No
++// code can assign it (DF-OFF-BY-ONE-40), so the living documentation must
++// state the field is reserved and never populated, and the misleading
++// conditional-population wording must not return.
++func TestDocs_ExportPRURLReservedWording(t *testing.T) {
++	raw, err := os.ReadFile("../../docs/api-reference.md")
++	if err != nil {
++		t.Fatalf("read docs/api-reference.md: %v", err)
++	}
++	doc := string(raw)
++
++	// Scope to the export endpoint section.
++	const heading = "### `POST /api/v1/export`"
++	start := strings.Index(doc, heading)
++	if start < 0 {
++		t.Fatalf("docs/api-reference.md: heading %q not found", heading)
++	}
++	section := doc[start:]
++	if next := strings.Index(section, "\n### "); next >= 0 {
++		section = section[:next]
++	}
++
++	// Negative control: the misleading conditional-population claim is gone.
++	if strings.Contains(section, "does not support pull requests") {
++		t.Errorf("docs/api-reference.md export section still claims pr_url is conditionally populated: %q", section)
++	}
++
++	// Positive control: the section states the field is reserved and never
++	// populated.
++	lower := strings.ToLower(section)
++	if !strings.Contains(lower, "reserved") {
++		t.Errorf("docs/api-reference.md export section does not state pr_url is reserved")
++	}
++	if !strings.Contains(lower, "never populated") {
++		t.Errorf("docs/api-reference.md export section does not state pr_url is never populated")
++	}
++}
+diff --git a/pkg/api/openapi.yaml b/pkg/api/openapi.yaml
+index 93386d4f..f272e0af 100644
+--- a/pkg/api/openapi.yaml
++++ b/pkg/api/openapi.yaml
+@@ -732,6 +732,7 @@ components:
+           type: string
+         pr_url:
+           type: string
++          description: Reserved for future pull-request creation and never populated by the current implementation. There is no pull-request creation code path, so no export response ever carries a PR URL; the field is kept in the schema only for backward compatibility and is always omitted.
+         files_changed:
+           type: integer
+ 
