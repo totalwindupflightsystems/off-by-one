@@ -1,0 +1,28 @@
+{
+  "class_id": 2717,
+  "title": "go-fsclient-uncacheable-read-bypass-census",
+  "description": "go-fsclient-uncacheable-read-bypass-census",
+  "created_at": "2026-10-12 14:49:32",
+  "answers": [
+    {
+      "answer_id": 4448,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "# BFS-027 — An uncacheable read is now a named, counted bypass\n\nI cloned `github.com/deployBunker/bunker`, reproduced the defect, implemented the fix on branch `wt/BFS-027` (commit `7bb1a00`), and verified it. The full solution is also written to `/workspace/BFS-027-solution.md` and `docs/evidence/BFS-027-uncacheable-census.md`.\n\n## Symptom\n\nBFS-009's uncacheable arm read bytes whose surface-declared hash differed from the body's real hash. The client correctly refused to cache them, but **nothing moved** — no blob, no index entry, no counter:\n\n```\nsurface says  : sha256:1195d8cc…\nbody hashes to: sha256:de7c33de…\nbefore : blobs_on_disk=1  target.txt_in_index=absent  … bypass=0 oversize=0 hits=0 misses=0\nafter  : blobs_on_disk=1  target.txt_in_index=absent  … bypass=0 oversize=0 hits=0 misses=0\n```\n\nBFS-005 §3.4 requires every read the client did **not** cache to be reported.\n\n## Root cause\n\nThe single content-identity refusal site is `Cache.Insert` in `internal/fsclient/cache.go`. The live FUSE read path (`readHandle.load`) calls `Cache.AdmitRead` → `Cache.Insert`. The cap/no-room/disabled refusals all count a `bypass_reason`; the identity-mismatch branch returned `OutcomeBypass` **silently**, and the refusal class was not even part of the closed `BypassReasons()` vocabulary. This is BFS-032's shape one site over.\n\n## Fix\n\n```go\n// internal/fsclient/cache.go — closed vocabulary\nBypassReasonContentMismatch = \"content_mismatch\"\n\nfunc BypassReasons() []string {\n\treturn []string{\n\t\tBypassReasonOverEntryCap,\n\t\tBypassReasonInsertOverEntryCap,\n\t\tBypassReasonNoRoom,\n\t\tBypassReasonDisabled,\n\t\tBypassReasonContentMismatch,   // new\n\t}\n}\n\n// Insert: hash first (never under the lock), then count under it\ngot := HashBytes(data)\nc.mu.Lock()\ndefer c.mu.Unlock()\nif got != hash {\n\tc.countBypassLocked(BypassReasonContentMismatch)   // new\n\treturn OutcomeBypass, fmt.Errorf(\"fsclient: refusing to store %s under %s (content hashes to %s)\", path, hash, got)\n}\n```\n\nI also registered `cache.bypass_reasons.content_mismatch` in the BFS-045 census table (and drove it), and added `TestContentIdentityMismatchRefusalIsCountedByReason` to `admitread_test.go` with a faithful-read control.\n\n`BypassReasons()` drives both the JSON census and the human `bypassSummary`, so the reason is visible everywhere. Cached reads are untouched — the branch is only entered when `HashBytes(data) != hash`.\n\n## Verification (all observed green)\n\n```sh\ngo test ./internal/fsclient/ -run 'TestContentIdentityMismatchRefusalIsCountedByReason' -v -count=1\n# --- PASS: TestContentIdentityMismatchRefusalIsCountedByReason (0.00s)\n\ngo test ./internal/fsclient/ -run TestEveryFigureInTheStatusRecordMovesOrIsExplained -v -count=1 | grep content_mismatch\n# === RUN   …/figure/cache.bypass_reasons.content_mismatch\n#   moved cache.bypass_reasons.content_mismatch          1\n#   --- PASS\n\ngo vet ./internal/fsclient/ && go test ./internal/fsclient/ -count=1 && go test ./internal/fsmount/ -count=1 && go build ./...\n# ok  github.com/deployBunker/bunker/internal/fsclient  41.888s\n# ok  github.com/deployBunker/bunker/internal/fsmount   0.257s\n```\n\n`internal/fsmount` contains `readHandle.load`, the function a FUSE read actually calls, so the admission change is covered by the live-path package suite. This container has no `/dev/fuse`, so the FUSE-level probe from `docs/evidence/BFS-009-probes/uncacheable-probe.sh` cannot run here; §5.4 of the written solution gives the exact invocation for a FUSE-capable host, where the status document now carries `\"content_mismatch\": 1`.\n\n## Deliverables\n\n- `internal/fsclient/cache.go` — new reason + counting at the refusal site\n- `internal/fsclient/admitread_test.go` — acceptance arm + control\n- `internal/fsclient/status_census_test.go` — census classification + workload driver\n- `/workspace/BFS-027-solution.md` and `docs/evidence/BFS-027-uncacheable-census.md` — the full self-contained writeup (root cause, exact diff, why the name, acceptance mapping)\n\nThe complete markdown solution is at `/workspace/BFS-027-solution.md`.\n",
+      "evidence": "# Evidence\n- Problem class: go-fsclient-uncacheable-read-bypass-census\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-12T14:49:32.561Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "FUSE fsclient read whose surface content-identity hash mismatches the served body is deliberately refused from caching, but the refusal moved no counter and no status figure - the uncacheable arm was invisible in the status record. Fix: emit a named bypass_reason at the content-identity refusal site so every deliberately-uncached read moves a reasoned outcome while cached reads stay correct.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-fsclient-uncacheable-read-bypass-census",
+        "provider": "openrouter",
+        "solved_at": "2026-10-12T14:49:32.568Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-12 14:49:32"
+    }
+  ]
+}

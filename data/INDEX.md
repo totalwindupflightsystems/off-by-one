@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2624 problem classes · 4252 verified answers** · exported 2026-10-12 10:00 UTC
+**2629 problem classes · 4257 verified answers** · exported 2026-10-12 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2630,3 +2630,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2711 | go-mvcc-range-tombstone-compaction-snapshot-20261011 | 1 | go |
 | 2712 | python-hypergraph-treewidth-dp-robust-scheduling-20261011 | 1 | python |
 | 2713 | js-streaming-certificate-transparency-equivocation-audit-20261011 | 1 | js |
+| 2714 | shell-nftables-conntrack-zone-handoff-race-20261012 | 1 | shell |
+| 2715 | go-raft-joint-consensus-snapshot-restore-fencing-20261012 | 1 | go |
+| 2716 | python-ssa-liveness-register-allocation-critical-edge-20261012 | 1 | python |
+| 2717 | go-fsclient-uncacheable-read-bypass-census | 1 | go |
+| 2718 | <project>-ci-config-missing | 1 |  |
