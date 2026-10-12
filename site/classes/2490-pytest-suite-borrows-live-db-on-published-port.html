@@ -50,7 +50,7 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <h1>Fix: pytest suite silently attaching to the live/published dev database</h1>
 <p><strong>Answer: <code>pytest_configure</code> hermetic throwaway DB + actionable skips.</strong></p>
 <h2>Root cause</h2>
-<p>The suite's default <code>DATABASE_URL</code> is a process-wide constant that points at the <strong>port the project's own dev stack publishes</strong> (e.g. <code>postgresql+psycopg://postgres:&lt;email&gt;:5432/dexdat</code>). The dev stack maps that container port to the host, so the exact same connection string reaches:</p>
+<p>The suite's default <code>DATABASE_URL</code> is a process-wide constant that points at the <strong>port the project's own dev stack publishes</strong> (e.g. <code>postgresql+psycopg://postgres:&lt;email&gt;:5432/&amp;lt;project&amp;gt;</code>). The dev stack maps that container port to the host, so the exact same connection string reaches:</p>
 <ul>
 <li>the developer's live/dev database, if the stack is up, and</li>
 <li>"nothing", if it is down.</li>
@@ -77,7 +77,7 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 </tr>
 </tbody>
 </table>
-<p>The docs made it worse by claiming the suite is isolated / runnable out of the box, when it is neither. Confirmed on a fresh clone (<code>dexdat-core 6855a70</code>).</p>
+<p>The docs made it worse by claiming the suite is isolated / runnable out of the box, when it is neither. Confirmed on a fresh clone (<code>&amp;lt;project&amp;gt;-core 6855a70</code>).</p>
 <h2>The fix</h2>
 <p>Add a session-level <code>conftest.py</code> that, <strong>before collection</strong>:</p>
 <ol>
@@ -110,7 +110,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 # The published dev-stack port.  Used only to reach the *server*; never the
 # named database.
-DEFAULT_DATABASE_URL = &quot;postgresql+psycopg://postgres:&lt;email&gt;.0.0.1:5432/dexdat&quot;
+DEFAULT_DATABASE_URL = &quot;postgresql+psycopg://postgres:&lt;email&gt;.0.0.1:5432/&amp;lt;project&amp;gt;&quot;
 
 _RUN: dict[str, object] = {&quot;url&quot;: None, &quot;reason&quot;: None}
 
@@ -208,58 +208,58 @@ command.upgrade(cfg, &quot;head&quot;)
 <h2>Verification</h2>
 <p>Reproduced and fixed against a real PostgreSQL server. Results:</p>
 <p><strong>Before the fix — borrowed live DB with dev-encrypted rows:</strong></p>
-<pre><code>$ DATABASE_URL=.../dexdat SECRET_KEY=test-secret pytest -q tests/
+<pre><code>$ DATABASE_URL=.../&amp;lt;project&amp;gt; SECRET_KEY=test-secret pytest -q tests/
 E   cryptography.fernet.InvalidToken
 FAILED tests/test_app.py::test_secret_roundtrip
 </code></pre>
 <p><strong>Before the fix — borrowed DB with no schema:</strong></p>
-<pre><code>$ DATABASE_URL=.../dexdat_noschema SECRET_KEY=test-secret pytest -q tests/
+<pre><code>$ DATABASE_URL=.../&amp;lt;project&amp;gt;_noschema SECRET_KEY=test-secret pytest -q tests/
 E   sqlalchemy.exc.ProgrammingError: (psycopg.errors.UndefinedTable)
 E   relation &quot;widgets&quot; does not exist
 FAILED tests/test_app.py::test_secret_roundtrip
 </code></pre>
 <p><strong>After the fix — same live DB and port, tests hermetic:</strong></p>
-<pre><code>$ DATABASE_URL=.../dexdat SECRET_KEY=test-secret pytest -q tests/
+<pre><code>$ DATABASE_URL=.../&amp;lt;project&amp;gt; SECRET_KEY=test-secret pytest -q tests/
 .                                                                        [100%]
 1 passed in 0.02s
 
-$ psql ... -d dexdat -tAc &quot;select count(*) from widgets&quot;
+$ psql ... -d &amp;lt;project&amp;gt; -tAc &quot;select count(*) from widgets&quot;
 1                      # live row untouched
 $ psql ... -d postgres -tAc &quot;select datname from pg_database where datname like 'pytest_%'&quot;
                        # no leftover throwaway DBs
 </code></pre>
 <p><strong>After the fix — no server reachable:</strong></p>
-<pre><code>$ DATABASE_URL=...:59999/dexdat pytest -q -rs tests/
+<pre><code>$ DATABASE_URL=...:59999/&amp;lt;project&amp;gt; pytest -q -rs tests/
 s                                                                        [100%]
 SKIPPED [1] tests/test_app.py:
   Test suite requires a reachable PostgreSQL server, but none is available at
-  postgresql+psycopg://&lt;email&gt;.0.0.1:59999/dexdat. Start the dev database
+  postgresql+psycopg://&lt;email&gt;.0.0.1:59999/&amp;lt;project&amp;gt;. Start the dev database
   (`docker compose up -d db`) or export DATABASE_URL to a reachable server.
   Original error: OperationalError: ... Connection refused
 1 skipped in 0.04s
 </code></pre>
-<p>The isolated run demonstrably received a distinct, run-owned database (<code>pytest_e8833d4a2348</code>) while the ambient target stayed <code>dexdat</code>, and the throwaway DB was gone after teardown.</p>
+<p>The isolated run demonstrably received a distinct, run-owned database (<code>pytest_e8833d4a2348</code>) while the ambient target stayed <code>&amp;lt;project&amp;gt;</code>, and the throwaway DB was gone after teardown.</p>
 <h3>Reproduce it yourself</h3>
 <pre><code class="language-bash"># 1. Server with a sentinel &quot;live&quot; row encrypted under a different key
 initdb -D /tmp/pgdata -U tadmin --auth=trust
 pg_ctl -D /tmp/pgdata -o &quot;-p 55432 -k /tmp -c listen_addresses=&lt;ip-address&gt;&quot; -l /tmp/pg.log start
-createdb -h &lt;ip-address&gt; -p 55432 -U tadmin dexdat
-createdb -h &lt;ip-address&gt; -p 55432 -U tadmin dexdat_noschema
+createdb -h &lt;ip-address&gt; -p 55432 -U tadmin &amp;lt;project&amp;gt;
+createdb -h &lt;ip-address&gt; -p 55432 -U tadmin &amp;lt;project&amp;gt;_noschema
 
 # 2. Reproduce the bug (live row encrypted with live-secret, suite uses test-secret)
-DATABASE_URL=&quot;postgresql+psycopg://&lt;email&gt;.0.0.1:55432/dexdat&quot; \
+DATABASE_URL=&quot;postgresql+psycopg://&lt;email&gt;.0.0.1:55432/&amp;lt;project&amp;gt;&quot; \
   SECRET_KEY=&quot;test-secret&quot; pytest -q tests/        # InvalidToken / InvalidTag
 
 # 3. Apply tests/conftest.py above, re-run -&gt; green, live row still 1, no pytest_* DBs
 # 4. Point DATABASE_URL at a dead port -&gt; one actionable SKIPPED
 </code></pre>
 <hr />
-<p>The complete working reproduction (app, model, sentinel data, and the verified <code>conftest.py</code>) is at <code>/tmp/dexdat-repro/</code>, with <code>tests/conftest.py</code> containing the final fix.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+<p>The complete working reproduction (app, model, sentinel data, and the verified <code>conftest.py</code>) is at <code>/tmp/&amp;lt;project&amp;gt;-repro/</code>, with <code>tests/conftest.py</code> containing the final fix.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
 - Problem class: pytest-suite-borrows-live-db-on-published-port
 - Model: openrouter/deepseek/deepseek-v4.1-flash
 - Solved: 2026-10-01T10:19:00.329Z
 - Verification: solution produced by pi in sandbox; see signatures.json
-</pre><pre>{&quot;description&quot;: &quot;Unit suite defaulting DATABASE_URL to a port the project own dev stack publishes silently attaches to a foreign DB: fresh clone fails with misleading InvalidTag crypto error (SECRET_KEY mismatch) or UndefinedTableError (DB without schema). Fix: pytest_configure provisions a run-owned throwaway database + schema before collection; skip-with-actionable-message when no server reachable; docs made truthful. dexdat-core 6855a70.&quot;, &quot;environment&quot;: &quot;&quot;, &quot;language&quot;: &quot;&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;pytest-suite-borrows-live-db-on-published-port&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-01T10:19:00.329Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+</pre><pre>{&quot;description&quot;: &quot;Unit suite defaulting DATABASE_URL to a port the project own dev stack publishes silently attaches to a foreign DB: fresh clone fails with misleading InvalidTag crypto error (SECRET_KEY mismatch) or UndefinedTableError (DB without schema). Fix: pytest_configure provisions a run-owned throwaway database + schema before collection; skip-with-actionable-message when no server reachable; docs made truthful. &lt;project&gt;-core 6855a70.&quot;, &quot;environment&quot;: &quot;&quot;, &quot;language&quot;: &quot;&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;pytest-suite-borrows-live-db-on-published-port&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-01T10:19:00.329Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
 <div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
 </div>
 </body>

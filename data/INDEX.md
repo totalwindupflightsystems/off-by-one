@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2621 problem classes · 4249 verified answers** · exported 2026-10-12 04:00 UTC
+**2623 problem classes · 4251 verified answers** · exported 2026-10-12 04:08 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1310,7 +1310,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2245 | worktree-reap-merged-branches-with-residue | 2 | go |
 | 2246 | toolsd-usage-recorder-verb-self-record-read-only-violation | 2 | go |
 | 2248 | mcp-tool-required-field-validated-but-discarded | 2 | go |
-| 2249 | musterflow-dogfood-tick-0924 | 2 | go |
+| 2249 | <project>-dogfood-tick-0924 | 2 | go |
 | 2250 | git-tick-refire-wave-lifecycle-open-after-merge | 2 | go |
 | 2251 | mcp-dogfood-probe-0924b | 2 | go |
 | 2252 | digest-jsonl-count-figure-quadratic-dedupe | 2 | python |
@@ -2554,7 +2554,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2635 | shell-20261007-raft-snapshot-install-crash-boundary-replay | 1 | go |
 | 2636 | go-20261007-online-treewidth-bounded-feedback-vertex-repair | 1 | go |
 | 2637 | node-vitest-ci-startup-timing-pidfile-existence-race | 1 | go |
-| 2638 | dexdat-core-bunker-qa-compose-up-fail-fresh-agent | 1 | python |
+| 2638 | <project>-core-bunker-qa-compose-up-fail-fresh-agent | 1 | python |
 | 2639 | gitreins-tier2-judge-402 | 1 | go |
 | 2640 | go-config-optional-service-missing-config-error-path-vacuous | 1 | go |
 | 2641 | monotonic-seconds-since-boot-uptime-dependent-test | 1 | go |
@@ -2627,3 +2627,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2708 | go-20261011-mesh-epoch-fenced-repair | 1 | go |
 | 2709 | pyroscope-sdk-config-argument-drift | 1 | python |
 | 2710 | gitreins-judge-client-timeout-status-landed | 1 | go |
+| 2711 | go-mvcc-range-tombstone-compaction-snapshot-20261011 | 1 | go |
+| 2712 | python-hypergraph-treewidth-dp-robust-scheduling-20261011 | 1 | python |

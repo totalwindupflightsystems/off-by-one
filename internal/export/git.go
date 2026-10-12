@@ -584,6 +584,13 @@ var internalNameRedactions = []struct {
 	{regexp.MustCompile(`chimera-v2`), "<project>"},
 	{regexp.MustCompile(`warpfs`), "<project>"},
 	{regexp.MustCompile(`crier`), "<project>"},
+	{regexp.MustCompile(`(?i)wojons(?:/[A-Za-z0-9._-]+)+`), "<project>"},
+	{regexp.MustCompile(`(?i)get-h3`), "<project>"},
+	{regexp.MustCompile(`(?i)dexdat`), "<project>"},
+	{regexp.MustCompile(`(?i)9router`), "<project>"},
+	{regexp.MustCompile(`(?i)task-router`), "<project>"},
+	{regexp.MustCompile(`(?i)musterflow`), "<project>"},
+	{regexp.MustCompile(`(?i)(https?://raw\.githubusercontent\.com/totalwindupflightsystems/[^\s"'<>]+)|totalwindupflightsystems`), "<organization>"},
 }
 
 // sanitizeInternalNames rewrites every internal project/tool name in s to
@@ -592,7 +599,15 @@ var internalNameRedactions = []struct {
 // untouched.
 func sanitizeInternalNames(s string) string {
 	for _, r := range internalNameRedactions {
-		s = r.pattern.ReplaceAllString(s, r.placeholder)
+		s = r.pattern.ReplaceAllStringFunc(s, func(match string) string {
+			// This public raw-content URL is a load-bearing distribution path.
+			// Keep it intact while redacting the organization name everywhere else.
+			if strings.HasPrefix(strings.ToLower(match), "https://raw.githubusercontent.com/totalwindupflightsystems/") ||
+				strings.HasPrefix(strings.ToLower(match), "http://raw.githubusercontent.com/totalwindupflightsystems/") {
+				return match
+			}
+			return r.placeholder
+		})
 	}
 	return s
 }

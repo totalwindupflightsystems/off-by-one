@@ -137,7 +137,8 @@ def sanitize_common_pii(text):
 # REVIEW-OB-009: internal project/tool names are lab-internal identifiers —
 # the corpus and the generated site are public, so they must never appear in
 # any emitted text field. Each (pattern, placeholder) pair rewrites one
-# internal name to a neutral token. Ordered: the gitreins tool path comes
+# internal name to a neutral token. The public raw.githubusercontent.com
+# distribution URL is retained as a whole because it is load-bearing. Ordered: the gitreins tool path comes
 # first and swallows its own /home/<user>/ or ~/ prefix, so the account name
 # cannot survive as a host-path leak when the generic rewrite runs after.
 # Mirrored in internal/export/git.go internalNameRedactions (keep in sync).
@@ -147,6 +148,17 @@ _NAME_REDACTIONS = [
     (re.compile(r"chimera-v2"), "<project>"),
     (re.compile(r"warpfs"), "<project>"),
     (re.compile(r"crier"), "<project>"),
+    (re.compile(r"wojons(?:/[A-Za-z0-9._-]+)+", re.IGNORECASE), "<project>"),
+    (re.compile(r"get-h3", re.IGNORECASE), "<project>"),
+    (re.compile(r"dexdat", re.IGNORECASE), "<project>"),
+    (re.compile(r"9router", re.IGNORECASE), "<project>"),
+    (re.compile(r"task-router", re.IGNORECASE), "<project>"),
+    (re.compile(r"musterflow", re.IGNORECASE), "<project>"),
+    (re.compile(
+        r"https?://raw\.githubusercontent\.com/totalwindupflightsystems/[^\s\"'<>]+|"
+        r"totalwindupflightsystems",
+        re.IGNORECASE,
+    ), "<organization>"),
 ]
 
 
@@ -160,7 +172,18 @@ def sanitize_internal_names(text):
     if not text:
         return text
     for pattern, placeholder in _NAME_REDACTIONS:
-        text = pattern.sub(placeholder, text)
+        if placeholder == "<organization>":
+            text = pattern.sub(
+                lambda match: match.group(0)
+                if match.group(0).lower().startswith((
+                    "https://raw.githubusercontent.com/totalwindupflightsystems/",
+                    "http://raw.githubusercontent.com/totalwindupflightsystems/",
+                ))
+                else placeholder,
+                text,
+            )
+        else:
+            text = pattern.sub(placeholder, text)
     return text
 
 
