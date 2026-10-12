@@ -272,6 +272,158 @@ func TestExport_ClassMismatch(t *testing.T) {
 	}
 }
 
+// initWorkRepo creates a NON-bare working repository with one commit on the
+// given branch and returns its path — the shape git refuses to receive
+// pushes into (receive.denyCurrentBranch=refuse is the default).
+func initWorkRepo(t *testing.T, branch string) string {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "work")
+	if out, err := exec.Command("git", "init", "-b", branch, repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	for _, args := range [][]string{
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", args[0], err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# Work Repo\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	for _, args := range [][]string{
+		{"add", "."},
+		{"commit", "-m", "initial"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", args[0], err, out)
+		}
+	}
+	return repo
+}
+
+// TestExport_NonBareTargetRefused guards DF-OFF-BY-ONE-35 in the owning
+// package: pointing the export at a local NON-bare working repository whose
+// checked-out branch is the push branch must be refused during validation —
+// before any clone, write, commit, or push — with the typed ErrNonBareTarget
+// naming the request field. Pre-fix the export reached git push and surfaced
+// git's raw "refusing to update checked out branch" failure.
+func TestExport_NonBareTargetRefused(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+
+	target := initWorkRepo(t, "main")
+	localDir := filepath.Join(t.TempDir(), "clone")
+	e := NewEngine(Config{
+		RepoURL:  target,
+		Branch:   "main",
+		LocalDir: localDir,
+		Push:     true,
+	}, store)
+
+	_, err := e.Export(context.Background(), []ExportItem{
+		{ClassID: pc.ID, AnswerID: answer.ID},
+	})
+	if err == nil {
+		t.Fatal("Export succeeded against a non-bare target; want ErrNonBareTarget")
+	}
+	if !errors.Is(err, ErrNonBareTarget) {
+		t.Fatalf("error = %v, want errors.Is ErrNonBareTarget", err)
+	}
+	if !strings.Contains(err.Error(), "target_repo") {
+		t.Errorf("error %q does not name the caller-controlled field target_repo", err)
+	}
+	if strings.Contains(err.Error(), "refusing to update checked out branch") {
+		t.Errorf("error leaks the raw git push refusal: %q", err)
+	}
+	// Validation runs before any mutation: the clone dir must not exist.
+	if _, statErr := os.Stat(localDir); !os.IsNotExist(statErr) {
+		t.Errorf("clone dir %s exists — validation did not run before the clone", localDir)
+	}
+
+	// A dry run never pushes, so the same target is not refused up front.
+	e2 := NewEngine(Config{
+		RepoURL:  target,
+		Branch:   "main",
+		LocalDir: filepath.Join(t.TempDir(), "clone2"),
+	}, store)
+	res, err := e2.DryRun(context.Background(), []ExportItem{
+		{ClassID: pc.ID, AnswerID: answer.ID},
+	})
+	if err != nil {
+		t.Fatalf("DryRun against a non-bare target: %v", err)
+	}
+	if !res.DryRun {
+		t.Error("DryRun = false, want true")
+	}
+}
+
+// TestExport_NonBareTargetOtherBranchAllowed verifies the refusal is scoped
+// to the guaranteed-failure case: pushing to a branch that is NOT checked
+// out in a non-bare working repo is accepted by git and must still export.
+func TestExport_NonBareTargetOtherBranchAllowed(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+
+	target := initWorkRepo(t, "main") // main is checked out; we push "export"
+	localDir := filepath.Join(t.TempDir(), "clone")
+	e := NewEngine(Config{
+		RepoURL:  target,
+		Branch:   "export",
+		LocalDir: localDir,
+		Push:     true,
+	}, store)
+
+	res, err := e.Export(context.Background(), []ExportItem{
+		{ClassID: pc.ID, AnswerID: answer.ID},
+	})
+	if err != nil {
+		t.Fatalf("Export to non-checked-out branch of a non-bare repo: %v", err)
+	}
+	if !res.Pushed {
+		t.Error("Pushed = false, want true")
+	}
+	// The pushed branch is visible in the target repo.
+	if out := gitIn(t, target, "branch", "--list", "export"); out != "export" {
+		t.Errorf("target repo branches = %q, want the pushed export branch", out)
+	}
+}
+
+// TestLocalRepoPath pins the local-vs-remote classification the validation
+// relies on: scheme and scp-like URLs are remotes; file:// URLs and existing
+// paths are local; a path that does not exist is left to the clone error.
+func TestLocalRepoPath(t *testing.T) {
+	existing := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "no-such-repo")
+	cases := []struct {
+		raw      string
+		wantOK   bool
+		wantPath string
+	}{
+		{"https://github.com/example/repo.git", false, ""},
+		{"ssh://git@example.com/repo.git", false, ""},
+		{"git@github.com:example/repo.git", false, ""},
+		{missing, false, ""},
+		{existing, true, existing},
+		{"file://" + existing, true, existing},
+		{"file://" + missing, false, ""},
+	}
+	for _, tc := range cases {
+		gotPath, gotOK := localRepoPath(tc.raw)
+		if gotOK != tc.wantOK || gotPath != tc.wantPath {
+			t.Errorf("localRepoPath(%q) = (%q, %v), want (%q, %v)",
+				tc.raw, gotPath, gotOK, tc.wantPath, tc.wantOK)
+		}
+	}
+}
+
 func TestExport_FullFlow(t *testing.T) {
 	skipIfNoGit(t)
 	setGitIdentity(t)

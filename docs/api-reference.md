@@ -456,7 +456,7 @@ Export verified answers to a git repository as a subtree commit.
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `target_repo` | string | Yes | Git URL of the target repo |
+| `target_repo` | string | Yes | Git URL or local path of the target repo. Must be a **bare** repository (`git init --bare`) or a remote that accepts pushes — a local non-bare working repo whose checked-out branch is the push branch is rejected (see below) |
 | `answer_ids` | integer[] | Yes | IDs of answers to export |
 | `branch` | string | No | Target branch |
 | `commit_message` | string | No | Commit message |
@@ -473,7 +473,16 @@ Export verified answers to a git repository as a subtree commit.
 
 `pr_url` is omitted when the repo does not support pull requests.
 
-**Status codes:** `200`, `400` (missing required fields), `501` (export not configured), `500` (export failed).
+**Non-bare target (`400`).** Pointing `target_repo` at a local non-bare working repository fails validation **before** any clone, write, or commit when the push would update the branch that repo currently has checked out — git always refuses such a push ("refusing to update checked out branch"). The export answers `400 invalid_target_repo` with a message naming `target_repo`; create a bare sibling (`git init --bare`) or push to a remote instead. Pushes to a branch that is *not* checked out, and repos configured with `receive.denyCurrentBranch=ignore/warn/updateInstead`, are accepted as before.
+
+```json
+{
+  "error": "invalid_target_repo",
+  "message": "export: target_repo must be a bare repository or a remote that accepts pushes: target_repo \"/srv/work\" is a non-bare working repository with branch \"main\" checked out; git refuses pushes that update the checked-out branch — use a bare repository (git init --bare) or a pushable remote"
+}
+```
+
+**Status codes:** `200`, `400` (missing required fields, unknown answer id, or non-bare `target_repo`), `501` (export not configured), `500` (export failed).
 
 **Example**
 

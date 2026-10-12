@@ -978,6 +978,16 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 
 	result, err := engine.Export(r.Context(), items)
 	if err != nil {
+		// A target_repo pointing at a local non-bare working repository
+		// whose checked-out branch is the push branch can never accept the
+		// push — that is a client request problem (fix the target), not a
+		// server fault, so it is a 400 naming target_repo rather than a
+		// 500 leaking git's raw "refusing to update checked out branch"
+		// failure (DF-OFF-BY-ONE-35).
+		if errors.Is(err, export.ErrNonBareTarget) {
+			writeError(w, http.StatusBadRequest, "invalid_target_repo", err.Error())
+			return
+		}
 		// Community edits in the export clone that the export would
 		// destroy are a conflict the caller can resolve (push/revert the
 		// clone or re-clone), not a server fault (DF-OFF-BY-ONE-22).

@@ -2863,6 +2863,102 @@ func pushAnswerFilesForHandler(t *testing.T, barePath, branch, classTitle, env, 
 	}
 }
 
+// TestExportNonBareTarget400 guards DF-OFF-BY-ONE-35 at the HTTP surface:
+// a target_repo pointing at a local NON-bare working repository whose
+// checked-out branch is the push branch is a client request problem, so the
+// handler answers 400 invalid_target_repo naming the field — never a 500
+// export_failed leaking git's raw "refusing to update checked out branch"
+// push failure (the pre-fix dogfood evidence).
+func TestExportNonBareTarget400(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed — skipping export integration test")
+	}
+	s, store, _ := newTestServer(t)
+	s.ExportLocalDir = filepath.Join(t.TempDir(), "export-clone")
+
+	ctx := context.Background()
+	pc, _, err := store.UpsertProblemClass(ctx, "export-nonbare-class", "non-bare target regression class")
+	if err != nil {
+		t.Fatalf("UpsertProblemClass: %v", err)
+	}
+	answerID, err := store.CreateAnswerNode(ctx, pc.ID, 0,
+		"docker", "go", "go-1.26",
+		"Use `COPY --chown=appuser:appuser` in Dockerfile.",
+		"Verified in Docker 24.0+.",
+		"")
+	if err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+	if err := store.UpdateAnswerStatus(ctx, answerID, graph.AnswerVerified); err != nil {
+		t.Fatalf("UpdateAnswerStatus: %v", err)
+	}
+
+	target := initWorkRepoForHandler(t, "main")
+
+	rr := do(t, s, "POST", "/api/v1/export", exportRequest{
+		TargetRepo: target,
+		AnswerIDs:  []int64{answerID},
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+	var body struct {
+		Error   string `json:"error"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Error != "invalid_target_repo" {
+		t.Errorf("error = %q, want invalid_target_repo", body.Error)
+	}
+	if !strings.Contains(body.Message, "target_repo") {
+		t.Errorf("message = %q, want it to name the field target_repo", body.Message)
+	}
+	if strings.Contains(body.Message, "refusing to update checked out branch") {
+		t.Errorf("message leaks the raw git push failure: %q", body.Message)
+	}
+	// Validation runs before any mutation: the export clone dir must be
+	// absent or empty.
+	if entries, err := os.ReadDir(s.ExportLocalDir); err == nil && len(entries) != 0 {
+		t.Errorf("export clone dir holds %d entries — the refusal did not run before mutation", len(entries))
+	}
+}
+
+// initWorkRepoForHandler creates a NON-bare working repository with one
+// commit on the given branch — the shape git refuses to receive pushes into.
+func initWorkRepoForHandler(t *testing.T, branch string) string {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "work")
+	if out, err := exec.Command("git", "init", "-b", branch, repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	for _, args := range [][]string{
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", args[0], err, out)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# Work Repo\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+	for _, args := range [][]string{
+		{"add", "."},
+		{"commit", "-m", "initial"},
+	} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %s: %v\n%s", args[0], err, out)
+		}
+	}
+	return repo
+}
+
 // TestExportImportRouteRegistered verifies the routes are wired by
 // checking that a POST to them does NOT return 404 (it should return
 // 501 when not configured, proving the route exists).

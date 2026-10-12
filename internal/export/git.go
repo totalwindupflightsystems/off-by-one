@@ -159,6 +159,14 @@ var ErrRepoMismatch = errors.New("export: RepoURL does not match the existing cl
 // working-tree changes.
 var ErrUnsafeExport = errors.New("export: refusing to overwrite community edits")
 
+// ErrNonBareTarget is returned before any clone or write when the export
+// would push into the checked-out branch of a LOCAL non-bare working
+// repository — a push git always refuses ("refusing to update checked out
+// branch"). The fix belongs to the caller, so the error names the request
+// field: point target_repo at a bare repository or a remote that accepts
+// pushes (DF-OFF-BY-ONE-35).
+var ErrNonBareTarget = errors.New("export: target_repo must be a bare repository or a remote that accepts pushes")
+
 // Export runs the full export flow for the given items:
 //
 //  1. Prepare the local clone (clone or pull)
@@ -175,6 +183,12 @@ func (e *Engine) Export(ctx context.Context, items []ExportItem) (*ExportResult,
 	}
 	if e.cfg.RepoURL == "" {
 		return nil, errors.New("export: RepoURL is required")
+	}
+	// Fail fast on a target the push can never succeed against — a local
+	// non-bare working repo with the push branch checked out — before any
+	// clone, write, or commit (DF-OFF-BY-ONE-35).
+	if err := e.validatePushTarget(ctx); err != nil {
+		return nil, err
 	}
 
 	res := &ExportResult{Branch: e.cfg.Branch}
@@ -477,6 +491,77 @@ func (e *Engine) stageAndCommit(ctx context.Context, res *ExportResult) error {
 		res.Pushed = true
 	}
 	return nil
+}
+
+// validatePushTarget refuses the one push configuration that can never
+// succeed: a LOCAL non-bare working repository whose checked-out branch is
+// the push branch. Git rejects that push ("refusing to update checked out
+// branch") because it would rewrite files the owner may be editing; without
+// this check the refusal surfaced after the clone, write and commit as a
+// raw push failure. The check runs before any mutation and only fires when
+// the export will actually push (Push=true).
+//
+// Anything we cannot prove is the refusing case is left alone: remote URLs
+// (their push policy is the server's), paths that do not exist or are not
+// git repos (the clone fails with its own error), bare repositories,
+// repositories configured with receive.denyCurrentBranch=ignore/warn/
+// updateInstead (those accept the push), a detached HEAD (no branch is
+// checked out), and pushes to a branch other than the checked-out one.
+func (e *Engine) validatePushTarget(ctx context.Context) error {
+	if !e.cfg.Push {
+		return nil
+	}
+	path, ok := localRepoPath(e.cfg.RepoURL)
+	if !ok {
+		return nil
+	}
+	bare, err := e.gitOutput(ctx, "", "-C", path, "rev-parse", "--is-bare-repository")
+	if err != nil || strings.TrimSpace(bare) == "true" {
+		// Not a git repo (the clone will report it) or already bare.
+		return nil
+	}
+	if v, err := e.gitOutput(ctx, "", "-C", path, "config", "--get", "receive.denyCurrentBranch"); err == nil {
+		switch strings.TrimSpace(v) {
+		case "ignore", "warn", "updateInstead":
+			return nil
+		}
+	}
+	head, err := e.gitOutput(ctx, "", "-C", path, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return nil // detached HEAD: no branch is checked out
+	}
+	if strings.TrimSpace(head) == e.cfg.Branch {
+		return fmt.Errorf("%w: target_repo %q is a non-bare working repository with branch %q checked out; "+
+			"git refuses pushes that update the checked-out branch — use a bare repository (git init --bare) or a pushable remote",
+			ErrNonBareTarget, e.cfg.RepoURL, e.cfg.Branch)
+	}
+	return nil
+}
+
+// localRepoPath reports whether raw addresses a repository on the local
+// filesystem, returning the path to inspect. Scheme URLs (https://, ssh://,
+// …) are remotes; scp-like SSH syntax (user@host:path — a colon before the
+// first slash) is a remote; file:// URLs and plain paths are local. A local
+// path that does not exist reports false so the clone surfaces the error.
+func localRepoPath(raw string) (string, bool) {
+	if p, ok := strings.CutPrefix(raw, "file://"); ok {
+		if _, err := os.Stat(p); err != nil {
+			return "", false
+		}
+		return p, true
+	}
+	if strings.Contains(raw, "://") {
+		return "", false
+	}
+	if !strings.HasPrefix(raw, "/") {
+		if i := strings.IndexByte(raw, ':'); i >= 0 && !strings.ContainsRune(raw[:i], '/') {
+			return "", false // scp-like SSH syntax
+		}
+	}
+	if _, err := os.Stat(raw); err != nil {
+		return "", false
+	}
+	return raw, true
 }
 
 // runGit executes a git command in the given directory (or the current
