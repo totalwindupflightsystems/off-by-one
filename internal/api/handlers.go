@@ -736,7 +736,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	depth, _ := s.Queue.Depth(r.Context())
 	st.QueueDepth = depth
-	// Avg solve time comes from the queue's solve timings; left empty
+	// Avg solve time comes from the queue's recent solve timings (a
+	// rolling window over the latest completed solves); left empty
 	// until the first solve completes (same error-ignore style as Depth).
 	if avg, _ := s.Queue.AvgSolveTime(r.Context()); avg > 0 {
 		st.AvgSolveTime = avg.Round(time.Second).String()
@@ -1169,7 +1170,8 @@ const defaultPerJobEstimate = 30 * time.Second
 const maxEstimateTotal = 30 * time.Minute
 
 // estimateTime derives the submit-response ETA from the lab's observed
-// mean solve time (perJob) multiplied by the number of queued jobs
+// mean solve time (perJob — Queue.AvgSolveTime, a rolling mean over the
+// most recent completed solves) multiplied by the number of queued jobs
 // (depth), rounded to the nearest second and capped at maxEstimateTotal.
 //
 // depth <= 0 means nothing is ahead of the caller, so it returns "0s".

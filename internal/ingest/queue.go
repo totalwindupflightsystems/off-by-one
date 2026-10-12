@@ -560,16 +560,36 @@ func (q *Queue) Depth(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// AvgSolveTime returns the mean wall-clock solve time across completed
-// queue entries (completed_at - started_at). Used by the /api/v1/stats
-// endpoint. Returns 0 when no entries have completed yet — AVG over an
-// empty set is NULL in SQLite, so we scan into a sql.NullFloat64.
+// avgSolveTimeWindow bounds the sample AvgSolveTime averages over: the
+// most recently completed N solves. Solve conditions (model, sandbox
+// setup, corpus mix) drift over time, so an all-history mean lets
+// months-old fast solves silently underquote a current wait — the live
+// observation behind DF-OFF-BY-ONE-38 (a 6m35s solve quoted as 3m33s).
+// A bounded recent window tracks current conditions as new solves
+// complete: once a solve falls out of the N most recent completions it
+// no longer influences the estimate. With fewer than N completed solves
+// the whole (short) history is the sample, so behaviour on a fresh lab
+// is unchanged.
+const avgSolveTimeWindow = 20
+
+// AvgSolveTime returns the mean wall-clock solve time across the
+// avgSolveTimeWindow most recently completed queue entries
+// (completed_at - started_at). Used by the /api/v1/stats endpoint and
+// the queue ETA derivation. Returns 0 when no entries have completed
+// yet — AVG over an empty set is NULL in SQLite, so we scan into a
+// sql.NullFloat64; callers fall back to a fixed per-job default in that
+// case.
 func (q *Queue) AvgSolveTime(ctx context.Context) (time.Duration, error) {
 	var avg sql.NullFloat64
 	err := q.db.QueryRowContext(ctx,
 		`SELECT AVG(julianday(completed_at) - julianday(started_at)) * 86400.0
-		FROM queue_entries
-		WHERE status = 'complete' AND started_at IS NOT NULL AND completed_at IS NOT NULL`,
+		FROM (
+			SELECT started_at, completed_at
+			FROM queue_entries
+			WHERE status = 'complete' AND started_at IS NOT NULL AND completed_at IS NOT NULL
+			ORDER BY completed_at DESC, id ASC
+			LIMIT ?
+		)`, avgSolveTimeWindow,
 	).Scan(&avg)
 	if err != nil {
 		return 0, err

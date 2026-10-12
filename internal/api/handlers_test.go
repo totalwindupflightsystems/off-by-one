@@ -3121,3 +3121,143 @@ func TestImportInvalidConflictStrategy(t *testing.T) {
 		t.Errorf("message = %q, want it to name conflict_strategy", body.Message)
 	}
 }
+
+// seedWindowedSolve inserts one completed queue entry that finished at
+// completedAt ("2006-01-02 15:04:05") after a solve of dur, so a test
+// can build a solve history with an explicit completion order.
+func seedWindowedSolve(t *testing.T, store *graph.Store, id, completedAt string, dur time.Duration) {
+	t.Helper()
+	end, err := time.Parse("2006-01-02 15:04:05", completedAt)
+	if err != nil {
+		t.Fatalf("parse completedAt %q: %v", completedAt, err)
+	}
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status, stage, started_at, completed_at)
+		VALUES (?, 'cls-observed', 'complete', 'done', ?, ?)`,
+		id, end.Add(-dur).Format("2006-01-02 15:04:05"), completedAt); err != nil {
+		t.Fatalf("insert completed entry %s: %v", id, err)
+	}
+}
+
+// recentWindow mirrors ingest.avgSolveTimeWindow (unexported): the
+// number of most recent completed solves AvgSolveTime averages over.
+const recentWindow = 20
+
+// TestSubmit_EstimatedTimeUsesRecentWindow guards DF-OFF-BY-ONE-38 at
+// the API layer: when the lab's solve history is stale relative to
+// current solve conditions, the quoted ETA must follow the rolling
+// recent window, not the all-history mean. Board observation: a live
+// solve took ~6m35s while the API quoted 3m33s because old, faster
+// solves dominated the average.
+//
+// Fixture: recentWindow stale solves of 40s each (completed in January),
+// then 3 recent solves of 400s each (completed in October — the
+// 6m35s-class current condition). The window mean is (3x400s +
+// 17x40s)/20 = 94s; the all-history mean is (3x400s + 20x40s)/23 =
+// ~87s. The submit response must quote 1m34s, never 1m27s.
+func TestSubmit_EstimatedTimeUsesRecentWindow(t *testing.T) {
+	s, store, queue := newTestServer(t)
+	ctx := context.Background()
+
+	for i := 0; i < recentWindow; i++ {
+		seedWindowedSolve(t, store, fmt.Sprintf("sub_stale_%02d", i),
+			fmt.Sprintf("2026-01-01 00:%02d:00", i), 40*time.Second)
+	}
+	for i := 0; i < 3; i++ {
+		seedWindowedSolve(t, store, fmt.Sprintf("sub_live_%d", i),
+			fmt.Sprintf("2026-10-01 00:0%d:00", i), 400*time.Second)
+	}
+
+	perJob, err := queue.AvgSolveTime(ctx)
+	if err != nil {
+		t.Fatalf("AvgSolveTime: %v", err)
+	}
+	if perJob.Round(time.Second) != 94*time.Second {
+		t.Fatalf("fixture window mean = %s, want 1m34s", perJob)
+	}
+
+	// Raw JSON, per the wire lesson: decode the untyped body too, so a
+	// missing/mis-tagged estimated_time key is caught rather than
+	// silently zero-valued by the struct decode.
+	rr := do(t, s, "POST", "/api/v1/problems/submit", submitProblemRequest{
+		ProblemClass: "cls-window-live",
+		Environment:  "docker",
+		Language:     "go",
+		Cadence:      ingest.CadencePrePhase,
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("submit status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw submit: %v", err)
+	}
+	var submitted submitProblemResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &submitted); err != nil {
+		t.Fatalf("decode submit: %v", err)
+	}
+	rawETA, ok := raw["estimated_time"]
+	if !ok {
+		t.Fatalf("submit response has no estimated_time key: %v", raw)
+	}
+	if rawETA != submitted.EstimatedTime {
+		t.Errorf("raw estimated_time = %v, decoded = %q", rawETA, submitted.EstimatedTime)
+	}
+
+	wantETA := estimateTime(1, perJob) // 1 x 1m34s
+	if submitted.EstimatedTime != wantETA {
+		t.Errorf("submit estimated_time = %q, want %q (rolling recent window)", submitted.EstimatedTime, wantETA)
+	}
+	allHistory := time.Duration((3*400+20*40)/23) * time.Second // ~1m27s
+	if stale := estimateTime(1, allHistory); submitted.EstimatedTime == stale {
+		t.Errorf("submit estimated_time = %q matches the all-history quote %q — stale history still dominates",
+			submitted.EstimatedTime, stale)
+	}
+
+	// Pending/in_progress/terminal wire semantics must be preserved
+	// under the windowed estimate.
+	_, pending := getQueueEntry(t, s, submitted.SubmissionID)
+	if pending.Status != ingest.StatusPending {
+		t.Fatalf("submitted status = %q, want pending", pending.Status)
+	}
+	if pending.Position != 1 || pending.EstimatedTime != wantETA {
+		t.Errorf("pending detail = position %d eta %q, want position 1 eta %q",
+			pending.Position, pending.EstimatedTime, wantETA)
+	}
+	solving, err := queue.Dequeue(ctx)
+	if err != nil {
+		t.Fatalf("Dequeue: %v", err)
+	}
+	if solving == nil || solving.ID != submitted.SubmissionID {
+		t.Fatalf("Dequeue = %+v, want the submitted row %s", solving, submitted.SubmissionID)
+	}
+	_, inprog := getQueueEntry(t, s, submitted.SubmissionID)
+	if inprog.Status != ingest.StatusInProgress {
+		t.Fatalf("in_progress status = %q", inprog.Status)
+	}
+	if inprog.Position != 0 || inprog.EstimatedTime != estimateTime(1, perJob) {
+		t.Errorf("in_progress detail = position %d eta %q, want position 0 eta %q (one job)",
+			inprog.Position, inprog.EstimatedTime, estimateTime(1, perJob))
+	}
+	_, terminal := getQueueEntry(t, s, "sub_stale_00")
+	if terminal.Status != ingest.StatusComplete {
+		t.Fatalf("terminal status = %q, want complete", terminal.Status)
+	}
+	if terminal.Position != 0 || terminal.EstimatedTime != "" {
+		t.Errorf("terminal detail = position %d eta %q, want position 0 eta empty",
+			terminal.Position, terminal.EstimatedTime)
+	}
+
+	// /api/v1/stats reports the same windowed estimate.
+	statsRR := do(t, s, "GET", "/api/v1/stats", nil)
+	if statsRR.Code != http.StatusOK {
+		t.Fatalf("stats status = %d", statsRR.Code)
+	}
+	var st graph.Stats
+	if err := json.Unmarshal(statsRR.Body.Bytes(), &st); err != nil {
+		t.Fatalf("decode stats: %v", err)
+	}
+	if st.AvgSolveTime != "1m34s" {
+		t.Errorf("stats avg_solve_time = %q, want %q (rolling recent window)", st.AvgSolveTime, "1m34s")
+	}
+}

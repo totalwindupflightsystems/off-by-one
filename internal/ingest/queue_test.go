@@ -1045,3 +1045,109 @@ func errIs(err, target error) bool {
 	}
 	return false
 }
+
+// seedCompletedSolveAt inserts one completed queue entry that finished
+// at completedAt ("2006-01-02 15:04:05") after a solve of dur, so tests
+// can build a solve history with an explicit completion order.
+func seedCompletedSolveAt(t *testing.T, store *graph.Store, id, completedAt string, dur time.Duration) {
+	t.Helper()
+	end, err := time.Parse("2006-01-02 15:04:05", completedAt)
+	if err != nil {
+		t.Fatalf("parse completedAt %q: %v", completedAt, err)
+	}
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status, stage, started_at, completed_at)
+		VALUES (?, 'cls-observed', 'complete', 'done', ?, ?)`,
+		id, end.Add(-dur).Format("2006-01-02 15:04:05"), completedAt); err != nil {
+		t.Fatalf("insert completed entry %s: %v", id, err)
+	}
+}
+
+// TestQueue_AvgSolveTime_RecentWindow guards DF-OFF-BY-ONE-38: the
+// estimate is a rolling mean over the avgSolveTimeWindow most recently
+// completed solves, not an all-history mean, so old fast solves cannot
+// silently underquote a current wait. Live board observation: a solve
+// took ~6m35s while the API quoted 3m33s because months of faster
+// history dominated the mean.
+//
+// Fixture: avgSolveTimeWindow stale solves of 40s each (completed in
+// January), then 3 recent solves of 400s each (completed in October).
+// The window holds the 3 live solves plus 17 of the stale ones, so the
+// mean is (3x400s + 17x40s) / 20 = 94s — pulled toward current
+// conditions. The all-history mean, (3x400s + 20x40s) / 23 = ~87s,
+// must NOT be what comes back.
+func TestQueue_AvgSolveTime_RecentWindow(t *testing.T) {
+	q, store := newTestQueue(t)
+	ctx := context.Background()
+
+	for i := 0; i < avgSolveTimeWindow; i++ {
+		seedCompletedSolveAt(t, store, fmt.Sprintf("sub_stale_%02d", i),
+			fmt.Sprintf("2026-01-01 00:%02d:00", i), 40*time.Second)
+	}
+	for i := 0; i < 3; i++ {
+		seedCompletedSolveAt(t, store, fmt.Sprintf("sub_live_%d", i),
+			fmt.Sprintf("2026-10-01 00:0%d:00", i), 400*time.Second)
+	}
+
+	got, err := q.AvgSolveTime(ctx)
+	if err != nil {
+		t.Fatalf("AvgSolveTime: %v", err)
+	}
+	const wantWindow = 94 * time.Second
+	if got.Round(time.Second) != wantWindow {
+		t.Errorf("AvgSolveTime = %s, want %s (rolling window: 3x400s + 17x40s over %d rows)",
+			got, wantWindow, avgSolveTimeWindow)
+	}
+	// The all-history mean the pre-fix code returned: (3x400s +
+	// 20x40s)/23 = ~86.96s — closer to the stale 40s than the live 400s.
+	allHistory := time.Duration((3*400+20*40)/23) * time.Second
+	if got.Round(time.Second) == allHistory.Round(time.Second) {
+		t.Errorf("AvgSolveTime = %s matches the all-history mean %s — the recent window is not in effect",
+			got, allHistory)
+	}
+}
+
+// TestQueue_AvgSolveTime_WindowDropsOldest proves the window is bounded:
+// with avgSolveTimeWindow+1 completed solves, the oldest completion — a
+// huge outlier here — drops out of the sample entirely.
+func TestQueue_AvgSolveTime_WindowDropsOldest(t *testing.T) {
+	q, store := newTestQueue(t)
+	ctx := context.Background()
+
+	seedCompletedSolveAt(t, store, "sub_oldest", "2026-01-01 00:00:00", 1000*time.Second)
+	for i := 0; i < avgSolveTimeWindow; i++ {
+		seedCompletedSolveAt(t, store, fmt.Sprintf("sub_recent_%02d", i),
+			fmt.Sprintf("2026-10-01 00:%02d:00", i), 10*time.Second)
+	}
+
+	got, err := q.AvgSolveTime(ctx)
+	if err != nil {
+		t.Fatalf("AvgSolveTime: %v", err)
+	}
+	if got.Round(time.Second) != 10*time.Second {
+		t.Errorf("AvgSolveTime = %s, want 10s: the oldest 1000s solve must fall out of the %d-row window",
+			got, avgSolveTimeWindow)
+	}
+}
+
+// TestQueue_AvgSolveTime_NoCompletes pins the fallback contract: with no
+// completed solves the estimate is 0 (and no error), so handlers fall
+// back to the fixed per-job default rather than quoting a fabricated
+// number.
+func TestQueue_AvgSolveTime_NoCompletes(t *testing.T) {
+	q, store := newTestQueue(t)
+	ctx := context.Background()
+
+	// A pending row with no timing must not affect the estimate.
+	if _, err := store.DB().Exec(`INSERT INTO queue_entries
+		(id, problem_class, status) VALUES ('sub_pend', 'cls-observed', 'pending')`); err != nil {
+		t.Fatalf("insert pending entry: %v", err)
+	}
+	got, err := q.AvgSolveTime(ctx)
+	if err != nil {
+		t.Fatalf("AvgSolveTime: %v", err)
+	}
+	if got != 0 {
+		t.Errorf("AvgSolveTime = %s, want 0 with no completed solves", got)
+	}
+}
