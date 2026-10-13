@@ -408,7 +408,18 @@
   function renderResult(area, res) {
     area.innerHTML = '';
 
-    if (!res.ok) {
+    // HTTP 409 with a `status: "deduplicated"` body is a documented
+    // SUCCESS response, not a failure: the submission already exists
+    // (the API treats dedup as success — see the CLI twin,
+    // DF-OFF-BY-ONE-37). Fall through to the success renderer so the
+    // user gets a pointer to the existing submission instead of the
+    // generic failure message. Non-dedup 409s and any
+    // other 4xx/5xx (which carry an `error`/`detail` field) still
+    // take the failure branch.
+    var deduplicated =
+      res.status === 409 && res.data && res.data.status === 'deduplicated';
+
+    if (!res.ok && !deduplicated) {
       var msg = res.data && res.data.detail ? res.data.detail : 'Submission failed (HTTP ' + res.status + ')';
       renderError(area, msg);
       return;
@@ -442,11 +453,18 @@
       card.appendChild(info);
     }
 
-    // Deduplicated
+    // Deduplicated — the submission already exists; point at it and
+    // clear the form so the user doesn't re-submit the same class.
     if (d.status === 'deduplicated') {
       var dupNote = el('div', 'submit-result-info');
-      dupNote.textContent = 'This problem was already solved or is already in the queue.';
+      dupNote.textContent =
+        'Already queued (' + (d.submission_id || 'existing submission') + '), position ' +
+        (d.position || 0) + ' — this problem was already solved or is already in the queue.';
       card.appendChild(dupNote);
+
+      if (state.form) {
+        state.form.reset();
+      }
     }
 
     // Existing solutions
