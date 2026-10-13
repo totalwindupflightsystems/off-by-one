@@ -820,3 +820,48 @@ answer through the full sharing loop (details in
   failure class as the export clobber (DF-22). Redaction correctness is
   data-integrity correctness.
 
+
+
+## §17 — 2026-10-13: the required_tools provisioning path, first exercise (DF-41)
+
+**How the surface is built.** `required_tools` rides the submission into the
+queue (internal/ingest), reaches the solver via `WithRequiredTools`
+(internal/solver/piagent.go:150), and is resolved at sandbox-create time by
+`ResolveTools` (internal/sandbox/tools.go:37): every tool name is mapped to
+host paths via exec.LookPath, realpaths are resolved through
+filepath.EvalSymlinks (OB-GAP-035), and any path already covered by the
+bwrap default mount set is deduped instead of re-bound. The contract is
+deliberate degrade-gracefully: an unresolvable tool NEVER fails the solve —
+it lands in a `missing` list that is logged as
+`WARN sandbox: could not resolve declared tools on host ... missing_tools=[...]`
+and the solve proceeds.
+
+**Why that design is right and still incomplete.** The sandbox half of the
+contract is correct: dropping `parallel` (absent on the host) while resolving
+`jq` did not fail or distort the solve — answer #4463 came back verified in
+1m38s. The defect is observability placement: the `missing` list dies in the
+daemon log. Every agent-facing surface (submit 200, queue status, discover
+response) is silent about it, and a remote agent by definition cannot read the
+daemon log. The data exists at exactly one point (ResolveTools' return) and
+stops there; plumbing resolved/missing back into the queue record would close
+DF-41 with no behavior change.
+
+**Errors hit on the way (ours, not the product's):**
+1. `bunker exec` stdin pipe silently delivered 0 bytes (empty staged script) —
+   stage scripts with `bunker cp` to a RELATIVE remote target instead (the
+   explicit `$HOME/...` scp target fails), then exec the staged file.
+2. Fresh-install smoke initially read an empty store: `seed` wrote the
+   CWD-relative default db while the server was started with `-db fresh.db`.
+   Use `OFF_BY_ONE_DB` for both (it is honored by both verbs) — pitfall 2 in
+   the usage skill already warned about CWD-relative seed; this run adds the
+   "keep server and seed on the SAME explicit db" corollary.
+3. tailscale showed 4 bunker hosts offline; only bunker-mvp answered. The
+   skill's host-agnostic rule (any live bunker host is the leg) is what made
+   the run possible — file SKIPPED only when nothing answers.
+
+**The right way (validated recipe):** declare `required_tools` freely — it
+cannot break the solve; verify what was provisioned by grepping the server log
+for `missing_tools` (until DF-41 lands a proper surface); expect the answer to
+reference only tools that actually resolved. Re-proof on fresh installs is
+cheap: clone+build 84s, seed 23s, discover green — the fresh-machine discover
+fallback (DF-36, d18586d6) reproduced exactly on a fresh seed.
