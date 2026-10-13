@@ -397,13 +397,16 @@
     item.appendChild(children);
 
     if (expanded) {
-      renderVersionChildren(children, answers);
+      renderVersionChildren(children, classTitle, parentKey + '/' + versionValue, answers);
     }
 
     return item;
   }
 
-  function renderVersionChildren(container, answers) {
+  // Same 4-arg dispatch shape as renderEnvChildren/renderLangChildren
+  // (toggleSubNode calls all three uniformly); classTitle and parentValue
+  // are unused here because version children are plain answer leaves.
+  function renderVersionChildren(container, classTitle, parentValue, answers) {
     if (answers.length === 0) {
       var none = el('div', 'explore-empty');
       none.textContent = 'No answers.';
