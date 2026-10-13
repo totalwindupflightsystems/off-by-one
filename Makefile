@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest check-corpus-hygiene check-corpus-hygiene-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -237,6 +237,15 @@ export-hostpaths-selftest:
 # Pure in-process unittest: no network, no DB, no credentials.
 export-normalize-selftest:
 	python3 scripts/tests/export_answers_normalize_test.py
+
+# Regression test for the static-site internal-name redaction
+# (scripts/generate-static-site.py public_stem/class_page, OB-GAP-093):
+# class-id-derived slugs/titles/og-tags never carry a REVIEW-OB-009 internal
+# name, clean stems stay byte-identical, slug mapping is deterministic and
+# collision-checked, and stale pages of renamed classes are pruned.
+# Pure in-process unittest: no network, no DB, no credentials.
+site-redaction-selftest:
+	python3 scripts/tests/generate_static_site_redaction_test.py
 
 # REVIEW-OB-006 corpus hygiene guard: data/ and site/ are public surfaces —
 # fail (listing offenders) when any /home/<user> operator path appears in

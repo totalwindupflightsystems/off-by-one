@@ -15,6 +15,7 @@ import json
 import os
 import re
 import html as htmlmod
+import importlib.util
 from datetime import datetime, timezone
 
 import markdown
@@ -24,6 +25,73 @@ DATA_DIR = os.path.join(ROOT, "data", "answers")
 OUT_DIR = os.path.join(ROOT, "site")
 
 MD = markdown.Markdown(extensions=["tables", "fenced_code"])
+
+# --- Internal-name hygiene for class-id-derived surfaces (OB-GAP-093) ------
+#
+# The corpus JSON text fields are sanitized at export time
+# (scripts/export-answers.py _NAME_REDACTIONS, mirrored in
+# internal/export/git.go), but the class_id is an IDENTIFIER: the filename
+# stem, <title>, og:title, meta description, h1 and the canonical/sitemap
+# URLs are all derived from it HERE. Reuse the export pipeline's redaction
+# list as the single pattern source so a new internal name only has to be
+# added once (check-corpus-hygiene.sh NAME_PATTERN gates the same set).
+_EA_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "export-answers.py")
+_ea_spec = importlib.util.spec_from_file_location("export_answers", _EA_PATH)
+_ea = importlib.util.module_from_spec(_ea_spec)
+_ea_spec.loader.exec_module(_ea)
+_NAME_REDACTIONS = _ea._NAME_REDACTIONS
+sanitize_internal_names = _ea.sanitize_internal_names
+
+# Slugs are filenames/URLs: the readable placeholders (<project>) are not
+# slug-safe, so slugs map each placeholder to a plain token instead.
+_SLUG_TOKENS = {"<project>": "project", "<tool>": "tool", "<organization>": "organization"}
+
+
+def public_stem(stem):
+    """Deterministic, slug-safe form of a corpus filename stem with every
+    internal project/tool/org name replaced by a neutral token. Pure
+    function of the stem: same corpus -> same slug, no timestamps.
+
+    A stem with no internal name is returned BYTE-IDENTICAL (the corpus
+    filename is already the public slug — renaming it would break the
+    source link and every external URL). Only a stem the redaction fired
+    on is rewritten to a slug-safe form."""
+    redacted = stem
+    for pattern, placeholder in _NAME_REDACTIONS:
+        redacted = pattern.sub(_SLUG_TOKENS.get(placeholder, "redacted"), redacted)
+    if redacted == stem:
+        return stem
+    slug = re.sub(r"[^a-z0-9]+", "-", redacted.lower()).strip("-")
+    return slug or "class"
+
+
+def build_slug_map(stems):
+    """Map raw stem -> public stem, failing loudly when two distinct raw ids
+    would collide on one public slug (a silent collision would make one
+    class page overwrite another)."""
+    mapping = {}
+    for stem in stems:
+        slug = public_stem(stem)
+        for other_raw, other_slug in mapping.items():
+            if other_slug == slug and other_raw != stem:
+                raise SystemExit(
+                    "slug collision: %r and %r both map to %r — refusing to "
+                    "generate an ambiguous public site" % (other_raw, stem, slug)
+                )
+        mapping[stem] = slug
+    return mapping
+
+
+def prune_stale_class_pages(classes_dir, keep_slugs):
+    """Remove generated class pages whose slug is not in keep_slugs, so a
+    renamed/redacted class never lingers as a stale public page. Pure
+    function of the corpus: same DB -> same site tree."""
+    removed = []
+    for fn in sorted(os.listdir(classes_dir)):
+        if fn.endswith(".html") and fn[:-5] not in keep_slugs:
+            os.remove(os.path.join(classes_dir, fn))
+            removed.append(fn)
+    return removed
 
 PAGE_CSS = """
 body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
@@ -133,9 +201,16 @@ def extract_problem_context(solution):
     return ""
 
 
-def class_page(stem, data):
-    title = data.get("title") or stem
-    desc = data.get("description") or ""
+def class_page(stem, data, slug=None):
+    # OB-GAP-093: the title is class_id-derived on corpus-seeded classes —
+    # redact internal names even if the corpus row predates export-side
+    # redaction. The slug (filename/URLs) uses the slug-safe token form.
+    if slug is None:
+        slug = public_stem(stem)
+    title = sanitize_internal_names(data.get("title") or stem)
+    # The class description lands in the meta description / og:description
+    # and the page intro — same class-id-adjacent leak surface as the title.
+    desc = sanitize_internal_names(data.get("description") or "")
     answers = data.get("answers") or []
     sol_text = ""
     if answers:
@@ -150,7 +225,7 @@ def class_page(stem, data):
     else:
         meta_desc = re.sub(r"\s+", " ", sol_text)[:160] or title
         show_desc = ""
-    gh_src = f"https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/{stem}.json"
+    gh_src = f"https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/{slug}.json"
 
     body = [f"<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div>",
             f"<h1>{esc(title)}</h1>",
@@ -186,7 +261,7 @@ def class_page(stem, data):
 <meta property="og:title" content="{esc(title)} — Off-By-One">
 <meta property="og:description" content="{esc(meta_desc)}">
 <meta property="og:type" content="article">
-<link rel="canonical" href="https://ob1.it.com/classes/{stem}.html">
+<link rel="canonical" href="https://ob1.it.com/classes/{slug}.html">
 <style>{PAGE_CSS}</style>
 </head>
 <body>
@@ -354,8 +429,11 @@ def main():
         stem = slug_stem(fn)
         with open(os.path.join(DATA_DIR, fn)) as f:
             data = json.load(f)
-        classes.append({"stem": stem, "title": data.get("title"), "created_at": data.get("created_at"), "answers": data.get("answers") or []})
+        classes.append({"stem": stem, "title": sanitize_internal_names(data.get("title")), "created_at": data.get("created_at"), "answers": data.get("answers") or []})
         stems.append(stem)
+
+    # OB-GAP-093: redacted, collision-checked public slugs for every class.
+    slug_map = build_slug_map(stems)
 
     # Landing
     gen_date = corpus_date()
@@ -367,9 +445,15 @@ def main():
     for c in classes:
         with open(os.path.join(DATA_DIR, c["stem"] + ".json")) as f:
             data = json.load(f)
-        html = class_page(c["stem"], data)
-        with open(os.path.join(OUT_DIR, "classes", c["stem"] + ".html"), "w") as f:
+        html = class_page(c["stem"], data, slug_map[c["stem"]])
+        with open(os.path.join(OUT_DIR, "classes", slug_map[c["stem"]] + ".html"), "w") as f:
             f.write(html)
+
+    # A class whose class_id was renamed/redacted must not linger as a stale
+    # public page under its old slug.
+    removed = prune_stale_class_pages(os.path.join(OUT_DIR, "classes"), set(slug_map.values()))
+    if removed:
+        print(f"pruned {len(removed)} stale class page(s)")
 
     # Sitemap
     gen_date = corpus_date()
@@ -377,7 +461,7 @@ def main():
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n')
         f.write(f"  <url><loc>https://ob1.it.com/</loc><lastmod>{gen_date}</lastmod><changefreq>daily</changefreq></url>\n")
         for stem in stems:
-            f.write(f"  <url><loc>https://ob1.it.com/classes/{stem}.html</loc><lastmod>{gen_date}</lastmod></url>\n")
+            f.write(f"  <url><loc>https://ob1.it.com/classes/{slug_map[stem]}.html</loc><lastmod>{gen_date}</lastmod></url>\n")
         f.write("</urlset>\n")
 
     # Robots
