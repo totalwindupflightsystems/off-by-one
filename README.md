@@ -374,7 +374,7 @@ or follow https://go.dev/doc/install) — the tarball recipe above needs no priv
 
 ### Install from a release (no toolchain needed)
 
-Every tag publishes prebuilt binaries — `off-by-one-<tag>-linux-amd64`, `-linux-arm64` (raw executables, not tarballs) plus `SHA256SUMS`. Latest: [v0.1.1](https://github.com/totalwindupflightsystems/off-by-one/releases/latest).
+Prebuilt binaries are available for tagged releases (see [releases](https://github.com/totalwindupflightsystems/off-by-one/releases)). The build process is documented in the Makefile (`make release TAG=<version>`).
 
 ```bash
 V=v0.1.1
