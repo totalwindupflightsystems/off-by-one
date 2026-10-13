@@ -620,11 +620,117 @@ func sanitizeHostPaths(s string) string {
 
 var (
 	personalEmailPattern = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b`)
-	dotlessEmailPattern  = regexp.MustCompile(`(?i)\b[A-Z0-9._%+-]+@[A-Z0-9_-]+\b`)
 	personalPhonePattern = regexp.MustCompile(`(^|[^0-9])(?:\+[0-9]{1,3}[ .-]?)?(?:\([0-9]{3}\)|[0-9]{3})[ .-][0-9]{3}[ .-][0-9]{4}([^0-9]|$)`)
 	ipv4Pattern          = regexp.MustCompile(`(^|[^0-9.])((?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])(?:\.(?:25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])){3})([^0-9.]|$)`)
 	ipv6CandidatePattern = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_:])((?:[0-9a-f]{0,4}:){2,}[0-9a-f:.%]+)([^A-Za-z0-9_:]|$)`)
 )
+
+// DF-OFF-BY-ONE-33: dotless user@host identifiers (user@localhost,
+// kara@builder-machine) escape the dotted-TLD email pattern, but a bare
+// "local@host" regex also matches legitimate programming syntax: version
+// refs (actions/checkout@v4, vitest@4, pkg@latest, repo@<sha>), module
+// version continuations (net/http@go1.26.5 — the dotless match stops at
+// the dot of a dotted token), VCS install specs (pkg@git+https://…), regex
+// fragments ([a-z]+@heading), workflow scope placeholders (run@step1,
+// run@each@item-1@step1), and single-letter artifacts produced when
+// escaped newlines/tabs sit next to decorators ("\n@dataclass" read as
+// raw text looks like "n@dataclass"). The classifier below keeps those
+// forms and redacts only plausible user@host identifiers. Keep in sync
+// with _DOTLESS_* / _is_dotless_user_host in scripts/export-answers.py
+// and scripts/check-public-pii.py.
+var (
+	dotlessCandidatePattern = regexp.MustCompile(`(?i)\b([A-Z0-9._%+-]+)@([A-Z0-9_-]+)\b`)
+	dotlessVersionHostRE    = regexp.MustCompile(`(?i)^v?\d`)            // @v4, @4, @2000s
+	dotlessShaHostRE        = regexp.MustCompile(`(?i)^[0-9a-f]{7,40}$`) // repo@<sha>
+	dotlessScopeHostRE      = regexp.MustCompile(`(?i)^(step\d*|each|item-\d+)$`)
+	dotlessVxHostRE         = regexp.MustCompile(`(?i)^vx+$`) // pkg@vX placeholder
+	dotlessVersionLocalRE   = regexp.MustCompile(`\d+\.\d+`)  // glm-5.3-flash@provider
+)
+
+// dotlessRefHosts are dist-tags/branch refs (pkg@latest, repo.git@main)
+// and prose placeholders (module@version, ample@init).
+var dotlessRefHosts = map[string]bool{
+	"latest": true, "main": true, "master": true, "next": true, "head": true,
+	"version": true, "init": true,
+}
+
+func isASCIIAlnum(b byte) bool {
+	return b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+}
+
+// isDotlessUserHost reports whether a dotless local@host candidate is a
+// real user@host identifier rather than programming syntax. following is
+// the (up to two) bytes right after the match — a dotted continuation
+// (net/http@go1.26.5, user@host.example) or a VCS marker
+// (pkg@git+https://) means the candidate is part of a larger token the
+// dotted-email rule (or no rule) owns.
+func isDotlessUserHost(local, host, following string) bool {
+	if len(local) < 2 || len(host) < 2 {
+		return false
+	}
+	if !isASCIIAlnum(local[0]) || !isASCIIAlnum(local[len(local)-1]) || strings.Contains(local, "..") {
+		return false
+	}
+	if dotlessVersionLocalRE.MatchString(local) {
+		return false
+	}
+	if dotlessVersionHostRE.MatchString(host) {
+		return false
+	}
+	low := strings.ToLower(host)
+	if dotlessRefHosts[low] || dotlessVxHostRE.MatchString(low) {
+		return false
+	}
+	if dotlessScopeHostRE.MatchString(host) {
+		return false
+	}
+	if dotlessShaHostRE.MatchString(host) && strings.ContainsAny(host, "0123456789") {
+		return false
+	}
+	if strings.HasPrefix(following, "+") {
+		return false
+	}
+	if len(following) == 2 && following[0] == '.' && isASCIIAlnum(following[1]) {
+		return false
+	}
+	return true
+}
+
+// sanitizeDotlessIdentifiers redacts dotless user@host identifiers
+// (user@localhost, kara@builder-machine) to <email>; programming syntax
+// that merely looks like one (actions/checkout@v4, vitest@4, run@step1)
+// is left intact.
+func sanitizeDotlessIdentifiers(s string) string {
+	matches := dotlessCandidatePattern.FindAllStringSubmatchIndex(s, -1)
+	if matches == nil {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	redacted := false
+	for _, m := range matches {
+		following := ""
+		if m[1] < len(s) {
+			end := m[1] + 2
+			if end > len(s) {
+				end = len(s)
+			}
+			following = s[m[1]:end]
+		}
+		if !isDotlessUserHost(s[m[2]:m[3]], s[m[4]:m[5]], following) {
+			continue
+		}
+		b.WriteString(s[last:m[0]])
+		b.WriteString("<email>")
+		last = m[1]
+		redacted = true
+	}
+	if !redacted {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
 
 // sanitizeCommonPII is the public answer-sharing filter. Gitleaks remains
 // responsible for credential detection; this separately redacts common
@@ -632,7 +738,7 @@ var (
 func sanitizeCommonPII(s string) string {
 	s = sanitizeHostPaths(s)
 	s = personalEmailPattern.ReplaceAllString(s, "<email>")
-	s = dotlessEmailPattern.ReplaceAllString(s, "<email>")
+	s = sanitizeDotlessIdentifiers(s)
 	s = personalPhonePattern.ReplaceAllString(s, "${1}<phone>${2}")
 	s = ipv4Pattern.ReplaceAllString(s, "${1}<ip-address>${3}")
 	s = ipv6CandidatePattern.ReplaceAllStringFunc(s, func(match string) string {
