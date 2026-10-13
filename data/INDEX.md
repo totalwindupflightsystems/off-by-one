@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2649 problem classes · 4277 verified answers** · exported 2026-10-13 16:00 UTC
+**2652 problem classes · 4280 verified answers** · exported 2026-10-13 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2655,3 +2655,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2736 | go-quic-connection-id-migration-amp-budget-20261013 | 1 | go |
 | 2737 | js-incremental-build-graph-dynamic-scc-invalidation-20261013 | 1 | js |
 | 2738 | gateway-shared-state-default-per-instance | 1 | go |
+| 2739 | go-cdc-watermark-tombstone-compaction-20261013 | 1 | go |
+| 2740 | python-hygienic-macro-cache-cycle-invalidation-20261013 | 1 | python |
+| 2741 | js-fenced-lease-retry-scheduler-20261013 | 1 | js |
