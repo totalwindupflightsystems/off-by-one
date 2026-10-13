@@ -202,9 +202,17 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
 | `stack_trace` | string | No | Stack trace or log excerpt |
 | `context` | object | No | Additional key-value context |
 | `cadence` | string | Yes | One of: `pre-phase`, `end-of-day`, `post-debug` |
-| `required_tools` | string[] | No | Tool names the sandbox should provision (e.g. `["jq", "parallel"]`); resolved on the host and mounted read-only when available |
+| `required_tools` | string[] | No | Tool names the sandbox should provision (e.g. `["jq", "parallel"]`); resolved on the host at submit time and mounted read-only when available. The response's `resolved_tools` / `missing_tools` fields echo which declared tools the sandbox will actually have |
 
 #### Submit responses and errors
+
+The submit response (and every `GET /api/v1/queue/{submission_id}` read, pending or complete)
+carries two array fields that classify the submission's `required_tools` against the host:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `resolved_tools` | string[] | Declared tools the sandbox CAN provision (always an array; `[]` when nothing was declared) |
+| `missing_tools` | string[] | Declared tools the host CANNOT provide. The solve proceeds without them (degrade-gracefully, never a hard failure), so a non-empty array means the answer will be produced with a reduced tool set (always an array; `[]` when nothing is missing) |
 
 A submission is deduplicated against the queue and the verified-answer corpus on the
 `(problem_class, environment, language, version)` tuple. Re-submitting a tuple that is already

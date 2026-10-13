@@ -3261,3 +3261,174 @@ func TestSubmit_EstimatedTimeUsesRecentWindow(t *testing.T) {
 		t.Errorf("stats avg_solve_time = %q, want %q (rolling recent window)", st.AvgSolveTime, "1m34s")
 	}
 }
+
+// --- DF-OFF-BY-ONE-41: resolved_tools/missing_tools on the wire ----------
+
+// TestSubmit_ToolClassificationEchoed is the DF-OFF-BY-ONE-41 acceptance
+// test: a submission declaring required_tools where one tool is absent
+// from the host must expose the missing name in a dedicated field — in
+// the submit 200 response AND in GET /api/v1/queue/{id} for BOTH the
+// pending and the completed entry. The resolver is the queue's
+// ToolResolver hook (wired to sandbox.ResolveToolNames in production);
+// the fake here plays the host that has jq but not parallel.
+func TestSubmit_ToolClassificationEchoed(t *testing.T) {
+	s, _, q := newTestServer(t)
+	q.ToolResolver = func(tools []string) (resolved, missing []string) {
+		if len(tools) == 2 && tools[0] == "jq" && tools[1] == "parallel" {
+			return []string{"jq"}, []string{"parallel"}
+		}
+		t.Fatalf("resolver called with %v, want [jq parallel]", tools)
+		return nil, nil
+	}
+
+	body := submitProblemRequest{
+		ProblemClass:  "df41-jq-parsing",
+		Environment:   "linux",
+		Language:      "bash",
+		Cadence:       ingest.CadencePrePhase,
+		RequiredTools: []string{"jq", "parallel"},
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("submit status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var resp submitProblemResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode submit response: %v", err)
+	}
+	if len(resp.ResolvedTools) != 1 || resp.ResolvedTools[0] != "jq" {
+		t.Errorf("submit resolved_tools = %v, want [jq]", resp.ResolvedTools)
+	}
+	if len(resp.MissingTools) != 1 || resp.MissingTools[0] != "parallel" {
+		t.Errorf("submit missing_tools = %v, want [parallel]", resp.MissingTools)
+	}
+	// Raw JSON carries the keys explicitly (never absent, never null).
+	if !strings.Contains(rr.Body.String(), `"missing_tools":["parallel"]`) {
+		t.Errorf("submit body missing the missing_tools echo: %s", rr.Body.String())
+	}
+
+	// Pending entry: the queue status object exposes the same verdict.
+	rawPending, pending := getQueueEntry(t, s, resp.SubmissionID)
+	if pending.Status != "pending" {
+		t.Fatalf("pending entry status = %q, want pending", pending.Status)
+	}
+	if len(pending.ResolvedTools) != 1 || pending.ResolvedTools[0] != "jq" {
+		t.Errorf("pending resolved_tools = %v, want [jq]", pending.ResolvedTools)
+	}
+	if len(pending.MissingTools) != 1 || pending.MissingTools[0] != "parallel" {
+		t.Errorf("pending missing_tools = %v, want [parallel]", pending.MissingTools)
+	}
+	if _, ok := rawPending["resolved_tools"]; !ok {
+		t.Error("pending entry JSON lacks resolved_tools key")
+	}
+	if _, ok := rawPending["missing_tools"]; !ok {
+		t.Error("pending entry JSON lacks missing_tools key")
+	}
+
+	// Completed entry: the classification is persisted, so it survives
+	// the status transition unchanged.
+	if err := q.MarkComplete(context.Background(), resp.SubmissionID, 0); err != nil {
+		t.Fatalf("MarkComplete: %v", err)
+	}
+	_, done := getQueueEntry(t, s, resp.SubmissionID)
+	if done.Status != "complete" {
+		t.Fatalf("completed entry status = %q, want complete", done.Status)
+	}
+	if len(done.MissingTools) != 1 || done.MissingTools[0] != "parallel" {
+		t.Errorf("completed missing_tools = %v, want [parallel]", done.MissingTools)
+	}
+	if len(done.ResolvedTools) != 1 || done.ResolvedTools[0] != "jq" {
+		t.Errorf("completed resolved_tools = %v, want [jq]", done.ResolvedTools)
+	}
+}
+
+// TestSubmit_DedupEchoesOriginalToolClassification: a deduplicated
+// re-submission echoes the classification persisted on the ORIGINAL
+// entry — the dedup creates no new solve, so the original verdict is the
+// truthful one (DF-OFF-BY-ONE-41).
+func TestSubmit_DedupEchoesOriginalToolClassification(t *testing.T) {
+	s, _, q := newTestServer(t)
+	q.ToolResolver = func(tools []string) (resolved, missing []string) {
+		return []string{"jq"}, []string{"parallel"}
+	}
+	body := submitProblemRequest{
+		ProblemClass:  "df41-dedup",
+		Cadence:       ingest.CadencePrePhase,
+		RequiredTools: []string{"jq", "parallel"},
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("first submit status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	rr2 := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr2.Code != http.StatusConflict {
+		t.Fatalf("second submit status = %d, want 409, body = %s", rr2.Code, rr2.Body.String())
+	}
+	var resp submitProblemResponse
+	if err := json.Unmarshal(rr2.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode dedup response: %v", err)
+	}
+	if resp.Status != "deduplicated" {
+		t.Errorf("status = %q, want deduplicated", resp.Status)
+	}
+	if len(resp.MissingTools) != 1 || resp.MissingTools[0] != "parallel" {
+		t.Errorf("dedup missing_tools = %v, want [parallel] (original entry's verdict)", resp.MissingTools)
+	}
+	if len(resp.ResolvedTools) != 1 || resp.ResolvedTools[0] != "jq" {
+		t.Errorf("dedup resolved_tools = %v, want [jq]", resp.ResolvedTools)
+	}
+}
+
+// TestSubmit_NoTools_ArraysNeverNull pins the []-never-null wire
+// convention (OB-GAP-046 family) for the new fields: a submission that
+// declares no required_tools still emits both keys as empty JSON arrays
+// on the submit response AND on the queue entry.
+func TestSubmit_NoTools_ArraysNeverNull(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	body := submitProblemRequest{
+		ProblemClass: "df41-no-tools",
+		Cadence:      ingest.CadencePrePhase,
+	}
+	rr := do(t, s, "POST", "/api/v1/problems/submit", body)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("submit status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"resolved_tools":[]`) {
+		t.Errorf("submit body: resolved_tools must be [] (got %s)", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"missing_tools":[]`) {
+		t.Errorf("submit body: missing_tools must be [] (got %s)", rr.Body.String())
+	}
+	var resp submitProblemResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	raw, entry := getQueueEntry(t, s, resp.SubmissionID)
+	for _, key := range []string{"resolved_tools", "missing_tools"} {
+		v, ok := raw[key]
+		if !ok {
+			t.Fatalf("queue entry JSON lacks %s key", key)
+		}
+		arr, ok := v.([]any)
+		if !ok {
+			t.Fatalf("queue entry %s = %#v (%T), want a JSON array", key, v, v)
+		}
+		if len(arr) != 0 {
+			t.Errorf("queue entry %s = %v, want empty", key, arr)
+		}
+	}
+	if entry.ResolvedTools == nil || entry.MissingTools == nil {
+		t.Errorf("decoded wire slices must be non-nil: resolved=%v missing=%v",
+			entry.ResolvedTools, entry.MissingTools)
+	}
+
+	// The list endpoint honors the same contract for every entry.
+	rrList := do(t, s, "GET", "/api/v1/queue", nil)
+	if rrList.Code != http.StatusOK {
+		t.Fatalf("list status = %d", rrList.Code)
+	}
+	if !strings.Contains(rrList.Body.String(), `"missing_tools":[]`) {
+		t.Errorf("list body: entry missing_tools must be [] (got %s)", rrList.Body.String())
+	}
+}

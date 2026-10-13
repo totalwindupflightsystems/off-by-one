@@ -137,6 +137,19 @@ func main() {
 				ExtraReadOnlyPaths: extraReadOnlyPaths(),
 				MemLimitMB:         *cfg.solveMemMB,
 			}
+			// Wire the submit-time tool classifier with the SAME mount set
+			// the sandbox builder will use at solve time (bwrap defaults +
+			// executor extras — bsandbox_runner builds the identical set),
+			// so the resolved/missing verdict persisted on the queue entry
+			// and echoed through the API matches what the solve will
+			// actually provision (DF-OFF-BY-ONE-41).
+			toolMountSet := make([]string, 0,
+				len(sandbox.DefaultReadOnlyPaths)+len(sandboxExec.ExtraReadOnlyPaths))
+			toolMountSet = append(toolMountSet, sandbox.DefaultReadOnlyPaths...)
+			toolMountSet = append(toolMountSet, sandboxExec.ExtraReadOnlyPaths...)
+			queue.ToolResolver = func(tools []string) (resolved []string, missing []string) {
+				return sandbox.ResolveToolNames(tools, toolMountSet)
+			}
 			runner := solver.NewBSandboxRunner(sandboxExec)
 			apiKey := os.Getenv("DEEPSEEK_API_KEY")
 			if looksPlaceholderAPIKey(apiKey) {

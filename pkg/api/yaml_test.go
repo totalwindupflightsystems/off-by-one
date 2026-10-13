@@ -881,6 +881,44 @@ func TestOpenAPISpec_EverySourceEnumReachesJSON(t *testing.T) {
 	}
 }
 
+// TestOpenAPISpec_ToolClassificationFields pins the published
+// resolved_tools/missing_tools contract (DF-OFF-BY-ONE-41): both the
+// SubmitProblemResponse and the QueueEntry schema must document the two
+// fields as arrays of strings, so a client generated from the spec
+// learns the field names the server actually emits.
+func TestOpenAPISpec_ToolClassificationFields(t *testing.T) {
+	raw, err := JSONBytes()
+	if err != nil {
+		t.Fatalf("JSONBytes: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	schemas := mustMap(t, mustMap(t, doc, "components"), "schemas")
+	for _, schemaName := range []string{"SubmitProblemResponse", "QueueEntry"} {
+		props := mustMap(t, mustMap(t, schemas, schemaName), "properties")
+		for _, field := range []string{"resolved_tools", "missing_tools"} {
+			f, ok := props[field].(map[string]any)
+			if !ok {
+				t.Errorf("%s.properties.%s = %#v (%T), want a mapping", schemaName, field, props[field], props[field])
+				continue
+			}
+			if got := f["type"]; got != "array" {
+				t.Errorf("%s.%s.type = %#v, want %q", schemaName, field, got, "array")
+			}
+			items, ok := f["items"].(map[string]any)
+			if !ok {
+				t.Errorf("%s.%s.items = %#v (%T), want a mapping", schemaName, field, f["items"], f["items"])
+				continue
+			}
+			if got := items["type"]; got != "string" {
+				t.Errorf("%s.%s.items.type = %#v, want %q", schemaName, field, got, "string")
+			}
+		}
+	}
+}
+
 // mustMap returns doc[key] as a mapping, failing the test when it is missing
 // or of another type.
 func mustMap(t *testing.T, doc map[string]any, key string) map[string]any {

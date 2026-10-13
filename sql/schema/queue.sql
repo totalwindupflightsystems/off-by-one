@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS queue_entries (
     stack_trace  TEXT NOT NULL DEFAULT '',
     context_json TEXT NOT NULL DEFAULT '{}',      -- JSON blob of additional context
     required_tools TEXT NOT NULL DEFAULT '[]',     -- JSON-encoded array of tool names (e.g. ["jq","parallel"])
+    resolved_tools TEXT NOT NULL DEFAULT '[]',     -- JSON-encoded subset of required_tools the host can provision (DF-OFF-BY-ONE-41)
+    missing_tools TEXT NOT NULL DEFAULT '[]',      -- JSON-encoded subset of required_tools the host cannot provide (DF-OFF-BY-ONE-41)
     cadence      TEXT NOT NULL DEFAULT 'pre-phase',
     priority     REAL NOT NULL DEFAULT 0.0,      -- computed priority score
     status       TEXT NOT NULL DEFAULT 'pending', -- pending, in_progress, complete, failed
