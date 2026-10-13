@@ -865,3 +865,48 @@ for `missing_tools` (until DF-41 lands a proper surface); expect the answer to
 reference only tools that actually resolved. Re-proof on fresh installs is
 cheap: clone+build 84s, seed 23s, discover green — the fresh-machine discover
 fallback (DF-36, d18586d6) reproduced exactly on a fresh seed.
+
+## §18 — 2026-10-13b: the web UI's own views, first exercise (DF-42, DF-43, DF-44)
+
+**What this surface is.** `internal/web` serves an embedded vanilla-JS SPA at
+`/` — seven views (home/search/submit/explore/system/export/import) plus a
+WebSocket chat sidebar. The API under it was already proven across 18 dogfood
+runs; this run drove the JS layer itself in a real browser, which no run had.
+
+**How it is built, and why the bug class follows.** Each view is a standalone
+script (`/js/explore.js`, `/js/submit.js`, …) loaded by a hand-rolled shell
+(`app.js`) — no framework, no tests over the render layer. The Explore tree is
+rendered client-side from `/api/v1/taxonomy`, four levels deep, with a
+`toggleSubNode(key, item, level, …)` dispatcher fanning out to per-level
+render functions. That dispatcher calls `renderVersionChildren` with FOUR
+arguments while the function declares TWO — the answers array lands in a
+string parameter, `answers.forEach` throws inside the click handler, and the
+exception vanishes (the row simply never renders). The API payload is
+correct; a render-layer test that expands every level and asserts
+`.tree-answer` nodes exist would have caught DF-44. This is the SPA twin of
+the struct-JSON-tag trap: at this layer the call-argument contract between
+two hand-written functions is the API, and nothing tests it.
+
+**Two more render-layer lessons from the same pass.**
+1. submit.js keys its feedback on the HTTP status alone: 409 + a
+   `status:"deduplicated"` body (the documented SUCCESS-shaped dedup
+   contract, submission_id included) renders as "Submission failed". The API
+   treats dedup as success; the UI treats 409 as failure; the user is told
+   the opposite of what happened (DF-43). Fix belongs in the client: branch
+   on the body's `status`, not the status code.
+2. chat.js appends a fresh "Connected…" system banner on every (re)connect —
+   11 banners in ~3 minutes during a client-side reconnect loop — and the
+   user's own sent message never appears in the transcript (DF-42's twin on
+   the chat surface). A raw-socket probe proved the server sends exactly one
+   banner with a 0.00s upgrade: the flap and the banner pile-up are both
+   client-side. When a chat looks "flaky", probe the socket raw before
+   blaming the server.
+
+**The right way to drive this surface (for the next agent):** load `/` in a
+real browser, then wrap `window.fetch` BEFORE clicking anything to capture
+status + body of every UI-initiated call — the UI's own requests are the
+contract evidence, and the 409 body above is only visible that way. Check
+`performance.getEntriesByType('resource')` for `responseStatus >= 400`
+(favicon.ico 404 is the only one today). Expand every tree level in Explore;
+count chat-sidebar banners over ~3 minutes; send a chat message and grep the
+transcript for your own text.

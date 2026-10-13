@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.10.0
+version: 1.11.0
 category: software-development
 ---
 
@@ -464,3 +464,18 @@ bare repo → re-import into a third node → discover → grep for raw PII (exp
 only `<ip-address>`/`<email>`/`<phone>`/`~`) → repeat discover against a
 `-readonly` node. Perf on the scratch node: discover 0.9–1.6ms warm, 16ms
 cold; re-import 76ms; bunker install clone 60s / build 54s / seed 10s.
+
+34. **Explore tree's version level renders an empty children div (DF-OFF-BY-ONE-44, P1)** —
+    drilling class→env→lang→version works, then expanding the version node shows NOTHING
+    (arg-shift bug in /js/explore.js: renderVersionChildren called with 4 args, declared with 2).
+    Until fixed, reach answers via Search or deep-linked problem pages, not the Explore tree.
+35. **Submit UI renders dedup (HTTP 409 + status:"deduplicated") as "Submission failed" (DF-OFF-BY-ONE-43, P2)** —
+    the API treats dedup as success and returns submission_id; ignore the UI's failure text and
+    check the queue via /api/v1/queue/status before resubmitting.
+36. **The chat sidebar flaps: piled-up "Connected…" banners = client reconnect loop, not the server (DF-OFF-BY-ONE-42, P2)** —
+    raw-socket probe upgrades in 0.00s with one banner. Your sent message may not appear in the
+    transcript; the server-side chat/WS surface itself is fine.
+
+Browser-driven UI evidence pattern (2026-10-13b): wrap `window.fetch` before clicking to capture
+each UI call's status+body (the 409 dedup body is only visible that way); check
+`performance.getEntriesByType('resource')` for responseStatus>=400; count chat banners over ~3 min.
