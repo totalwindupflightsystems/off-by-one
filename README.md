@@ -167,6 +167,11 @@ For detailed integration examples and a per-route reference, see [`docs/integrat
 | `GET` | `/api/v1/stats` | System statistics — `verified_answers` counts answers whose status is `verified`/`ci_passed` **and** whose signatures JSON does not record `result: "failed"` (a status-verified answer whose solve failed is excluded); `coverage` = verified_answers/total_problems and can exceed 1.0 (a class may hold multiple verified answers); `hit_rate` = verified_answers/total_answers |
 | `GET` | `/openapi.json` | OpenAPI 3.0.3 specification |
 | `GET` | `/health` | Health check (status + uptime) |
+| `GET` | `/metrics` | Runtime metrics snapshot — solve counts, host-pressure skips, and `over_budget`/`rejected` roll-ups (404 when the metrics observer is disabled) |
+
+`GET /metrics` returns the daemon's runtime metrics snapshot (fields include
+`solve_count`, `solve_rejected`, `over_budget`, and `alert_threshold_bytes`); it
+answers 404 when the metrics observer is not configured.
 
 ### Example: Submit a Problem
 
@@ -262,7 +267,10 @@ the class's best verified answer and names the mismatch in `version_warnings`.
 | `OFF_BY_ONE_PI_AGENT` | No | `pi-agent` | Path to Pi Agent binary (resolved via PATH) |
 | `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
 | `OFF_BY_ONE_LOAD_THRESHOLD` | No | `1` | Max loadavg(1) for idle detection (negative = always idle) |
+| `OFF_BY_ONE_MEM_FRACTION` | No | `0.9` | Max MemUsedFraction (1 - MemAvailable/MemTotal) for idle detection (negative = always idle) |
 | `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `30m` | Solver-level per-solve timeout |
+| `OFF_BY_ONE_SOLVE_MEM_MB` | No | `0` (unlimited) | Per-solve memory cap in MiB, applied to the sandboxed command through the `oby-memcap` wrapper as `RLIMIT_AS`; `0` = unlimited |
+| `OFF_BY_ONE_SOLVE_REJECT_RSS_MB` | No | `-1` (auto) | Reject a solve whose observed peak RSS exceeds this many MiB, even when the solver returned success; `-1` = auto (80% of the `-solve-mem-mb` cap), `0` = disabled, `>0` = that threshold in MiB |
 | `OB1_BWRAP_TIMEOUT` | No | `300` | Outer bubblewrap sandbox cap per solve, in seconds (positive integer; unset or invalid values fall back to the 300s default with a warning) |
 | `OFF_BY_ONE_READONLY` | No | `false` | Public catalog mode: block all mutating endpoints and the AI chat (set `1`/`true`/`yes`) |
 | `OFF_BY_ONE_SKIP_SANDBOX` | No | `false` | Skip bwrap sandbox for dev/testing (set `1`/`true`/`yes`) |
@@ -284,10 +292,13 @@ go run ./cmd/off-by-one --help
 | `--host` | HTTP listen host (default 127.0.0.1 = loopback only; use 0.0.0.0 to listen on all interfaces) |
 | `--import-dir` | Working directory for git import clones (empty = `POST /api/v1/import` disabled, 501) |
 | `--load-threshold` | Max loadavg(1) for idle detection (negative = always idle) |
+| `--mem-fraction` | Max MemUsedFraction (1 - MemAvailable/MemTotal) for idle detection (negative = always idle; env `OFF_BY_ONE_MEM_FRACTION`) |
 | `--pi-agent` | Path to Pi Agent binary |
 | `--port` | HTTP server port |
 | `--readonly` | Public catalog mode: block all mutating endpoints and the AI chat |
 | `--skip-sandbox` | Skip bwrap sandbox (for dev/testing) |
+| `--solve-mem-mb` | Per-solve memory cap in MiB, applied to the sandboxed command via the `oby-memcap` wrapper (RLIMIT_AS); 0 = unlimited (env `OFF_BY_ONE_SOLVE_MEM_MB`) |
+| `--solve-reject-rss-mb` | Reject a solve whose observed peak RSS exceeds this many MiB even when it returned success (-1 = auto: 80% of `--solve-mem-mb`; 0 = disabled; env `OFF_BY_ONE_SOLVE_REJECT_RSS_MB`) |
 | `--solve-timeout` | Per-solve timeout cap (env `OFF_BY_ONE_SOLVE_TIMEOUT`) |
 | `--version` | Print the build stamp (e.g. `off-by-one 0287082`) and exit |
 
