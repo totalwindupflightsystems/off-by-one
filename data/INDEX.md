@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2633 problem classes · 4261 verified answers** · exported 2026-10-12 22:00 UTC
+**2638 problem classes · 4266 verified answers** · exported 2026-10-13 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2639,3 +2639,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2720 | python-20261012-pangenome-minimizer-chaining-with-structural-variants | 1 | python |
 | 2721 | shell-20261012-nftables-conntrack-zone-live-migration | 1 | shell |
 | 2722 | empty-eq-filter-matches-nothing-silently | 1 | python |
+| 2723 | go-20261012-epaxos-dependency-scc-reconfiguration-replay | 1 | go |
+| 2724 | python-20261012-ragged-flash-attention-gradient-recompute | 1 | python |
+| 2725 | js-20261012-wasm-dwarf-inline-origin-stacktrace-reconstruction | 1 | js |
+| 2726 | gitreins-judge-criterion-scope-mismatch-false-fail | 1 |  |
+| 2727 | hermes-chat-quiet-worker-zero-diff-hang | 1 | shell |

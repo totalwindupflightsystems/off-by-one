@@ -1,0 +1,28 @@
+{
+  "class_id": 2723,
+  "title": "go-20261012-epaxos-dependency-scc-reconfiguration-replay",
+  "description": "go-20261012-epaxos-dependency-scc-reconfiguration-replay",
+  "created_at": "2026-10-12 22:05:57",
+  "answers": [
+    {
+      "answer_id": 4454,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "I built and verified a complete, self-contained solution. The full write-up (with the entire analyzer source and test suite embedded) is at **`~/SOLUTION.md`**, and the runnable module is at **`~/epaxos-recovery/`**.\n\n# EPaxos dependency-SCC reconfiguration replay\n\n## Root cause\n\nThe trace is **not** the execution history. EPaxos safety is a partial order over dependencies + ballots:\n\n1. **Delivery order ≠ protocol order.** Duplicates/reordering let a stale lower-ballot `pre_accept`/`accept` overwrite a `commit`. Precedence must be `commit`/`conf_change` > `accept` > `pre_accept`, then max ballot, unioning deps tied at `(phase, ballot)`.\n2. **Dependencies form a DAG up to SCCs.** Mutual dependencies are normal (contention). A plain topological sort deadlocks or picks an arbitrary cycle break → reorders conflicting commands.\n3. **Lost conflict edges.** Two committed commands on the same key need a fallback order `(seq, ballot, replica, slot)`, added only when no dependency path exists (never fabricate a cycle).\n4. **Per-replica slot truncation is not a global cut** — the core reconfiguration bug. A snapshot keeping an early local slot may omit a dependency in a *later* slot on another replica, so the retained set is not closed and the state is unlinearizable.\n5. **External deps must be carried** in `residual`, not inferred.\n6. **Bounded memory:** keep only the committed graph, SCC condensation, retained suffix, and a frontier touching the snapshot.\n\nThe three truncation invariants for a prefix `S`: dependency closure (`x∈S ⇒ deps(x)⊆S`), SCC atomicity, and configuration-epoch boundary (`<e` fully included, `e` wholly or not at all).\n\n## The fix\n\nPipeline: `Normalize → BuildGraph → Tarjan(SCC) → ExecutionOrder → Verify`, with `Verify` returning shortest-path/cycle **minimal counterexamples** and a self-re-verifying **recovery plan**.\n\nCore selection logic:\n\n```go\n// commit/conf_change > accept > pre_accept; within phase, max ballot;\n// union deps tied at (phase, ballot).\nbestRank := 0\nfor _, m := range group { if r := kindRank(m.Kind); r > bestRank { bestRank = r } }\n// ... pick max ballot among bestRank, union deps of all messages at that (rank,ballot)\n```\n\nRecovery finds the greatest dependency-closed, SCC-complete, config-prefix subset and moves the rest back into the log (less truncation), then re-runs verification with recursion disabled.\n\n## Verification (all passing)\n\n```bash\ncd ~/epaxos-recovery\ngo vet ./...\ngo test -race -count=3 ./...\n# ok   epaxosrecovery\n# ?    epaxosrecovery/single  [no test files]\n\n# End-to-end counterexample (X=(r1,s5) sets v=1; Y=(r2,s1) depends on X, v+=2;\n# snapshot max_slot {\"1\":0,\"2\":1} keeps Y but truncates X):\ngo build -o /tmp/r single/solution.go\n/tmp/r -in testdata/cross_replica.json   # exit 1\n```\n\nOutput: `snapshot_down_closure` with witness `[(r2,s1) → (r1,s5)]`, a `state_mismatch` (`v` expected `2`, actual `1`), and `recovery.verified: true` retaining both `(r1,s5)` and `(r2,s1)`.\n\nTest suite (`epaxos_test.go`, `property_test.go`) covers dependency ordering, dedup + ballot precedence, conflict fallback, SCC atomicity, the cross-replica counterexample, safe prefixes, state mismatch, config-epoch split, external-dep coverage, plus **500 randomized dependency graphs** (order = valid topological order of the condensation; Tarjan components are true mutual-reachability classes) and **300 randomized snapshot plans** (every recovery re-verifies).\n\n**Files:** `model.go`, `graph.go`, `state.go`, `snapshot.go`, `main.go`, `single/solution.go` (dependency-free single file), `epaxos_test.go`, `property_test.go`, `gen_single.py`, `testdata/cross_replica.json`, and `~/SOLUTION.md`.\n",
+      "evidence": "# Evidence\n- Problem class: go-20261012-epaxos-dependency-scc-reconfiguration-replay\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-12T22:05:57.411Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Given a sequence of EPaxos pre-accept, accept, commit, and membership-change messages with duplicated, delayed, and reordered delivery, reconstruct the maximal safe execution order while respecting dependency SCCs and ballot precedence. Detect whether a proposed log truncation plus snapshot can be replayed without violating linearizability, and emit a minimal counterexample or a verifiable recovery plan under bounded memory.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-20261012-epaxos-dependency-scc-reconfiguration-replay",
+        "provider": "openrouter",
+        "solved_at": "2026-10-12T22:05:57.420Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-10-12 22:05:57"
+    }
+  ]
+}
