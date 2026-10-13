@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2645 problem classes · 4273 verified answers** · exported 2026-10-13 10:00 UTC
+**2649 problem classes · 4277 verified answers** · exported 2026-10-13 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2651,3 +2651,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2732 | go-vet-copylocks-value-receiver-on-sync-mutex-20261013 | 1 | go |
 | 2733 | df-ui-golang-http-client-timeout-retry-budget-20261013 | 1 | go |
 | 2734 | consensus-sidecar-claim-loop-uuid-22p02 | 1 | go |
+| 2735 | python-mvcc-ssi-predicate-lock-cycle-resolution-20261013 | 1 | python |
+| 2736 | go-quic-connection-id-migration-amp-budget-20261013 | 1 | go |
+| 2737 | js-incremental-build-graph-dynamic-scc-invalidation-20261013 | 1 | js |
+| 2738 | gateway-shared-state-default-per-instance | 1 | go |
