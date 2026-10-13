@@ -47,7 +47,7 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
 <div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-nested-pipeline-run-scope-cache-collision</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>go</span><span class='badge v'>linux</span><span class='badge g'>go</span><span class='badge v'>linux</span></div><div class='desc'><p>Component: Hermes DAGger runner + MCP adapter + SQLite checkpoint store</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1534-go-nested-pipeline-run-scope-cache-collision.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>The repository <code>Hermes-DAGger/&amp;lt;project&amp;gt;</code> is private and unavailable here, so I built and ran a self-contained Go reproduction that reproduces the exact engine-cache collision and proves the fix. Full solution saved to <code>~/DAGGER-162-solution.md</code> and reproduced below.</p>
 <hr />
-<h1>DAGGER-162 — Fix: nested foreach pipelines collide on <code>&lt;email&gt;</code> run scope</h1>
+<h1>DAGGER-162 — Fix: nested foreach pipelines collide on <code>run_id@step</code> run scope</h1>
 <p><strong>Component:</strong> Hermes DAGger runner + MCP adapter + SQLite checkpoint store
 <strong>Language:</strong> Go 1.25
 <strong>Fix commit:</strong> <code>51e1aec72af69b23e6fa02bb380278b82e8364e5</code>
@@ -62,7 +62,7 @@ iteration checkpoints
 <p>Top-level execution was correct. Any pipeline containing a <code>foreach</code> whose body was a nested template pipeline produced <code>null</code> for every item terminal. The checkpoint store (<code>role.db</code>) grew by the top-level rows only — zero iteration checkpoint rows.</p>
 <h2>2. Root cause</h2>
 <p>The engine's unit of idempotency is the <strong>engine sub-run ID</strong>, and a completed sub-run is served from cache. The server derived that ID from the run ID plus a <strong>local</strong> step index:</p>
-<pre><code>&lt;run_id&gt;@&lt;step&gt;          e.g.  &lt;email&gt;
+<pre><code>&lt;run_id&gt;@&lt;step&gt;          e.g.  run-42@1
 </code></pre>
 <p>A foreach body is itself a pipeline whose local steps restart at <code>1</code>. The original implementation executed the nested template by <strong>reusing the parent <code>Runner</code> and its <code>RunID</code></strong>, so:</p>
 <table>
@@ -75,26 +75,26 @@ iteration checkpoints
 <tbody>
 <tr>
 <td>top-level step 1 (<code>fetch</code>)</td>
-<td><code>&lt;email&gt;</code></td>
+<td><code>run-42@1</code></td>
 </tr>
 <tr>
 <td>iteration 1, local step 1 (<code>summarize</code>)</td>
-<td><code>&lt;email&gt;</code></td>
+<td><code>run-42@1</code></td>
 </tr>
 <tr>
 <td>iteration 2, local step 1 (<code>summarize</code>)</td>
-<td><code>&lt;email&gt;</code></td>
+<td><code>run-42@1</code></td>
 </tr>
 <tr>
 <td>iteration N, local step 1 (<code>summarize</code>)</td>
-<td><code>&lt;email&gt;</code></td>
+<td><code>run-42@1</code></td>
 </tr>
 </tbody>
 </table>
 <p>Two independent bugs follow from the alias:</p>
 <ol>
-<li><strong>Parent/child collision.</strong> The top-level step 1 already cached <code>&lt;email&gt;</code> as <code>completed</code>. The engine returns a cache hit — <code>Status=completed</code> — but the cached entry was produced by a differently named node, so no output is associated with the requested node. Result: <code>Status=completed, Output=""</code>. The runner treats it as a valid terminal and propagates <code>null</code>.</li>
-<li><strong>Sibling collision.</strong> Even without a top-level step 1, iterations 1..N all share <code>&lt;email&gt;</code>, so siblings alias each other and only one iteration's work is ever checkpointed. Because the returned output is empty, the checkpoint write is skipped entirely → "no iteration checkpoints".</li>
+<li><strong>Parent/child collision.</strong> The top-level step 1 already cached <code>run-42@1</code> as <code>completed</code>. The engine returns a cache hit — <code>Status=completed</code> — but the cached entry was produced by a differently named node, so no output is associated with the requested node. Result: <code>Status=completed, Output=""</code>. The runner treats it as a valid terminal and propagates <code>null</code>.</li>
+<li><strong>Sibling collision.</strong> Even without a top-level step 1, iterations 1..N all share <code>run-42@1</code>, so siblings alias each other and only one iteration's work is ever checkpointed. Because the returned output is empty, the checkpoint write is skipped entirely → "no iteration checkpoints".</li>
 </ol>
 <p>Disabling the completed-run cache would hide the symptom but destroy resume, fresh-run, and checkpoint semantics. The cache is not wrong; the <strong>ID was not unique per iteration</strong>.</p>
 <h2>3. The fix</h2>
@@ -139,7 +139,7 @@ func (r *Runner) runForEach(index int, s Step) []Result {
 <pre><code class="language-go">// BUG: no child scope, local steps restart at 1 on the parent RunID.
 for _, item := range s.ForEach.Items {
     for j, local := range s.ForEach.Template {
-        out = append(out, r.runStep(j+1, local)) // -&gt; &lt;email&gt; every time
+        out = append(out, r.runStep(j+1, local)) // -&gt; run@1 every time
     }
 }
 </code></pre>
@@ -147,8 +147,8 @@ for _, item := range s.ForEach.Items {
 <p>Make the scope explicit in the ID and pass it through to the engine. The adapter is the single place that composes engine sub-run IDs, so scoped and unscoped execution can never be confused:</p>
 <pre><code class="language-go">// EngineRunID joins parent run, optional scope and node with '@' in a fixed,
 // deterministic order:
-//   parent                + node   -&gt; &quot;&lt;email&gt;&quot;              (top level)
-//   parent + scope + node -&gt; &quot;&lt;email&gt;@&lt;email&gt;&quot;  (iteration)
+//   parent                + node   -&gt; &quot;run@step1&quot;              (top level)
+//   parent + scope + node -&gt; &quot;run@each@item-1@step1&quot;  (iteration)
 func EngineRunID(parentRunID, scope, node string) string {
     parts := make([]string, 0, 3)
     if parentRunID != &quot;&quot; {
@@ -402,7 +402,7 @@ func fixture() Pipeline {
     }}
 }
 
-// Bug repro: nested template reuses &quot;&lt;email&gt;&quot; -&gt; completed with empty output.
+// Bug repro: nested template reuses &quot;run@1&quot; -&gt; completed with empty output.
 func TestRepro_UnscopedNestedCollides(t *testing.T) {
     eng := NewEngine()
     store := NewCheckpointStore()
@@ -426,8 +426,8 @@ func TestRepro_UnscopedNestedCollides(t *testing.T) {
         if res.Output != &quot;&quot; {
             t.Fatalf(&quot;nested[%d] output = %q, want empty (bug should reproduce)&quot;, i, res.Output)
         }
-        if res.RunID != &quot;&lt;email&gt;&quot; {
-            t.Fatalf(&quot;nested[%d] runID = %q, want colliding &lt;email&gt;&quot;, i, res.RunID)
+        if res.RunID != &quot;run@1&quot; {
+            t.Fatalf(&quot;nested[%d] runID = %q, want colliding run@1&quot;, i, res.RunID)
         }
     }
     if store.Len() != 1 {
@@ -452,8 +452,8 @@ func TestRunner_ForEachTouchesNoTopLevelEntries(t *testing.T) {
     if len(top) != 1 {
         t.Fatalf(&quot;want exactly 1 top-level entry, got %d&quot;, len(top))
     }
-    if _, ok := top[&quot;&lt;email&gt;&quot;]; !ok {
-        t.Fatalf(&quot;top-level entry &lt;email&gt; missing: %#v&quot;, top)
+    if _, ok := top[&quot;run@1&quot;]; !ok {
+        t.Fatalf(&quot;top-level entry run@1 missing: %#v&quot;, top)
     }
 
     var nested []Result
@@ -463,7 +463,7 @@ func TestRunner_ForEachTouchesNoTopLevelEntries(t *testing.T) {
             continue
         }
         nested = append(nested, res)
-        if res.RunID == &quot;&lt;email&gt;&quot; || res.RunID == &quot;&lt;email&gt;&quot; {
+        if res.RunID == &quot;run@1&quot; || res.RunID == &quot;run@2&quot; {
             t.Fatalf(&quot;nested node touched a top-level run ID: %q&quot;, res.RunID)
         }
         if res.Output == &quot;&quot; {
@@ -501,11 +501,11 @@ func TestAdapterScopedNestedScopeSurvivesCompletedParentStep(t *testing.T) {
     }
 
     parentID := EngineRunID(&quot;run&quot;, &quot;&quot;, &quot;step1&quot;)
-    nestedID := EngineRunID(&quot;run&quot;, &quot;&lt;email&gt;&quot;, &quot;step1&quot;)
+    nestedID := EngineRunID(&quot;run&quot;, &quot;each@item-1&quot;, &quot;step1&quot;)
     if parentID == nestedID {
         t.Fatalf(&quot;scope was lost: parent and nested IDs both %q&quot;, parentID)
     }
-    nested := a.RunNode(&quot;run&quot;, &quot;&lt;email&gt;&quot;, &quot;step1&quot;)
+    nested := a.RunNode(&quot;run&quot;, &quot;each@item-1&quot;, &quot;step1&quot;)
     if nested.Cached {
         t.Fatalf(&quot;scoped nested node incorrectly served from parent cache: %#v&quot;, nested)
     }
@@ -568,7 +568,7 @@ ok      daggerrepro 1.013s
 <p>The results prove all four required properties:</p>
 <ul>
 <li><code>TestRepro_UnscopedNestedCollides</code> reproduces the bug: nested terminals are <code>Status=completed</code> with <code>Output=""</code>, and only 1 checkpoint row (the top-level) exists.</li>
-<li><code>TestRunner_ForEachTouchesNoTopLevelEntries</code> proves nested nodes never use <code>&lt;email&gt;</code>/<code>&lt;email&gt;</code>, each iteration gets a distinct scope, and every iteration checkpoint is written.</li>
+<li><code>TestRunner_ForEachTouchesNoTopLevelEntries</code> proves nested nodes never use <code>run@1</code>/<code>run@2</code>, each iteration gets a distinct scope, and every iteration checkpoint is written.</li>
 <li><code>TestAdapterScopedNestedScopeSurvivesCompletedParentStep</code> proves a scoped nested node is not served from the completed parent's cache.</li>
 <li><code>TestRunner_FifteenIterationsFifteenRunIDs</code> proves 15 iterations yield 15 checkpoint rows under 15 distinct run IDs.</li>
 </ul>
@@ -630,7 +630,7 @@ go test -race ./...
 - Verification: solution produced by pi in sandbox; see signatures.json
 </pre><pre>{&quot;description&quot;: &quot;A recursive Go pipeline runner reused the parent run ID while nested foreach template pipelines restarted local steps at 1. The server derived engine sub-run IDs as &lt;run_id&gt;@&lt;step&gt;, so a nested item node at local step 1 collided with an already-completed top-level step-1 run. Engine completed-run caching returned status completed but no output for the differently named nested node, causing every foreach terminal to become null and preventing iteration checkpoints. Fix by executing each iteration on a dedicated child Runner with a deterministic per-iteration run scope, while retaining per-step derivation inside that scope. This keeps top-level nodes, sibling iterations, and nodes within one iteration distinct without disabling cacheing, resume, fresh-run, or checkpoint semantics.&quot;, &quot;environment&quot;: &quot;Linux; Hermes DAGger runner, MCP adapter, SQLite checkpoint store&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-nested-pipeline-run-scope-cache-collision&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-12T01:55:35.045Z&quot;, &quot;version&quot;: &quot;go1.25&quot;}</pre></div><div class='answer'><h2>Answer 2</h2><p>The repository <code>Hermes-DAGger/&amp;lt;project&amp;gt;</code> is private and unavailable here, so I built and ran a self-contained Go reproduction that reproduces the exact engine-cache collision and proves the fix. Full solution saved to <code>~/DAGGER-162-solution.md</code> and reproduced below.</p>
 <hr />
-<h1>DAGGER-162 — Fix: nested foreach pipelines collide on <code>&lt;email&gt;</code> run scope</h1>
+<h1>DAGGER-162 — Fix: nested foreach pipelines collide on <code>run_id@step</code> run scope</h1>
 <p><strong>Component:</strong> Hermes DAGger runner + MCP adapter + SQLite checkpoint store
 <strong>Language:</strong> Go 1.25
 <strong>Fix commit:</strong> <code>51e1aec72af69b23e6fa02bb380278b82e8364e5</code>
@@ -645,7 +645,7 @@ iteration checkpoints
 <p>Top-level execution was correct. Any pipeline containing a <code>foreach</code> whose body was a nested template pipeline produced <code>null</code> for every item terminal. The checkpoint store (<code>role.db</code>) grew by the top-level rows only — zero iteration checkpoint rows.</p>
 <h2>2. Root cause</h2>
 <p>The engine's unit of idempotency is the <strong>engine sub-run ID</strong>, and a completed sub-run is served from cache. The server derived that ID from the run ID plus a <strong>local</strong> step index:</p>
-<pre><code>&lt;run_id&gt;@&lt;step&gt;          e.g.  &lt;email&gt;
+<pre><code>&lt;run_id&gt;@&lt;step&gt;          e.g.  run-42@1
 </code></pre>
 <p>A foreach body is itself a pipeline whose local steps restart at <code>1</code>. The original implementation executed the nested template by <strong>reusing the parent <code>Runner</code> and its <code>RunID</code></strong>, so:</p>
 <table>
@@ -658,26 +658,26 @@ iteration checkpoints
 <tbody>
 <tr>
 <td>top-level step 1 (<code>fetch</code>)</td>
-<td><code>&lt;email&gt;</code></td>
+<td><code>run-42@1</code></td>
 </tr>
 <tr>
 <td>iteration 1, local step 1 (<code>summarize</code>)</td>
-<td><code>&lt;email&gt;</code></td>
+<td><code>run-42@1</code></td>
 </tr>
 <tr>
 <td>iteration 2, local step 1 (<code>summarize</code>)</td>
-<td><code>&lt;email&gt;</code></td>
+<td><code>run-42@1</code></td>
 </tr>
 <tr>
 <td>iteration N, local step 1 (<code>summarize</code>)</td>
-<td><code>&lt;email&gt;</code></td>
+<td><code>run-42@1</code></td>
 </tr>
 </tbody>
 </table>
 <p>Two independent bugs follow from the alias:</p>
 <ol>
-<li><strong>Parent/child collision.</strong> The top-level step 1 already cached <code>&lt;email&gt;</code> as <code>completed</code>. The engine returns a cache hit — <code>Status=completed</code> — but the cached entry was produced by a differently named node, so no output is associated with the requested node. Result: <code>Status=completed, Output=""</code>. The runner treats it as a valid terminal and propagates <code>null</code>.</li>
-<li><strong>Sibling collision.</strong> Even without a top-level step 1, iterations 1..N all share <code>&lt;email&gt;</code>, so siblings alias each other and only one iteration's work is ever checkpointed. Because the returned output is empty, the checkpoint write is skipped entirely → "no iteration checkpoints".</li>
+<li><strong>Parent/child collision.</strong> The top-level step 1 already cached <code>run-42@1</code> as <code>completed</code>. The engine returns a cache hit — <code>Status=completed</code> — but the cached entry was produced by a differently named node, so no output is associated with the requested node. Result: <code>Status=completed, Output=""</code>. The runner treats it as a valid terminal and propagates <code>null</code>.</li>
+<li><strong>Sibling collision.</strong> Even without a top-level step 1, iterations 1..N all share <code>run-42@1</code>, so siblings alias each other and only one iteration's work is ever checkpointed. Because the returned output is empty, the checkpoint write is skipped entirely → "no iteration checkpoints".</li>
 </ol>
 <p>Disabling the completed-run cache would hide the symptom but destroy resume, fresh-run, and checkpoint semantics. The cache is not wrong; the <strong>ID was not unique per iteration</strong>.</p>
 <h2>3. The fix</h2>
@@ -722,7 +722,7 @@ func (r *Runner) runForEach(index int, s Step) []Result {
 <pre><code class="language-go">// BUG: no child scope, local steps restart at 1 on the parent RunID.
 for _, item := range s.ForEach.Items {
     for j, local := range s.ForEach.Template {
-        out = append(out, r.runStep(j+1, local)) // -&gt; &lt;email&gt; every time
+        out = append(out, r.runStep(j+1, local)) // -&gt; run@1 every time
     }
 }
 </code></pre>
@@ -730,8 +730,8 @@ for _, item := range s.ForEach.Items {
 <p>Make the scope explicit in the ID and pass it through to the engine. The adapter is the single place that composes engine sub-run IDs, so scoped and unscoped execution can never be confused:</p>
 <pre><code class="language-go">// EngineRunID joins parent run, optional scope and node with '@' in a fixed,
 // deterministic order:
-//   parent                + node   -&gt; &quot;&lt;email&gt;&quot;              (top level)
-//   parent + scope + node -&gt; &quot;&lt;email&gt;@&lt;email&gt;&quot;  (iteration)
+//   parent                + node   -&gt; &quot;run@step1&quot;              (top level)
+//   parent + scope + node -&gt; &quot;run@each@item-1@step1&quot;  (iteration)
 func EngineRunID(parentRunID, scope, node string) string {
     parts := make([]string, 0, 3)
     if parentRunID != &quot;&quot; {
@@ -985,7 +985,7 @@ func fixture() Pipeline {
     }}
 }
 
-// Bug repro: nested template reuses &quot;&lt;email&gt;&quot; -&gt; completed with empty output.
+// Bug repro: nested template reuses &quot;run@1&quot; -&gt; completed with empty output.
 func TestRepro_UnscopedNestedCollides(t *testing.T) {
     eng := NewEngine()
     store := NewCheckpointStore()
@@ -1009,8 +1009,8 @@ func TestRepro_UnscopedNestedCollides(t *testing.T) {
         if res.Output != &quot;&quot; {
             t.Fatalf(&quot;nested[%d] output = %q, want empty (bug should reproduce)&quot;, i, res.Output)
         }
-        if res.RunID != &quot;&lt;email&gt;&quot; {
-            t.Fatalf(&quot;nested[%d] runID = %q, want colliding &lt;email&gt;&quot;, i, res.RunID)
+        if res.RunID != &quot;run@1&quot; {
+            t.Fatalf(&quot;nested[%d] runID = %q, want colliding run@1&quot;, i, res.RunID)
         }
     }
     if store.Len() != 1 {
@@ -1035,8 +1035,8 @@ func TestRunner_ForEachTouchesNoTopLevelEntries(t *testing.T) {
     if len(top) != 1 {
         t.Fatalf(&quot;want exactly 1 top-level entry, got %d&quot;, len(top))
     }
-    if _, ok := top[&quot;&lt;email&gt;&quot;]; !ok {
-        t.Fatalf(&quot;top-level entry &lt;email&gt; missing: %#v&quot;, top)
+    if _, ok := top[&quot;run@1&quot;]; !ok {
+        t.Fatalf(&quot;top-level entry run@1 missing: %#v&quot;, top)
     }
 
     var nested []Result
@@ -1046,7 +1046,7 @@ func TestRunner_ForEachTouchesNoTopLevelEntries(t *testing.T) {
             continue
         }
         nested = append(nested, res)
-        if res.RunID == &quot;&lt;email&gt;&quot; || res.RunID == &quot;&lt;email&gt;&quot; {
+        if res.RunID == &quot;run@1&quot; || res.RunID == &quot;run@2&quot; {
             t.Fatalf(&quot;nested node touched a top-level run ID: %q&quot;, res.RunID)
         }
         if res.Output == &quot;&quot; {
@@ -1084,11 +1084,11 @@ func TestAdapterScopedNestedScopeSurvivesCompletedParentStep(t *testing.T) {
     }
 
     parentID := EngineRunID(&quot;run&quot;, &quot;&quot;, &quot;step1&quot;)
-    nestedID := EngineRunID(&quot;run&quot;, &quot;&lt;email&gt;&quot;, &quot;step1&quot;)
+    nestedID := EngineRunID(&quot;run&quot;, &quot;each@item-1&quot;, &quot;step1&quot;)
     if parentID == nestedID {
         t.Fatalf(&quot;scope was lost: parent and nested IDs both %q&quot;, parentID)
     }
-    nested := a.RunNode(&quot;run&quot;, &quot;&lt;email&gt;&quot;, &quot;step1&quot;)
+    nested := a.RunNode(&quot;run&quot;, &quot;each@item-1&quot;, &quot;step1&quot;)
     if nested.Cached {
         t.Fatalf(&quot;scoped nested node incorrectly served from parent cache: %#v&quot;, nested)
     }
@@ -1151,7 +1151,7 @@ ok      daggerrepro 1.013s
 <p>The results prove all four required properties:</p>
 <ul>
 <li><code>TestRepro_UnscopedNestedCollides</code> reproduces the bug: nested terminals are <code>Status=completed</code> with <code>Output=""</code>, and only 1 checkpoint row (the top-level) exists.</li>
-<li><code>TestRunner_ForEachTouchesNoTopLevelEntries</code> proves nested nodes never use <code>&lt;email&gt;</code>/<code>&lt;email&gt;</code>, each iteration gets a distinct scope, and every iteration checkpoint is written.</li>
+<li><code>TestRunner_ForEachTouchesNoTopLevelEntries</code> proves nested nodes never use <code>run@1</code>/<code>run@2</code>, each iteration gets a distinct scope, and every iteration checkpoint is written.</li>
 <li><code>TestAdapterScopedNestedScopeSurvivesCompletedParentStep</code> proves a scoped nested node is not served from the completed parent's cache.</li>
 <li><code>TestRunner_FifteenIterationsFifteenRunIDs</code> proves 15 iterations yield 15 checkpoint rows under 15 distinct run IDs.</li>
 </ul>
