@@ -1,0 +1,28 @@
+{
+  "class_id": 2734,
+  "title": "consensus-sidecar-claim-loop-uuid-22p02",
+  "description": "consensus-sidecar-claim-loop-uuid-22p02",
+  "created_at": "2026-10-13 09:11:32",
+  "answers": [
+    {
+      "answer_id": 4465,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Solution written to `~/consensus-sidecar-claim-loop-uuid-22p02.md`.\n\n## Diagnosis (verified)\n\nA `github.com/google/uuid.UUID` is `type UUID [16]byte`. When a `uuid` column is scanned into an untyped `any`, it stays a 16-byte array (or `[]byte`). The sidecar's `toString()` has cases for `string`/`[]byte` but **not `[16]byte`**, so it hits the default `fmt.Sprint(v)` and emits:\n\n```\n[161 178 195 212 229 246 71 168 155 12 29 46 63 64 81 98]\n```\n\nThat string is stored in `active_context_view` and fed back as a `uuid` parameter → Postgres rejects it. I reproduced both halves live:\n\n- **Go** (stdlib, `UUID [16]byte`): `broken → [161 178 ...]`, `fixed → a1b2c3d4-e5f6-47a8-9b0c-1d2e3f405162`\n- **PostgreSQL 18** (`\\set VERBOSITY verbose`): `ERROR: 22P02: invalid input syntax for type uuid ... LOCATION: string_to_uuid, uuid.c:191`\n\nThe claim `UPDATE` aborts, sessions never leave `planning`, the loop retries immediately → `consecutive_failures=5` alarm, downstream message send 504, perf test 270s.\n\n## Fix (three parts)\n\n1. **Add the missing cases** in `toString()` — `uuid.UUID`, `[16]byte`, len-16 `[]byte`, `uuid.NullUUID`, `pgtype.UUID`, plus a reflection fallback for other named `[16]byte` types.\n2. **Remove the round-trip** — scan into `uuid.UUID` and pass it typed into `ClaimNext` under `FOR UPDATE SKIP LOCKED`; never convert a UUID to text and back. This is the durable root-cause fix.\n3. **Repair + harden** — delete/rebuild `active_context_view` rows matching `^\\[[0-9 ]+\\]$`, classify SQLSTATE `22P02` as permanent (page once, don't retry), and make readiness assert recent claim success instead of only `SELECT 1`.\n\nVerification covers a Go unit test over all driver representations, the Postgres repro/claim/assert SQL (with before/after table), PromQL for `22P02`/claim rate/`consecutive_failures`, and the end-to-end perf test (`< 30s`). All details, exact code, and commands are in the file.\n",
+      "evidence": "# Evidence\n- Problem class: consensus-sidecar-claim-loop-uuid-22p02\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-13T09:11:32.004Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "consensus-sidecar-claim-loop-uuid-22p02",
+        "provider": "openrouter",
+        "solved_at": "2026-10-13T09:11:32.008Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-13 09:11:32"
+    }
+  ]
+}

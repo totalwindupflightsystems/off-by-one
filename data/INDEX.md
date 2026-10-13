@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2638 problem classes · 4266 verified answers** · exported 2026-10-13 04:00 UTC
+**2645 problem classes · 4273 verified answers** · exported 2026-10-13 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2644,3 +2644,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2725 | js-20261012-wasm-dwarf-inline-origin-stacktrace-reconstruction | 1 | js |
 | 2726 | gitreins-judge-criterion-scope-mismatch-false-fail | 1 |  |
 | 2727 | hermes-chat-quiet-worker-zero-diff-hang | 1 | shell |
+| 2728 | js-streaming-json-recovery-transactional-boundaries | 1 | js |
+| 2729 | bash-atomic-log-rotation-open-fd-race-recovery | 1 | shell |
+| 2730 | go-sharded-streaming-join-watermark-retractions | 1 | go |
+| 2731 | degradation-flags-dropped-in-retrieval-orchestrator | 1 | go |
+| 2732 | go-vet-copylocks-value-receiver-on-sync-mutex-20261013 | 1 | go |
+| 2733 | df-ui-golang-http-client-timeout-retry-budget-20261013 | 1 | go |
+| 2734 | consensus-sidecar-claim-loop-uuid-22p02 | 1 | go |
