@@ -78,7 +78,7 @@ Priority formula: `priority = cadence_weight + recurrence * 0.5`, where recurren
 | `error_message` | string | No | Error text from the failing run |
 | `stack_trace` | string | No | Stack trace or log excerpt |
 | `context` | object | No | Arbitrary key-value metadata (e.g. repo, commit, file path) |
-| `required_tools` | string[] | No | Tools the sandbox should mount read-only (e.g. `jq`, `parallel`) |
+| `required_tools` | string[] | No | Tools the sandbox should mount read-only (e.g. `jq`, `parallel`). The response's `resolved_tools`/`missing_tools` arrays report which declared tools the host can actually provision — a tool in `missing_tools` means the solve runs without it |
 
 ### Example
 
@@ -106,7 +106,9 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
   "position": 1,
   "estimated_time": "30s",
   "existing_solutions": 0,
-  "related_problems": ["so-nil-pointer-deref"]
+  "related_problems": ["so-nil-pointer-deref"],
+  "resolved_tools": [],
+  "missing_tools": []
 }
 ```
 
@@ -133,7 +135,9 @@ curl -s http://localhost:8766/api/v1/queue/sub_...
   "position": 1,
   "estimated_time": "30s",
   "started_at": "...",
-  "completed_at": ""
+  "completed_at": "",
+  "resolved_tools": [],
+  "missing_tools": []
 }
 ```
 

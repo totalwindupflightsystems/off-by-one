@@ -72,6 +72,45 @@ func ResolveTools(tools []string, alreadyMounted []string) (resolved []string, m
 	return resolved, missing
 }
 
+// ResolveToolNames classifies declared tool names into the subset the
+// host can provision inside the sandbox (resolved) and the subset it
+// cannot (missing). It is the same resolution ResolveTools performs,
+// reported in tool-NAME space rather than host-path space: ResolveTools
+// answers "which paths do I bind-mount", which is what the sandbox
+// builder needs, while the API and the queue entry need "which of the
+// caller's declared tools will actually be there" — exposing host
+// filesystem paths on the wire would leak layout detail and tell the
+// submitting agent nothing it asked about (DF-OFF-BY-ONE-41).
+//
+// A tool counts as resolved when ResolveTools does not report it
+// missing — including a tool whose paths are all already covered by the
+// effective mount set (e.g. git under /usr), since it will be available
+// inside the sandbox. Names are trimmed, de-duplicated, and returned in
+// declaration order; empty/whitespace entries are dropped exactly as
+// ResolveTools drops them. Both results are nil when tools is empty —
+// callers that persist or marshal them normalize to empty arrays.
+func ResolveToolNames(tools []string, alreadyMounted []string) (resolved []string, missing []string) {
+	_, missingNames := ResolveTools(tools, alreadyMounted)
+	missingSet := make(map[string]bool, len(missingNames))
+	for _, name := range missingNames {
+		missingSet[name] = true
+	}
+	seen := make(map[string]bool, len(tools))
+	for _, tool := range tools {
+		tool = strings.TrimSpace(tool)
+		if tool == "" || seen[tool] {
+			continue
+		}
+		seen[tool] = true
+		if missingSet[tool] {
+			missing = append(missing, tool)
+		} else {
+			resolved = append(resolved, tool)
+		}
+	}
+	return resolved, missing
+}
+
 // resolveToolPaths maps a single tool name to the host paths needed
 // inside the sandbox. The second return value is false when the tool
 // cannot be resolved for sandbox use — not on PATH, a broken symlink,

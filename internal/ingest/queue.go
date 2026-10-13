@@ -66,6 +66,16 @@ type Queue struct {
 	store *graph.Store
 	db    *sql.DB
 	mu    sync.Mutex
+
+	// ToolResolver classifies a submission's RequiredTools into the
+	// names the host can provision inside the solve sandbox (resolved)
+	// and the names it cannot (missing). main wires it to
+	// sandbox.ResolveToolNames with the solver's full effective mount
+	// set, so the persisted values match what the sandbox builder will
+	// do at solve time. nil disables resolution — both columns persist
+	// as empty arrays, the documented shape for "nothing was declared
+	// or nothing is known" (DF-OFF-BY-ONE-41).
+	ToolResolver func(tools []string) (resolved []string, missing []string)
 }
 
 // Submission is the validated input to Submit. Created by the API layer
@@ -101,6 +111,16 @@ type Entry struct {
 	Stage          string         `json:"stage"`
 	ResultAnswerID sql.NullInt64  `json:"result_answer_id,omitempty"`
 	RequiredTools  []string       `json:"required_tools,omitempty"`
+	// ResolvedTools/MissingTools are the submit-time classification of
+	// RequiredTools against the host: which declared tools the sandbox
+	// can provision and which it cannot. Persisted on the row at Submit
+	// so the queue API can echo them for pending AND completed entries
+	// (previously the missing set existed only in a server-log WARN —
+	// a submitting agent had no way to learn its tool was unavailable,
+	// DF-OFF-BY-ONE-41). Empty (never nil on the wire) when nothing was
+	// declared or no resolver was wired.
+	ResolvedTools []string `json:"resolved_tools,omitempty"`
+	MissingTools  []string `json:"missing_tools,omitempty"`
 	// CreatedAt/StartedAt/CompletedAt are stored as strings because
 	// modernc.org/sqlite returns TEXT timestamps as strings — scanning
 	// directly into time.Time fails with "unsupported Scan, storing
@@ -175,6 +195,17 @@ func Open(store *graph.Store) (*Queue, error) {
 			return nil, fmt.Errorf("migrate queue schema: %w", err)
 		}
 	}
+	// Migrate existing databases: add the resolved_tools/missing_tools
+	// columns that persist the submit-time tool classification
+	// (DF-OFF-BY-ONE-41). Same defensive pattern again: '[]' default so
+	// pre-existing rows read as "nothing declared / nothing known".
+	for _, col := range []string{"resolved_tools", "missing_tools"} {
+		if err := store.ApplyExtra(`ALTER TABLE queue_entries ADD COLUMN ` + col + ` TEXT NOT NULL DEFAULT '[]'`); err != nil {
+			if !strings.Contains(err.Error(), "duplicate column") {
+				return nil, fmt.Errorf("migrate queue schema (%s): %w", col, err)
+			}
+		}
+	}
 	return &Queue{store: store, db: store.DB()}, nil
 }
 
@@ -244,15 +275,43 @@ func (q *Queue) Submit(ctx context.Context, sub Submission) (string, *Entry, err
 		toolsJSON = string(b)
 	}
 
+	// Classify the declared tools against the host NOW (submit time) and
+	// persist the verdict on the row: the submitting agent learns from
+	// the 200 response and every later queue read which of its declared
+	// tools will actually exist in the sandbox — previously the missing
+	// set lived only in a server-log WARN (DF-OFF-BY-ONE-41). With no
+	// resolver wired (solver unavailable — but note the API refuses
+	// submits in that state) both columns persist as empty arrays.
+	// Non-nil slices: json.Marshal of a nil slice yields "null", and the
+	// columns (and the wire contract) are '[]' (OB-GAP-046 convention).
+	resolvedTools := []string{}
+	missingTools := []string{}
+	if len(sub.RequiredTools) > 0 && q.ToolResolver != nil {
+		if r, m := q.ToolResolver(sub.RequiredTools); r != nil || m != nil {
+			resolvedTools = append(resolvedTools, r...)
+			missingTools = append(missingTools, m...)
+		}
+	}
+	resolvedJSON, err := json.Marshal(resolvedTools)
+	if err != nil {
+		return "", nil, fmt.Errorf("marshal resolved_tools: %w", err)
+	}
+	missingJSON, err := json.Marshal(missingTools)
+	if err != nil {
+		return "", nil, fmt.Errorf("marshal missing_tools: %w", err)
+	}
+
 	id := graph.NewID("sub")
 	res, err := q.db.ExecContext(ctx, `
 		INSERT INTO queue_entries
 		  (id, problem_class, environment, language, version, description,
-		   error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		   error_message, stack_trace, context_json, required_tools,
+		   resolved_tools, missing_tools, cadence, priority, status, stage)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`, id, sub.ProblemClass, sub.Environment, sub.Language, sub.Version,
 		sub.Description, sub.ErrorMessage, sub.StackTrace, string(ctxJSON),
-		toolsJSON, sub.Cadence, priority, StatusPending, "queued")
+		toolsJSON, string(resolvedJSON), string(missingJSON), sub.Cadence,
+		priority, StatusPending, "queued")
 	if err != nil {
 		return "", nil, fmt.Errorf("insert queue entry: %w", err)
 	}
@@ -306,7 +365,8 @@ func computePriority(cadence string, recurrence int) float64 {
 func (q *Queue) findPendingDuplicate(ctx context.Context, sub Submission) (*Entry, error) {
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
-		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
+		       error_message, stack_trace, context_json, required_tools,
+		       resolved_tools, missing_tools, cadence, priority, status, stage,
 		       result_answer_id, created_at, started_at, completed_at, failure_reason
 		FROM queue_entries
 		WHERE problem_class = ?
@@ -363,7 +423,8 @@ func (q *Queue) classRecurrence(ctx context.Context, problemClass string) (int, 
 func (q *Queue) Get(ctx context.Context, id string) (*Entry, error) {
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
-		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
+		       error_message, stack_trace, context_json, required_tools,
+		       resolved_tools, missing_tools, cadence, priority, status, stage,
 		       result_answer_id, created_at, started_at, completed_at, failure_reason
 		FROM queue_entries WHERE id = ?`, id)
 	return scanEntry(row)
@@ -382,7 +443,8 @@ const maxListLimit = 1000
 // List/Get/pickPending.
 const queueEntrySelect = `
 	SELECT id, problem_class, environment, language, version, description,
-	       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
+	       error_message, stack_trace, context_json, required_tools,
+	       resolved_tools, missing_tools, cadence, priority, status, stage,
 	       result_answer_id, created_at, started_at, completed_at, failure_reason
 	FROM queue_entries`
 
@@ -658,7 +720,8 @@ func (q *Queue) Dequeue(ctx context.Context) (*Entry, error) {
 func (q *Queue) pickPending(ctx context.Context) (*Entry, error) {
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
-		       error_message, stack_trace, context_json, required_tools, cadence, priority, status, stage,
+		       error_message, stack_trace, context_json, required_tools,
+		       resolved_tools, missing_tools, cadence, priority, status, stage,
 		       result_answer_id, created_at, started_at, completed_at, failure_reason
 		FROM queue_entries
 		WHERE status = 'pending'
@@ -754,9 +817,12 @@ func scanEntry(row rowScanner) (*Entry, error) {
 	var e Entry
 	var ctxJSON string
 	var toolsJSON string
+	var resolvedJSON string
+	var missingJSON string
 	if err := row.Scan(
 		&e.ID, &e.ProblemClass, &e.Environment, &e.Language, &e.Version,
 		&e.Description, &e.ErrorMessage, &e.StackTrace, &ctxJSON, &toolsJSON,
+		&resolvedJSON, &missingJSON,
 		&e.Cadence, &e.Priority, &e.Status, &e.Stage,
 		&e.ResultAnswerID, &e.CreatedAt, &e.StartedAt, &e.CompletedAt,
 		&e.FailureReason,
@@ -774,6 +840,12 @@ func scanEntry(row rowScanner) (*Entry, error) {
 	}
 	if toolsJSON != "" && toolsJSON != "[]" {
 		_ = json.Unmarshal([]byte(toolsJSON), &e.RequiredTools)
+	}
+	if resolvedJSON != "" && resolvedJSON != "[]" {
+		_ = json.Unmarshal([]byte(resolvedJSON), &e.ResolvedTools)
+	}
+	if missingJSON != "" && missingJSON != "[]" {
+		_ = json.Unmarshal([]byte(missingJSON), &e.MissingTools)
 	}
 	return &e, nil
 }

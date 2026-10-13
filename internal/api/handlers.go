@@ -53,6 +53,16 @@ type submitProblemResponse struct {
 	EstimatedTime     string   `json:"estimated_time"`
 	ExistingSolutions int      `json:"existing_solutions"`
 	RelatedProblems   []string `json:"related_problems"`
+	// ResolvedTools/MissingTools echo the submit-time classification of
+	// the request's required_tools against the host: which tools the
+	// solve sandbox will actually have, and which it will not. No
+	// omitempty and never null — an agent that declared tools must be
+	// able to read the verdict from the response itself instead of
+	// scraping the server log (DF-OFF-BY-ONE-41); a submission with no
+	// declared tools (or a dedup hit whose original entry predates
+	// tool persistence) emits both keys as [].
+	ResolvedTools []string `json:"resolved_tools"`
+	MissingTools  []string `json:"missing_tools"`
 }
 
 // discoverRequest mirrors DiscoverRequest.
@@ -149,6 +159,14 @@ type queueEntryWire struct {
 	// for every non-failed entry, so a submitter polling the queue can
 	// tell "still queued" from "failed, here's why" (DF-OFF-BY-ONE-4).
 	FailureReason string `json:"failure_reason,omitempty"`
+	// ResolvedTools/MissingTools persist the submit-time classification
+	// of the entry's declared required_tools (which the solve sandbox
+	// will have / will not have). No omitempty and never null: both
+	// keys always emit, [] when nothing was declared — a missing key is
+	// indistinguishable from a server that forgot to emit it
+	// (DF-OFF-BY-ONE-41, same contract as started_at/completed_at).
+	ResolvedTools []string `json:"resolved_tools"`
+	MissingTools  []string `json:"missing_tools"`
 }
 
 type queueListResponse struct {
@@ -316,12 +334,20 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 		status := ingest.StatusForHTTP(err)
 		if errors.Is(err, ingest.ErrDuplicate) {
 			resp := submitProblemResponse{
-				ProblemClass: slug,
-				Status:       "deduplicated",
+				ProblemClass:  slug,
+				Status:        "deduplicated",
+				ResolvedTools: []string{},
+				MissingTools:  []string{},
 			}
 			if existing != nil {
 				resp.SubmissionID = existing.ID
 				resp.Position = s.queuePosition(r, existing)
+				// Echo the classification recorded when the ORIGINAL
+				// submission was stored — the dedup hit creates no new
+				// solve, so the existing entry's verdict is the
+				// truthful one for the solve that will (or did) run.
+				resp.ResolvedTools = nonNilStrings(existing.ResolvedTools)
+				resp.MissingTools = nonNilStrings(existing.MissingTools)
 			}
 			resp.ExistingSolutions = s.countAnswersFor(r, slug)
 			resp.RelatedProblems = nonNilStrings(s.relatedFor(r, slug))
@@ -349,6 +375,18 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 		EstimatedTime:     estimateTime(depth, perJob),
 		ExistingSolutions: s.countAnswersFor(r, slug),
 		RelatedProblems:   nonNilStrings(s.relatedFor(r, slug)),
+		ResolvedTools:     []string{},
+		MissingTools:      []string{},
+	}
+	// Echo the tool classification Submit persisted on the entry so the
+	// submitting agent learns immediately — in the 200 response, not
+	// just via a later queue poll — which of its declared
+	// required_tools the sandbox will actually have (DF-OFF-BY-ONE-41).
+	// A failed read-back degrades to the empty-array defaults above:
+	// the queue entry itself still carries the verdict.
+	if entry, gerr := s.Queue.Get(r.Context(), id); gerr == nil {
+		resp.ResolvedTools = nonNilStrings(entry.ResolvedTools)
+		resp.MissingTools = nonNilStrings(entry.MissingTools)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -792,6 +830,10 @@ func entryToWire(e *ingest.Entry) queueEntryWire {
 		Status:        e.Status,
 		Stage:         e.Stage,
 		FailureReason: e.FailureReason,
+		// nil → [] so both keys always emit as JSON arrays, never null
+		// (OB-GAP-046 convention; DF-OFF-BY-ONE-41).
+		ResolvedTools: nonNilStrings(e.ResolvedTools),
+		MissingTools:  nonNilStrings(e.MissingTools),
 	}
 	if e.StartedAt.Valid {
 		w.StartedAt = formatStoreTimestamp(e.StartedAt.String)

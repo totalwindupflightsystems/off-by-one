@@ -255,3 +255,52 @@ func TestIsPathCovered(t *testing.T) {
 		}
 	}
 }
+
+// --- ResolveToolNames (DF-OFF-BY-ONE-41) --------------------------------
+//
+// ResolveToolNames is ResolveTools' classification reported in tool-NAME
+// space: it backs the Queue.ToolResolver hook that persists
+// resolved_tools/missing_tools on queue entries so the API can echo them.
+
+func TestResolveToolNames_MixedResolution(t *testing.T) {
+	// sh exists on every host and is covered by the default mounts, so
+	// ResolveTools emits no extra paths for it — but in NAME space it is
+	// RESOLVED (available inside the sandbox), not missing. The unknown
+	// tool lands in missing. This is the DF-OFF-BY-ONE-41 repro shape:
+	// required_tools=[present, absent].
+	resolved, missing := ResolveToolNames([]string{"sh", "nonexistent-tool-xyz123"}, DefaultReadOnlyPaths)
+	if len(resolved) != 1 || resolved[0] != "sh" {
+		t.Errorf("resolved = %v, want [sh]", resolved)
+	}
+	if len(missing) != 1 || missing[0] != "nonexistent-tool-xyz123" {
+		t.Errorf("missing = %v, want [nonexistent-tool-xyz123]", missing)
+	}
+	// Non-vacuous premise: sh really is on PATH here.
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh not on PATH — unexpected")
+	}
+}
+
+func TestResolveToolNames_NilAndWhitespace(t *testing.T) {
+	resolved, missing := ResolveToolNames(nil, nil)
+	if len(resolved) != 0 || len(missing) != 0 {
+		t.Errorf("nil input: resolved=%v missing=%v, want both empty", resolved, missing)
+	}
+	// Empty/whitespace entries are dropped exactly as ResolveTools drops
+	// them — never reported missing.
+	resolved, missing = ResolveToolNames([]string{"", "  "}, nil)
+	if len(resolved) != 0 || len(missing) != 0 {
+		t.Errorf("whitespace input: resolved=%v missing=%v, want both empty", resolved, missing)
+	}
+}
+
+func TestResolveToolNames_TrimsDedupesKeepsOrder(t *testing.T) {
+	resolved, missing := ResolveToolNames(
+		[]string{" sh ", "sh", "nonexistent-tool-xyz123", "nonexistent-tool-xyz123", "ls"}, nil)
+	if len(resolved) != 2 || resolved[0] != "sh" || resolved[1] != "ls" {
+		t.Errorf("resolved = %v, want [sh ls] (declaration order, deduped)", resolved)
+	}
+	if len(missing) != 1 || missing[0] != "nonexistent-tool-xyz123" {
+		t.Errorf("missing = %v, want [nonexistent-tool-xyz123] exactly once", missing)
+	}
+}

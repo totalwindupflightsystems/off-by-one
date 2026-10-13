@@ -46,7 +46,7 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
 | `error_message` | string | No | Error text from the failing run |
 | `stack_trace` | string | No | Stack trace or log excerpt |
 | `context` | object | No | Arbitrary key-value metadata |
-| `required_tools` | string[] | No | Tools to mount read-only in the sandbox |
+| `required_tools` | string[] | No | Tools to mount read-only in the sandbox; resolved on the host at submit time — the response's `resolved_tools`/`missing_tools` fields carry the verdict |
 
 **Response `200 OK`**
 
@@ -58,11 +58,15 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
   "position": 1,
   "estimated_time": "30s",
   "existing_solutions": 0,
-  "related_problems": ["so-nil-pointer-deref"]
+  "related_problems": ["so-nil-pointer-deref"],
+  "resolved_tools": ["jq"],
+  "missing_tools": ["parallel"]
 }
 ```
 
 `status` is one of `queued`, `deduplicated`, or `rejected`.
+
+**`resolved_tools` and `missing_tools`.** Both keys are **always present and always arrays** (`[]` when no `required_tools` were declared or nothing was missing) — never omitted, never `null`. They record the submit-time classification of the declared `required_tools` against the host: `resolved_tools` are the names the sandbox CAN provision, `missing_tools` the names it CANNOT. A missing tool is not an error: the solve proceeds with a reduced tool set (degrade-gracefully), and the classification is persisted on the queue entry, so `GET /api/v1/queue/{submission_id}` returns the same values while the entry is pending and after it completes. A `deduplicated` response echoes the classification recorded for the original entry.
 
 **Status codes:** `200` (queued/duplicate), `400` (invalid submission), `409` (duplicate — same tuple already queued or answered), `500` (internal error), `503` (`solver_unavailable` — no solver wired up; see below).
 
@@ -110,9 +114,12 @@ curl -s -X POST http://localhost:8766/api/v1/problems/submit \
     "version": "1.26.1",
     "description": "Nil pointer dereference in HTTP handler",
     "error_message": "runtime error: invalid memory address",
-    "cadence": "post-debug"
+    "cadence": "post-debug",
+    "required_tools": ["jq", "parallel"]
   }'
 ```
+
+With that request the response carries `"resolved_tools": ["jq"], "missing_tools": ["parallel"]` when the host has `jq` but not `parallel` — the example above shows exactly that host.
 
 ---
 
@@ -382,7 +389,9 @@ List all queued submissions, newest submission first. Optionally filter by `stat
       "position": 1,
       "estimated_time": "30s",
       "started_at": "",
-      "completed_at": ""
+      "completed_at": "",
+      "resolved_tools": ["jq"],
+      "missing_tools": ["parallel"]
     }
   ],
   "total": 1
@@ -390,6 +399,8 @@ List all queued submissions, newest submission first. Optionally filter by `stat
 ```
 
 `status` is one of `pending`, `in_progress`, `complete`, `failed`. `stage` may be `queued`, `sandbox_prepare`, `sandbox_solve`, `done`, or `failed`.
+
+**`resolved_tools` and `missing_tools` semantics.** Both keys are **always present and always arrays** on every entry, pending or complete — `[]` when the submission declared no `required_tools` (or when nothing was missing). They are the submit-time host classification persisted on the entry: `resolved_tools` will be mounted in the solve sandbox, `missing_tools` will not (the solve proceeds without them — degrade-gracefully, never a hard failure). Because the values are stored, not recomputed, a completed entry keeps reporting the verdict its submitter was given even if the host's tool set has changed since.
 
 **`total` semantics**
 

@@ -1151,3 +1151,214 @@ func TestQueue_AvgSolveTime_NoCompletes(t *testing.T) {
 		t.Errorf("AvgSolveTime = %s, want 0 with no completed solves", got)
 	}
 }
+
+// TestQueue_Submit_PersistsToolClassification is the DF-OFF-BY-ONE-41
+// store-level contract: Submit runs the wired ToolResolver over
+// RequiredTools and persists both verdicts on the row, so every later
+// read path (Get, ListPage, PendingQueueOrder) reports the same
+// classification — pending AND completed.
+func TestQueue_Submit_PersistsToolClassification(t *testing.T) {
+	q, store := newTestQueue(t)
+	var gotDeclared []string
+	q.ToolResolver = func(tools []string) (resolved, missing []string) {
+		gotDeclared = append([]string{}, tools...)
+		return []string{"jq"}, []string{"parallel"}
+	}
+	ctx := context.Background()
+	id, _, err := q.Submit(ctx, Submission{
+		ProblemClass:  "tools-classify",
+		Cadence:       CadencePrePhase,
+		RequiredTools: []string{"jq", "parallel"},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if len(gotDeclared) != 2 || gotDeclared[0] != "jq" || gotDeclared[1] != "parallel" {
+		t.Fatalf("ToolResolver received %v, want [jq parallel]", gotDeclared)
+	}
+
+	// The raw columns hold JSON arrays, not NULL and not 'null'.
+	var resolvedCol, missingCol string
+	if err := store.DB().QueryRow(
+		`SELECT resolved_tools, missing_tools FROM queue_entries WHERE id = ?`, id,
+	).Scan(&resolvedCol, &missingCol); err != nil {
+		t.Fatalf("read columns: %v", err)
+	}
+	if resolvedCol != `["jq"]` {
+		t.Errorf("resolved_tools column = %q, want %q", resolvedCol, `["jq"]`)
+	}
+	if missingCol != `["parallel"]` {
+		t.Errorf("missing_tools column = %q, want %q", missingCol, `["parallel"]`)
+	}
+
+	// Round-trip through Get (the single-entry read the API status
+	// endpoint uses).
+	entry, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(entry.ResolvedTools) != 1 || entry.ResolvedTools[0] != "jq" {
+		t.Errorf("Get ResolvedTools = %v, want [jq]", entry.ResolvedTools)
+	}
+	if len(entry.MissingTools) != 1 || entry.MissingTools[0] != "parallel" {
+		t.Errorf("Get MissingTools = %v, want [parallel]", entry.MissingTools)
+	}
+
+	// Round-trip through the list read the API queue listing uses.
+	page, _, err := q.ListPage(ctx, "", 10, 0)
+	if err != nil {
+		t.Fatalf("ListPage: %v", err)
+	}
+	if len(page) != 1 {
+		t.Fatalf("ListPage len = %d, want 1", len(page))
+	}
+	if len(page[0].MissingTools) != 1 || page[0].MissingTools[0] != "parallel" {
+		t.Errorf("ListPage MissingTools = %v, want [parallel]", page[0].MissingTools)
+	}
+
+	// The classification is persisted, so a COMPLETED entry still
+	// reports it (the solve mutates status, never the verdict).
+	if err := q.MarkComplete(ctx, id, 0); err != nil {
+		t.Fatalf("MarkComplete: %v", err)
+	}
+	done, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get after complete: %v", err)
+	}
+	if done.Status != StatusComplete {
+		t.Fatalf("status = %q, want complete", done.Status)
+	}
+	if len(done.MissingTools) != 1 || done.MissingTools[0] != "parallel" {
+		t.Errorf("completed entry MissingTools = %v, want [parallel]", done.MissingTools)
+	}
+	if len(done.ResolvedTools) != 1 || done.ResolvedTools[0] != "jq" {
+		t.Errorf("completed entry ResolvedTools = %v, want [jq]", done.ResolvedTools)
+	}
+}
+
+// TestQueue_Submit_NoResolverStoresEmptyArrays pins the []-never-null
+// store convention: with no resolver wired (or nothing declared) both
+// columns persist as '[]', and the scanned Entry carries empty (nil)
+// slices that the API layer normalizes to [] on the wire.
+func TestQueue_Submit_NoResolverStoresEmptyArrays(t *testing.T) {
+	q, store := newTestQueue(t)
+	ctx := context.Background()
+	id, _, err := q.Submit(ctx, Submission{
+		ProblemClass:  "no-resolver",
+		Cadence:       CadencePrePhase,
+		RequiredTools: []string{"jq"},
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	var resolvedCol, missingCol string
+	if err := store.DB().QueryRow(
+		`SELECT resolved_tools, missing_tools FROM queue_entries WHERE id = ?`, id,
+	).Scan(&resolvedCol, &missingCol); err != nil {
+		t.Fatalf("read columns: %v", err)
+	}
+	if resolvedCol != "[]" || missingCol != "[]" {
+		t.Errorf("columns = %q / %q, want '[]' / '[]'", resolvedCol, missingCol)
+	}
+	entry, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(entry.ResolvedTools) != 0 || len(entry.MissingTools) != 0 {
+		t.Errorf("ResolvedTools=%v MissingTools=%v, want both empty",
+			entry.ResolvedTools, entry.MissingTools)
+	}
+}
+
+// TestQueue_Open_MigratesToolClassification verifies the defensive ALTERs
+// for databases created before resolved_tools/missing_tools existed: Open
+// adds both columns with the '[]' default, pre-existing rows read as
+// empty, and new submits persist into the migrated table
+// (DF-OFF-BY-ONE-41). Modelled on TestQueue_Open_MigratesFailureReason.
+func TestQueue_Open_MigratesToolClassification(t *testing.T) {
+	store, err := graph.OpenShared(fmt.Sprintf("legacy-tools-%s-%d", t.Name(), time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("graph.OpenShared: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	// The pre-DF-41 queue_entries shape (through failure_reason, no
+	// resolved_tools/missing_tools).
+	if _, err := store.DB().Exec(`
+		CREATE TABLE queue_entries (
+		    id TEXT PRIMARY KEY,
+		    problem_class TEXT NOT NULL,
+		    environment TEXT NOT NULL DEFAULT '',
+		    language TEXT NOT NULL DEFAULT '',
+		    version TEXT NOT NULL DEFAULT '',
+		    description TEXT NOT NULL DEFAULT '',
+		    error_message TEXT NOT NULL DEFAULT '',
+		    stack_trace TEXT NOT NULL DEFAULT '',
+		    context_json TEXT NOT NULL DEFAULT '{}',
+		    required_tools TEXT NOT NULL DEFAULT '[]',
+		    cadence TEXT NOT NULL DEFAULT 'pre-phase',
+		    priority REAL NOT NULL DEFAULT 0.0,
+		    status TEXT NOT NULL DEFAULT 'pending',
+		    stage TEXT NOT NULL DEFAULT 'queued',
+		    result_answer_id INTEGER,
+		    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+		    started_at TEXT,
+		    completed_at TEXT,
+		    failure_reason TEXT NOT NULL DEFAULT ''
+		)`); err != nil {
+		t.Fatalf("create legacy table: %v", err)
+	}
+	// A pre-existing row predating the columns.
+	if _, err := store.DB().Exec(`
+		INSERT INTO queue_entries (id, problem_class, cadence, status, stage)
+		VALUES ('sub_legacy', 'legacy-class', 'pre-phase', 'pending', 'queued')`); err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+
+	q, err := Open(store)
+	if err != nil {
+		t.Fatalf("ingest.Open on legacy DB: %v", err)
+	}
+	for _, col := range []string{"resolved_tools", "missing_tools"} {
+		var n int
+		if err := store.DB().QueryRow(
+			`SELECT COUNT(*) FROM pragma_table_info('queue_entries') WHERE name = ?`, col,
+		).Scan(&n); err != nil {
+			t.Fatalf("pragma table_info %s: %v", col, err)
+		}
+		if n != 1 {
+			t.Fatalf("%s column count = %d, want 1", col, n)
+		}
+	}
+
+	// The pre-existing row reads as empty classification, not an error.
+	ctx := context.Background()
+	legacy, err := q.Get(ctx, "sub_legacy")
+	if err != nil {
+		t.Fatalf("Get legacy row: %v", err)
+	}
+	if len(legacy.ResolvedTools) != 0 || len(legacy.MissingTools) != 0 {
+		t.Errorf("legacy row ResolvedTools=%v MissingTools=%v, want both empty",
+			legacy.ResolvedTools, legacy.MissingTools)
+	}
+
+	// And a fresh submit on the migrated DB persists the verdict.
+	q.ToolResolver = func(tools []string) (resolved, missing []string) {
+		return nil, []string{"parallel"}
+	}
+	id, _, err := q.Submit(ctx, Submission{
+		ProblemClass:  "post-migration",
+		Cadence:       CadencePrePhase,
+		RequiredTools: []string{"parallel"},
+	})
+	if err != nil {
+		t.Fatalf("Submit on migrated DB: %v", err)
+	}
+	got, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if len(got.MissingTools) != 1 || got.MissingTools[0] != "parallel" {
+		t.Errorf("MissingTools = %v, want [parallel]", got.MissingTools)
+	}
+}
