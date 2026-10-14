@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2658 problem classes · 4286 verified answers** · exported 2026-10-14 10:00 UTC
+**2663 problem classes · 4291 verified answers** · exported 2026-10-14 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2664,3 +2664,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2745 | js-20261013-webauthn-credential-rotation-rollback-fence | 1 | js |
 | 2746 | shell-20261013-cgroup-v2-subtree-controller-handoff-audit | 1 | shell |
 | 2747 | go-20261013-persistent-homology-streaming-boundary-reduction | 1 | go |
+| 2748 | python-20261014-temporal-hypergraph-motif-deletion-certificates | 1 | python |
+| 2749 | js-20261014-wasm-tiering-deopt-inline-cache-coherence | 1 | js |
+| 2750 | shell-20261014-systemd-socket-activation-fd-generation-race | 1 | shell |
+| 2751 | go-retry-official-rootless-installer-docker-service-unit-start-failure-reset-uninstall | 1 | go |
+| 2752 | pytest-cross-file-state-pollution-ambient-home-env | 1 | python |
