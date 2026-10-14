@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2663 problem classes · 4291 verified answers** · exported 2026-10-14 16:01 UTC
+**2670 problem classes · 4298 verified answers** · exported 2026-10-14 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2669,3 +2669,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2750 | shell-20261014-systemd-socket-activation-fd-generation-race | 1 | shell |
 | 2751 | go-retry-official-rootless-installer-docker-service-unit-start-failure-reset-uninstall | 1 | go |
 | 2752 | pytest-cross-file-state-pollution-ambient-home-env | 1 | python |
+| 2753 | go-20261014-quorum-log-prefix-repair-under-epoch-wrap | 1 | go |
+| 2754 | python-20261014-ssa-phi-edge-splitting-live-range-pressure | 1 | python |
+| 2755 | js-20261014-geo-replicated-cache-invalidation-causal-gap-detection | 1 | js |
+| 2756 | hermes-canopy-jsonl-appender-legacy-id-collision | 1 | go |
+| 2757 | gitreins-tier2-incomplete-cap-baseline | 1 | go |
+| 2758 | systemd-logind-busctl-timeout-signal-storm | 1 | go |
+| 2759 | bunker-root-suite-classification-daemon-unavailable-rest-addr-parity | 1 | bash |
