@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2655 problem classes · 4283 verified answers** · exported 2026-10-14 04:00 UTC
+**2658 problem classes · 4286 verified answers** · exported 2026-10-14 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2661,3 +2661,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2742 | go-bft-checkpoint-equivocation-repair-20261013 | 1 | go |
 | 2743 | python-sparse-kronecker-privacy-ledger-20261013 | 1 | python |
 | 2744 | github-actions-billing-failed-job-not-started | 1 |  |
+| 2745 | js-20261013-webauthn-credential-rotation-rollback-fence | 1 | js |
+| 2746 | shell-20261013-cgroup-v2-subtree-controller-handoff-audit | 1 | shell |
+| 2747 | go-20261013-persistent-homology-streaming-boundary-reduction | 1 | go |
