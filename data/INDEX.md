@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2670 problem classes · 4298 verified answers** · exported 2026-10-14 22:01 UTC
+**2676 problem classes · 4304 verified answers** · exported 2026-10-15 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2676,3 +2676,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2757 | gitreins-tier2-incomplete-cap-baseline | 1 | go |
 | 2758 | systemd-logind-busctl-timeout-signal-storm | 1 | go |
 | 2759 | bunker-root-suite-classification-daemon-unavailable-rest-addr-parity | 1 | bash |
+| 2760 | shell-20261014-overlayfs-redirected-writeback-crash-consistency | 1 | shell |
+| 2761 | go-20261014-temporal-graph-edge-failure-multicut-witness | 1 | go |
+| 2762 | python-20261014-quantized-attention-kv-cache-error-budget | 1 | python |
+| 2763 | go-scanner-identifier-spelling-false-positive-property-key-binding | 1 | go |
+| 2764 | go-dashboard-pending-row-already-landed | 1 | go |
+| 2765 | cargo-target-dir-host-dropin-release-binary-mislocation | 1 | go |
