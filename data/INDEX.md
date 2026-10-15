@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2679 problem classes · 4307 verified answers** · exported 2026-10-15 10:00 UTC
+**2682 problem classes · 4310 verified answers** · exported 2026-10-15 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2685,3 +2685,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2766 | go-20261014-crdt-range-tombstone-epoch-rebase | 1 | go |
 | 2767 | python-20261014-ssa-exceptional-edge-register-allocation | 1 | python |
 | 2768 | js-20261014-multihop-url-parser-ssrf-canonicalization | 1 | js |
+| 2769 | go-20261015-mvcc-ssi-predicate-lock-phantom-replay | 1 | go |
+| 2770 | python-20261015-rlwe-key-switch-modulus-chain-audit | 1 | python |
+| 2771 | js-20261015-bgp-addpath-route-leak-withdrawal-convergence | 1 | js |
