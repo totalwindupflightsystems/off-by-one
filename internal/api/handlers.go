@@ -1094,6 +1094,13 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "source_repo_mismatch", err.Error())
 			return
 		}
+		// A non-empty import destination that is not a clone is a client
+		// precondition error, not a repo-fetch failure: report it as 409
+		// with the remediation message instead of a bare 500 (REVIEW-OB-014).
+		if errors.Is(err, importgit.ErrDestNotEmpty) {
+			writeError(w, http.StatusConflict, "import_dest_not_empty", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "import_failed", err.Error())
 		return
 	}

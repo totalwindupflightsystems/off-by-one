@@ -691,6 +691,85 @@ func TestNormalizeRepoURL(t *testing.T) {
 	}
 }
 
+// TestImport_NonEmptyDestDir_Errors verifies REVIEW-OB-014: importing into
+// a destination directory that already exists, is non-empty, and is NOT a
+// clone fails with the typed ErrDestNotEmpty — naming the path and the
+// remediation — instead of git's bare "destination path ... already exists
+// and is not an empty directory" error (which is indistinguishable from an
+// unreachable remote). The directory's contents must be left untouched.
+func TestImport_NonEmptyDestDir_Errors(t *testing.T) {
+	skipIfNoGit(t)
+	store := makeStore(t)
+
+	// An existing, non-empty directory that is not a git clone.
+	localDir := t.TempDir()
+	sentinel := filepath.Join(localDir, "keep-me.txt")
+	if err := os.WriteFile(sentinel, []byte("user data"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+
+	repo := initBareRepo(t, "main")
+	seedRemote(t, repo, "main")
+
+	e := NewEngine(Config{
+		RepoURL:  repo,
+		Branch:   "main",
+		LocalDir: localDir,
+	}, store)
+
+	res, err := e.Import(context.Background())
+	if err == nil {
+		t.Fatal("Import into non-empty destination: err = nil, want ErrDestNotEmpty")
+	}
+	if !errors.Is(err, ErrDestNotEmpty) {
+		t.Fatalf("Import err = %v, want errors.Is(err, ErrDestNotEmpty) — not a bare git error", err)
+	}
+	if res != nil {
+		t.Errorf("Import result = %+v, want nil", res)
+	}
+	// The message must name the destination path and the remediation.
+	if !strings.Contains(err.Error(), localDir) {
+		t.Errorf("error %q does not name the destination path %q", err.Error(), localDir)
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Errorf("error %q carries no remediation hint (empty/new directory)", err.Error())
+	}
+	// The user data must be untouched.
+	if b, rerr := os.ReadFile(sentinel); rerr != nil || string(b) != "user data" {
+		t.Errorf("sentinel = %q, %v — import modified the non-empty destination", b, rerr)
+	}
+	// Nothing may have been written into the graph.
+	if _, err := store.GetProblemClassByTitle(context.Background(), "docker-permission-denied"); err == nil {
+		t.Error("failed import still inserted answers into the graph store")
+	}
+}
+
+// TestImport_EmptyDestDir_Clones is the control for REVIEW-OB-014: an
+// existing but EMPTY destination directory still clones and imports
+// normally — the precondition only refuses non-empty directories.
+func TestImport_EmptyDestDir_Clones(t *testing.T) {
+	skipIfNoGit(t)
+	store := makeStore(t)
+
+	localDir := t.TempDir() // exists, empty
+
+	repo := setupSourceRepo(t, "main")
+
+	e := NewEngine(Config{
+		RepoURL:  repo,
+		Branch:   "main",
+		LocalDir: localDir,
+	}, store)
+
+	res, err := e.Import(context.Background())
+	if err != nil {
+		t.Fatalf("Import into empty destination: err = %v, want success", err)
+	}
+	if res == nil || res.Added == 0 {
+		t.Errorf("Import result = %+v, want answers added", res)
+	}
+}
+
 // TestImport_ExistingCloneMismatchedRepo_Errors verifies that Import refuses
 // to reuse a clone whose origin is a different repository than the requested
 // source_repo: it must return ErrRepoMismatch (naming both URLs), leave the

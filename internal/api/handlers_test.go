@@ -2822,6 +2822,47 @@ func TestImportSourceRepoMismatch_Conflict(t *testing.T) {
 	}
 }
 
+// TestImportNonEmptyDestDir_Conflict verifies REVIEW-OB-014 at the HTTP
+// boundary: when ImportLocalDir exists, is non-empty, and is not a clone,
+// the import is rejected with 409 import_dest_not_empty naming the path —
+// never a 500 import_failed indistinguishable from an unreachable repo, and
+// the directory contents are left untouched.
+func TestImportNonEmptyDestDir_Conflict(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed — skipping import integration test")
+	}
+	s, _, _ := newTestServer(t)
+
+	localDir := t.TempDir()
+	sentinel := filepath.Join(localDir, "keep-me.txt")
+	if err := os.WriteFile(sentinel, []byte("user data"), 0o644); err != nil {
+		t.Fatalf("write sentinel: %v", err)
+	}
+	s.ImportLocalDir = localDir
+
+	repo := initBareRepoForHandler(t, "main")
+	seedBareRepoForHandler(t, repo, "main")
+
+	rr := do(t, s, "POST", "/api/v1/import", importRequest{SourceRepo: repo})
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body: %s", rr.Code, rr.Body.String())
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body %q: %v", rr.Body.String(), err)
+	}
+	if body["error"] != "import_dest_not_empty" {
+		t.Errorf("error = %q, want import_dest_not_empty", body["error"])
+	}
+	if !strings.Contains(body["message"], localDir) {
+		t.Errorf("message %q does not name the destination path %q", body["message"], localDir)
+	}
+	if b, err := os.ReadFile(sentinel); err != nil || string(b) != "user data" {
+		t.Errorf("sentinel = %q, %v — import modified the non-empty destination", b, err)
+	}
+}
+
 // pushAnswerFilesForHandler pushes one minimal answer directory into the bare
 // repo, mirroring the export layout, so an import has something to import.
 func pushAnswerFilesForHandler(t *testing.T, barePath, branch, classTitle, env, version string) {
