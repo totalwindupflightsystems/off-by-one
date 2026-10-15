@@ -159,6 +159,15 @@ var ErrNoSubtree = errors.New("import: subtree directory not found in repo")
 // fetch or pull touches the clone.
 var ErrRepoMismatch = errors.New("import: source_repo does not match the existing clone")
 
+// ErrDestNotEmpty is returned when LocalDir exists, is non-empty, and does
+// not contain a clone (no .git directory). A fresh `git clone` into such a
+// directory fails with a bare "destination path ... already exists and is
+// not an empty directory" error that is indistinguishable from an
+// unreachable remote, so the engine refuses BEFORE invoking git and names
+// the remediation: point the import directory at an empty/new directory or
+// remove it. The engine never deletes user data itself (REVIEW-OB-014).
+var ErrDestNotEmpty = errors.New("import: destination directory already exists and is non-empty")
+
 // Import runs the full import flow:
 //
 //  1. Clone or pull the source repo
@@ -255,7 +264,20 @@ func (e *Engine) prepareClone(ctx context.Context) error {
 		return nil
 	}
 
-	// Fresh clone.
+	// Fresh clone. Precondition: `git clone` refuses a non-empty
+	// destination with a bare "already exists and is not an empty
+	// directory" error that is indistinguishable from an unreachable
+	// remote — refuse first with a typed, actionable error instead
+	// (REVIEW-OB-014). An existing-but-empty directory is fine. The
+	// directory is never modified or deleted here.
+	entries, err := os.ReadDir(e.cfg.LocalDir)
+	switch {
+	case err == nil && len(entries) > 0:
+		return fmt.Errorf("%w: %q — point the import directory at an empty or new directory, or remove it",
+			ErrDestNotEmpty, e.cfg.LocalDir)
+	case err != nil && !os.IsNotExist(err):
+		return fmt.Errorf("read import destination %q: %w", e.cfg.LocalDir, err)
+	}
 	if err := os.MkdirAll(e.cfg.LocalDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir clone dir: %w", err)
 	}
