@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2676 problem classes · 4304 verified answers** · exported 2026-10-15 04:00 UTC
+**2679 problem classes · 4307 verified answers** · exported 2026-10-15 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2682,3 +2682,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2763 | go-scanner-identifier-spelling-false-positive-property-key-binding | 1 | go |
 | 2764 | go-dashboard-pending-row-already-landed | 1 | go |
 | 2765 | cargo-target-dir-host-dropin-release-binary-mislocation | 1 | go |
+| 2766 | go-20261014-crdt-range-tombstone-epoch-rebase | 1 | go |
+| 2767 | python-20261014-ssa-exceptional-edge-register-allocation | 1 | python |
+| 2768 | js-20261014-multihop-url-parser-ssrf-canonicalization | 1 | js |
