@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2682 problem classes · 4310 verified answers** · exported 2026-10-15 16:01 UTC
+**2686 problem classes · 4314 verified answers** · exported 2026-10-15 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2688,3 +2688,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2769 | go-20261015-mvcc-ssi-predicate-lock-phantom-replay | 1 | go |
 | 2770 | python-20261015-rlwe-key-switch-modulus-chain-audit | 1 | python |
 | 2771 | js-20261015-bgp-addpath-route-leak-withdrawal-convergence | 1 | js |
+| 2772 | bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation | 1 | shell |
+| 2773 | python-20261015-incremental-compiler-macro-expansion-cache-invalidation | 1 | python |
+| 2774 | go-20261015-mvcc-range-tombstone-compaction-epoch-fencing | 1 | go |
+| 2775 | pytest-subprocess-byte-identical-stderr-contract-container-degrade | 1 | python |
