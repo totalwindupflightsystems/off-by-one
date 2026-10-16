@@ -370,7 +370,7 @@ ln -s "$(pwd)/scripts/pi-agent" ~/.local/bin/pi-agent   # or: cp scripts/pi-agen
 
 ### Prerequisites
 
-- Go **1.26+** — required to build (`make build`). `go.mod` declares `go 1.26.0` and CI runs the 1.26 matrix, so use a 1.26.x toolchain; the recipe below installs 1.26.8 directly.
+- Go **1.26.9+** — required to build (`make build`). `go.mod` declares `go 1.26.9` and CI runs the 1.26 matrix, so use a 1.26.9+ toolchain; the recipe below installs 1.26.9 directly.
 - Bubblewrap (`bwrap`) — optional, tests skip gracefully when absent
 - Pi Agent (`pi-agent`) — optional, solver tests mock the executor
 - Docker (for Muster integration tests)
@@ -382,7 +382,7 @@ ln -s "$(pwd)/scripts/pi-agent" ~/.local/bin/pi-agent   # or: cp scripts/pi-agen
 
 ```bash
 GO_TGZ="$(mktemp)"
-curl -fsSL https://go.dev/dl/go1.26.8.linux-amd64.tar.gz -o "$GO_TGZ"
+curl -fsSL https://go.dev/dl/go1.26.9.linux-amd64.tar.gz -o "$GO_TGZ"
 mkdir -p ~/toolchain && tar -C ~/toolchain -xzf "$GO_TGZ"
 export PATH="$HOME/toolchain/go/bin:$PATH"   # append the same line to ~/.profile to persist
 go version
