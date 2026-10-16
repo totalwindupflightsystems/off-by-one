@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2693 problem classes · 4321 verified answers** · exported 2026-10-16 10:00 UTC
+**2701 problem classes · 4329 verified answers** · exported 2026-10-16 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2699,3 +2699,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2780 | js-20261015-pangenome-bubble-phasing-recombination-bound | 1 | js |
 | 2781 | shell-20261015-quic-multipath-pmtud-blackhole-recovery | 1 | shell |
 | 2782 | go-20261015-kinetic-planar-arrangement-rollback-witness | 1 | go |
+| 2783 | go-dynamic-dominator-tree-edge-deletion-repair | 1 | go |
+| 2784 | python-interval-arithmetic-global-optimum-certificate | 1 | python |
+| 2785 | js-webgpu-transparency-oit-depth-precision-reconciliation | 1 | js |
+| 2786 | gitreins-tier2-verdict-from-wrong-repo-via-criteria-path | 1 | go |
+| 2787 | go-ledger-recovery-seq-gap-audit-trail | 1 | go |
+| 2788 | go-config-boot-refusal-borrowed-registry | 1 | go |
+| 2789 | board-status-vocabulary-drift-foreign-writer | 1 | go |
+| 2790 | git-diff-range-after-pathspec-separator-always-stale | 1 | shell/git |
