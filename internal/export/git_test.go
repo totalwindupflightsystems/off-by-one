@@ -656,6 +656,221 @@ func TestExport_IdempotentNoChanges(t *testing.T) {
 	}
 }
 
+// failingPushGit writes a git wrapper script that passes every subcommand
+// through to the real git except `push`, which fails — a deterministic
+// stand-in for a network blip or a read-only target. Returns the script
+// path for use as Config.GitPath.
+func failingPushGit(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("stub git wrapper is a POSIX shell script")
+	}
+	path := filepath.Join(t.TempDir(), "git-no-push")
+	script := "#!/bin/sh\nif [ \"$1\" = \"push\" ]; then\n	echo 'stub: simulated push failure' >&2\n	exit 1\nfi\nexec git \"$@\"\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write stub git: %v", err)
+	}
+	return path
+}
+
+// assertRemoteHasFiles clones barePath fresh and asserts the export subtree
+// files for pc/answer are present — proof the commit reached upstream.
+func assertRemoteHasFiles(t *testing.T, barePath string, pc *graph.ProblemClass, answer *graph.AnswerNode) {
+	t.Helper()
+	verifyDir := filepath.Join(t.TempDir(), "verify")
+	if out, err := exec.Command("git", "clone", barePath, verifyDir).CombinedOutput(); err != nil {
+		t.Fatalf("verify clone: %v\n%s", err, out)
+	}
+	dir := filepath.Join(verifyDir, "pre-solve-answers", pc.Title, answer.Env, answer.Version)
+	for _, fname := range []string{"solution.md", "evidence.md", "signatures.json"} {
+		if _, err := os.Stat(filepath.Join(dir, fname)); err != nil {
+			t.Errorf("exported file %s not in remote repo: %v", fname, err)
+		}
+	}
+}
+
+// TestExport_FailedPushRollsBackAndRetryDelivers is the DF-OFF-BY-ONE-50
+// regression test: when the push fails after the commit, the local commit
+// must be rolled back (never stranded), and re-exporting the same ids once
+// the push can succeed must deliver the files upstream with a non-empty
+// commit_sha.
+func TestExport_FailedPushRollsBackAndRetryDelivers(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+	barePath := initBareRepo(t, "main")
+	seedRemote(t, barePath, "main")
+	localDir := filepath.Join(t.TempDir(), "clone")
+
+	// Export through a git whose push always fails.
+	stub := failingPushGit(t)
+	e := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir, Push: true, GitPath: stub}, store)
+	_, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if err == nil {
+		t.Fatal("Export with failing push: err = nil, want a push failure")
+	}
+	if !strings.Contains(err.Error(), "git push") {
+		t.Errorf("error = %q, want it to name the git push failure", err)
+	}
+
+	// The commit must have been rolled back: nothing unpushed, and the
+	// rendered files are gone from the working tree (HEAD~1 restored).
+	if ahead := gitIn(t, localDir, "rev-list", "origin/main..HEAD"); ahead != "" {
+		t.Errorf("after failed push, rev-list origin/main..HEAD = %q, want empty (no stranded commit)", ahead)
+	}
+	solutionPath := filepath.Join(localDir, "pre-solve-answers", pc.Title, answer.Env, answer.Version, "solution.md")
+	if _, statErr := os.Stat(solutionPath); !os.IsNotExist(statErr) {
+		t.Errorf("after rollback, %s still present (stat err = %v)", solutionPath, statErr)
+	}
+
+	// Retry the same ids with a working git: must commit, push, and
+	// deliver upstream with a real SHA.
+	e2 := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir, Push: true}, store)
+	res, err := e2.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if err != nil {
+		t.Fatalf("retry Export: %v", err)
+	}
+	if res.CommitSHA == "" {
+		t.Error("retry CommitSHA is empty — commit was not created")
+	}
+	if !res.Pushed {
+		t.Error("retry Pushed = false, want true")
+	}
+	assertRemoteHasFiles(t, barePath, pc, answer)
+}
+
+// TestExport_FailedPushRootCommitRollsBack covers the first export into an
+// EMPTY remote: the export commit is the branch's root commit, so
+// `git reset --hard HEAD~1` has no parent to reset to and the rollback must
+// delete the branch ref instead (DF-OFF-BY-ONE-50 scratch finding). The
+// export files stay on disk and the retry re-commits and delivers them.
+func TestExport_FailedPushRootCommitRollsBack(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+	barePath := initBareRepo(t, "main") // no seedRemote — the remote is empty
+	localDir := filepath.Join(t.TempDir(), "clone")
+
+	stub := failingPushGit(t)
+	e := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir, Push: true, GitPath: stub}, store)
+	_, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if err == nil {
+		t.Fatal("Export with failing push: err = nil, want a push failure")
+	}
+	if !strings.Contains(err.Error(), "git push") {
+		t.Errorf("error = %q, want it to name the git push failure", err)
+	}
+
+	// The root commit cannot be reset to HEAD~1: the rollback must have
+	// deleted the branch ref (unborn HEAD), leaving the files on disk.
+	if out, revErr := exec.Command("git", "-C", localDir, "rev-parse", "--verify", "HEAD").CombinedOutput(); revErr == nil {
+		t.Errorf("after root-commit rollback, HEAD still resolves to %q, want unborn", strings.TrimSpace(string(out)))
+	}
+	solutionPath := filepath.Join(localDir, "pre-solve-answers", pc.Title, answer.Env, answer.Version, "solution.md")
+	if _, statErr := os.Stat(solutionPath); statErr != nil {
+		t.Errorf("after root-commit rollback, %s missing: %v (files must survive for the retry)", solutionPath, statErr)
+	}
+
+	// Retry the same ids with a working git.
+	e2 := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir, Push: true}, store)
+	res, err := e2.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if err != nil {
+		t.Fatalf("retry Export: %v", err)
+	}
+	if res.CommitSHA == "" {
+		t.Error("retry CommitSHA is empty — commit was not created")
+	}
+	if !res.Pushed {
+		t.Error("retry Pushed = false, want true")
+	}
+	assertRemoteHasFiles(t, barePath, pc, answer)
+}
+
+// TestExport_StrandedCommitPushedOnReExport covers the pre-fix clone state
+// (DF-OFF-BY-ONE-50): HEAD already holds an export commit that never
+// reached the remote (here via Push=false, the same shape as a failed
+// push). Re-exporting the same ids finds nothing to commit, so the engine
+// must detect the stranded commit and push it instead of returning a
+// hollow success with commit_sha="".
+func TestExport_StrandedCommitPushedOnReExport(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+	barePath := initBareRepo(t, "main")
+	seedRemote(t, barePath, "main")
+	localDir := filepath.Join(t.TempDir(), "clone")
+
+	// Strand a commit: export without pushing.
+	e := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir, Push: false}, store)
+	res1, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if err != nil {
+		t.Fatalf("first Export: %v", err)
+	}
+	if res1.CommitSHA == "" {
+		t.Fatal("first export produced no commit")
+	}
+
+	// Re-export the same ids with Push enabled: nothing to commit, but
+	// the stranded commit must be pushed and its SHA reported.
+	e2 := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir, Push: true}, store)
+	res2, err := e2.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if err != nil {
+		t.Fatalf("second Export: %v", err)
+	}
+	if res2.CommitSHA == "" {
+		t.Error("second export CommitSHA is empty — stranded commit was not pushed")
+	}
+	if !res2.Pushed {
+		t.Error("second export Pushed = false, want true")
+	}
+	assertRemoteHasFiles(t, barePath, pc, answer)
+}
+
+// TestExport_StrandedCommitPushFailureRollsBack: with a stranded commit on
+// HEAD and the push STILL failing, the recovery attempt must roll the
+// stranded commit back so the next export re-renders and re-pushes rather
+// than early-returning forever.
+func TestExport_StrandedCommitPushFailureRollsBack(t *testing.T) {
+	skipIfNoGit(t)
+	setGitIdentity(t)
+	store, pc, answer := makeStore(t)
+	barePath := initBareRepo(t, "main")
+	seedRemote(t, barePath, "main")
+	localDir := filepath.Join(t.TempDir(), "clone")
+
+	// Strand a commit.
+	e := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir, Push: false}, store)
+	if _, err := e.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}}); err != nil {
+		t.Fatalf("first Export: %v", err)
+	}
+
+	// Re-export the same ids with Push enabled but the push failing:
+	// the recovery must error AND roll the stranded commit back.
+	stub := failingPushGit(t)
+	e2 := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir, Push: true, GitPath: stub}, store)
+	_, err := e2.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if err == nil {
+		t.Fatal("re-export with failing push: err = nil, want a push failure")
+	}
+	if ahead := gitIn(t, localDir, "rev-list", "origin/main..HEAD"); ahead != "" {
+		t.Errorf("after failed recovery push, rev-list origin/main..HEAD = %q, want empty (stranded commit rolled back)", ahead)
+	}
+
+	// With the push working again, the same ids re-render and deliver.
+	e3 := NewEngine(Config{RepoURL: barePath, Branch: "main", LocalDir: localDir, Push: true}, store)
+	res, err := e3.Export(context.Background(), []ExportItem{{ClassID: pc.ID, AnswerID: answer.ID}})
+	if err != nil {
+		t.Fatalf("final Export: %v", err)
+	}
+	if res.CommitSHA == "" {
+		t.Error("final export CommitSHA is empty — commit was not re-created")
+	}
+	if !res.Pushed {
+		t.Error("final export Pushed = false, want true")
+	}
+	assertRemoteHasFiles(t, barePath, pc, answer)
+}
+
 // TestExport_DefaultCommitMessage pins the fallback: with no
 // CommitMessage configured the engine writes its own summary message.
 func TestExport_DefaultCommitMessage(t *testing.T) {
