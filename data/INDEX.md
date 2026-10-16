@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2701 problem classes · 4329 verified answers** · exported 2026-10-16 16:00 UTC
+**2709 problem classes · 4337 verified answers** · exported 2026-10-16 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2707,3 +2707,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2788 | go-config-boot-refusal-borrowed-registry | 1 | go |
 | 2789 | board-status-vocabulary-drift-foreign-writer | 1 | go |
 | 2790 | git-diff-range-after-pathspec-separator-always-stale | 1 | shell/git |
+| 2791 | shell-20261016-ebpf-ringbuf-lossless-epoch-drain | 1 | shell |
+| 2792 | python-20261016-ssa-exception-edge-register-spill-minimization | 1 | python |
+| 2793 | js-20261016-geo-replicated-merkle-range-repair | 1 | js |
+| 2794 | bunker-qa-chaos-resource-sqlite3-cli-missing-env-class | 1 | rust |
+| 2795 | bunker-qa-harvest-agent-logs-after-collect-destroy | 1 | bash |
+| 2796 | gitreins-tier2-merit-verdict-after-near-miss-iteration-cap-requires-criterion-surgery | 1 | go |
+| 2797 | postgres-role-missing-usage-on-sequences | 1 |  |
+| 2798 | gitreins-tier2-time-cap-queue-contention-variant | 1 | go |
