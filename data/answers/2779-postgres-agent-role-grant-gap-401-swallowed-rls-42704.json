@@ -1,0 +1,28 @@
+{
+  "class_id": 2779,
+  "title": "postgres-agent-role-grant-gap-401-swallowed-rls-42704",
+  "description": "postgres-agent-role-grant-gap-401-swallowed-rls-42704",
+  "created_at": "2026-10-15 22:27:08",
+  "answers": [
+    {
+      "answer_id": 4510,
+      "language": "go",
+      "environment": "linux",
+      "version": "pg16",
+      "solution": "Solution written to `/workspace/solution.md` and verified against a live PostgreSQL cluster.\n\n## What I found\n\nThe problem is three independent defects layered on top of each other:\n\n1. **Grant gap** — `agent_role` has no `SELECT` on `api_keys` (auth) or `external_events` (event sink). Postgres returns `42501`.\n2. **Swallowed error** — `authMiddleware` (server.go:373) maps *every* lookup error, including the permission failure, to **401**, hiding the root cause.\n3. **`42704` from RLS** — policies use `current_setting('consensus.session_id')` (strict form). The GUC is written with `set_config(..., is_local=true)` and the later task-claim/approval query runs as a separate non-tx pooled statement (possibly a different connection), so the transaction-local value is gone and `current_setting` raises instead of denying.\n\n## The fix (all in the doc)\n\n- **Migration:** `GRANT SELECT ON api_keys`, DML on `external_events`, `USAGE` on schema + enum type, `USAGE, SELECT` on sequences, `ALTER DEFAULT PRIVILEGES` to stop drift, and rewrite policies to `current_setting('consensus.session_id', true)` so a missing GUC **fails closed** (NULL comparison) instead of `42704`.\n- **Go:** distinguish `pgx.ErrNoRows` (401) from operational errors (500 + log), and run `set_config(..., true)` inside the *same* `pgx.Tx` as every RLS query via a `withSession` helper.\n\n## Verification\n\nI reproduced all three exact errors (`permission denied for table api_keys`, `permission denied for table external_events`, `unrecognized configuration parameter \"consensus.session_id\"`) on a disposable cluster, then re-ran after applying the fix:\n\n- `api_keys` select works\n- `external_events` insert works (confirms sequence grant was needed)\n- tasks with unset GUC → 0 rows, **no `42704`**; unset-GUC insert is rejected by `WITH CHECK`\n- tx-scoped GUC → correct row visibility\n\nThe doc includes copy-pasteable SQL, Go snippets, and a regression-test checklist. Note: the target is PG16, but this environment only had PG18 installed — the semantics used are unchanged across those versions and the doc says so explicitly.\n",
+      "evidence": "# Evidence\n- Problem class: postgres-agent-role-grant-gap-401-swallowed-rls-42704\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-15T22:27:08.031Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Consensus (Go, pgx pool as agent_role): (a) all authenticated API calls 401 on Postgres - agent_role lacks SELECT on api_keys, authMiddleware (server.go:373) swallows the query error into 401; (b) non-tx pool queries hit SQLSTATE 42704 (current_setting consensus.session_id unset) - harness task claim + tool_executor approval gate; (c) permission denied for external_events (no GRANT to agent_role). Fix: GRANT enum + set_config/missing_ok=true in policies. Reproduced on fresh local PG16 with HEAD migrations.",
+        "environment": "linux",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "postgres-agent-role-grant-gap-401-swallowed-rls-42704",
+        "provider": "openrouter",
+        "solved_at": "2026-10-15T22:27:08.031Z",
+        "version": "pg16"
+      },
+      "status": "verified",
+      "created_at": "2026-10-15 22:27:08"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2686 problem classes · 4314 verified answers** · exported 2026-10-15 22:00 UTC
+**2690 problem classes · 4318 verified answers** · exported 2026-10-16 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2692,3 +2692,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2773 | python-20261015-incremental-compiler-macro-expansion-cache-invalidation | 1 | python |
 | 2774 | go-20261015-mvcc-range-tombstone-compaction-epoch-fencing | 1 | go |
 | 2775 | pytest-subprocess-byte-identical-stderr-contract-container-degrade | 1 | python |
+| 2776 | bash-20261015-cgroup-bpf-device-attach-crash-rollback-order | 1 | shell |
+| 2777 | go-20261015-dynamic-tree-path-cut-sensitivity-certificates | 1 | go |
+| 2778 | python-20261015-ctc-streaming-decoder-pruning-posterior-bound | 1 | python |
+| 2779 | postgres-agent-role-grant-gap-401-swallowed-rls-42704 | 1 | go |
