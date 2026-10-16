@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.11.0
+version: 1.12.0
 category: software-development
 ---
 
@@ -479,3 +479,43 @@ cold; re-import 76ms; bunker install clone 60s / build 54s / seed 10s.
 Browser-driven UI evidence pattern (2026-10-13b): wrap `window.fetch` before clicking to capture
 each UI call's status+body (the 409 dedup body is only visible that way); check
 `performance.getEntriesByType('resource')` for responseStatus>=400; count chat banners over ~3 min.
+
+## Field-tested 2026-10-16 (dogfood tick #18): verdict 🟡 PROMISING-BUT-ROUGH for the OPERATOR surface
+
+The lab, its catalog and its install path stay SHIPPABLE. This run took the operator/substrate view
+for the first time — the idle gate (loadavg + `/proc/meminfo`) and the per-solve memory/timeout
+bounds, as the SUBMITTER experiences them. Every safety invariant held (gate tripped => nothing runs;
+cap/timeout kill => nothing committed; keyless box => honest 503; fresh box => 113s to a working
+catalog). The gaps are observability, and all of them are OPEN rows — treat as current:
+
+37. **A gated submission looks identical to a stuck one (DF-OFF-BY-ONE-45, P2)** — while the host gate
+    is tripped, `GET /api/v1/queue/{id}` keeps answering `status:"pending", stage:"queued",
+    position:1, estimated_time:"30s"` and never changes; no field names the gate. The OPERATOR view
+    has the answer: `GET /metrics` → `last_skip_reason` (`load` | `memory` | `load+memory`) and a
+    climbing `skipped_host_pressure`. If a submission is not moving, read /metrics before
+    resubmitting or blaming the queue — and remember the live unit ticks every 60s (avg solve 5m41s),
+    so a gated box can hold your submission for a long time behind a fixed 30s ETA.
+38. **A solve killed by a configured limit reports a cause-blind reason (DF-OFF-BY-ONE-46, P2)** —
+    `failure_reason` is the raw exec error: `pi-agent exec: signal: killed (stdout=)` (the
+    `--solve-timeout` firing — compare the entry's started_at→completed_at wall against your
+    configured timeout) or `pi-agent exec: exit status 139 (stdout=)` (SIGSEGV-shaped, but really
+    `--solve-mem-mb` RLIMIT_AS biting). Neither names the limit. To attribute a kill use /metrics
+    (`last_solve.peak_rss_bytes`, `killed`) plus the startup line
+    (`cron loop started: … solve-mem-mb=N reject-rss=M MiB`); either way nothing is committed
+    (`/api/v1/stats` total_answers stays put).
+39. **Gate skips are logged as errors (DF-OFF-BY-ONE-47, P3)** — a busy box prints
+    `cron: tick error: cron: system is not idle` on EVERY tick. Do not read that as a fault, and do
+    not key alerting on `tick error` until this lands.
+40. **README's toolchain recipe is behind go.mod (DF-OFF-BY-ONE-48, P3)** — the no-sudo recipe
+    installs go1.26.8 while `go.mod` requires `go 1.26.9`; install ≥1.26.9 or rely on Go's toolchain
+    auto-download (which is what a fresh/keyless box does anyway — verified on a box with go1.22.2).
+
+Re-proven on HEAD 84c211b6 (good news): the `required_tools` degrade is now visible on BOTH surfaces
+(submit response AND queue entry carry `resolved_tools` / `missing_tools` — DF-41's fix), the keyless
+submit still answers `503 solver_unavailable` with the remediation message, and the from-source install
+is 113s verbatim (clone 13 / build 72 / seed 28).
+
+Recipe that produced the numbers above: three scratch nodes and one ephemeral bunker agent — gate leg
+`--load-threshold -1 --mem-fraction 0.001 -cron-interval 2s`; bounds arm 1 `--solve-mem-mb 32`
+(dies ~70ms), arm 2 `--solve-mem-mb 128 --solve-timeout 30s` (dies at 30.0s); install leg on
+bunker-mvp with `make gate-deploy` proving the scratch binaries serve HEAD's code.

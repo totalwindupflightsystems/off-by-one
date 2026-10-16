@@ -910,3 +910,70 @@ contract evidence, and the 409 body above is only visible that way. Check
 (favicon.ico 404 is the only one today). Expand every tree level in Explore;
 count chat-sidebar banners over ~3 minutes; send a chat message and grep the
 transcript for your own text.
+
+---
+
+## §19 — 2026-10-16: the operator substrate — idle gate, memory bounds, and the fresh-box install (DF-45…DF-49)
+
+**Why this section exists.** Nineteen dogfood runs learned the lab from the *consumer* side (catalog,
+API, UI, export/import, privacy, MCP) and one from the *install* side. Nobody had driven the two
+mechanisms that make the lab safe to co-host — the idle gate and the per-solve memory/timeout
+bounds — nor the surfaces an operator reads when the box is busy. All three legs below ran on HEAD
+code (`make gate-deploy` PASS; scratch binaries and the running unit both stamp HEAD's code).
+
+### How the gate and the bounds compose (the mental model)
+
+- One cron loop ticks every `--cron-interval`. Each tick, in order: reap stale `in_progress` entries
+  (always runs, even on a busy box), `checkIdle`, `Dequeue`, `processOne`
+  (`internal/cron/loop.go:398-428`).
+- `checkIdle` (`loop.go:447-504`) reads loadavg *and* `/proc/meminfo`; `MemUsedFraction = 1 -
+  MemAvailable/MemTotal` (`internal/cron/memgate.go:11-17` — MemAvailable, not MemFree, is the
+  difference between a false alarm and a real one on a box with a healthy page cache). The skip
+  reason is a string: `load` | `memory` | `load+memory`; a negative threshold disables that half.
+- A skip increments `skipped_host_pressure` and stores the full HostSnapshot
+  (`metrics.HostSnapshot`, reason included) as `last_skip_reason` + `last_host`. **This is the only
+  place the fact "I am not solving because of host memory" exists.** It is global, not per-submission.
+- `processOne` (`loop.go:509-615`) bounds the solve twice: `--solve-mem-mb` becomes RLIMIT_AS via the
+  `oby-memcap` exec wrapper, and `--solve-timeout` becomes the `context.WithTimeout` around the
+  pi-agent exec (`internal/solver/piagent.go:261-265`). On success the RSSTracker's observed peak is
+  compared against `--solve-reject-rss-mb` (auto = 80% of the cap) and a solve over it is marked
+  failed with **nothing committed** (DF-OFF-BY-ONE-31's contract).
+
+### The right way to drive this surface (for the next agent)
+
+1. **Gate leg:** start a scratch node with `--load-threshold -1 --mem-fraction 0.001 -cron-interval 2s`
+   (the memory half is deterministic — used-fraction is ~0.36 on this host, so the gate trips every
+   tick). Submit, then poll `GET /api/v1/queue/{id}` *and* `GET /metrics` side by side: the queue
+   entry never moves, `/metrics` explains everything. That asymmetry IS DF-45.
+2. **Bounds legs:** arm 1 `--solve-mem-mb 32` (dies in ~70 ms, reason `exit status 139` — a
+   SIGSEGV-shaped string); arm 2 `--solve-mem-mb 128 --solve-timeout 30s` (dies at exactly 30.0 s,
+   reason `signal: killed`, peak 0.022 GiB, i.e. the cap never fired). Read
+   `/api/v1/stats` after each to confirm `total_answers 0` — the fail-closed property is the part
+   that already works; the *attribution* is what is missing (DF-46).
+3. **Always read the cron startup line first** — `cron loop started: interval=2s loadThreshold=-1.0
+   solve-mem-mb=32 reject-rss=25 MiB` — it names the effective limits, which is exactly the
+   information the queue entry omits.
+4. **Kill the serve before you finish**: README's own port-hygiene note (a `nohup` serve survives
+   `bunker destroy` and answers the next install's probes). Verify `uptime` is in seconds, not minutes.
+
+### Lessons worth keeping
+
+- **A gate that defers silently is worse than a gate that refuses.** The 503-on-keyless-box path
+  (`solver_unavailable` + remediation message) is the house style at its best: it refuses loudly and
+  tells you what to do. The deferral path does the opposite — it accepts, promises an ETA, and goes
+  quiet. Same daemon, two opposite honesty levels; the fix is to reuse the good one.
+- **Limit-kill strings are not diagnostics.** `signal: killed` and `exit status 139` are what the
+  kernel says, not what the operator needs. The daemon holds every fact required to say
+  "killed by --solve-mem-mb 32" at the moment it writes the reason; the docs' advice ("verify the
+  configured value yourself") is a workaround for a missing field.
+- **Watch your own alert prefixes.** `cron: tick error: cron: system is not idle` is what a healthy
+  busy box prints *forever*; any log-scanner keyed on `tick error` is permanently red on exactly the
+  deployment the gate was built for. `ErrNoIdle` is a decision, not an error, and the log should say so.
+- **A docs recipe is code that nobody compiles.** The README pins a toolchain (1.26.8) that `go.mod`
+  (1.26.9, bumped by a CVE-clearing commit that touched go.mod alone) now refuses. Nothing in CI reads
+  the README's recipe, so only a run like this one catches it — and only because the leg was run
+  *verbatim*.
+- **Fresh-box legs are cheap when the docs are honest.** 113 s of clone+build+seed to a working
+  catalog, matching the README's quoted ~114 s; the only rescue needed was Go's own toolchain
+  auto-download, which is itself documentation the README does not mention.
+
