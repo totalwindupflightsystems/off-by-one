@@ -185,6 +185,20 @@ func runMemCapHelper(t *testing.T, mode string, extraEnv ...string) (string, err
 }
 
 func TestApplyMemLimitMB_RoundTrip(t *testing.T) {
+	// The helper pins RLIMIT_AS at 4096 MiB with Cur == Max, which a
+	// non-root process can only do when the ambient HARD cap is at
+	// least that large. Under a lower ambient cap (e.g. the fleet's
+	// terminal sandbox `ulimit -v 3145728` = 3072 MiB) setrlimit
+	// answers EPERM and the test would fail for an ENVIRONMENT reason,
+	// not a product reason — skip instead.
+	const probeMB = 4096
+	var rlim syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_AS, &rlim); err != nil {
+		t.Fatalf("Getrlimit: %v", err)
+	}
+	if rlim.Cur < probeMB*1024*1024 {
+		t.Skipf("ambient RLIMIT_AS hard cap %d MiB < probe %d MiB", rlim.Cur/1024/1024, probeMB)
+	}
 	out, err := runMemCapHelper(t, "roundtrip")
 	if err != nil {
 		t.Fatalf("roundtrip helper failed: %v\n%s", err, out)
