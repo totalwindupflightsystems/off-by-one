@@ -291,6 +291,16 @@ func (e *Engine) prepareClone(ctx context.Context) error {
 		if err := e.runGit(ctx, e.cfg.LocalDir, "fetch", "origin"); err != nil {
 			return fmt.Errorf("fetch origin: %w", err)
 		}
+		// A clone whose HEAD is unborn (e.g. a rolled-back root commit —
+		// DF-OFF-BY-ONE-50) has no ref to check out or pull: point HEAD
+		// at the target branch and stop here; the working tree and index
+		// already hold the state the next commit re-uses.
+		if _, err := e.gitOutput(ctx, e.cfg.LocalDir, "rev-parse", "--verify", "HEAD"); err != nil {
+			if err := e.runGit(ctx, e.cfg.LocalDir, "symbolic-ref", "HEAD", "refs/heads/"+e.cfg.Branch); err != nil {
+				return fmt.Errorf("point unborn HEAD at branch %s: %w", e.cfg.Branch, err)
+			}
+			return nil
+		}
 		if err := e.runGit(ctx, e.cfg.LocalDir, "checkout", e.cfg.Branch); err != nil {
 			// Branch may not exist yet — create it tracking origin.
 			if err2 := e.runGit(ctx, e.cfg.LocalDir, "checkout", "-b", e.cfg.Branch,
@@ -454,8 +464,13 @@ func (e *Engine) stageAndCommit(ctx context.Context, res *ExportResult) error {
 		return fmt.Errorf("git diff --cached: %w", err)
 	}
 	if strings.TrimSpace(out) == "" {
-		// Nothing to commit — all files were identical to existing content.
-		return nil
+		// Nothing to commit — all files were identical to existing
+		// content. But a previous export may have committed locally and
+		// never pushed (push failed after the commit, or Push was false):
+		// the stranded commit sits on HEAD and every re-export of the
+		// same answers early-returns here, so it would never reach
+		// upstream (DF-OFF-BY-ONE-50). Recover by pushing it now.
+		return e.recoverStrandedCommit(ctx, res)
 	}
 
 	// Commit message: a caller-supplied message is used verbatim (no
@@ -486,10 +501,72 @@ func (e *Engine) stageAndCommit(ctx context.Context, res *ExportResult) error {
 	// Push.
 	if e.cfg.Push {
 		if err := e.runGit(ctx, e.cfg.LocalDir, "push", "-u", "origin", e.cfg.Branch); err != nil {
+			// Roll the local commit back so a failed push never strands
+			// it: the next export of the same answers re-renders,
+			// re-commits and re-pushes (DF-OFF-BY-ONE-50).
+			res.CommitSHA = ""
+			if rbErr := e.rollbackUnpushedCommit(ctx); rbErr != nil {
+				return fmt.Errorf("git push: %w (rollback of the unpushed commit also failed: %v)", err, rbErr)
+			}
 			return fmt.Errorf("git push: %w", err)
 		}
 		res.Pushed = true
 	}
+	return nil
+}
+
+// rollbackUnpushedCommit removes the commit at HEAD after a failed push so
+// the failure never strands a local commit (DF-OFF-BY-ONE-50). The common
+// case is `git reset --hard HEAD~1`; when HEAD is the branch's ROOT commit
+// (first export into an empty remote) there is no parent and the reset
+// fails, so the branch ref is deleted instead — the export files stay on
+// disk and the next export re-stages and re-commits them.
+func (e *Engine) rollbackUnpushedCommit(ctx context.Context) error {
+	if err := e.runGit(ctx, e.cfg.LocalDir, "reset", "--hard", "HEAD~1"); err != nil {
+		if err2 := e.runGit(ctx, e.cfg.LocalDir, "update-ref", "-d", "HEAD"); err2 != nil {
+			return fmt.Errorf("reset --hard HEAD~1: %v (root-commit ref delete also failed: %v)", err, err2)
+		}
+	}
+	return nil
+}
+
+// recoverStrandedCommit handles the "nothing to commit" early-return in
+// stageAndCommit: the rendered files already match HEAD, but HEAD may hold
+// a commit a previous export created and never pushed (DF-OFF-BY-ONE-50).
+// When Push is enabled and origin/<branch>..HEAD is non-empty, push the
+// stranded commit now and report its real SHA. If the push fails, roll the
+// local commit back (git reset --hard HEAD~1) so the next export re-renders
+// and re-pushes instead of early-returning forever. With Push disabled the
+// clone is left untouched — the idempotent no-change contract is unchanged.
+func (e *Engine) recoverStrandedCommit(ctx context.Context, res *ExportResult) error {
+	if !e.cfg.Push {
+		return nil
+	}
+	ahead, err := e.gitOutput(ctx, e.cfg.LocalDir, "rev-list", "origin/"+e.cfg.Branch+"..HEAD")
+	if err != nil {
+		// origin/<branch> may not exist yet (no push ever succeeded):
+		// then every commit on HEAD is unpushed. An unborn HEAD (no
+		// commits at all) fails this too — nothing to recover.
+		ahead, err = e.gitOutput(ctx, e.cfg.LocalDir, "rev-list", "HEAD")
+		if err != nil {
+			return nil
+		}
+	}
+	if strings.TrimSpace(ahead) == "" {
+		return nil
+	}
+	if err := e.runGit(ctx, e.cfg.LocalDir, "push", "-u", "origin", e.cfg.Branch); err != nil {
+		if rbErr := e.rollbackUnpushedCommit(ctx); rbErr != nil {
+			return fmt.Errorf("git push (recovering stranded commit): %w (rollback of the stranded commit also failed: %v)", err, rbErr)
+		}
+		return fmt.Errorf("git push (recovering stranded commit): %w", err)
+	}
+	sha, err := e.gitOutput(ctx, e.cfg.LocalDir, "rev-parse", "--short", "HEAD")
+	if err != nil {
+		return fmt.Errorf("rev-parse HEAD: %w", err)
+	}
+	res.CommitSHA = strings.TrimSpace(sha)
+	res.Pushed = true
 	return nil
 }
 
