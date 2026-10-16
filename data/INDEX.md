@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2690 problem classes · 4318 verified answers** · exported 2026-10-16 04:00 UTC
+**2693 problem classes · 4321 verified answers** · exported 2026-10-16 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2696,3 +2696,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2777 | go-20261015-dynamic-tree-path-cut-sensitivity-certificates | 1 | go |
 | 2778 | python-20261015-ctc-streaming-decoder-pruning-posterior-bound | 1 | python |
 | 2779 | postgres-agent-role-grant-gap-401-swallowed-rls-42704 | 1 | go |
+| 2780 | js-20261015-pangenome-bubble-phasing-recombination-bound | 1 | js |
+| 2781 | shell-20261015-quic-multipath-pmtud-blackhole-recovery | 1 | shell |
+| 2782 | go-20261015-kinetic-planar-arrangement-rollback-witness | 1 | go |
