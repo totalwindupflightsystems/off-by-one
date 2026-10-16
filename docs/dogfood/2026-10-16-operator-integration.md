@@ -130,3 +130,45 @@ compute-bound: a gated submission waits for the host, and the wait has no repres
   pitfalls 37–39 for consumers.
 - Scratch evidence on the control host: `/home/kara/oby-dogfood-1016/{A,B,C,perf}/evidence.txt`,
   `install-payload.sh`, and the pre-write board snapshots in `…/snap/`.
+
+## Phase 2 (same tick) — the fleet fresh-system QA battery, and a cap-tolerance defect (DF-51)
+
+The tick's install leg was also driven through the fleet harness the lane prompt names:
+`bunker-qa.sh launch /home/kara/off-by-one` → agent `913faf73` on bunker-mvp (TTL 4h), battery against
+**HEAD 31f49319** (this run's own commit), then `collect --evidence
+/home/kara/oby-dogfood-1016/qa/evidence.jsonl` (20 cells, agent auto-destroyed).
+
+Green: repo-head/sync, toolchain-bootstrap (Go + node + make bootstrapped into `$HOME`), **fresh-install**,
+**ci-pass — native suite PASS**, upgrade (previous release tree → HEAD reinstall clean), chaos-errorpath
+(clean error on missing config, rc=2). Not applicable: docker-deploy / chaos-shutdown (no compose file),
+chaos-corruption (no db/state files in the repo). Note `ui-probe` graded "no web UI detected" although the
+repo serves an embedded SPA — a harness-detection gap, reported here rather than filed (QA lane owns the
+probe).
+
+**Red, and reproduced: `chaos-resource` rc=1 — `TestApplyMemLimitMB_RoundTrip` FAIL in
+`internal/sandbox`.** The cell ran the suite under a 3 GiB RLIMIT_AS. Local control proves it is
+environment-driven, not product-driven:
+
+```
+$ go test ./internal/sandbox/ -run TestApplyMemLimitMB_RoundTrip -count=1     → ok 0.004s
+$ bash -c 'ulimit -v 3145728; go test ./internal/sandbox/ -run TestApplyMemLimitMB_RoundTrip -count=1'
+    memcap_test.go:190: roundtrip helper failed: exit status 1
+        ApplyMemLimitMB(4096): sandbox: setrlimit RLIMIT_AS=4096 MiB: operation not permitted   → rc=1
+```
+
+The helper asks for 4096 MiB while an inherited hard cap of 3072 MiB is in force; setrlimit above an
+inherited hard limit is EPERM. Filed as **DF-OFF-BY-ONE-51** (fix direction: derive the probe from the
+ambient hard limit and skip with a reason). Worth a row because containers, CI runners, this fleet's QA
+battery and the Hermes terminal sandbox all carry ambient AS caps, so the documented `go test ./...`
+turns red for an environment reason in exactly the shapes this project targets.
+
+**Deliberately NOT filed:** the battery's `ci-act` cell exited rc=1 with a truncated act log. The
+harness's own rule is that "a failed act leg is never graded OK; hosted CI is authoritative", and the
+full log lived on the now-destroyed agent — so the leg is recorded here as **unattributed**, not as a
+defect claim.
+
+**Sibling thread (same tick, same board):** another executor of this tick landed a follow-up commit
+(192e398b) filing **DF-OFF-BY-ONE-50** — export pushes not atomic (a stranded commit silently skipped
+forever) — and re-proving the REVIEW-OB-014 import precondition live. Both threads are credited to run
+18; DF-50 and DF-51 are distinct findings.
+
