@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1093,4 +1094,252 @@ func (h *blockingHandle) Destroy() error {
 	err := os.RemoveAll(h.root)
 	h.root = ""
 	return err
+}
+
+// --- DF-OFF-BY-ONE-46: cause-named kill reasons ------------------------
+
+// signalExitError returns the *exec.ExitError produced by a process
+// that killed itself with the named signal — exactly what a
+// limit-killed pi-agent looks like to the solver.
+func signalExitError(t *testing.T, sig string) error {
+	t.Helper()
+	err := exec.Command("/bin/sh", "-c", "kill -"+sig+" $$").Run()
+	if err == nil {
+		t.Fatalf("self-kill -%s unexpectedly succeeded", sig)
+	}
+	return err
+}
+
+// errRunner is a Runner whose handle's Exec sleeps delay, then fails
+// with a caller-supplied error. Used to drive the kill-reason
+// classifier through each configured limit.
+type errRunner struct {
+	root  string
+	err   error
+	delay time.Duration
+}
+
+type errHandle struct {
+	root  string
+	err   error
+	delay time.Duration
+}
+
+func (r *errRunner) Create(ctx context.Context, id string, opts ...CreateOption) (Handle, error) {
+	root, err := os.MkdirTemp(r.root, "err-*"+id+"-*")
+	if err != nil {
+		return nil, err
+	}
+	return &errHandle{root: root, err: r.err, delay: r.delay}, nil
+}
+
+func (h *errHandle) WriteFile(relPath string, data []byte) error {
+	full := filepath.Join(h.root, relPath)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(full, data, 0o644)
+}
+
+func (h *errHandle) ReadFile(relPath string) ([]byte, error) {
+	return os.ReadFile(filepath.Join(h.root, relPath))
+}
+
+func (h *errHandle) Exec(ctx context.Context, name string, args, env []string) ([]byte, error) {
+	if h.delay > 0 {
+		timer := time.NewTimer(h.delay)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		}
+	}
+	return nil, h.err
+}
+
+func (h *errHandle) Destroy() error {
+	if h.root == "" {
+		return nil
+	}
+	err := os.RemoveAll(h.root)
+	h.root = ""
+	return err
+}
+
+// newKillTestExecutor wires an Executor to an errRunner with the given
+// config and returns it.
+func newKillTestExecutor(t *testing.T, cfg Config, runErr error, delay time.Duration) *Executor {
+	t.Helper()
+	store, err := graph.OpenShared(fmt.Sprintf("test-solver-kill-%s-%d", t.Name(), time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("graph.OpenShared: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	if cfg.PiAgentPath == "" {
+		cfg.PiAgentPath = "/bin/true"
+	}
+	if cfg.Model == "" {
+		cfg.Model = "x"
+	}
+	return NewExecutor(cfg, &errRunner{root: t.TempDir(), err: runErr, delay: delay}, store)
+}
+
+// TestExecutor_Solve_KillClassifiedSolveTimeout: the solver's own
+// context deadline fired, so the reason must name --solve-timeout even
+// though the raw kill shape (SIGKILL from CommandContext) is identical
+// to a memory-cap kill.
+func TestExecutor_Solve_KillClassifiedSolveTimeout(t *testing.T) {
+	rec := &blockingRunner{root: t.TempDir(), unblock: make(chan struct{})}
+	store, err := graph.OpenShared(fmt.Sprintf("test-solver-killtimeout-%d", time.Now().UnixNano()))
+	if err != nil {
+		t.Fatalf("graph.OpenShared: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+	ex := NewExecutor(Config{
+		PiAgentPath: "/bin/true",
+		Model:       "x",
+		Timeout:     100 * time.Millisecond,
+		// Caps configured but NOT the cause — the timeout fires first.
+		MemLimitMB:     128,
+		SandboxTimeout: time.Minute,
+	}, rec, store)
+	_, err = ex.Solve(context.Background(), sampleEntry("sub-kill-timeout"))
+	if err == nil {
+		t.Fatal("expected error from timed-out solve")
+	}
+	if !strings.Contains(err.Error(), "solve killed by --solve-timeout 100ms") {
+		t.Errorf("err = %q, want it to name --solve-timeout 100ms", err)
+	}
+	// The original diagnostic must survive inside the wrap.
+	if !strings.Contains(err.Error(), "pi-agent exec") {
+		t.Errorf("err = %q, want the original pi-agent exec error preserved", err)
+	}
+}
+
+// TestExecutor_Solve_KillClassifiedMemCap: a SIGSEGV/SIGKILL death with
+// RLIMIT_AS armed and every timeout far away must name --solve-mem-mb.
+func TestExecutor_Solve_KillClassifiedMemCap(t *testing.T) {
+	for _, sig := range []string{"SEGV", "KILL"} {
+		t.Run(sig, func(t *testing.T) {
+			ex := newKillTestExecutor(t, Config{
+				Timeout:        5 * time.Second,
+				MemLimitMB:     32,
+				SandboxTimeout: time.Minute,
+			}, signalExitError(t, sig), 0)
+			_, err := ex.Solve(context.Background(), sampleEntry("sub-kill-mem"))
+			if err == nil {
+				t.Fatal("expected error from killed solve")
+			}
+			if !strings.Contains(err.Error(), "solve killed by --solve-mem-mb 32 (RLIMIT_AS)") {
+				t.Errorf("err = %q, want it to name --solve-mem-mb 32 (RLIMIT_AS)", err)
+			}
+			if !strings.Contains(err.Error(), "pi-agent exec") {
+				t.Errorf("err = %q, want the original pi-agent exec error preserved", err)
+			}
+		})
+	}
+}
+
+// TestExecutor_Solve_KillClassifiedBwrapTimeout: a SIGKILL death at the
+// sandbox's outer cap, with the solver's own timeout still live, must
+// name the bwrap timeout — not the memory cap (mem cap is also armed
+// here, so this test pins the precedence).
+func TestExecutor_Solve_KillClassifiedBwrapTimeout(t *testing.T) {
+	ex := newKillTestExecutor(t, Config{
+		Timeout:        5 * time.Second,
+		MemLimitMB:     128,
+		SandboxTimeout: 200 * time.Millisecond,
+	}, signalExitError(t, "KILL"), 400*time.Millisecond)
+	_, err := ex.Solve(context.Background(), sampleEntry("sub-kill-bwrap"))
+	if err == nil {
+		t.Fatal("expected error from killed solve")
+	}
+	if !strings.Contains(err.Error(), "solve killed by bwrap timeout 200ms") {
+		t.Errorf("err = %q, want it to name bwrap timeout 200ms", err)
+	}
+}
+
+// TestExecutor_Solve_KillUnclassified pins the negative space: deaths
+// that match no configured limit keep the historical raw error.
+func TestExecutor_Solve_KillUnclassified(t *testing.T) {
+	t.Run("sigterm with caps armed is not a limit kill", func(t *testing.T) {
+		ex := newKillTestExecutor(t, Config{
+			Timeout:        5 * time.Second,
+			MemLimitMB:     32,
+			SandboxTimeout: time.Minute,
+		}, signalExitError(t, "TERM"), 0)
+		_, err := ex.Solve(context.Background(), sampleEntry("sub-kill-term"))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if strings.Contains(err.Error(), "solve killed by") {
+			t.Errorf("SIGTERM misclassified as a limit kill: %q", err)
+		}
+		if !strings.Contains(err.Error(), "pi-agent exec") {
+			t.Errorf("err = %q, want the raw pi-agent exec error", err)
+		}
+	})
+
+	t.Run("sigkill with no caps configured stays raw", func(t *testing.T) {
+		ex := newKillTestExecutor(t, Config{
+			Timeout: 5 * time.Second,
+			// MemLimitMB 0 (unlimited), SandboxTimeout 0 (unknown).
+		}, signalExitError(t, "KILL"), 0)
+		_, err := ex.Solve(context.Background(), sampleEntry("sub-kill-nocap"))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if strings.Contains(err.Error(), "solve killed by") {
+			t.Errorf("kill with no caps misclassified: %q", err)
+		}
+	})
+
+	t.Run("ordinary failure keeps raw error", func(t *testing.T) {
+		ex := newKillTestExecutor(t, Config{
+			Timeout:        5 * time.Second,
+			MemLimitMB:     32,
+			SandboxTimeout: time.Minute,
+		}, errors.New("provider 429: slow down"), 0)
+		_, err := ex.Solve(context.Background(), sampleEntry("sub-kill-429"))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if strings.Contains(err.Error(), "solve killed by") {
+			t.Errorf("provider error misclassified as a limit kill: %q", err)
+		}
+		if !strings.Contains(err.Error(), "provider 429: slow down") {
+			t.Errorf("err = %q, want the provider error preserved", err)
+		}
+	})
+}
+
+// TestKilledByLimitSignal pins the signal detector itself: SIGKILL and
+// SIGSEGV (both process-signal and shell exit-code shapes) count;
+// SIGTERM, exit 1, and non-exec errors do not.
+func TestKilledByLimitSignal(t *testing.T) {
+	if !killedByLimitSignal(signalExitError(t, "KILL")) {
+		t.Error("SIGKILL not detected")
+	}
+	if !killedByLimitSignal(signalExitError(t, "SEGV")) {
+		t.Error("SIGSEGV not detected")
+	}
+	if killedByLimitSignal(signalExitError(t, "TERM")) {
+		t.Error("SIGTERM must not be treated as a limit kill")
+	}
+	if err := exec.Command("/bin/sh", "-c", "exit 137").Run(); !killedByLimitSignal(err) {
+		t.Error("shell-shaped exit 137 (128+SIGKILL) not detected")
+	}
+	if err := exec.Command("/bin/sh", "-c", "exit 139").Run(); !killedByLimitSignal(err) {
+		t.Error("shell-shaped exit 139 (128+SIGSEGV) not detected")
+	}
+	if err := exec.Command("/bin/sh", "-c", "exit 1").Run(); killedByLimitSignal(err) {
+		t.Error("exit 1 must not be treated as a limit kill")
+	}
+	if killedByLimitSignal(errors.New("boom")) {
+		t.Error("plain error must not be treated as a limit kill")
+	}
+	if !killedByLimitSignal(errors.New("pi-agent exec: signal: killed (stdout=)")) {
+		t.Error("string fallback: rendered 'signal: killed' not detected")
+	}
 }

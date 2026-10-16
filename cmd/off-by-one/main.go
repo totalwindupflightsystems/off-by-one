@@ -162,6 +162,12 @@ func main() {
 				}
 			}
 			solverCfg := solverConfigFor(os.Getenv, *cfg.piAgentPath, apiKey, *cfg.solveTimeout)
+			// DF-OFF-BY-ONE-46: the solver names the limit that killed a
+			// solve in failure_reason, so it must know both configured
+			// caps — the mem cap the sandbox enforces via oby-memcap and
+			// the bwrap outer timeout the sandbox executor was built with.
+			solverCfg.MemLimitMB = *cfg.solveMemMB
+			solverCfg.SandboxTimeout = sandboxExec.Timeout
 			solverExec = solver.NewExecutor(solverCfg, runner, store)
 			log.Printf("solver ready: pi-agent=%s bwrap=%s model=%s", *cfg.piAgentPath, *cfg.bwrapPath, solverCfg.Model)
 		}

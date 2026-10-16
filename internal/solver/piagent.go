@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
@@ -53,6 +54,23 @@ type Config struct {
 	// Timeout is the wall-clock cap for a single solve. Defaults
 	// to DefaultSolveTimeout when zero.
 	Timeout time.Duration
+
+	// MemLimitMB is the per-solve memory cap in MiB applied inside
+	// the sandbox as RLIMIT_AS (the daemon wires it from
+	// --solve-mem-mb → sandbox.Executor.MemLimitMB). 0 means
+	// unlimited. The solver does not enforce it — the sandbox's
+	// oby-memcap wrapper does — but Solve uses the value to
+	// classify a SIGKILL/SIGSEGV death as "killed by the memory
+	// cap" instead of leaving the operator with a bare
+	// "signal: killed" (DF-OFF-BY-ONE-46).
+	MemLimitMB int
+
+	// SandboxTimeout is the bwrap outer wall-clock cap configured
+	// on the sandbox executor (OB1_BWRAP_TIMEOUT). 0 means unknown
+	// — in that case Solve never attributes a kill to the bwrap
+	// timeout. Used only for kill-reason classification; the cap
+	// itself is enforced by the sandbox.
+	SandboxTimeout time.Duration
 
 	// ExtraEnv is appended to the sandbox's environment.
 	ExtraEnv []string
@@ -268,8 +286,9 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 	if err != nil {
 		// Return the stdout too so the caller can log it — pi-agent
 		// tends to be verbose on failure and the raw output is the
-		// most useful diagnostic.
-		return nil, fmt.Errorf("pi-agent exec: %w (stdout=%s)", err, truncate(string(stdout), 4096))
+		// most useful diagnostic. classifyExecError names the
+		// configured limit when one fired (DF-OFF-BY-ONE-46).
+		return nil, e.classifyExecError(err, stdout, timeoutCtx, duration)
 	}
 
 	// Parse the result. Missing files are errors — we want the
@@ -304,6 +323,74 @@ func (e *Executor) Solve(ctx context.Context, sub *ingest.Entry) (*Solution, err
 		"stdout": truncate(string(stdout), 8192),
 	}
 	return &sol, nil
+}
+
+// killClassifyGrace is the tolerance added when comparing the measured
+// solve duration against the bwrap outer timeout: the sandbox starts its
+// own clock a few milliseconds after Solve starts ours, and timer
+// scheduling can shave off a few more.
+const killClassifyGrace = 250 * time.Millisecond
+
+// classifyExecError wraps a failed pi-agent Exec in the standard
+// "pi-agent exec" error and, when the death matches one of the
+// configured limits, prefixes the limit's name so the queue entry's
+// failure_reason tells the operator WHICH cap fired instead of a bare
+// "signal: killed" / "exit status 139" (DF-OFF-BY-ONE-46).
+//
+// Precedence matters:
+//
+//  1. --solve-timeout: our own context fired. CommandContext kills the
+//     child with SIGKILL on deadline, so this check must come before
+//     any signal-based classification.
+//  2. bwrap timeout: the child died by SIGKILL/SIGSEGV at or after the
+//     sandbox's outer cap while our context stayed live.
+//  3. --solve-mem-mb: the child died by SIGKILL/SIGSEGV well before
+//     every configured timeout with RLIMIT_AS armed. A genuine
+//     pi-agent segfault under a configured cap is attributed to the
+//     cap too — acceptable: the hint names the knob to check, and
+//     under RLIMIT_AS SIGSEGV is the common OOM manifestation.
+//
+// Anything else returns the historical unclassified error unchanged.
+func (e *Executor) classifyExecError(execErr error, stdout []byte, timeoutCtx context.Context, duration time.Duration) error {
+	orig := fmt.Errorf("pi-agent exec: %w (stdout=%s)", execErr, truncate(string(stdout), 4096))
+	if errors.Is(timeoutCtx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("solve killed by --solve-timeout %s: %w", e.cfg.Timeout, orig)
+	}
+	if killedByLimitSignal(execErr) {
+		if e.cfg.SandboxTimeout > 0 && duration+killClassifyGrace >= e.cfg.SandboxTimeout {
+			return fmt.Errorf("solve killed by bwrap timeout %s: %w", e.cfg.SandboxTimeout, orig)
+		}
+		if e.cfg.MemLimitMB > 0 {
+			return fmt.Errorf("solve killed by --solve-mem-mb %d (RLIMIT_AS) after %s: %w",
+				e.cfg.MemLimitMB, duration.Round(time.Millisecond), orig)
+		}
+	}
+	return orig
+}
+
+// killedByLimitSignal reports whether err is a process death by SIGKILL
+// or SIGSEGV — the two signals a configured limit produces (RLIMIT_AS
+// enforcement, kernel OOM-kill, or a CommandContext deadline cancel).
+// *exec.ExitError is the primary shape; a string fallback covers
+// runners that return pre-rendered errors.
+func killedByLimitSignal(err error) bool {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok {
+			if ws.Signaled() {
+				sig := ws.Signal()
+				return sig == syscall.SIGKILL || sig == syscall.SIGSEGV
+			}
+			// Shell-shaped exit codes: 137 = 128+SIGKILL, 139 = 128+SIGSEGV.
+			code := ws.ExitStatus()
+			return code == 137 || code == 139
+		}
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "signal: killed") ||
+		strings.Contains(msg, "signal: segmentation fault") ||
+		strings.Contains(msg, "exit status 137") ||
+		strings.Contains(msg, "exit status 139")
 }
 
 // answerStatusFromSignatures derives the status to store for a newly
