@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2715 problem classes · 4343 verified answers** · exported 2026-10-17 10:00 UTC
+**2718 problem classes · 4346 verified answers** · exported 2026-10-17 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2721,3 +2721,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2802 | shell-20261016-bpf-map-freeze-live-migration-generation-fence | 1 | shell |
 | 2803 | go-20261016-proof-carrying-dynamic-dominator-repair | 1 | go |
 | 2804 | python-20261016-rlhf-dataset-provenance-poisoning-audit | 1 | python |
+| 2805 | wal-group-commit-torn-write-recovery | 1 | go |
+| 2806 | multiobjective-ehvi-hypervolume-selection | 1 | python |
+| 2807 | thompson-nfa-linear-time-regex-engine | 1 | js |
