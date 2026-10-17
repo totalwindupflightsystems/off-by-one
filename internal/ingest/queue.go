@@ -30,6 +30,7 @@ const (
 // Status values for the queue_entries.status column.
 const (
 	StatusPending    = "pending"
+	StatusDeferred   = "deferred"
 	StatusInProgress = "in_progress"
 	StatusComplete   = "complete"
 	StatusFailed     = "failed"
@@ -141,6 +142,14 @@ type Entry struct {
 	// their solve failed instead of only status='failed'. Empty for
 	// every non-failed entry. Capped at maxFailureReasonLen on write.
 	FailureReason string `json:"failure_reason,omitempty"`
+	// GateReason carries the host-pressure gate's reason ("load",
+	// "memory", "load+memory") while the entry is deferred: the cron
+	// loop's idle gate tripped and the solve is postponed until the
+	// host is idle again (DF-OFF-BY-ONE-45). Without it a gated entry
+	// reads exactly like a stuck one — status pending, static ETA, no
+	// explanation. Empty for every non-deferred entry; cleared when
+	// the entry is dequeued.
+	GateReason string `json:"gate_reason,omitempty"`
 }
 
 // maxFailureReasonLen caps the stored failure reason. Solver/commit
@@ -204,6 +213,16 @@ func Open(store *graph.Store) (*Queue, error) {
 			if !strings.Contains(err.Error(), "duplicate column") {
 				return nil, fmt.Errorf("migrate queue schema (%s): %w", col, err)
 			}
+		}
+	}
+	// Migrate existing databases: add the gate_reason column that makes
+	// a host-pressure deferral visible to the submitter
+	// (DF-OFF-BY-ONE-45). Same defensive pattern as failure_reason —
+	// upgraded DBs get the column via ALTER, new DBs from the CREATE
+	// TABLE.
+	if err := store.ApplyExtra(`ALTER TABLE queue_entries ADD COLUMN gate_reason TEXT NOT NULL DEFAULT ''`); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column") {
+			return nil, fmt.Errorf("migrate queue schema (gate_reason): %w", err)
 		}
 	}
 	return &Queue{store: store, db: store.DB()}, nil
@@ -367,13 +386,14 @@ func (q *Queue) findPendingDuplicate(ctx context.Context, sub Submission) (*Entr
 		SELECT id, problem_class, environment, language, version, description,
 		       error_message, stack_trace, context_json, required_tools,
 		       resolved_tools, missing_tools, cadence, priority, status, stage,
-		       result_answer_id, created_at, started_at, completed_at, failure_reason
+		       result_answer_id, created_at, started_at, completed_at, failure_reason,
+		       gate_reason
 		FROM queue_entries
 		WHERE problem_class = ?
 		  AND environment = ?
 		  AND language = ?
 		  AND version = ?
-		  AND status IN ('pending', 'in_progress')
+		  AND status IN ('pending', 'deferred', 'in_progress')
 		ORDER BY created_at DESC LIMIT 1
 	`, sub.ProblemClass, sub.Environment, sub.Language, sub.Version)
 	entry, err := scanEntry(row)
@@ -425,7 +445,8 @@ func (q *Queue) Get(ctx context.Context, id string) (*Entry, error) {
 		SELECT id, problem_class, environment, language, version, description,
 		       error_message, stack_trace, context_json, required_tools,
 		       resolved_tools, missing_tools, cadence, priority, status, stage,
-		       result_answer_id, created_at, started_at, completed_at, failure_reason
+		       result_answer_id, created_at, started_at, completed_at, failure_reason,
+		       gate_reason
 		FROM queue_entries WHERE id = ?`, id)
 	return scanEntry(row)
 }
@@ -442,10 +463,11 @@ const maxListLimit = 1000
 // added to the table is added in one place instead of drifting between
 // List/Get/pickPending.
 const queueEntrySelect = `
-	SELECT id, problem_class, environment, language, version, description,
-	       error_message, stack_trace, context_json, required_tools,
-	       resolved_tools, missing_tools, cadence, priority, status, stage,
-	       result_answer_id, created_at, started_at, completed_at, failure_reason
+SELECT id, problem_class, environment, language, version, description,
+       error_message, stack_trace, context_json, required_tools,
+       resolved_tools, missing_tools, cadence, priority, status, stage,
+       result_answer_id, created_at, started_at, completed_at, failure_reason,
+       gate_reason
 	FROM queue_entries`
 
 // scanEntries runs an already-ordered, already-bounded queue query and
@@ -516,6 +538,13 @@ func listQueueCountQuery(status string) (string, []any) {
 // next job — with placeholders excluded in SQL and the cap applied by LIMIT
 // so the materialised set is bounded (OB-GAP-084).
 func pendingOrderQuery(limit int) string {
+	// NOTE: deliberately `status = ?` with a single value, never an IN
+	// list — the index-ordered walk (idx_queue_entries_status_priority)
+	// only holds while the leading column is a constant; an IN scan
+	// forces a temp-B-tree sort and the OB-GAP-084 plan tests fail.
+	// Deferred entries (DF-OFF-BY-ONE-45) are reclaimed to 'pending'
+	// by the cron loop when the host goes idle, so they re-enter this
+	// read at their original place rather than being matched here.
 	return queueEntrySelect + ` WHERE status = ? AND ` + graph.NotPlaceholderClassSQL +
 		` ORDER BY priority DESC, created_at ASC LIMIT ?`
 }
@@ -617,7 +646,7 @@ func (q *Queue) PendingQueueOrder(ctx context.Context, limit int) ([]Entry, erro
 func (q *Queue) Depth(ctx context.Context) (int, error) {
 	var n int
 	err := q.db.QueryRowContext(ctx,
-		`SELECT COUNT(1) FROM queue_entries WHERE status IN ('pending', 'in_progress')`,
+		`SELECT COUNT(1) FROM queue_entries WHERE status IN ('pending', 'deferred', 'in_progress')`,
 	).Scan(&n)
 	return n, err
 }
@@ -689,7 +718,10 @@ func (q *Queue) Dequeue(ctx context.Context) (*Entry, error) {
 	}
 	// Re-check that the entry is still pending. If a parallel process
 	// dequeued it first, we return nil and let the caller skip this
-	// iteration.
+	// iteration. Deferred entries never reach here: the cron loop
+	// reclaims them to 'pending' (ReclaimAllDeferred) on the first
+	// tick the host-pressure gate lets through (DF-OFF-BY-ONE-45), so
+	// this path keeps its original single-status shape.
 	var status string
 	if err := q.db.QueryRowContext(ctx,
 		`SELECT status FROM queue_entries WHERE id = ?`, entry.ID).Scan(&status); err != nil {
@@ -716,13 +748,17 @@ func (q *Queue) Dequeue(ctx context.Context) (*Entry, error) {
 
 // pickPending fetches the highest-priority pending entry. We use a
 // separate method so Dequeue can be retried safely without a
-// surrounding transaction.
+// surrounding transaction. Deferred entries are excluded on purpose:
+// the cron loop reclaims them to 'pending' when the gate opens
+// (ReclaimAllDeferred, DF-OFF-BY-ONE-45), and this query stays
+// single-status so its index-ordered walk is preserved.
 func (q *Queue) pickPending(ctx context.Context) (*Entry, error) {
 	row := q.db.QueryRowContext(ctx, `
 		SELECT id, problem_class, environment, language, version, description,
 		       error_message, stack_trace, context_json, required_tools,
 		       resolved_tools, missing_tools, cadence, priority, status, stage,
-		       result_answer_id, created_at, started_at, completed_at, failure_reason
+		       result_answer_id, created_at, started_at, completed_at, failure_reason,
+		       gate_reason
 		FROM queue_entries
 		WHERE status = 'pending'
 		ORDER BY priority DESC, created_at ASC
@@ -763,6 +799,76 @@ func (q *Queue) MarkFailed(ctx context.Context, id string, reason string) error 
 		return fmt.Errorf("mark failed: %w", err)
 	}
 	return nil
+}
+
+// PeekPending returns the queue head (the entry Dequeue would claim)
+// without claiming it, or (nil, nil) when nothing waits. The host-pressure
+// gate uses it to stamp a deferred entry instead of skipping silently
+// (DF-OFF-BY-ONE-45).
+func (q *Queue) PeekPending(ctx context.Context) (*Entry, error) {
+	row := q.db.QueryRowContext(ctx, `
+		SELECT id, problem_class, environment, language, version, description,
+		       error_message, stack_trace, context_json, required_tools,
+		       resolved_tools, missing_tools, cadence, priority, status, stage,
+		       result_answer_id, created_at, started_at, completed_at,
+		       failure_reason, gate_reason
+		FROM queue_entries
+		WHERE status IN ('pending', 'deferred')
+		ORDER BY priority DESC, created_at ASC
+		LIMIT 1`)
+	return scanEntry(row)
+}
+
+// MarkDeferred stamps a waiting entry as deferred by the host-pressure
+// gate: status='deferred', stage='gated', gate_reason=reason ("load",
+// "memory", "load+memory"). This lets a poller see WHY an entry is
+// waiting (DF-OFF-BY-ONE-45). The cron tick reclaims the entry when
+// the host becomes idle again via ReclaimDeferred.
+func (q *Queue) MarkDeferred(ctx context.Context, id, reason string) error {
+	_, err := q.db.ExecContext(ctx, `
+		UPDATE queue_entries
+		SET status = 'deferred', stage = 'gated', gate_reason = ?
+		WHERE id = ? AND status IN ('pending', 'deferred')`, reason, id)
+	if err != nil {
+		return fmt.Errorf("mark deferred: %w", err)
+	}
+	return nil
+}
+
+// ReclaimDeferred moves a deferred entry back to pending so the solver
+// can claim it once the host is idle again. Clears gate_reason.
+func (q *Queue) ReclaimDeferred(ctx context.Context, id string) error {
+	_, err := q.db.ExecContext(ctx, `
+		UPDATE queue_entries
+		SET status = 'pending', stage = 'queued', gate_reason = ''
+		WHERE status = 'deferred' AND id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("reclaim deferred: %w", err)
+	}
+	return nil
+}
+
+// ReclaimAllDeferred moves EVERY deferred entry back to pending and
+// returns the number reclaimed. The cron loop calls it on the first
+// tick the host-pressure gate lets through (DF-OFF-BY-ONE-45): more
+// than one entry can be deferred at once (a higher-priority submission
+// arriving mid-deferral takes the head and gets stamped on the next
+// gated tick), so reclaiming only the head would strand the rest.
+// Reclaimed rows keep their priority and created_at, so they re-enter
+// the solver order at exactly their original place.
+func (q *Queue) ReclaimAllDeferred(ctx context.Context) (int64, error) {
+	res, err := q.db.ExecContext(ctx, `
+		UPDATE queue_entries
+		SET status = 'pending', stage = 'queued', gate_reason = ''
+		WHERE status = 'deferred'`)
+	if err != nil {
+		return 0, fmt.Errorf("reclaim all deferred: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("reclaim all deferred: %w", err)
+	}
+	return n, nil
 }
 
 // ReapStale transitions in_progress entries whose started_at is older
@@ -825,7 +931,7 @@ func scanEntry(row rowScanner) (*Entry, error) {
 		&resolvedJSON, &missingJSON,
 		&e.Cadence, &e.Priority, &e.Status, &e.Stage,
 		&e.ResultAnswerID, &e.CreatedAt, &e.StartedAt, &e.CompletedAt,
-		&e.FailureReason,
+		&e.FailureReason, &e.GateReason,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound

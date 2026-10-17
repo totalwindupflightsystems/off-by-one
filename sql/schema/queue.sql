@@ -16,13 +16,14 @@ CREATE TABLE IF NOT EXISTS queue_entries (
     missing_tools TEXT NOT NULL DEFAULT '[]',      -- JSON-encoded subset of required_tools the host cannot provide (DF-OFF-BY-ONE-41)
     cadence      TEXT NOT NULL DEFAULT 'pre-phase',
     priority     REAL NOT NULL DEFAULT 0.0,      -- computed priority score
-    status       TEXT NOT NULL DEFAULT 'pending', -- pending, in_progress, complete, failed
-    stage        TEXT NOT NULL DEFAULT 'queued',  -- queued, sandbox_solve, etc.
+    status       TEXT NOT NULL DEFAULT 'pending', -- pending, deferred, in_progress, complete, failed
+    stage        TEXT NOT NULL DEFAULT 'queued',  -- queued, gated, sandbox_solve, etc.
     result_answer_id INTEGER,                     -- FK to answer_nodes.id on success
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     started_at   TEXT,
     completed_at TEXT,
-    failure_reason TEXT NOT NULL DEFAULT ''          -- why a solve failed (empty until status='failed')
+    failure_reason TEXT NOT NULL DEFAULT '',         -- why a solve failed (empty until status='failed')
+    gate_reason  TEXT NOT NULL DEFAULT ''            -- host-pressure gate reason while status='deferred' (DF-OFF-BY-ONE-45)
 );
 
 -- idx_queue_entries_status covers the status filter alone; the three added

@@ -398,7 +398,9 @@ List all queued submissions, newest submission first. Optionally filter by `stat
 }
 ```
 
-`status` is one of `pending`, `in_progress`, `complete`, `failed`. `stage` may be `queued`, `sandbox_prepare`, `sandbox_solve`, `done`, or `failed`.
+`status` is one of `pending`, `deferred`, `in_progress`, `complete`, `failed`. `stage` may be `queued`, `gated`, `sandbox_prepare`, `sandbox_solve`, `done`, or `failed`.
+
+**`deferred` / `gate_reason` semantics.** When the cron loop's host-pressure gate postpones a tick (load or memory above the configured thresholds), the queue head is stamped `status: "deferred"`, `stage: "gated"`, and `gate_reason` names the cause (`"load"`, `"memory"`, or `"load+memory"`). A deferred entry is still waiting — it keeps its place in the pending order and its `position` — and it is claimed normally on the first tick the gate lets through; `gate_reason` is present only while the entry is deferred. This is what distinguishes "the host is busy, your solve is postponed" from "your solve is stuck": a `pending` row that never moves carries no explanation, a `deferred` row carries the reason.
 
 **`resolved_tools` and `missing_tools` semantics.** Both keys are **always present and always arrays** on every entry, pending or complete — `[]` when the submission declared no `required_tools` (or when nothing was missing). They are the submit-time host classification persisted on the entry: `resolved_tools` will be mounted in the solve sandbox, `missing_tools` will not (the solve proceeds without them — degrade-gracefully, never a hard failure). Because the values are stored, not recomputed, a completed entry keeps reporting the verdict its submitter was given even if the host's tool set has changed since.
 
@@ -416,10 +418,10 @@ Both are RFC 3339 UTC timestamps (e.g. `2026-08-15T02:13:43Z`) and both keys are
 
 | Field | `GET /api/v1/queue` (list) | `GET /api/v1/queue/{submission_id}` |
 |-------|----------------------------|-------------------------------------|
-| `position` | The entry's 1-based place in the returned page — `offset + index + 1` | The entry's 1-based place in the **pending** queue, or `0` when the entry is not waiting (`in_progress`, `complete`, `failed`) |
-| `estimated_time` | Wait left for this entry: `estimateTime(place in the pending queue, observed mean solve time)` while `pending`; one job while `in_progress`; empty for `complete` / `failed` | Same rule as the list |
+| `position` | The entry's 1-based place in the returned page — `offset + index + 1` | The entry's 1-based place in the **pending** queue, or `0` when the entry is not waiting (`in_progress`, `complete`, `failed`); a `deferred` entry is still waiting and keeps its place |
+| `estimated_time` | Wait left for this entry: `estimateTime(place in the pending queue, observed mean solve time)` while `pending`; one job while `in_progress`; empty for `complete` / `failed` / `deferred` | Same rule as the list |
 
-`estimated_time` is the lab's observed mean solve time (`avg_solve_time` on `GET /api/v1/stats`) multiplied by the number of jobs ahead of the entry, rounded to the nearest second and capped at `30m`. The mean is a **rolling window over the 20 most recent completed solves**, not an all-history average: once a solve falls out of the 20 latest completions it stops influencing the estimate, so months-old faster solves cannot keep quoting a wait that current, slower solves will not meet. A lab with fewer than 20 completed solves averages what it has, and a lab with no completed solves yet falls back to `30s` per job — which is why the sample above shows `"estimated_time": "30s"` for the first pending entry. A finished entry is no longer waiting, so `complete` and `failed` entries always return `"estimated_time": ""`.
+`estimated_time` is the lab's observed mean solve time (`avg_solve_time` on `GET /api/v1/stats`) multiplied by the number of jobs ahead of the entry, rounded to the nearest second and capped at `30m`. The mean is a **rolling window over the 20 most recent completed solves**, not an all-history average: once a solve falls out of the 20 latest completions it stops influencing the estimate, so months-old faster solves cannot keep quoting a wait that current, slower solves will not meet. A lab with fewer than 20 completed solves averages what it has, and a lab with no completed solves yet falls back to `30s` per job — which is why the sample above shows `"estimated_time": "30s"` for the first pending entry. A finished entry is no longer waiting, so `complete` and `failed` entries always return `"estimated_time": ""`. A `deferred` entry returns `""` too: its wait is bounded by the host-pressure gate, not by queue depth, so quoting a depth-derived ETA would promise a time the gate does not honour — read `gate_reason` instead.
 
 **Status codes:** `200`, `500`.
 

@@ -24,6 +24,7 @@ type fakeQueue struct {
 	done         map[string]string
 	answers      map[string]int64
 	failText     map[string]string
+	deferred     map[string]string
 	dequeueCalls atomic.Int64
 	reapCalls    atomic.Int64
 	reapTTL      time.Duration
@@ -38,6 +39,7 @@ func newFakeQueue(entries ...*ingest.Entry) *fakeQueue {
 		done:     map[string]string{},
 		answers:  map[string]int64{},
 		failText: map[string]string{},
+		deferred: map[string]string{},
 	}
 }
 
@@ -48,6 +50,9 @@ func (q *fakeQueue) Dequeue(ctx context.Context) (*ingest.Entry, error) {
 	for _, e := range entries(q.entries) {
 		if _, ok := q.done[e.ID]; ok {
 			continue
+		}
+		if _, held := q.deferred[e.ID]; held {
+			continue // gated: claimable only after ReclaimAllDeferred
 		}
 		return e, nil
 	}
@@ -86,6 +91,28 @@ func (q *fakeQueue) SetStage(ctx context.Context, id, stage string) error {
 	return nil
 }
 
+// PeekPending returns the first entry Dequeue would claim, without
+// claiming it (the gate path's look at the queue head).
+func (q *fakeQueue) PeekPending(ctx context.Context) (*ingest.Entry, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, e := range entries(q.entries) {
+		if _, ok := q.done[e.ID]; ok {
+			continue
+		}
+		return e, nil
+	}
+	return nil, nil
+}
+
+// MarkDeferred records the deferral stamp per entry id.
+func (q *fakeQueue) MarkDeferred(ctx context.Context, id string, reason string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.deferred[id] = reason
+	return nil
+}
+
 // ReapStale records the call and returns the scripted (rows, err).
 // The fake has no TTL logic of its own — staleness is exercised
 // against the real SQLite queue in ingest's queue_test.go.
@@ -95,6 +122,24 @@ func (q *fakeQueue) ReapStale(ctx context.Context, olderThan time.Duration) (int
 	defer q.mu.Unlock()
 	q.reapTTL = olderThan
 	return q.reapRows, q.reapErr
+}
+
+// ReclaimDeferred stub: clears the gate stage.
+func (q *fakeQueue) ReclaimDeferred(ctx context.Context, id string) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	delete(q.stage, id)
+	return nil
+}
+
+// ReclaimAllDeferred clears every deferral stamp and returns the count —
+// the fake's model of "the gate opened, the entries are pending again".
+func (q *fakeQueue) ReclaimAllDeferred(ctx context.Context) (int64, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	n := int64(len(q.deferred))
+	q.deferred = map[string]string{}
+	return n, nil
 }
 
 // fakeSolver is an in-memory Solver. The script fields let tests
@@ -811,5 +856,235 @@ func TestTickReapUsesDefaultTTL(t *testing.T) {
 	q.mu.Unlock()
 	if want := 2 * solver.DefaultSolveTimeout; ttl != want {
 		t.Errorf("ReapStale TTL = %s, want default %s", ttl, want)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// DF-OFF-BY-ONE-45 — host-pressure deferral must be VISIBLE: the gate
+// decision stamps the queue head (status=deferred, stage=gated,
+// gate_reason) and the log says "deferred", never "tick error".
+
+// TestTickGateDeferralStampsQueueHead: when the load gate trips, the tick
+// stamps the queue head via MarkDeferred with the gate's reason and does
+// NOT dequeue it (a deferred entry waits for the reclaim on an idle tick).
+func TestTickGateDeferralStampsQueueHead(t *testing.T) {
+	q := newFakeQueue(makeEntry("a"))
+	s := &fakeSolver{}
+	var buf strings.Builder
+	l := NewLoop(Config{
+		Queue:         q,
+		Solver:        s,
+		Interval:      time.Millisecond,
+		LoadThreshold: 0.5,
+		IdleProbe:     func() (float64, error) { return 1.0, nil },
+		Logger:        newTestLogger(&buf),
+	})
+
+	if err := l.Tick(context.Background()); !errors.Is(err, ErrNoIdle) {
+		t.Fatalf("Tick err = %v, want ErrNoIdle", err)
+	}
+	q.mu.Lock()
+	reason, stamped := q.deferred["a"]
+	q.mu.Unlock()
+	if !stamped {
+		t.Fatal("queue head was not stamped deferred — the submitter cannot see the gate decision")
+	}
+	if reason != "load" {
+		t.Errorf("gate reason = %q, want %q", reason, "load")
+	}
+	if q.dequeueCalls.Load() != 0 {
+		t.Errorf("Dequeue called %d times, want 0 (gate held the tick)", q.dequeueCalls.Load())
+	}
+	// The tick log must name the deferral, not a tick error.
+	if !strings.Contains(buf.String(), "cron: deferred — host busy (load): used 1.000 / threshold 0.500") {
+		t.Errorf("log %q missing the deferral line", buf.String())
+	}
+	if strings.Contains(buf.String(), "tick error") {
+		t.Errorf("log %q mislabels a gate decision as a tick error", buf.String())
+	}
+}
+
+// TestTickGateDeferralMemoryLine pins the memory-reason log shape from the
+// brief: "cron: deferred — host busy (memory): used 0.500 / threshold 0.001".
+func TestTickGateDeferralMemoryLine(t *testing.T) {
+	q := newFakeQueue(makeEntry("m"))
+	s := &fakeSolver{}
+	var buf strings.Builder
+	l := NewLoop(Config{
+		Queue:           q,
+		Solver:          s,
+		Interval:        time.Millisecond,
+		LoadThreshold:   -1, // load gate off: memory alone trips
+		MemoryThreshold: 0.001,
+		MemoryProbe:     fakeMemProbe(MemReading{UsedFraction: 0.5}, nil),
+		Logger:          newTestLogger(&buf),
+	})
+
+	if err := l.Tick(context.Background()); !errors.Is(err, ErrNoIdle) {
+		t.Fatalf("Tick err = %v, want ErrNoIdle", err)
+	}
+	want := "cron: deferred — host busy (memory): used 0.500 / threshold 0.001"
+	if !strings.Contains(buf.String(), want) {
+		t.Errorf("log %q missing %q", buf.String(), want)
+	}
+	q.mu.Lock()
+	reason := q.deferred["m"]
+	q.mu.Unlock()
+	if reason != "memory" {
+		t.Errorf("gate reason = %q, want memory", reason)
+	}
+}
+
+// TestRunGateDeferralIsNotATickError drives Run (not Tick directly): the
+// loop's error path must not print "cron: tick error: cron: system is not
+// idle" for a gate decision — the deferral line replaces it. A Sleep stub
+// that fails after the first tick ends Run deterministically.
+func TestRunGateDeferralIsNotATickError(t *testing.T) {
+	q := newFakeQueue(makeEntry("a"))
+	s := &fakeSolver{}
+	var buf strings.Builder
+	l := NewLoop(Config{
+		Queue:         q,
+		Solver:        s,
+		Interval:      time.Millisecond,
+		LoadThreshold: 0.5,
+		IdleProbe:     func() (float64, error) { return 1.0, nil },
+		Logger:        newTestLogger(&buf),
+		Sleep:         func(ctx context.Context, d time.Duration) error { return errors.New("stop after one tick") },
+	})
+
+	if err := l.Run(context.Background()); err != nil {
+		t.Fatalf("Run err = %v, want nil", err)
+	}
+	log := buf.String()
+	if strings.Contains(log, "tick error") {
+		t.Errorf("Run logged a gate decision as a tick error: %q", log)
+	}
+	if !strings.Contains(log, "cron: deferred — host busy (load)") {
+		t.Errorf("Run log %q missing the deferral line", log)
+	}
+}
+
+// TestTickGateOpenReclaimsAndSolves: a deferred entry is reclaimed to
+// pending on the first idle tick and solved there — deferral postpones,
+// it never strands.
+func TestTickGateOpenReclaimsAndSolves(t *testing.T) {
+	q := newFakeQueue(makeEntry("a"))
+	s := &fakeSolver{}
+	busy := true
+	l := NewLoop(Config{
+		Queue:         q,
+		Solver:        s,
+		Interval:      time.Millisecond,
+		LoadThreshold: 0.5,
+		IdleProbe: func() (float64, error) {
+			if busy {
+				return 1.0, nil
+			}
+			return 0.0, nil
+		},
+	})
+
+	// Busy tick: deferral, no solve.
+	if err := l.Tick(context.Background()); !errors.Is(err, ErrNoIdle) {
+		t.Fatalf("busy Tick err = %v, want ErrNoIdle", err)
+	}
+	q.mu.Lock()
+	_, stamped := q.deferred["a"]
+	q.mu.Unlock()
+	if !stamped {
+		t.Fatal("entry not stamped deferred on the busy tick")
+	}
+	if s.solveCalls.Load() != 0 {
+		t.Fatalf("Solve called on a gated tick")
+	}
+
+	// Idle tick: the reclaim must make the entry claimable again.
+	busy = false
+	if err := l.Tick(context.Background()); err != nil {
+		t.Fatalf("idle Tick err = %v, want a solve", err)
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if _, held := q.deferred["a"]; held {
+		t.Error("entry still deferred after the gate opened — reclaim did not run")
+	}
+	if q.done["a"] != ingest.StatusComplete {
+		t.Errorf("entry status = %q, want complete after the gate opened", q.done["a"])
+	}
+}
+
+// TestTickGateDeferral_RealQueuePersistence drives the REAL ingest.Queue
+// through the gate path: the deferral stamp must persist to the row the
+// API serves (status=deferred, stage=gated, gate_reason), and the next
+// idle tick must reclaim + solve the same row — no re-submit needed.
+func TestTickGateDeferral_RealQueuePersistence(t *testing.T) {
+	store, err := graph.OpenShared("cron_defer_" + t.Name() + "_" + time.Now().Format("150405.000000"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	q, err := ingest.Open(store)
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+
+	ctx := context.Background()
+	id, _, err := q.Submit(ctx, ingest.Submission{
+		ProblemClass: "host-pressure-deferral-visibility",
+		Cadence:      ingest.CadencePostDebug,
+	})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	s := &fakeSolver{}
+	l := NewLoop(Config{
+		Queue:           q,
+		Solver:          s,
+		Interval:        time.Millisecond,
+		LoadThreshold:   -1,
+		MemoryThreshold: 0.001,
+		MemoryProbe:     fakeMemProbe(MemReading{UsedFraction: 0.5}, nil),
+	})
+
+	if err := l.Tick(ctx); !errors.Is(err, ErrNoIdle) {
+		t.Fatalf("busy Tick err = %v, want ErrNoIdle", err)
+	}
+	got, err := q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != ingest.StatusDeferred {
+		t.Errorf("status = %q, want deferred", got.Status)
+	}
+	if got.Stage != "gated" {
+		t.Errorf("stage = %q, want gated", got.Stage)
+	}
+	if got.GateReason != "memory" {
+		t.Errorf("gate_reason = %q, want memory", got.GateReason)
+	}
+
+	// The gate opens: the same row is reclaimed and solved.
+	l2 := NewLoop(Config{
+		Queue:           q,
+		Solver:          s,
+		Interval:        time.Millisecond,
+		LoadThreshold:   -1,
+		MemoryThreshold: 0.9,
+		MemoryProbe:     fakeMemProbe(MemReading{UsedFraction: 0.1}, nil),
+	})
+	if err := l2.Tick(ctx); err != nil {
+		t.Fatalf("idle Tick err = %v, want a solve", err)
+	}
+	got, err = q.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get after reclaim: %v", err)
+	}
+	if got.Status != ingest.StatusComplete {
+		t.Errorf("status after gate opened = %q, want complete (deferred is a pause, not a strand)", got.Status)
+	}
+	if got.GateReason != "" {
+		t.Errorf("gate_reason after solve = %q, want empty (cleared on reclaim)", got.GateReason)
 	}
 }

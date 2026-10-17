@@ -159,6 +159,11 @@ type queueEntryWire struct {
 	// for every non-failed entry, so a submitter polling the queue can
 	// tell "still queued" from "failed, here's why" (DF-OFF-BY-ONE-4).
 	FailureReason string `json:"failure_reason,omitempty"`
+	// GateReason is why the host-pressure gate postponed the solve
+	// ("load", "memory", "load+memory"); present only while status is
+	// "deferred" (DF-OFF-BY-ONE-45). It is what makes a gated entry
+	// distinguishable from a stuck one.
+	GateReason string `json:"gate_reason,omitempty"`
 	// ResolvedTools/MissingTools persist the submit-time classification
 	// of the entry's declared required_tools (which the solve sandbox
 	// will have / will not have). No omitempty and never null: both
@@ -830,6 +835,7 @@ func entryToWire(e *ingest.Entry) queueEntryWire {
 		Status:        e.Status,
 		Stage:         e.Stage,
 		FailureReason: e.FailureReason,
+		GateReason:    e.GateReason,
 		// nil → [] so both keys always emit as JSON arrays, never null
 		// (OB-GAP-046 convention; DF-OFF-BY-ONE-41).
 		ResolvedTools: nonNilStrings(e.ResolvedTools),
@@ -849,11 +855,14 @@ func entryToWire(e *ingest.Entry) queueEntryWire {
 // does not store (DF-OFF-BY-ONE-11):
 //
 //   - position is the entry's 1-based place in the pending queue, and 0 when
-//     it is not waiting (in_progress / complete / failed).
+//     it is not waiting (in_progress / complete / failed). A deferred
+//     (host-pressure-gated) entry is still waiting, so it keeps its place.
 //     handleListQueue overwrites it with the entry's place in the page.
 //   - estimated_time is the remaining wait as a Go duration string: the jobs
 //     ahead of a pending entry, one job while an in_progress entry occupies
-//     the bench, and empty once the entry can no longer be waited on.
+//     the bench, and empty once the entry can no longer be waited on — or
+//     while the entry is deferred, where the wait is gate-bound rather than
+//     queue-depth-bound (DF-OFF-BY-ONE-45).
 //
 // pendingIndex is the entry's 1-based place in the pending list, 0 when the
 // entry is not pending or when that list could not be read — a pending entry
@@ -868,6 +877,16 @@ func queueWireEntry(e *ingest.Entry, pendingIndex int, perJob time.Duration) que
 		}
 		w.Position = pendingIndex
 		w.EstimatedTime = estimateTime(pendingIndex, perJob)
+	case ingest.StatusDeferred:
+		// Deferred by the host-pressure gate: the entry keeps its place
+		// in line (position still resolves), but estimated_time stays
+		// EMPTY — the wait is gate-bound (host pressure), not
+		// queue-depth-bound, so a fixed per-job ETA would lie
+		// (DF-OFF-BY-ONE-45). gate_reason carries the cause.
+		if pendingIndex <= 0 {
+			pendingIndex = 1
+		}
+		w.Position = pendingIndex
 	case ingest.StatusInProgress:
 		// No longer waiting in the queue: the job holds the bench now, so
 		// the wait left is one job.

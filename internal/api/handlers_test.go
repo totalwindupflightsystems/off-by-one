@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -16,8 +17,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/totalwindupflightsystems/off-by-one/internal/cron"
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
+	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
+	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 	schemasql "github.com/totalwindupflightsystems/off-by-one/sql/schema"
 )
 
@@ -3471,5 +3475,102 @@ func TestSubmit_NoTools_ArraysNeverNull(t *testing.T) {
 	}
 	if !strings.Contains(rrList.Body.String(), `"missing_tools":[]`) {
 		t.Errorf("list body: entry missing_tools must be [] (got %s)", rrList.Body.String())
+	}
+}
+
+// -----------------------------------------------------------------------------
+// DF-OFF-BY-ONE-45 — a host-pressure-gated submission must be visible to
+// the submitter: status=deferred, stage=gated, gate_reason, and NO static
+// estimated_time.
+
+// idleGateStubSolver satisfies cron.Solver for the gate test: the gate
+// trips before any solve, so reaching either method is a bug.
+type idleGateStubSolver struct{ t *testing.T }
+
+func (s idleGateStubSolver) Solve(ctx context.Context, sub *ingest.Entry) (*solver.Solution, error) {
+	s.t.Fatal("Solve called on a gated tick")
+	return nil, nil
+}
+
+func (s idleGateStubSolver) Commit(ctx context.Context, sub *ingest.Entry, sol *solver.Solution) (int64, error) {
+	s.t.Fatal("Commit called on a gated tick")
+	return 0, nil
+}
+
+// TestGetQueueStatus_DeferredEntryShape trips the host-pressure gate with a
+// tiny memory threshold and asserts the queue entry the API serves carries
+// the deferral: status=deferred (not pending), stage=gated, a non-empty
+// gate_reason naming the cause, and an EMPTY estimated_time — the pre-fix
+// static "30s" was indistinguishable from a stuck queue.
+func TestGetQueueStatus_DeferredEntryShape(t *testing.T) {
+	s, _, queue := newTestServer(t)
+	ctx := context.Background()
+
+	resp := submitForTest(t, s, "host-pressure-gate-visibility")
+	if resp.SubmissionID == "" {
+		t.Fatalf("submit returned no id: %+v", resp)
+	}
+	// Pre-gate sanity: the submit response still quotes the depth-derived
+	// ETA (the lab has no solve history, so this is the 30s fallback).
+	if resp.EstimatedTime == "" {
+		t.Fatalf("submit estimated_time empty before the gate: %+v", resp)
+	}
+
+	obs := metrics.New(metrics.DefaultRSSAlertBytes, nil)
+	loop := cron.NewLoop(cron.Config{
+		Queue:           queue,
+		Solver:          idleGateStubSolver{t},
+		Interval:        time.Millisecond,
+		LoadThreshold:   -1, // load gate off: memory alone trips
+		MemoryThreshold: 0.001,
+		MemoryProbe: func() (cron.MemReading, error) {
+			return cron.MemReading{UsedFraction: 0.368}, nil
+		},
+		Observer: obs,
+	})
+	if err := loop.Tick(ctx); !errors.Is(err, cron.ErrNoIdle) {
+		t.Fatalf("Tick err = %v, want ErrNoIdle (gate tripped)", err)
+	}
+	if got := obs.Skips(); got != 1 {
+		t.Errorf("skipped_host_pressure = %d, want 1", got)
+	}
+
+	// Criterion 2: the single-entry GET shows the deferred shape — no
+	// re-queue, no resubmit.
+	raw, entry := getQueueEntry(t, s, resp.SubmissionID)
+	if entry.Status != "deferred" {
+		t.Errorf("status = %q, want deferred (not pending)", entry.Status)
+	}
+	if entry.Stage != "gated" {
+		t.Errorf("stage = %q, want gated", entry.Stage)
+	}
+	if entry.GateReason != "memory" {
+		t.Errorf("gate_reason = %q, want memory", entry.GateReason)
+	}
+	if _, ok := raw["gate_reason"]; !ok {
+		t.Errorf("raw response missing gate_reason key: %v", raw)
+	}
+	// Criterion 4: the static 30s ETA must NOT be served while deferred.
+	if entry.EstimatedTime != "" {
+		t.Errorf("estimated_time = %q while deferred, want empty (the wait is gate-bound, not queue-depth-bound)", entry.EstimatedTime)
+	}
+	if rawETA, ok := raw["estimated_time"]; !ok || rawETA != "" {
+		t.Errorf("raw estimated_time = %v (present=%v), want \"\"", rawETA, ok)
+	}
+
+	// The list endpoint serves the same shape for the same entry.
+	rr := do(t, s, "GET", "/api/v1/queue?status=deferred", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("list deferred status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	var list queueListResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Entries) != 1 {
+		t.Fatalf("deferred list entries = %d, want 1: %s", len(list.Entries), rr.Body.String())
+	}
+	if got := list.Entries[0]; got.SubmissionID != resp.SubmissionID || got.GateReason != "memory" || got.EstimatedTime != "" {
+		t.Errorf("list entry = %+v, want the deferred submission with gate_reason=memory and empty ETA", got)
 	}
 }

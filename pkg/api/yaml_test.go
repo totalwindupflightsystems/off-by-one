@@ -511,7 +511,7 @@ func TestOpenAPISpec_ResponsesKeysAndEnumsAreMachineReadable(t *testing.T) {
 	}
 	status := mustMap(t, mustMap(t, mustMap(t, mustMap(t, mustMap(t, doc, "components"), "schemas"), "QueueEntry"), "properties"), "status")
 	got := status["enum"]
-	want := []any{"pending", "in_progress", "complete", "failed"}
+	want := []any{"pending", "deferred", "in_progress", "complete", "failed"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("QueueEntry.status.enum = %#v (%T), want %#v", got, got, want)
 	}

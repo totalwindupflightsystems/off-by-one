@@ -44,6 +44,53 @@ const DefaultLoadThreshold = 1.0
 // signal to skip the tick.
 var ErrNoIdle = errors.New("cron: system is not idle")
 
+// IdleGateError is the structured form of ErrNoIdle: the host-pressure
+// gate tripped, and the error carries the snapshot that tripped it
+// (reason + load/memory readings) plus the thresholds in force
+// (DF-OFF-BY-ONE-45). errors.Is(err, ErrNoIdle) still matches — the
+// sentinel remains the classification; the struct carries the detail
+// the deferral log line and the queue-entry stamp need.
+type IdleGateError struct {
+	// Snapshot is the host observation at the moment the gate
+	// tripped; Snapshot.Reason is "load", "memory", or "load+memory".
+	Snapshot metrics.HostSnapshot
+	// LoadThreshold / MemoryThreshold are the configured limits the
+	// readings were compared against, so a log line can say
+	// "used X / threshold Y" without re-reading config.
+	LoadThreshold   float64
+	MemoryThreshold float64
+}
+
+func (e *IdleGateError) Error() string {
+	return fmt.Sprintf("%s (%s)", ErrNoIdle, e.Snapshot.Reason)
+}
+
+// Unwrap lets errors.Is(err, ErrNoIdle) keep classifying the gate
+// decision exactly as before this error carried a payload.
+func (e *IdleGateError) Unwrap() error { return ErrNoIdle }
+
+// deferralLine renders the gate decision for the loop log:
+//
+//	cron: deferred — host busy (memory): used 0.368 / threshold 0.001
+//
+// It replaces the old "cron: tick error: cron: system is not idle"
+// line: a gate decision is not a tick failure, and log-scanners keyed
+// on "tick error" were permanently red on exactly the busy
+// deployment the gate was built for (DF-OFF-BY-ONE-45).
+func (e *IdleGateError) deferralLine() string {
+	switch e.Snapshot.Reason {
+	case "load":
+		return fmt.Sprintf("cron: deferred — host busy (load): used %.3f / threshold %.3f",
+			e.Snapshot.Load1, e.LoadThreshold)
+	case "memory":
+		return fmt.Sprintf("cron: deferred — host busy (memory): used %.3f / threshold %.3f",
+			e.Snapshot.MemUsedFraction, e.MemoryThreshold)
+	default: // load+memory
+		return fmt.Sprintf("cron: deferred — host busy (load+memory): load used %.3f / threshold %.3f, memory used %.3f / threshold %.3f",
+			e.Snapshot.Load1, e.LoadThreshold, e.Snapshot.MemUsedFraction, e.MemoryThreshold)
+	}
+}
+
 // Metrics is the live counters maintained by the loop. The fields
 // are read with the atomic load helpers — no lock required for
 // the hot-path metrics. TotalRuntime tracks the cumulative time
@@ -248,6 +295,20 @@ type Queue interface {
 	MarkComplete(ctx context.Context, id string, answerID int64) error
 	MarkFailed(ctx context.Context, id string, reason string) error
 	SetStage(ctx context.Context, id, stage string) error
+	// PeekPending returns the queue head (the entry Dequeue would
+	// claim) WITHOUT claiming it, or (nil, nil) when nothing waits.
+	// The gate path uses it to stamp the entry a busy host is
+	// postponing (DF-OFF-BY-ONE-45).
+	PeekPending(ctx context.Context) (*ingest.Entry, error)
+	// MarkDeferred stamps a waiting entry status=deferred /
+	// stage=gated / gate_reason=reason. The entry stays in line and
+	// is claimed normally once the gate lets a tick through.
+	MarkDeferred(ctx context.Context, id string, reason string) error
+	// ReclaimAllDeferred returns every deferred entry to pending once
+	// the gate opens again, so the solver order read (deliberately
+	// single-status, index-ordered) sees them at their original
+	// place. Returns the number reclaimed.
+	ReclaimAllDeferred(ctx context.Context) (int64, error)
 	// ReapStale marks in_progress entries older than olderThan as
 	// failed and returns the number reaped. Called once per tick so
 	// entries wedged by a restart mid-solve do not inflate Depth
@@ -376,7 +437,13 @@ func (l *Loop) Run(ctx context.Context) error {
 			return nil
 		}
 		if err := l.Tick(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			l.cfg.Logger.Printf("cron: tick error: %v", err)
+			// A host-pressure gate decision is NOT a tick error: Tick
+			// already logged the deferral line naming the reason and
+			// the reading. Anything else is a real failure.
+			var gate *IdleGateError
+			if !errors.As(err, &gate) {
+				l.cfg.Logger.Printf("cron: tick error: %v", err)
+			}
 		}
 		// Exit promptly when ctx is cancelled. Err here is
 		// only the sleep error; context.Canceled returns from
@@ -414,7 +481,27 @@ func (l *Loop) Tick(ctx context.Context) error {
 	}
 
 	if err := l.checkIdle(ctx); err != nil {
+		// A gate decision is a deferral, not a failure: log the
+		// reason + reading on its own line (never "tick error") and
+		// stamp the queue head so the submitter's next poll shows
+		// status=deferred with the gate's reason instead of a silent
+		// pending row (DF-OFF-BY-ONE-45).
+		var gate *IdleGateError
+		if errors.As(err, &gate) {
+			l.deferQueueHead(ctx, gate)
+			l.cfg.Logger.Print(gate.deferralLine())
+		}
 		return err
+	}
+	// The gate is open: return any entries a busy tick deferred to
+	// pending so the solver order sees them at their original place
+	// (DF-OFF-BY-ONE-45). Best-effort, like the reaper: a failed
+	// reclaim must not block a solve — the entries stay deferred and
+	// the next idle tick retries.
+	if n, err := l.cfg.Queue.ReclaimAllDeferred(ctx); err != nil {
+		l.cfg.Logger.Printf("cron: reclaim deferred failed: %v (continuing)", err)
+	} else if n > 0 {
+		l.cfg.Logger.Printf("cron: reclaimed %d deferred queue entries (host idle again)", n)
 	}
 	entry, err := l.cfg.Queue.Dequeue(ctx)
 	if err != nil {
@@ -494,13 +581,38 @@ func (l *Loop) checkIdle(ctx context.Context) error {
 		if l.cfg.Observer != nil {
 			l.cfg.Observer.RecordSkip(hostSnap(skipReason))
 		}
-		return ErrNoIdle
+		return &IdleGateError{
+			Snapshot:        hostSnap(skipReason),
+			LoadThreshold:   l.cfg.LoadThreshold,
+			MemoryThreshold: l.cfg.MemoryThreshold,
+		}
 	}
 
 	if l.cfg.Observer != nil {
 		l.cfg.Observer.RecordHost(hostSnap(""))
 	}
 	return nil
+}
+
+// deferQueueHead stamps the entry the gate just postponed so the
+// submitter can SEE the deferral (DF-OFF-BY-ONE-45): without the
+// stamp, a gated submission reads byte-identical to a stuck one
+// (status=pending, static estimated_time) for as long as the host
+// stays busy. Stamping is best-effort — a busy host must not turn a
+// queue-read hiccup into a failed tick, and an empty queue has no
+// head to stamp.
+func (l *Loop) deferQueueHead(ctx context.Context, gate *IdleGateError) {
+	head, err := l.cfg.Queue.PeekPending(ctx)
+	if err != nil {
+		l.cfg.Logger.Printf("cron: deferral stamp: peek queue head failed: %v (continuing)", err)
+		return
+	}
+	if head == nil {
+		return
+	}
+	if err := l.cfg.Queue.MarkDeferred(ctx, head.ID, gate.Snapshot.Reason); err != nil {
+		l.cfg.Logger.Printf("cron: deferral stamp: mark %s deferred failed: %v (continuing)", head.ID, err)
+	}
 }
 
 // processOne solves a single dequeued entry and persists the result.
