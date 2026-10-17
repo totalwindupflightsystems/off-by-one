@@ -251,15 +251,13 @@ func awaitSeedExit(t *testing.T, cmd *exec.Cmd, port int, logPath string, timeou
 		}
 		if portListening(port) {
 			_ = cmd.Process.Kill()
-			err2 := <-done
-			_ = err2
+			// done is buffered (cap 1), so the Wait()-goroutine completes without us reading.
 			t.Fatalf("the invocation bound 127.0.0.1:%d — the HTTP server started instead of seeding (OB-GAP-071)\noutput:\n%s",
 				port, readFileString(logPath))
 		}
 		if time.Now().After(deadline) {
 			_ = cmd.Process.Kill()
-			err2 := <-done
-			_ = err2
+			// done is buffered; the goroutine is unblocked without us reading.
 			t.Fatalf("the invocation did not exit within %s — it is serving instead of seeding\noutput:\n%s",
 				timeout, readFileString(logPath))
 		}
