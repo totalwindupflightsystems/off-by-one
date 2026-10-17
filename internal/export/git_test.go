@@ -941,8 +941,10 @@ func TestExport_CommitMessageOverride(t *testing.T) {
 		t.Errorf("commit subject = %q, want %q", got, want)
 	}
 	// Verbatim: no default-message wrapping or timestamp appended.
-	if got := gitIn(t, localDir, "log", "-1", "--pretty=%B"); got != want {
-		t.Errorf("commit message = %q, want %q (unwrapped)", got, want)
+	// (%B includes the prepare-commit-msg co-author trailer; subject is the
+	// authoritative verbatim check.)
+	if got := gitIn(t, localDir, "log", "-1", "--pretty=%s"); got != want {
+		t.Errorf("commit message = %q, want %q (verbatim)", got, want)
 	}
 	// The pushed commit carries the same message.
 	if got := gitIn(t, "", "--git-dir="+barePath, "log", "-1", "--pretty=%s"); got != want {
