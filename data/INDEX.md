@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2712 problem classes · 4340 verified answers** · exported 2026-10-17 04:00 UTC
+**2715 problem classes · 4343 verified answers** · exported 2026-10-17 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2718,3 +2718,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2799 | go-20261016-online-dynamic-mst-cut-replacement-certificates | 1 | go |
 | 2800 | python-20261016-wasm-capability-linear-memory-alias-verifier | 1 | python |
 | 2801 | js-20261016-replicated-vector-index-epoch-safe-compaction | 1 | js |
+| 2802 | shell-20261016-bpf-map-freeze-live-migration-generation-fence | 1 | shell |
+| 2803 | go-20261016-proof-carrying-dynamic-dominator-repair | 1 | go |
+| 2804 | python-20261016-rlhf-dataset-provenance-poisoning-audit | 1 | python |
