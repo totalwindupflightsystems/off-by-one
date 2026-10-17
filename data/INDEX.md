@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2718 problem classes · 4346 verified answers** · exported 2026-10-17 16:00 UTC
+**2721 problem classes · 4349 verified answers** · exported 2026-10-17 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2724,3 +2724,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2805 | wal-group-commit-torn-write-recovery | 1 | go |
 | 2806 | multiobjective-ehvi-hypervolume-selection | 1 | python |
 | 2807 | thompson-nfa-linear-time-regex-engine | 1 | js |
+| 2808 | go-20261017-tls13-zero-rtt-anti-replay-partition-fence | 1 | go |
+| 2809 | python-20261017-datalog-provenance-semiring-negation-fixpoint | 1 | python |
+| 2810 | bash-20261017-tpm2-pcr-policy-seal-drift-recovery-ladder | 1 | bash |
