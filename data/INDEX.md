@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2709 problem classes · 4337 verified answers** · exported 2026-10-16 22:01 UTC
+**2712 problem classes · 4340 verified answers** · exported 2026-10-17 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2715,3 +2715,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2796 | gitreins-tier2-merit-verdict-after-near-miss-iteration-cap-requires-criterion-surgery | 1 | go |
 | 2797 | postgres-role-missing-usage-on-sequences | 1 |  |
 | 2798 | gitreins-tier2-time-cap-queue-contention-variant | 1 | go |
+| 2799 | go-20261016-online-dynamic-mst-cut-replacement-certificates | 1 | go |
+| 2800 | python-20261016-wasm-capability-linear-memory-alias-verifier | 1 | python |
+| 2801 | js-20261016-replicated-vector-index-epoch-safe-compaction | 1 | js |
