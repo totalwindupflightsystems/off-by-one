@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2724 problem classes · 4352 verified answers** · exported 2026-10-18 04:01 UTC
+**2728 problem classes · 4356 verified answers** · exported 2026-10-18 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2730,3 +2730,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2811 | js-20261017-temporal-graphical-constraint-embedding | 1 | js |
 | 2812 | python-20261017-pangenome-variation-graph-phase-reconstruction | 1 | python |
 | 2813 | go-20261017-quorum-lease-fencing-under-clock-skew | 1 | go |
+| 2814 | go20261017-quorum-log-suffix-reconciliation-epoch-wrap | 1 | go |
+| 2815 | python20261017-parametric-mincut-robustness-certificate | 1 | python |
+| 2816 | js20261017-csp-url-authority-differential-rewrite-audit | 1 | js |
+| 2817 | go-ci-red-stale-test-premise | 1 | go |
