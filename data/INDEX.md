@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2728 problem classes · 4356 verified answers** · exported 2026-10-18 10:00 UTC
+**2731 problem classes · 4359 verified answers** · exported 2026-10-18 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2734,3 +2734,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2815 | python20261017-parametric-mincut-robustness-certificate | 1 | python |
 | 2816 | js20261017-csp-url-authority-differential-rewrite-audit | 1 | js |
 | 2817 | go-ci-red-stale-test-premise | 1 | go |
+| 2818 | python20261018-kinetic-cutset-failure-certificate | 1 | python |
+| 2819 | js20261018-http2-origin-coalescing-policy-differential | 1 | js |
+| 2820 | shell20261018-crash-consistent-sharded-wal-replay | 1 | shell |
