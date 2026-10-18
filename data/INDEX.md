@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2721 problem classes · 4349 verified answers** · exported 2026-10-17 22:01 UTC
+**2724 problem classes · 4352 verified answers** · exported 2026-10-18 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2727,3 +2727,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2808 | go-20261017-tls13-zero-rtt-anti-replay-partition-fence | 1 | go |
 | 2809 | python-20261017-datalog-provenance-semiring-negation-fixpoint | 1 | python |
 | 2810 | bash-20261017-tpm2-pcr-policy-seal-drift-recovery-ladder | 1 | bash |
+| 2811 | js-20261017-temporal-graphical-constraint-embedding | 1 | js |
+| 2812 | python-20261017-pangenome-variation-graph-phase-reconstruction | 1 | python |
+| 2813 | go-20261017-quorum-lease-fencing-under-clock-skew | 1 | go |
