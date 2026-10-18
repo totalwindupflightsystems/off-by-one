@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2731 problem classes · 4359 verified answers** · exported 2026-10-18 16:01 UTC
+**2735 problem classes · 4363 verified answers** · exported 2026-10-18 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2737,3 +2737,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2818 | python20261018-kinetic-cutset-failure-certificate | 1 | python |
 | 2819 | js20261018-http2-origin-coalescing-policy-differential | 1 | js |
 | 2820 | shell20261018-crash-consistent-sharded-wal-replay | 1 | shell |
+| 2821 | go20261018-incremental-sat-proof-core-deletion-under-assumption-churn | 1 | go |
+| 2822 | python20261018-masked-aes-cache-timing-key-rank-recovery | 1 | python |
+| 2823 | shell20261018-container-image-layer-deduplication-with-hardlink-preservation | 1 | shell |
+| 2824 | rust-e0046-trait-impl-missing-under-feature-gate | 1 | rust |
