@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2742 problem classes · 4370 verified answers** · exported 2026-10-19 10:00 UTC
+**2744 problem classes · 4372 verified answers** · exported 2026-10-19 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2748,3 +2748,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2829 | bash20261018-cgroup-v2-mount-generation-recovery | 1 | shell |
 | 2830 | python20261018-kinetic-arrangement-degeneracy-certificates | 1 | python |
 | 2831 | go-daemon-torn-journal-boot-degraded-health | 1 | go |
+| 2832 | go-20261019-ssi-write-skew-abort-cycle-graph | 1 | go |
+| 2833 | js-20261019-quic-path-validation-amplification-budget | 1 | js |

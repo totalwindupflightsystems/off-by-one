@@ -1,0 +1,28 @@
+{
+  "class_id": 2832,
+  "title": "go-20261019-ssi-write-skew-abort-cycle-graph",
+  "description": "go-20261019-ssi-write-skew-abort-cycle-graph",
+  "created_at": "2026-10-19 10:12:04",
+  "answers": [
+    {
+      "answer_id": 4563,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "Done. The verified solution is in **`~/SOLUTION.md`**, with the runnable implementation at **`~/ssi/`** (`ssi.go`, `ssi_test.go`).\n\n## Diagnosis (root causes)\n\n1. **False positives from raw SSI dangerous detection** — the acyclic chain `T1 ->rw T2 ->rw T3` is serializable but contains a dangerous structure. A dangerous structure is only actionable if it lies on a **cycle**.\n2. **Late-discovered edges** — `R ->rw W` is created when `W` writes, which can be after `R` commits. Cycle checks must also run on edge insertion, not only at commit.\n3. **Non-determinism** — Go map iteration randomizes pivot selection; traversals must be id-sorted and victims chosen by a total order.\n4. **Broken GC** — aborting a txn must remove *only its incident edges*; clearing a neighbour's adjacency set wholesale destroys live dangerous structures.\n\n## Exact fix\n\nA compact `Tracker` keyed by `TxnID` with `in`/`out` `rw` edge sets and events `Begin`, `AddRW`, `Commit`, `Abort`:\n\n- **`AddRW`**: insert edge, then while the new edge closes a cycle, abort the **lowest-id active pivot** on it (eager, so commits never see cycles).\n- **`Commit`**: if the txn was doomed → report abort; if it lies on a cycle → abort lowest-id pivot (possibly a different active txn); else commit.\n- **`Abort`**: edge-local GC only.\n- **Determinism**: `sortedNeighbors` + `minActive`; tie-break by smallest `TxnID`.\n- **No false positives**: acyclic ⇒ no cycle ⇒ no abort; read-only txns are never pivots (no in-edge).\n\nKey victim/GC logic:\n\n```go\n// AddRW: break every cycle the new edge closed\nfor {\n    cycle := t.cycleThroughEdge(from, to)\n    if cycle == nil { break }\n    t.doom(t.minActive(cycle)) // lowest-id active pivot\n}\n\n// removeEdges: only incident edges, preserving live structures\nfor v := range tx.in  { delete(t.txns[v].out, id) }\nfor u := range tx.out { delete(t.txns[u].in,  id) }\n```\n\n## Verification\n\n```\n$ gofmt -l .            # clean\n$ go vet ./...          # clean\n$ go test -race -count=2 ./...\nok  \texample.com/ssi\t1.146s\n```\n\n15 tests pass, including: 2-txn write skew, **all 6 commit orders** of a 3-txn cycle, a 5-txn cycle, read-only no-abort, acyclic chain/diamond no-abort, multi-pivot tie-break, 200-run determinism, late edge after commit, GC preserving live dangerous structures, and a randomized 2000-graph invariant check (acyclic input ⇒ 0 aborts, cyclic input ⇒ ≥1 abort, final live graph acyclic).\n\nI also re-extracted the two `go` code blocks straight out of `SOLUTION.md` into a fresh module and ran the suite there — it passes and is byte-identical to the working tree, so the document is genuinely self-contained.\n",
+      "evidence": "# Evidence\n- Problem class: go-20261019-ssi-write-skew-abort-cycle-graph\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-19T10:12:04.981Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement a Serializable Snapshot Isolation conflict tracker that maintains rw-antidependency edges between concurrent transactions and aborts exactly those participating in a dangerous structure (two consecutive rw edges whose pivot commits first), with no false positives on read-only or provably-serializable workloads. Your tracker must consume commit/abort events in arbitrary interleaving under a deterministic harness, handle multi-transaction write-skew cycles spanning three or more transactions (not only the classic two-transaction case), and emit deterministic, reproducible abort decisions whenever two pivots tie. Also detect the case where an aborted transaction's edges must be garbage-collected without losing a still-live dangerous structure.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-20261019-ssi-write-skew-abort-cycle-graph",
+        "provider": "openrouter",
+        "solved_at": "2026-10-19T10:12:04.981Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-10-19 10:12:05"
+    }
+  ]
+}
