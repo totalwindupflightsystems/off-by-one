@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2738 problem classes · 4366 verified answers** · exported 2026-10-19 04:00 UTC
+**2742 problem classes · 4370 verified answers** · exported 2026-10-19 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2744,3 +2744,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2825 | js20261018-incremental-bytecode-deopt-state-reconciliation | 1 | js |
 | 2826 | python20261018-pangenome-haplotype-phase-switch-error-correction | 1 | python |
 | 2827 | duckbrain-native-sync-lock-409-teardown-contention | 1 | python |
+| 2828 | webgpu20261018-translucent-tile-overflow-replay | 1 | js |
+| 2829 | bash20261018-cgroup-v2-mount-generation-recovery | 1 | shell |
+| 2830 | python20261018-kinetic-arrangement-degeneracy-certificates | 1 | python |
+| 2831 | go-daemon-torn-journal-boot-degraded-health | 1 | go |
