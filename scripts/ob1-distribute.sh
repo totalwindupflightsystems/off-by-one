@@ -9,12 +9,30 @@
 # CANONICAL COPY: this file is tracked in the repo. The cron entrypoint is an
 # untracked deployed copy at ~/.hermes/scripts/ob1-distribute.sh; re-deploy it
 # after any change here:
-#     cp scripts/ob1-distribute.sh ~/.hermes/scripts/ob1-distribute.sh
-#     chmod +x ~/.hermes/scripts/ob1-distribute.sh
+#     make deploy-distribute
+# (`make check-distribute-deploy` verifies the pair; the drift guard below
+# refuses to run a stale copy — OB-DIST-003.)
 #
 # PART 2 (host publish) delegates to the tracked scripts/publish-catalog.sh,
 # which owns the transport-class retry, the staged-pair activation and the
 # operator configuration — see docs/publish-transport.md.
+#
+# ── drift guard (OB-DIST-003) — must stay ABOVE the `set -euo pipefail` line:
+# scripts/tests/ob1-distribute-regression.sh slices this script from that line
+# onward and runs the slice from /tmp; a guard inside the slice would compare
+# the slice against the canonical and fail every OB-DIST-001 case.
+_ob1_canonical="${OB1_REPO:-$HOME/off-by-one}/scripts/ob1-distribute.sh"
+_ob1_self_sha="$(sha256sum "$0" 2>/dev/null | awk '{print $1}')"
+_ob1_canon_sha="$(sha256sum "$_ob1_canonical" 2>/dev/null | awk '{print $1}')"
+if [ -z "$_ob1_self_sha" ] || [ -z "$_ob1_canon_sha" ] || [ "$_ob1_self_sha" != "$_ob1_canon_sha" ]; then
+  echo "❌ ob1-distribute.sh drift guard: the running copy is not byte-identical to the tracked canonical" >&2
+  echo "   running:   $0 (sha256 ${_ob1_self_sha:-<unreadable>})" >&2
+  echo "   canonical: $_ob1_canonical (sha256 ${_ob1_canon_sha:-<unreadable>})" >&2
+  echo "   remedy: make deploy-distribute" >&2
+  exit 1
+fi
+unset _ob1_canonical _ob1_self_sha _ob1_canon_sha
+
 set -euo pipefail
 
 REPO="${OB1_REPO:-$HOME/off-by-one}"

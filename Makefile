@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest check-distribute-deploy deploy-distribute check-distribute-deploy-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -259,6 +259,36 @@ check-corpus-hygiene:
 # "real tree passes" arm.
 check-corpus-hygiene-selftest:
 	bash scripts/tests/check-corpus-hygiene-selftest.sh
+
+# OB-DIST-003 — the ob1-distribute cron (4x/day) runs the UNTRACKED deployed
+# copy at ~/.hermes/scripts/ob1-distribute.sh of the tracked
+# scripts/ob1-distribute.sh. Nothing enforced that the two match, and the
+# deployed copy silently drifted ~6 days behind (missing the
+# generate-static-site.py leg; site/ frozen). This checker FAILS (exit 1,
+# naming both paths, both sha256s and the remedy) when the deployed copy is
+# missing, non-executable or byte-drifted. Read-only: no network, no writes.
+check-distribute-deploy:
+	bash scripts/check-distribute-deploy.sh
+
+# Re-deploy the canonical script to the cron entrypoint (OB1_DEPLOYED
+# overrides the destination for tests). The freshness checker runs AFTER the
+# copy and must pass before any success is reported — a copy that did not
+# land can never print green.
+deploy-distribute:
+	@set -e; \
+	deployed="$${OB1_DEPLOYED:-$$HOME/.hermes/scripts/ob1-distribute.sh}"; \
+	mkdir -p "$$(dirname "$$deployed")"; \
+	cp scripts/ob1-distribute.sh "$$deployed"; \
+	chmod +x "$$deployed"; \
+	bash scripts/check-distribute-deploy.sh
+
+# Regression self-test for the deploy freshness gate + the in-script drift
+# guard (OB-DIST-003): in-sync / drifted / missing / non-executable pairs and
+# the guard's loud refusal of a stale copy. Deterministic: temp dirs only, no
+# network, no contact with the real deployed copy beyond a read-only sha256
+# leak check.
+check-distribute-deploy-selftest:
+	bash scripts/tests/ob1-distribute-deploy-check-test.sh
 
 lint:
 	go vet ./...
