@@ -238,6 +238,15 @@ func TestSubmit_DedupPending(t *testing.T) {
 	if resp.SubmissionID == "" {
 		t.Error("dedup response should include the existing submission_id")
 	}
+	// Queue-arm dedup is machine-distinguishable from the corpus arm:
+	// reason "queued" plus a non-empty, pollable submission_id
+	// (DF-OFF-BY-ONE-37-R2).
+	if resp.Reason != "queued" {
+		t.Errorf("reason = %q, want queued (existing queue entry)", resp.Reason)
+	}
+	if resp.NextAction != "" {
+		t.Errorf("next_action = %q, want empty on the queued arm (poll submission_id instead)", resp.NextAction)
+	}
 	// Verify the queue only has 1 entry.
 	depth, _ := q.Depth(context.Background())
 	if depth != 1 {
@@ -335,6 +344,12 @@ func TestSubmit_RelatedProblemsPopulated(t *testing.T) {
 	}
 }
 
+// TestSubmit_DedupVerifiedAnswer locks the corpus-arm dedup wire contract
+// (DF-OFF-BY-ONE-37-R2): a tuple already covered by a verified answer
+// returns 409 with reason "answered", an EMPTY submission_id (no queue
+// entry exists, so there is nothing to poll), and a machine-readable
+// next_action pointing at the discover endpoint for the same class.
+// ch:trace row=DF-OFF-BY-ONE-37-R2 spec=docs/api-reference.md:73 wave=none:serial-tick test=internal/api/handlers_test.go::TestSubmit_DedupVerifiedAnswer doc=docs/api-reference.md prompt=/tmp/off-by-one-foreman-2026-10-20-22-11-24-DF-OFF-BY-ONE-37-R2-brief.txt evidence=internal/api/handlers_test.go witness=none:no-external-witness verdict=none:foreman-will-run-gitreins commit=none:worker-commit memory=none:foreman-will-write
 func TestSubmit_DedupVerifiedAnswer(t *testing.T) {
 	s, store, _ := newTestServer(t)
 	// Pre-seed a verified answer for "docker-perms".
@@ -352,9 +367,28 @@ func TestSubmit_DedupVerifiedAnswer(t *testing.T) {
 		t.Fatalf("status = %d, want 409 (verified dedup)", rr.Code)
 	}
 	var resp submitProblemResponse
-	_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v, body = %s", err, rr.Body.String())
+	}
 	if resp.Status != "deduplicated" {
 		t.Errorf("status = %q, want deduplicated", resp.Status)
+	}
+	if resp.Reason != "answered" {
+		t.Errorf("reason = %q, want answered (corpus dedup arm)", resp.Reason)
+	}
+	// The corpus arm has no queue entry: submission_id must be empty —
+	// never a manufactured queue id — so a scripted consumer knows there
+	// is nothing to poll on GET /api/v1/queue.
+	if resp.SubmissionID != "" {
+		t.Errorf("submission_id = %q, want empty on the answered arm (no queue entry exists)", resp.SubmissionID)
+	}
+	// The response must carry a resolvable next step: the discover
+	// endpoint for the same problem class.
+	if !strings.Contains(resp.NextAction, "/api/v1/problems/discover") {
+		t.Errorf("next_action = %q, want a pointer to POST /api/v1/problems/discover", resp.NextAction)
+	}
+	if resp.ProblemClass != "docker-perms" {
+		t.Errorf("problem_class = %q, want docker-perms (discover lookup key)", resp.ProblemClass)
 	}
 	if resp.ExistingSolutions < 1 {
 		t.Errorf("existing_solutions = %d, want >= 1", resp.ExistingSolutions)

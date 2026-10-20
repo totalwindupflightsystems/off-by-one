@@ -63,6 +63,17 @@ type submitProblemResponse struct {
 	// tool persistence) emits both keys as [].
 	ResolvedTools []string `json:"resolved_tools"`
 	MissingTools  []string `json:"missing_tools"`
+	// Reason distinguishes the two 409 dedup arms for scripted consumers
+	// (DF-OFF-BY-ONE-37-R2): "queued" when the tuple already has a queue
+	// entry (SubmissionID is set and pollable), "answered" when a verified
+	// corpus answer covers it (SubmissionID is empty — no queue entry
+	// exists, so there is nothing to poll). Omitted on non-dedup
+	// responses.
+	Reason string `json:"reason,omitempty"`
+	// NextAction is the machine-readable next step on the "answered"
+	// dedup arm: discover the existing corpus answer for the returned
+	// ProblemClass. Empty on every other arm.
+	NextAction string `json:"next_action,omitempty"`
 }
 
 // discoverRequest mirrors DiscoverRequest.
@@ -345,6 +356,9 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 				MissingTools:  []string{},
 			}
 			if existing != nil {
+				// Queue arm: the tuple is already pending/in progress.
+				// Reason "queued" + a pollable SubmissionID.
+				resp.Reason = "queued"
 				resp.SubmissionID = existing.ID
 				resp.Position = s.queuePosition(r, existing)
 				// Echo the classification recorded when the ORIGINAL
@@ -353,6 +367,14 @@ func (s *Server) handleSubmitProblem(w http.ResponseWriter, r *http.Request) {
 				// truthful one for the solve that will (or did) run.
 				resp.ResolvedTools = nonNilStrings(existing.ResolvedTools)
 				resp.MissingTools = nonNilStrings(existing.MissingTools)
+			} else {
+				// Corpus arm (DF-OFF-BY-ONE-37-R2): a verified answer
+				// already covers this tuple. No queue entry exists, so
+				// SubmissionID stays empty (never manufactured) and the
+				// consumer's next step is the discover endpoint for the
+				// same problem class.
+				resp.Reason = "answered"
+				resp.NextAction = "POST /api/v1/problems/discover"
 			}
 			resp.ExistingSolutions = s.countAnswersFor(r, slug)
 			resp.RelatedProblems = nonNilStrings(s.relatedFor(r, slug))

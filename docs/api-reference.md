@@ -70,7 +70,9 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
 
 **Status codes:** `200` (queued/duplicate), `400` (invalid submission), `409` (duplicate — same tuple already queued or answered), `500` (internal error), `503` (`solver_unavailable` — no solver wired up; see below).
 
-**Duplicate (`409`) response.** A submission is deduplicated on `(problem_class, environment, language, version)`. When that tuple is already queued/in progress or already has a verified answer, no second job is created: the response carries `"status": "deduplicated"` and the **existing** `submission_id` (the same id the original submit returned) with its queue `position`:
+**Duplicate (`409`) response.** A submission is deduplicated on `(problem_class, environment, language, version)`. No second job is created; the response carries `"status": "deduplicated"` and a `reason` field that distinguishes the two dedup arms so a scripted consumer can act without reading source.
+
+**Queue arm — `reason: "queued"`.** The tuple is already queued or in progress. The response carries the **existing** `submission_id` (the same id the original submit returned) with its queue `position`; poll `GET /api/v1/queue/{submission_id}`:
 
 ```json
 {
@@ -78,9 +80,26 @@ Submit a problem to the pre-solve queue. The request body is JSON; `multipart/fo
   "problem_class": "so-nil-pointer-deref",
   "status": "deduplicated",
   "position": 2,
-  "existing_solutions": 1
+  "existing_solutions": 1,
+  "reason": "queued"
 }
 ```
+
+**Answered arm — `reason: "answered"`.** A verified answer in the corpus already covers the tuple. There is **no queue entry**, so `submission_id` is empty and **not pollable** (no id is manufactured for a corpus answer); `position` is `0`. The resolvable next step is `next_action` — call `POST /api/v1/problems/discover` with the returned `problem_class` (and the same environment/language/version tuple) to retrieve the existing answer:
+
+```json
+{
+  "submission_id": "",
+  "problem_class": "so-nil-pointer-deref",
+  "status": "deduplicated",
+  "position": 0,
+  "existing_solutions": 1,
+  "reason": "answered",
+  "next_action": "POST /api/v1/problems/discover"
+}
+```
+
+`reason` and `next_action` are omitted on non-dedup (`200`) responses.
 
 **Invalid `cadence` (`400`).** An unknown `cadence` is rejected with a message that lists the accepted values and echoes the rejected one:
 

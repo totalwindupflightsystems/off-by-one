@@ -348,13 +348,16 @@ Deduplication does **not** span different environments, languages, or versions �
 
 ### Duplicate response
 
-When a duplicate is detected, the API returns HTTP `409 Conflict` with a body like:
+When a duplicate is detected, the API returns HTTP `409 Conflict`. The body carries a `reason` field that tells a scripted consumer which dedup arm fired, without reading source.
+
+Queue arm — the tuple is already queued or in progress (`reason: "queued"`); `submission_id` is the existing entry's id and is pollable on `GET /api/v1/queue/{submission_id}`:
 
 ```json
 {
   "submission_id": "sub_...",
   "problem_class": "so-nil-pointer-deref",
   "status": "deduplicated",
+  "reason": "queued",
   "position": 1,
   "estimated_time": "30s",
   "existing_solutions": 3,
@@ -362,7 +365,22 @@ When a duplicate is detected, the API returns HTTP `409 Conflict` with a body li
 }
 ```
 
-`existing_solutions` is the count of answers already cached for that problem class. The client should call `POST /api/v1/problems/discover` to retrieve the existing answer instead of waiting for the queue.
+Answered arm — a verified corpus answer already covers the tuple (`reason: "answered"`). `submission_id` is empty and **not pollable** (no queue entry exists and no id is manufactured); instead, `next_action` points at the discover endpoint:
+
+```json
+{
+  "submission_id": "",
+  "problem_class": "so-nil-pointer-deref",
+  "status": "deduplicated",
+  "reason": "answered",
+  "next_action": "POST /api/v1/problems/discover",
+  "position": 0,
+  "existing_solutions": 3,
+  "related_problems": ["so-nil-pointer-deref"]
+}
+```
+
+`existing_solutions` is the count of answers already cached for that problem class. On the answered arm the client should call `POST /api/v1/problems/discover` with the returned `problem_class` and the same environment/language/version tuple to retrieve the existing answer instead of waiting for the queue.
 
 ### Queue ordering
 
