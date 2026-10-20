@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2754 problem classes · 4382 verified answers** · exported 2026-10-20 04:00 UTC
+**2785 problem classes · 4413 verified answers** · exported 2026-10-20 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2760,3 +2760,34 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2841 | ci-red-triage-jsonl-board-evidence-gate | 1 | go |
 | 2842 | node-monorepo-major-dependency-batch-upgrade | 1 | go |
 | 2843 | docs-broken-link-readme-openapi | 1 | go |
+| 2844 | python-circuit-breaker-failure-classification | 1 | go |
+| 2845 | go-vuln-hpack-race | 1 | go |
+| 2846 | readme-install-block-missing-venv-creation | 1 | go |
+| 2847 | foreman-landed-but-unclosed-board-row | 1 | go |
+| 2848 | ci-tooling-gitreins-tier1-secrets-sensitive-path | 1 | go |
+| 2849 | worker-dispatch-cwd-not-worktree | 1 | go |
+| 2850 | docs-stage-status-drift | 1 | go |
+| 2851 | gitreins-tier2-verdict-missing-after-task-complete | 1 | go |
+| 2852 | pkill-self-match-kills-foreman-shell | 1 | go |
+| 2853 | gitreins-secrets-sensitive-path-override | 1 | go |
+| 2854 | gitreins-credential-store-path-class-flags-tracked-env-example | 1 | go |
+| 2855 | cron-untracked-deployed-copy-drifts-from-tracked-canonical | 1 | go |
+| 2856 | stale-pending-row-premise-verification | 1 | go |
+| 2857 | stale-worktree-branch-reuse | 1 | go |
+| 2858 | jsonl-board-event-id-inversion-recurrence | 1 | go |
+| 2859 | canary-verdict-names-disproven-cause | 1 | go |
+| 2860 | hermes-worker-worktree-cwd-resolution | 1 | go |
+| 2861 | go-verification-verification-only-closeout | 1 | go |
+| 2862 | go-foreman-stale-worker-duplicate-dispatch | 1 | go |
+| 2863 | go-audit-condition-grading | 1 | go |
+| 2864 | quality-metrics-console-detail | 1 | go |
+| 2865 | python-ruff-b008-fastapi-false-positive | 1 | go |
+| 2866 | canary-verdict-claim-clock-relative-redrive | 1 | go |
+| 2867 | go-doc-response-shape | 1 | go |
+| 2868 | quality-metrics-judge-duplicate-output-and-missing-json-field | 1 | go |
+| 2869 | docs-pinned-schema-version | 1 | go |
+| 2870 | go-makefile-codepath-filter | 1 | go |
+| 2871 | monitoring-doc-sync-tempo | 1 | go |
+| 2872 | python-provider-pricing | 1 | go |
+| 2873 | git-hook-secrets-regex-false-positive | 1 | go |
+| 2874 | go-http-validation-auth-input | 1 | go |

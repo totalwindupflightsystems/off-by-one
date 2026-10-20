@@ -1,0 +1,28 @@
+{
+  "class_id": 2874,
+  "title": "go-http-validation-auth-input",
+  "description": "go-http-validation-auth-input",
+  "created_at": "2026-10-20 09:39:18",
+  "answers": [
+    {
+      "answer_id": 4605,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I diagnosed the issue, built a faithful standalone Go reproduction of the shim, and **verified the fix in both directions** — the three regression tests fail on the pre-fix code and pass with the whitelist applied. The full solution is saved at `~/solution.md`.\n\n---\n\n# Fixing Phantom Provider Existence on `PUT /auth/{providerID}`\n\n**Problem class:** `go-http-validation-auth-input`\n**Files:** `internal/shim/opencode/server.go`, `internal/shim/opencode/server_test.go`\n**Affected endpoints:** `PUT /auth/{providerID}`, `GET /api/provider/{id}`, `GET /provider/auth`\n\n## 1. Root cause\n\n`PUT /auth/{providerID}` decoded the body into an untyped `map[string]any` and persisted **every JSON key verbatim** as `system_settings` rows: `auth.<providerID>.<arbitrary-key>`.\n\nProvider existence is derived *exclusively* from those rows by `storedProviderAuthMethods()`, which scans for the `auth.` prefix and treats the first path segment as the provider ID. So `GET /api/provider/{id}` returns `404` only when the ID is absent from that map, and `GET /provider/auth` serializes it directly.\n\nTherefore a single request with **any** key — typo, client extension, or malicious field — creates `auth.*` rows and makes a provider that was never configured appear to exist. The OpenCode contract only permits 5 fields (`type`, `key`, `refresh`, `access`, `expires`). Secondary defect: rows were written inside the decode loop, allowing partial writes.\n\n## 2. Exact fix\n\n**2a. Add the whitelist in `internal/shim/opencode/server.go`:**\n\n```go\n// api -> type, key ; oauth -> type, refresh, access, expires\nvar authAllowedFields = map[string]struct{}{\n\t\"type\": {}, \"key\": {}, \"refresh\": {}, \"access\": {}, \"expires\": {},\n}\n```\n\n**2b. Validate before any persistence (fail closed + atomic):**\n\n```go\nvar raw map[string]any\nif err := json.NewDecoder(r.Body).Decode(&raw); err != nil {\n\thttp.Error(w, \"invalid JSON body\", http.StatusBadRequest)\n\treturn\n}\n\n// FIX: validate every key against the whitelist before persisting anything.\nfor field := range raw {\n\tif _, ok := authAllowedFields[field]; !ok {\n\t\thttp.Error(w, \"unknown auth field: \"+field, http.StatusBadRequest)\n\t\treturn\n\t}\n}\n\nfor field, value := range raw {\n\tencoded, _ := json.Marshal(value)\n\ts.store.Set(\"auth.\"+providerID+\".\"+field, string(encoded))\n}\nw.WriteHeader(http.StatusOK)\n```\n\nValidates everything *before* the first `store.Set`, so a rejected request writes nothing.\n\n## 3. Verification\n\nThree regression tests in `server_test.go`:\n1. `TestSetAuthRejectsUnknownField` — unknown key → `400`, **0 rows** persisted.\n2. `TestRejectedAuthDoesNotCreatePhantomProvider` — rejected PUT → `GET /api/provider/ghost` is `404`.\n3. `TestProviderAuthHasNoPhantomEntry` — rejected PUT → `GET /provider/auth` has no `ghost` entry.\n\nPlus a positive control (`TestSetAuthAcceptsValidCredential`) ensuring valid `api` creds still persist.\n\n```bash\ngo test ./internal/shim/opencode/ -run \\\n  'TestSetAuthRejectsUnknownField|TestRejectedAuthDoesNotCreatePhantomProvider|TestProviderAuthHasNoPhantomEntry|TestSetAuthAcceptsValidCredential' -v\n```\n\n**Observed — fix applied (PASS):**\n```\n--- PASS: TestSetAuthRejectsUnknownField (0.00s)\n--- PASS: TestRejectedAuthDoesNotCreatePhantomProvider (0.00s)\n--- PASS: TestProviderAuthHasNoPhantomEntry (0.00s)\n--- PASS: TestSetAuthAcceptsValidCredential (0.00s)\nPASS\nok      authrepro       0.003s\n```\n\n**Observed — fix reverted (FAILs prove the root cause):**\n```\n--- FAIL: TestSetAuthRejectsUnknownField (0.00s)\n    server_test.go:27: status = 200, want 400\n--- FAIL: TestRejectedAuthDoesNotCreatePhantomProvider (0.00s)\n    server_test.go:48: GET /api/provider/ghost status = 200, want 404\n--- FAIL: TestProviderAuthHasNoPhantomEntry (0.00s)\n    server_test.go:70: GET /provider/auth leaked phantom provider: map[ghost:[extra key type]]\nFAIL\nFAIL    authrepro       0.003s\n```\n\nThe pre-fix output is direct proof: `PUT /auth/ghost` returned `200`, `GET /api/provider/ghost` returned `200` instead of `404`, and `GET /provider/auth` contained a `ghost` entry built purely from client-supplied keys.\n\nA runnable reproduction lives at `/tmp/authrepro` (fixed) and `/tmp/authrepro-buggy` (fix removed).\n",
+      "evidence": "# Evidence\n- Problem class: go-http-validation-auth-input\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-20T09:39:18.655Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "PUT /auth/{providerID} in consensus opencode shim stored any JSON keys verbatim as system_settings rows, which caused phantom provider existence on GET /api/provider/{id} and GET /provider/auth because storedProviderAuthMethods derived provider existence purely from auth.* rows. Fix: added authAllowedFields whitelist (5 fields) in server.go, validated input before store, added 3 regression tests. Key files: internal/shim/opencode/server.go, server_test.go",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-http-validation-auth-input",
+        "provider": "openrouter",
+        "solved_at": "2026-10-20T09:39:18.655Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-20 09:39:18"
+    }
+  ]
+}
