@@ -38,9 +38,31 @@ python3 scripts/export-answers.py >/tmp/ob1_export.log 2>&1 || {
 
 if ! git diff --quiet data/ site/ scripts/export-answers.py scripts/generate-static-site.py README.md; then
   git add data/ site/ scripts/export-answers.py scripts/generate-static-site.py README.md
+  # FAIL LOUD (OB-DIST-001). The previous form was `git commit ... || true`, so a
+  # rejected commit (hook, index lock, killed process) degraded the whole
+  # distribution into a silent no-op: the script still printed "Answer corpus
+  # synced to GitHub" while showing the STALE head, the push answered
+  # "Everything up-to-date", and the cron run reported success — the corpus never
+  # reached GitHub and the only trace was a dirty index. Observed 2026-10-19 17:00
+  # local (guard PASSed, no commit object, reflog unchanged, run
+  # 2026-10-19_17-00-49.md claimed success). Every step below is now verified.
+  PRE_HEAD="$(git rev-parse HEAD)"
+  set +e
   git commit -q -m "data: sync answer corpus — $(git diff --cached --numstat | wc -l) files changed
 
-Auto-exported from SQLite by export-answers.py (cron)." || true
+Auto-exported from SQLite by export-answers.py (cron)."
+  COMMIT_RC=$?
+  set -e
+  if [ "$COMMIT_RC" -ne 0 ]; then
+    echo "❌ corpus commit FAILED (rc=$COMMIT_RC) — nothing was distributed; working tree still dirty:"
+    git status --short | head -20
+    exit 1
+  fi
+  NEW_HEAD="$(git rev-parse HEAD)"
+  if [ "$NEW_HEAD" = "$PRE_HEAD" ]; then
+    echo "❌ corpus commit did not advance HEAD (${PRE_HEAD}) — refusing to report success"
+    exit 1
+  fi
   if ! git push -q origin master 2>/tmp/ob1_push.log; then
     sleep 5
     git push -q origin master 2>>/tmp/ob1_push.log || {
@@ -49,8 +71,17 @@ Auto-exported from SQLite by export-answers.py (cron)." || true
       exit 1
     }
   fi
+  # A push that answered "Everything up-to-date" (or any silent no-op) must never
+  # be reported as distribution: verify the REMOTE carries the commit we just made.
+  REMOTE_HEAD="$(git ls-remote origin refs/heads/master 2>/dev/null | awk '{print $1}')"
+  if [ "$REMOTE_HEAD" != "$NEW_HEAD" ]; then
+    if ! git fetch -q origin master 2>/dev/null || ! git merge-base --is-ancestor "$NEW_HEAD" origin/master; then
+      echo "❌ push did not land: origin/master=${REMOTE_HEAD:-<unreachable>} does not contain ${NEW_HEAD}"
+      exit 1
+    fi
+  fi
   echo "📦 Answer corpus synced to GitHub:"
-  git show --stat --oneline HEAD | head -8
+  git show --stat --oneline "$NEW_HEAD" | head -8
   echo ""
 fi
 
