@@ -43,10 +43,11 @@ serving `:8766`**, which no gate in the repo checks.
 | `DF-OFF-BY-ONE-53` | P2 | `GET /api/v1/taxonomy` still truncates at 1000 classes (9.8 MB payload, 2785-class lab, no total/notice) and the Explore UI renders 1000 rows under "Browse the full **problem-class tree**". The 2026-09-25 finding (logged as `DF-OFF-BY-ONE-21`) has never existed on the board — 0 rows. |
 | `DF-OFF-BY-ONE-54` | P2 | The Submit form's fixed env vocabulary (Any/dev/staging/prod/ci/local) cannot express the corpus/docs values (`docker`, `linux`), so the documented "already answered → 409" dedup is unreachable from the SPA: the UI queues a fresh solve of an answered class while telling the user "1 existing solution found." |
 | `QA-OFF-BY-ONE-20-R2` | P3 | The fresh-system battery still grades `ui-probe` **N/A "no web UI detected"** for a build that serves an SPA this run drove end-to-end in a browser. |
+| `DF-OFF-BY-ONE-55` | P3 | The **board-lint pre-commit hook is inert in this checkout**: `git config core.hooksPath = /home/kara/.hermes/hooks` and `git rev-parse --git-path hooks/pre-commit` resolves there, so the `.git/hooks/pre-commit` that `boardctl install` wrote (the duplicate-id / dangling-dep gate the board's own `BT-053-ROLLOUT` row reports as installed) never runs. Found while landing this run's own commit. Fix owner: boardctl's install path. |
 | `INSTALL-OFF-BY-ONE-1` | P3 | Install leg PASS at HEAD `fda8b3a2` (details below). |
 
-All seven rows were appended with `board_next_id.py`-minted ids and the board still validates
-(`boardctl validate` → `RESULT: OK`, 279 warnings, 0 errors).
+All eight rows were appended with `board_next_id.py`-minted ids and the board still validates
+(`boardctl validate` → `RESULT: OK`, 280 warnings, 0 errors).
 
 ## Re-proofs on this run's HEAD (fixed regressions re-run, not just claimed)
 
@@ -153,7 +154,7 @@ the install leg ran on an ephemeral bunker agent with existing access and was de
 
 | | |
 |---|---|
-| row | `DF-OFF-BY-ONE-29-R2`, `DF-OFF-BY-ONE-52`, `DF-OFF-BY-ONE-37-R2`, `DF-OFF-BY-ONE-53`, `DF-OFF-BY-ONE-54`, `QA-OFF-BY-ONE-20-R2`, `INSTALL-OFF-BY-ONE-1` |
+| row | `DF-OFF-BY-ONE-29-R2`, `DF-OFF-BY-ONE-52`, `DF-OFF-BY-ONE-37-R2`, `DF-OFF-BY-ONE-53`, `DF-OFF-BY-ONE-54`, `QA-OFF-BY-ONE-20-R2`, `DF-OFF-BY-ONE-55`, `INSTALL-OFF-BY-ONE-1` |
 | spec | `deploy/off-by-one.service`, `docs/api-reference.md` (submit/dedup), `README.md` (taxonomy/catalog) |
 | procedure | manual dogfood run 19 (commands inline above); install leg via `bunker-qa.sh` |
 | evidence | `docs/dogfood/2026-10-20-deploy-truth-integration.md`, `/tmp/bunker-qa-evidence-20261020T105356Z-822880.jsonl`, `docs/dogfood/diagnostics.md` §20 |
