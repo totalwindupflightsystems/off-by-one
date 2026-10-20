@@ -1,0 +1,28 @@
+{
+  "class_id": 2890,
+  "title": "go-daemon-ttl-flat-ticker-quantization",
+  "description": "go-daemon-ttl-flat-ticker-quantization",
+  "created_at": "2026-10-20 16:37:10",
+  "answers": [
+    {
+      "answer_id": 4621,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Done. The verified solution is at **`~/ttl-watchdog-fix/SOLUTION.md`**, with a runnable reproducer (`main.go`), regression tests (`main_test.go`), and `go.mod`.\n\n## Summary\n\n**Root cause.** The daemon fuses two jobs into one `time.NewTicker(HeartbeatInterval)` branch: health rendering *and* `revertExpired()`. TTL expiry is therefore quantized to the next heartbeat edge:\n\n```\nmeasured = ceil((p + ttl)/H)·H − p  ∈  [ttl, ttl + H)\n```\n\nWith `ttl=10s`, `H=5s`, a tick landing `p≈4.21s` after arming yields the observed `14.21s`. The sweep can never fire before `ttl`, so the early `9.27s` run is a **different leg** — owner liveness (`owner_detached`), not the ticker. The negative `ttl_remaining` while armed is the same fused loop letting the renderer act as state machine.\n\n**Exact fix.** Keep the heartbeat for health rendering; wake the sweep with a `time.Timer` reset to `NextExpiry()` on every arm/sweep event, and attribute the detached-owner path separately.\n\n**Verified** (all 4 tests pass):\n- buggy sweep measured in `[209ms, 298ms]` for `ttl=200ms`, `H=100ms` — inside `[ttl, ttl+H)`.\n- fixed sweep measured `200–201ms` for every ticker phase (no quantization).\n- detached-owner reverts early at `187ms` with `reason=owner_detached`, while `RevertExpired()` refuses unexpired holds.\n- render still shows `armed=true ttl_remaining=-16ms` during the gap, confirming the symptom.\n\n```\nTestBuggySweepIsQuantizedToHeartbeat        PASS\nTestFixedSweepIsNotQuantized                PASS\nTestDetachedOwnerLegIsEarlyAndAttributed    PASS\nTestRenderShowsArmedWithNegativeTTLDuringGap PASS\n```\n\nKey fix:\n\n```go\nrearm := func() {\n    next, ok := w.NextExpiry()\n    if !timer.Stop() { select { case <-timer.C: default: } }\n    if !ok { return }\n    d := time.Until(next); if d < 0 { d = 0 }\n    timer.Reset(d)\n}\n// select { case <-hb.C: /* render only */\n//          case <-timer.C: w.RevertExpired(); rearm()\n//          case <-wake:    rearm() }\n```\n\nThe markdown also includes the diagnosis recipe (`grep` for `HeartbeatInterval`/`revertExpired`), the production-number mapping table, and acceptance criteria.\n",
+      "evidence": "# Evidence\n- Problem class: go-daemon-ttl-flat-ticker-quantization\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-20T16:37:10.789Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A TTL-based watchdog whose sweep runs on a FLAT heartbeat ticker enforces containment up to one full interval LATE (measured: declared 10s TTL -> revert at 9.27/14.21/14.22/14.21/14.21s with a 5s heartbeat; the expired hold keeps rendering armed with ttl_remaining=-2s). Diagnosis recipe: measure declared-vs-measured revert-at over >=5 runs, then grep the daemon loop for the ticker constant (here const HeartbeatInterval = 5*time.Second + time.NewTicker(...) calling revertExpired()); the early runs are NOT explained by the ticker and must be attributed separately (detached-owner leg). Fix: keep the heartbeat for health rendering but wake the sweep with a timer set to the nearest pending expiry.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-daemon-ttl-flat-ticker-quantization",
+        "provider": "openrouter",
+        "solved_at": "2026-10-20T16:37:10.793Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-20 16:37:10"
+    }
+  ]
+}

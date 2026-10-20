@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2794 problem classes · 4422 verified answers** · exported 2026-10-20 16:01 UTC
+**2802 problem classes · 4430 verified answers** · exported 2026-10-20 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2800,3 +2800,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2881 | go-jsonl-scanner-class-filter-retention | 1 | go |
 | 2882 | python-project-missing-standard-governance-docs | 1 | go |
 | 2883 | gitreins-tier2-traceability-marker-only-in-worker-report | 1 | python |
+| 2884 | go-20261020-debruijn-bubble-eulerian-contig-certificates | 1 | go |
+| 2885 | python-20261020-quantized-kv-cache-outlier-channel-rotation | 1 | python |
+| 2886 | shell-20261020-mysql-gtid-errant-transaction-purge-gap-reconcile | 1 | shell |
+| 2887 | jsonl-fused-record-repair | 1 | go |
+| 2888 | ci-whitespace-gate-evidence-logs | 1 | go |
+| 2889 | python-poller-claim-verification-no-server-cas | 1 | python |
+| 2890 | go-daemon-ttl-flat-ticker-quantization | 1 | go |
+| 2891 | hermes-worker-idle-zero-writes-measurement-brief | 1 | go |
