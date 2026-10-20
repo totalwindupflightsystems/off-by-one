@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation">
+<meta property="og:title" content="bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation — Off-By-One">
+<meta property="og:description" content="Problem class: bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2772-bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>Problem class: bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2772-bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is complete and verified. Artifacts are in <code>~/btrfs-resume/</code> (<code>SOLUTION.md</code>, <code>reconcile.sh</code>, <code>gen_fixture.py</code>, <code>test.sh</code>, <code>fuzz.py</code>). Here is the self-contained solution:</p>
+<hr />
+<h1>Bounded-Memory Resume-Point Reconciliation for Fragmented btrfs Send Streams</h1>
+<p><em>Problem class:</em> <code>bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation</code></p>
+<p><em>Deliverable:</em> a fail-closed verifier that turns corrupted/duplicated/truncated send-stream fragments plus receiver checkpoints into the <strong>maximal safe resume offset</strong>, and that provably never acknowledges a byte the receiver has not durably applied.</p>
+<hr />
+<h2>1. Root-cause analysis</h2>
+<h3>1.1 The real defect: a send stream is not a resumable log</h3>
+<p>A <code>btrfs send</code> stream is a bare sequence of length-prefixed, CRC'd commands (<code>SUBVOL</code>, <code>SNAPSHOT</code>, <code>MKFILE</code>, <code>RENAME</code>, <code>WRITE</code>, <code>CLONE</code>, …). It carries:</p>
+<ul>
+<li><strong>no logical sequence number</strong> (so a receiver cannot tell a replay from a new record),</li>
+<li><strong>no generation counter</strong> (so wrap-around is invisible),</li>
+<li><strong>no per-record durability commitment</strong> (so "bytes received" ≠ "bytes applied"),</li>
+<li><strong>no signed parent-root transition</strong> (so a <code>SNAPSHOT</code> command can be forged).</li>
+</ul>
+<p>Consequently, the naive resume point — <em>the highest byte offset parsed so far</em>, or <em>the highest sequence number seen</em> — is unsafe. Four distinct failure modes combine:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Failure mode</th>
+<th>Naive behaviour</th>
+<th>Consequence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>Committed vs. replayable</strong></td>
+<td>Ack the last parsed byte</td>
+<td>Acking a metadata command (<code>RENAME</code>, <code>UNLINK</code>, <code>SNAPSHOT</code>) that was never fsynced duplicates or destroys data on replay</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Forged parent-root transition</strong></td>
+<td>Trust the <code>SNAPSHOT</code>/<code>SUBVOL</code> root in the stream</td>
+<td>Receiver grafts a subtree onto an attacker-chosen root</td>
+</tr>
+<tr>
+<td>3</td>
+<td><strong>Sequence-number wrap</strong></td>
+<td><code>seq &gt; last_seq</code> comparison</td>
+<td>After <code>0xFFFFFFFF → 0x0</code>, every new record looks "old" and is discarded, or an old replay looks "new"</td>
+</tr>
+<tr>
+<td>4</td>
+<td><strong>Duplicate extents</strong></td>
+<td>Re-apply every <code>WRITE</code>/<code>CLONE</code></td>
+<td>Unbounded work and unbounded memory if every extent is remembered; unsafe if duplicates are <em>dropped</em> from metadata order</td>
+</tr>
+</tbody>
+</table>
+<p>The task is therefore <strong>not</strong> "find the last record". It is "find the highest point at which the receiver can <em>prove</em> a metadata-consistent, fsynced state, given only untrusted fragments".</p>
+<h3>1.2 What must be true before an offset may be acknowledged</h3>
+<p>An offset <code>O</code> is safe iff all of the following hold:</p>
+<ol>
+<li>the record stream <code>[0, O)</code> chains byte-for-byte to a checkpoint the <strong>trusted receiver</strong> wrote;</li>
+<li>that checkpoint was marked <code>durable</code> only after <code>fsync</code> of data + metadata + the checkpoint itself;</li>
+<li>every <strong>metadata</strong> record in <code>[0, O)</code> is covered by a <em>barrier</em> (or no metadata occurred since the last barrier, so the remainder is only <strong>replayable data</strong>).</li>
+</ol>
+<p>The fix realises exactly these three conditions with constant memory.</p>
+<hr />
+<h2>2. Reference model</h2>
+<p>The receiver adapter produces a textual <strong>manifest</strong> (one event per line) that is already recovered in stream order by the fragment reassembler:</p>
+<pre><code>ANCHOR off=&lt;u64&gt; gen=&lt;u32&gt; seq=&lt;u32&gt; chain=&lt;hex&gt; meta_root=&lt;hex&gt;
+REC    off=&lt;u64&gt; seq=&lt;u32&gt; cmd=&lt;OP&gt; kind=&lt;meta|data&gt; size=&lt;u32&gt; dgst=&lt;hex&gt; parent=&lt;hex|-&gt;
+CKPT   off=&lt;u64&gt; seq=&lt;u32&gt; chain=&lt;hex&gt; meta_root=&lt;hex&gt; parent=&lt;hex|-&gt; barrier=&lt;0|1&gt; durable=&lt;0|1&gt;
+</code></pre>
+<p>Hashes (SHA-256, prefix-free encoding):</p>
+<pre><code>chain_i      = H(&quot;C|&quot; || chain_{i-1} || gen || seq || cmd || dgst || parent)
+meta_root_i  = H(&quot;M|&quot; || meta_{i-1}  || gen || seq || cmd || dgst || parent)   # every meta record
+root         = H(&quot;R|subvol|&quot; || dgst)                     # SUBVOL
+root         = H(&quot;R|snap|&quot;   || root || dgst)             # SNAPSHOT, parent must == root
+</code></pre>
+<ul>
+<li><code>kind=meta</code> — anything that is <strong>not</strong> a <code>WRITE</code>/<code>CLONE</code> (including <code>TRUNCATE</code>); it is non-idempotent, so it must be covered by a barrier.</li>
+<li><code>kind=data</code> — <code>WRITE</code>/<code>CLONE</code>; idempotent, so it may be replayed after resume.</li>
+<li><code>barrier=1</code> — the receiver has applied <strong>and fsynced</strong> every metadata record up to <code>seq</code>. <code>barrier=0</code> is a data-only checkpoint.</li>
+<li><code>durable=1</code> — the checkpoint itself is on stable storage.</li>
+</ul>
+<p><code>ANCHOR</code> is the last resume point already known-good (or the empty stream at <code>off=0</code>). It is the only trusted starting state.</p>
+<hr />
+<h2>3. The exact fix</h2>
+<h3>3.1 <code>reconcile.sh</code> — bounded-memory, fail-closed reconciler</h3>
+<p>Save as <code>reconcile.sh</code>, <code>chmod +x</code>, feed the manifest on stdin. Exit <code>0</code> means a resume offset was accepted; <code>3</code> means "no advance, stay at the anchor" (fail-closed); <code>64</code> means the manifest itself is untrustworthy.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# reconcile.sh -- bounded-memory, fail-closed reconciliation of a fragmented
+# btrfs send stream against trusted receiver checkpoints.
+#
+# Manifest grammar (space separated key=value):
+#   ANCHOR off=&lt;u64&gt; gen=&lt;u32&gt; seq=&lt;u32&gt; chain=&lt;hex&gt; meta_root=&lt;hex&gt;
+#   REC    off=&lt;u64&gt; seq=&lt;u32&gt; cmd=&lt;OP&gt; kind=&lt;meta|data&gt; size=&lt;u32&gt; \
+#          dgst=&lt;hex&gt; parent=&lt;hex|-&gt; [root=&lt;hex&gt;]
+#   CKPT   off=&lt;u64&gt; seq=&lt;u32&gt; chain=&lt;hex&gt; meta_root=&lt;hex&gt; \
+#          parent=&lt;hex|-&gt; barrier=&lt;0|1&gt; durable=&lt;0|1&gt;
+#
+# Exit: 0 accepted a resume point, 3 no advance (fail-closed), 64 malformed.
+set -uo pipefail
+
+WINDOW=${WINDOW:-4096}          # bounded dedup ring, entries
+MAX_META=${MAX_META:-100000}    # bounded metadata-pending budget, entries
+
+die() { printf 'ERROR: %s\n' &quot;$*&quot; &gt;&amp;2; exit 64; }
+sha() { sha256sum | awk '{print $1}'; }
+
+# Exact hash definitions -- MUST match the receiver/adapter byte-for-byte.
+chain_next() { printf 'C|%s|%s|%s|%s|%s|%s' &quot;$1&quot; &quot;$2&quot; &quot;$3&quot; &quot;$4&quot; &quot;$5&quot; &quot;$6&quot; | sha; }
+meta_next()  { printf 'M|%s|%s|%s|%s|%s|%s' &quot;$1&quot; &quot;$2&quot; &quot;$3&quot; &quot;$4&quot; &quot;$5&quot; &quot;$6&quot; | sha; }
+root_next() {  # cmd dgst oldroot
+  if [ &quot;$1&quot; = SUBVOL ]; then printf 'R|subvol|%s' &quot;$2&quot; | sha
+  else                       printf 'R|snap|%s|%s' &quot;$3&quot; &quot;$2&quot; | sha; fi
+}
+
+getv() { local k=&quot;$1&quot;; shift; local t; for t in &quot;$@&quot;; do case &quot;$t&quot; in &quot;$k=&quot;*) printf '%s' &quot;${t#*=}&quot;; return 0;; esac; done; }
+
+# ---- trusted anchor state -------------------------------------------------
+anchor_off=0 anchor_gen=0 anchor_seq=0 anchor_chain=&quot;&quot; anchor_meta=&quot;&quot;
+# ---- live state -----------------------------------------------------------
+cur_gen=0 cur_seq=0 cur_chain=&quot;&quot; cur_meta=&quot;&quot; cur_root=&quot;&quot;
+off_exp=0 barrier_meta=&quot;&quot; have_barrier=0
+safe_off=0 safe_gen=0 safe_seq=0 safe_chain=&quot;&quot; safe_meta=&quot;&quot;
+seen_anchor=0 n_rec=0 n_meta=0 n_data=0 n_dup=0 n_forged=0 n_gap=0
+
+# Bounded dedup for replayable data: O(1) hash lookup + FIFO eviction ring.
+# Forgetting the oldest key is safe -- WRITE/CLONE are idempotent, so a false
+# negative only costs a redundant replay, never correctness.
+declare -A dmap=(); declare -a dq=(); dq_head=0
+is_data() { [ &quot;$1&quot; = WRITE ] || [ &quot;$1&quot; = CLONE ]; }
+remember_data() { # key ; returns 1 if already seen in window
+  local key=&quot;$1&quot; old
+  if [ -n &quot;${dmap[$key]:-}&quot; ]; then return 1; fi
+  if [ &quot;${#dq[@]}&quot; -ge &quot;$WINDOW&quot; ]; then
+    old=&quot;${dq[$dq_head]}&quot;; unset 'dmap[$old]'
+    dq[$dq_head]=&quot;$key&quot;; dq_head=$(( (dq_head+1) % WINDOW ))
+  else dq+=(&quot;$key&quot;); fi
+  dmap[$key]=1; return 0
+}
+
+while IFS= read -r line; do
+  [ -z &quot;$line&quot; ] &amp;&amp; continue
+  case &quot;$line&quot; in \#*) continue;; esac
+  read -r -a tok &lt;&lt;&lt; &quot;$line&quot;; type=&quot;${tok[0]}&quot;
+  case &quot;$type&quot; in
+    ANCHOR)
+      anchor_off=$(getv off &quot;${tok[@]}&quot;); anchor_gen=$(getv gen &quot;${tok[@]}&quot;)
+      anchor_seq=$(getv seq &quot;${tok[@]}&quot;); anchor_chain=$(getv chain &quot;${tok[@]}&quot;)
+      anchor_meta=$(getv meta_root &quot;${tok[@]}&quot;)
+      [ -n &quot;$anchor_chain&quot; ] &amp;&amp; [ -n &quot;$anchor_meta&quot; ] || die &quot;anchor missing chain/meta_root&quot;
+      cur_gen=$anchor_gen; cur_seq=$anchor_seq
+      cur_chain=$anchor_chain; cur_meta=$anchor_meta
+      barrier_meta=$anchor_meta; have_barrier=1; off_exp=$anchor_off
+      safe_off=$anchor_off; safe_gen=$anchor_gen; safe_seq=$anchor_seq
+      safe_chain=$anchor_chain; safe_meta=$anchor_meta; seen_anchor=1
+      ;;
+    REC)
+      [ &quot;$seen_anchor&quot; -eq 1 ] || die &quot;REC before ANCHOR&quot;
+      r_off=$(getv off &quot;${tok[@]}&quot;); r_seq=$(getv seq &quot;${tok[@]}&quot;)
+      r_cmd=$(getv cmd &quot;${tok[@]}&quot;); r_kind=$(getv kind &quot;${tok[@]}&quot;)
+      r_size=$(getv size &quot;${tok[@]}&quot;); r_dgst=$(getv dgst &quot;${tok[@]}&quot;)
+      r_parent=$(getv parent &quot;${tok[@]}&quot;); [ -z &quot;$r_parent&quot; ] &amp;&amp; r_parent=-
+      [ -n &quot;$r_off&quot; ] &amp;&amp; [ -n &quot;$r_seq&quot; ] &amp;&amp; [ -n &quot;$r_cmd&quot; ] &amp;&amp; [ -n &quot;$r_dgst&quot; ] \
+        || die &quot;malformed REC: $line&quot;
+      case &quot;$r_seq&quot; in ''|*[!0-9]*) die &quot;non-numeric seq: $line&quot;;; esac
+
+      # Bounded reorder window.  Generation is DERIVED, never trusted.
+      # RFC1982-style serial compare makes u32 wrap explicit.
+      expected=$(( (cur_seq + 1) &amp; 0xFFFFFFFF ))
+      if [ &quot;$r_seq&quot; = &quot;$cur_seq&quot; ]; then n_dup=$((n_dup+1)); continue; fi
+      if [ $(( ((expected - r_seq) &amp; 0xFFFFFFFF) &lt; 0x80000000 )) -eq 1 ] \
+         &amp;&amp; [ &quot;$r_seq&quot; != &quot;$expected&quot; ]; then
+        n_dup=$((n_dup+1)); continue     # serial-before expected -&gt; old replay
+      fi
+      if [ &quot;$r_seq&quot; != &quot;$expected&quot; ]; then n_gap=$((n_gap+1)); break; fi
+      case &quot;$r_off&quot; in ''|*[!0-9]*) die &quot;bad off: $line&quot;;; esac
+      if [ &quot;$r_off&quot; -ne &quot;$off_exp&quot; ]; then n_gap=$((n_gap+1)); break; fi
+
+      next_gen=$cur_gen
+      [ &quot;$r_seq&quot; = 4294967295 ] &amp;&amp; next_gen=$((cur_gen+1))   # full u32 wrap
+
+      # --- parent-root transition validation (anti-forgery) --------------
+      if [ &quot;$r_cmd&quot; = SUBVOL ]; then
+        [ &quot;$r_parent&quot; = &quot;-&quot; ] || { n_forged=$((n_forged+1)); break; }
+        cur_root=$(root_next SUBVOL &quot;$r_dgst&quot; &quot;$cur_root&quot;)
+      elif [ &quot;$r_cmd&quot; = SNAPSHOT ]; then
+        [ &quot;$cur_root&quot; = &quot;$r_parent&quot; ] || { n_forged=$((n_forged+1)); break; }
+        cur_root=$(root_next SNAPSHOT &quot;$r_dgst&quot; &quot;$cur_root&quot;)
+      fi
+
+      # --- chain / metadata journal --------------------------------------
+      cur_chain=$(chain_next &quot;$cur_chain&quot; &quot;$cur_gen&quot; &quot;$r_seq&quot; &quot;$r_cmd&quot; &quot;$r_dgst&quot; &quot;$r_parent&quot;)
+      if [ &quot;$r_kind&quot; = meta ]; then
+        n_meta=$((n_meta+1))
+        [ &quot;$n_meta&quot; -gt &quot;$MAX_META&quot; ] &amp;&amp; { n_gap=$((n_gap+1)); break; }
+        cur_meta=$(meta_next &quot;$cur_meta&quot; &quot;$cur_gen&quot; &quot;$r_seq&quot; &quot;$r_cmd&quot; &quot;$r_dgst&quot; &quot;$r_parent&quot;)
+      elif [ &quot;$r_kind&quot; = data ] &amp;&amp; is_data &quot;$r_cmd&quot;; then
+        n_data=$((n_data+1)); remember_data &quot;$r_dgst&quot; || n_dup=$((n_dup+1))
+      fi
+      cur_gen=$next_gen; cur_seq=$r_seq; off_exp=$(( r_off + r_size )); n_rec=$((n_rec+1))
+      ;;
+    CKPT)
+      [ &quot;$seen_anchor&quot; -eq 1 ] || die &quot;CKPT before ANCHOR&quot;
+      c_off=$(getv off &quot;${tok[@]}&quot;); c_seq=$(getv seq &quot;${tok[@]}&quot;)
+      c_chain=$(getv chain &quot;${tok[@]}&quot;); c_meta=$(getv meta_root &quot;${tok[@]}&quot;)
+      c_barrier=$(getv barrier &quot;${tok[@]}&quot;); c_durable=$(getv durable &quot;${tok[@]}&quot;)
+      [ -n &quot;$c_off&quot; ] &amp;&amp; [ -n &quot;$c_seq&quot; ] &amp;&amp; [ -n &quot;$c_chain&quot; ] &amp;&amp; [ -n &quot;$c_meta&quot; ] \
+        || die &quot;malformed CKPT: $line&quot;
+      case &quot;$c_seq&quot; in ''|*[!0-9]*) die &quot;non-numeric seq: $line&quot;;; esac
+
+      # Trust a checkpoint only if it reproduces the chained state we just
+      # walked AND the receiver fsynced it.
+      [ &quot;$c_durable&quot; = 1 ] || continue
+      [ &quot;$c_chain&quot; = &quot;$cur_chain&quot; ] &amp;&amp; [ &quot;$c_meta&quot; = &quot;$cur_meta&quot; ] || continue
+      [ &quot;$c_seq&quot; = &quot;$cur_seq&quot; ] || continue
+
+      eligible=0
+      if [ &quot;$c_barrier&quot; = 1 ]; then
+        eligible=1; barrier_meta=$cur_meta
+      elif [ &quot;$have_barrier&quot; -eq 1 ] &amp;&amp; [ &quot;$cur_meta&quot; = &quot;$barrier_meta&quot; ]; then
+        eligible=1     # data-only: no metadata since the last durable barrier
+      fi
+      if [ &quot;$eligible&quot; -eq 1 ] &amp;&amp; [ &quot;$c_off&quot; -gt &quot;$safe_off&quot; ]; then
+        safe_off=$c_off; safe_gen=$cur_gen; safe_seq=$cur_seq
+        safe_chain=$cur_chain; safe_meta=$cur_meta
+      fi
+      ;;
+    *) die &quot;unknown manifest line type: $type&quot; ;;
+  esac
+done
+
+[ &quot;$seen_anchor&quot; -eq 1 ] || die &quot;no ANCHOR line&quot;
+printf 'SAFE off=%s gen=%s seq=%s chain=%s meta_root=%s rec=%s meta=%s data=%s dup=%s forged=%s gap=%s\n' \
+  &quot;$safe_off&quot; &quot;$safe_gen&quot; &quot;$safe_seq&quot; &quot;$safe_chain&quot; &quot;$safe_meta&quot; \
+  &quot;$n_rec&quot; &quot;$n_meta&quot; &quot;$n_data&quot; &quot;$n_dup&quot; &quot;$n_forged&quot; &quot;$n_gap&quot;
+if [ &quot;$safe_off&quot; -gt &quot;$anchor_off&quot; ]; then exit 0; fi
+exit 3
+</code></pre>
+<h3>3.2 Producing the manifest from a real stream</h3>
+<p>The reconciler consumes a manifest; the adapter that produces it must be the <strong>only</strong> component allowed to touch raw bytes, and must obey this contract:</p>
+<ol>
+<li><strong>Inventory commands read-only.</strong> <code>btrfs receive --dump -f stream.bin &lt;mnt&gt;</code> (or an equivalent stream walker) enumerates <code>SUBVOL</code>/<code>SNAPSHOT</code>/<code>WRITE</code>/<code>CLONE</code>/… commands without applying them. Record <code>off</code> (running byte offset), <code>cmd</code>, and <code>kind</code>.</li>
+<li><strong>Content digest.</strong> For each data command store <code>dgst = SHA256(payload)</code> (or the kernel's extent digest); for metadata store <code>dgst = SHA256(command body)</code>. Never store the payload.</li>
+<li><strong>Sequence/generation.</strong> The adapter assigns <code>seq</code> from the receiver's monotonic log and <code>gen</code> from wrap detection; the verifier re-derives <code>gen</code> anyway, so a lying adapter cannot force a wrap.</li>
+<li><strong>Parent roots.</strong> On <code>SUBVOL</code>/<code>SNAPSHOT</code>, read the receiver's <code>Received UUID</code> / <code>Parent UUID</code> via <code>btrfs subvolume show</code>; do not trust the bytes in the stream as authoritative.</li>
+<li><strong>Checkpoints.</strong> After the receiver <code>fsync()</code>s data, metadata, and the checkpoint record, append <code>CKPT … durable=1</code>. Before that, <code>durable=0</code>.</li>
+</ol>
+<p>Resume itself is deliberately out of scope for the verifier: because a btrfs stream is not seekable, the safe action is to re-drive from the metadata-consistent parent snapshot, i.e. <code>btrfs send -p &lt;parent-ro&gt; &lt;ro&gt; | btrfs receive &lt;dest&gt;</code>. The verifier's job is to tell you <em>which parent</em> is provably durable and to forbid over-ack.</p>
+<hr />
+<h2>4. Why it is safe (proof sketch)</h2>
+<p>Let <code>V</code> be the reconciler, <code>O</code> its output offset.</p>
+<p><strong>Theorem 1 (no over-acknowledgement).</strong> <code>O</code> implies every stream byte in <code>[0, O)</code> was applied and fsynced by the receiver.</p>
+<p><em>Proof.</em> <code>safe_off</code> is assigned in exactly two places: the <code>ANCHOR</code> line and the <code>CKPT</code> branch (<code>safe_off=$c_off</code>). In the <code>CKPT</code> branch the guard requires <code>c_durable = 1</code>, <code>c_chain = cur_chain</code>, <code>c_meta = cur_meta</code>, <code>c_seq = cur_seq</code>, and an eligibility condition. By the receiver contract, <code>durable=1</code> is written only after <code>fsync</code> of data, metadata, and the checkpoint record, so at that instant <code>[0, c_off)</code> is on stable storage. Hence <code>O ∈ {anchor_off} ∪ {c_off : c durable}</code> and every such <code>c_off</code> is durable. No other code path mutates <code>safe_off</code>. ∎</p>
+<p><strong>Theorem 2 (forgery resistance).</strong> If the fragments contain a forged parent transition, no checkpoint after it is accepted.</p>
+<p><em>Proof.</em> A <code>SNAPSHOT</code> record is rejected locally unless <code>parent == cur_root</code>, where <code>cur_root</code> is the SHA-256-bound accumulator of all prior authenticated transitions. Even if an adversary constructs a transition that satisfies the local check, <code>chain</code> and <code>meta_root</code> both include <code>parent</code>, <code>cmd</code>, and <code>dgst</code> under SHA-256. To have a later <code>CKPT</code> accepted, the adversary must produce a <code>(chain, meta_root)</code> pair equal to the trusted checkpoint's value, i.e. a SHA-256 second preimage under a domain-separated prefix (<code>"C|"</code>/<code>"M|"</code>), which is infeasible. ∎</p>
+<p><strong>Theorem 3 (wrap safety).</strong> A <code>u32</code> sequence wrap cannot cause a stale record to advance the frontier.</p>
+<p><em>Proof.</em> The verifier never reads a wire generation. It computes <code>expected = (cur_seq + 1) mod 2^32</code> and advances <code>gen</code> exactly when <code>seq = 0xFFFFFFFF</code>. <code>serial_before(a,b) = ((b-a) mod 2^32) &lt; 2^31</code> classifies an old record as serial-before <code>expected</code>, so it is counted as a duplicate and ignored; only <code>seq == expected</code> advances. A checkpoint with a stale <code>seq</code>, <code>chain</code>, or <code>meta_root</code> fails the equality guard. ∎</p>
+<p><strong>Theorem 4 (bounded memory).</strong> Resident memory is independent of stream length.</p>
+<p><em>Proof.</em> Live state is a fixed set of scalars plus the dedup map/ring, whose size is capped at <code>WINDOW</code>; the metadata budget is capped at <code>MAX_META</code>, and exceeding it is fail-closed (<code>break</code>). No command payload, record, or history is retained. ∎</p>
+<p><strong>Maximality.</strong> <code>O</code> is the highest eligible checkpoint the fragments can reach. The walk stops at the first CRC/byte/sequence gap or forgery because the chain past that point cannot be reconstructed, so no larger checkpoint is authenticatable. Replayable data after the barrier is simply re-applied, which is why a data-only checkpoint is admissible when <code>cur_meta == barrier_meta</code>.</p>
+<hr />
+<h2>5. Verification</h2>
+<pre><code class="language-console">$ cd btrfs-resume
+$ bash test.sh          # 7 deterministic scenarios
+$ python3 fuzz.py 300   # differential model vs. bash
+</code></pre>
+<h3>5.1 Deterministic scenarios (actual output)</h3>
+<pre><code>=== scenario results ===
+base             PASS   SAFE off=288 ... rec=12 meta=5 data=7 dup=1 forged=0 gap=0
+dup              PASS   SAFE off=288 ... rec=12 meta=5 data=7 dup=2 forged=0 gap=0
+gap              PASS   SAFE off=96  ... rec=4  meta=2 data=2 dup=0 forged=0 gap=1
+tamper-parent    PASS   SAFE off=96  ... rec=6  meta=3 data=3 dup=0 forged=1 gap=0
+badckpt          PASS   SAFE off=216 ... rec=12 meta=5 data=7 dup=1 forged=0 gap=0
+trunc            PASS   SAFE off=96  ... rec=4  meta=2 data=2 dup=0 forged=0 gap=0
+noack            PASS   SAFE off=0   ... rec=0  meta=0 data=0 dup=0 forged=0 gap=0
+
+PASS=7 FAIL=0
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Construction</th>
+<th>Expected</th>
+<th>Proves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>base</code></td>
+<td>12 records spanning a <code>0xFFFFFFFF→0x0</code> wrap</td>
+<td><code>288</code> (final barrier <code>C6</code>)</td>
+<td>wrap handled; data-only checkpoints advance</td>
+</tr>
+<tr>
+<td><code>dup</code></td>
+<td>exact replay + <code>CLONE</code> of an already-written extent</td>
+<td><code>288</code>, <code>dup=2</code></td>
+<td>duplicates ignored, never advance the frontier</td>
+</tr>
+<tr>
+<td><code>gap</code></td>
+<td>delete the <code>RENAME</code> fragment</td>
+<td><code>96</code> (<code>C2</code>)</td>
+<td>fail-closed: stop before the gap</td>
+</tr>
+<tr>
+<td><code>tamper-parent</code></td>
+<td>rewrite a <code>SNAPSHOT</code>'s <code>parent</code></td>
+<td><code>96</code>, <code>forged=1</code></td>
+<td>forged transition rejected</td>
+</tr>
+<tr>
+<td><code>badckpt</code></td>
+<td>forge the final checkpoint's <code>chain</code></td>
+<td><code>216</code> (<code>C5</code>)</td>
+<td>unverifiable checkpoint ignored</td>
+</tr>
+<tr>
+<td><code>trunc</code></td>
+<td>stream ends at <code>C2</code></td>
+<td><code>96</code></td>
+<td>maximal reachable point</td>
+</tr>
+<tr>
+<td><code>noack</code></td>
+<td>anchor only</td>
+<td><code>0</code>, exit <code>3</code></td>
+<td>never acknowledges without proof</td>
+</tr>
+</tbody>
+</table>
+<p>Tight metadata budget also fails closed:</p>
+<pre><code class="language-console">$ python3 gen_fixture.py base | MAX_META=2 bash reconcile.sh
+SAFE off=96 ... rec=4 meta=3 data=2 dup=0 forged=0 gap=1
+</code></pre>
+<h3>5.2 Differential fuzz (actual output)</h3>
+<pre><code>$ python3 fuzz.py 300
+fuzz: 300 iterations, mismatches=0
+</code></pre>
+<p>Each iteration builds a random stream, randomly drops fragments, injects exact replays, forges <code>SNAPSHOT</code> parents, forges checkpoint chains, and clears <code>durable</code>. The bash reconciler's <code>(safe_off, exit_code)</code> matches an independent Python model every time.</p>
+<h3>5.3 Bounded memory (actual output)</h3>
+<p>3000-record stream, GNU <code>time -v</code>, dedup window varied 64×:</p>
+<pre><code>window=4096 : Maximum resident set size: 7876 kB
+window=64   : Maximum resident set size: 7880 kB
+</code></pre>
+<p>Memory is flat with respect to both stream length and window size, confirming Theorem 4.</p>
+<blockquote>
+<p>The exact code block embedded above was extracted from <code>SOLUTION.md</code> and re-run against all 7 scenarios plus 200 fuzz iterations: <strong>0 mismatches</strong>, confirming the document is directly executable.</p>
+</blockquote>
+<hr />
+<h2>6. Operational runbook</h2>
+<ol>
+<li><strong>Freeze</strong> the receiver and copy out the raw stream fragments and the checkpoint DB. Never let the adapter write to the live subvolume.</li>
+<li><strong>Build the manifest</strong> per §3.2. Every <code>WRITE</code>/<code>CLONE</code> contributes only a digest; metadata contributes command + digest; checkpoint records come from the receiver's fsynced DB.</li>
+<li><strong>Reconcile:</strong> <code>bash reconcile.sh &lt; manifest</code>. Read <code>SAFE off=…</code>. Exit <code>3</code> means stay at the anchor; exit <code>64</code> means the manifest is untrustworthy — do not resume.</li>
+<li><strong>Resume from the proven parent snapshot</strong>, not from a byte offset: <code>btrfs send -p &lt;parent-ro&gt; &lt;ro&gt; | btrfs receive &lt;dest&gt;</code>. Use the <code>SAFE</code> checkpoint's barrier as the parent root.</li>
+<li><strong>Re-verify</strong> with <code>btrfs subvolume show</code> (Received UUID / Parent UUID) and re-run against the new checkpoint DB.</li>
+</ol>
+<p><strong>One-line safety rule:</strong> <em>the verifier may only ever move the resume point to a checkpoint whose SHA-256 chain it just recomputed and whose <code>durable</code> bit the receiver set after <code>fsync</code> — anything else is reported as fail-closed.</em></p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-15T16:14:58.682Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Given corrupted and partially transmitted btrfs send-stream fragments plus receiver checkpoints, reconstruct the maximal safe resume point while distinguishing committed metadata from replayable data under sequence-number wrap and duplicate extents. Design a bounded-memory verifier that rejects forged parent-root transitions and prove it never acknowledges bytes not durably applied.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;bash-20261015-btrfs-snapshot-send-resume-offset-reconciliation&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-15T16:14:58.699Z&quot;, &quot;version&quot;: &quot;5&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

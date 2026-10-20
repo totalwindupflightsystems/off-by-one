@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-20261014-crdt-range-tombstone-epoch-rebase — Off-By-One verified answer</title>
+<meta name="description" content="A replicated ordered-map merge engine accepts:">
+<meta property="og:title" content="go-20261014-crdt-range-tombstone-epoch-rebase — Off-By-One">
+<meta property="og:description" content="A replicated ordered-map merge engine accepts:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2766-go-20261014-crdt-range-tombstone-epoch-rebase.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-20261014-crdt-range-tombstone-epoch-rebase</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>A replicated ordered-map merge engine accepts:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2766-go-20261014-crdt-range-tombstone-epoch-rebase.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I've built and verified a complete solution. It's saved at <code>~/crdt/SOLUTION.md</code>, with the runnable program at <code>~/crdt/standalone/solution.go</code> and a full test suite. All checks pass (<code>go test ./... -race</code> → <code>ok</code>, and <code>go run solution.go</code> → <code>OK</code>).</p>
+<p>Here is the solution document:</p>
+<hr />
+<h1>Fixing wrap-unsafe epoch ordering in an observed-remove range-tombstone map</h1>
+<h2>Problem</h2>
+<p>A replicated ordered-map merge engine accepts:</p>
+<ul>
+<li>out-of-order <strong>range tombstones</strong> <code>[lo, hi)</code>,</li>
+<li>concurrent inserts, and</li>
+<li><strong>node reincarnations</strong> whose compacted per-replica <strong>epochs may wrap</strong>.</li>
+</ul>
+<p>It must preserve observed-remove (OR) semantics, must not retain all historical events, and must return the <strong>minimal safe compaction frontier</strong> from bounded per-replica summaries — or prove that no bounded frontier exists. The result is validated, under adversarial delivery schedules, against a reference event interpreter that keeps the full history.</p>
+<h2>Root cause</h2>
+<p>The engine stored a per-op stamp as an <code>Epoch</code> counter that is <strong>compacted</strong> (reduced to a small window) and compared with plain numeric <code>&lt;</code>/<code>&lt;=</code>.</p>
+<p>That comparison is only valid while the counter is strictly monotone. Two things break monotonicity:</p>
+<ol>
+<li><strong>Reincarnation.</strong> After a node restarts it resets the local counter, so new ops get <em>numerically smaller</em> epochs than old ops.</li>
+<li><strong>Epoch wrap.</strong> Even inside one incarnation the retained epoch is stored modulo a window. After <code>EpochMod</code> operations the counter rolls back to <code>0</code>.</li>
+</ol>
+<p>Because the wrap/incarnation qualification was discarded during compaction, an old range tombstone's causal context <code>{Epoch: k}</code> was treated as if it covered a brand-new insert with <code>Epoch: 0..k</code>. The tombstone then removed an insert it never observed — a direct observed-remove violation and permanent divergence from the reference interpreter.</p>
+<p>Concretely, with <code>EpochMod = 4</code>:</p>
+<pre><code class="language-text">put k=v0        Epoch=1
+del [a,z)       Epoch=2   context {r1: Epoch 2}
+put k=v1        Epoch=3
+put k=v2        Epoch=0   wrap=1   &lt;-- numerically below the tombstone context
+</code></pre>
+<p>A raw <code>Epoch &lt;=</code> check folds the <code>wrap=1, Epoch=0</code> insert under the tombstone and wrongly deletes <code>v2</code>. The same failure appears on reincarnation.</p>
+<p>The loss of qualification also makes the frontier unsound: the componentwise minimum of per-replica epochs can advance past live inserts, and once the wrap counter has been truncated there is no way to recover the ordering, so <strong>no bounded frontier can be certified</strong>.</p>
+<h2>The fix</h2>
+<p>Qualify every stamp with <code>(Incarnation, Wrap, Epoch)</code> and compare causally:</p>
+<ul>
+<li><code>Incarnation</code> is bumped on restart and never wraps.</li>
+<li><code>Wrap</code> counts epoch wraps inside an incarnation.</li>
+<li><code>Epoch</code> remains the small, compacted counter.</li>
+<li>Causal comparison is lexicographic on <code>(Incarnation, Wrap, Epoch)</code>; raw <code>Epoch</code> is never compared alone.</li>
+<li>A range tombstone carries its observed causal context <code>Ctx</code> (a version vector) and removes put <code>P</code> iff <code>P.Key ∈ [lo,hi)</code> <strong>and</strong> <code>Ctx</code> covers <code>P.ID</code>. Concurrent inserts the tombstone did not observe survive.</li>
+<li>The <strong>compaction frontier</strong> is the componentwise minimum of the per-replica version vectors. A tombstone is forgotten only when the frontier covers both the tombstone <code>ID</code> and its whole context <code>Ctx</code>; that is precisely when every replica has applied it and no future insert can be mistaken for an observed one.</li>
+<li>If any summary has lost its <code>Wrap</code> qualification (<code>Truncated</code>), the engine returns <code>ErrNoBoundedFrontier</code> instead of silently compacting.</li>
+</ul>
+<h3>Complete, self-contained program</h3>
+<p>Save as <code>solution.go</code> and run <code>go run solution.go</code>.</p>
+<pre><code class="language-go">// Command solution is a self-contained replication engine for an ordered map
+// with out-of-order range tombstones, concurrent inserts and reincarnating
+// nodes whose compacted epochs may wrap.
+//
+//  go run solution.go
+//
+// It runs a deterministic observed-remove check, a wrap/reincarnation
+// regression, a randomized differential check against a history-retaining
+// reference interpreter, and frontier certification.
+package main
+
+import (
+    &quot;errors&quot;
+    &quot;fmt&quot;
+    &quot;math/rand&quot;
+    &quot;os&quot;
+    &quot;reflect&quot;
+)
+
+// ---------------------------------------------------------------------------
+// Identifiers, causal versions and version vectors
+// ---------------------------------------------------------------------------
+
+var ErrNoBoundedFrontier = errors.New(&quot;no bounded compaction frontier exists&quot;)
+
+type OpID struct {
+    Replica     uint64
+    Incarnation uint64 // bumped on reincarnation; never wraps
+    Wrap        uint64 // number of epoch wraps inside an incarnation
+    Epoch       uint64 // per-replica counter, stored modulo EpochMod
+}
+
+func (a OpID) Less(b OpID) bool {
+    if a.Incarnation != b.Incarnation {
+        return a.Incarnation &lt; b.Incarnation
+    }
+    if a.Wrap != b.Wrap {
+        return a.Wrap &lt; b.Wrap
+    }
+    if a.Epoch != b.Epoch {
+        return a.Epoch &lt; b.Epoch
+    }
+    return a.Replica &lt; b.Replica
+}
+
+type Version struct {
+    Incarnation uint64
+    Wrap        uint64
+    Epoch       uint64
+}
+
+func (v Version) CoversID(id OpID) bool {
+    if id.Incarnation != v.Incarnation {
+        return id.Incarnation &lt; v.Incarnation
+    }
+    if id.Wrap != v.Wrap {
+        return id.Wrap &lt; v.Wrap
+    }
+    return id.Epoch &lt;= v.Epoch
+}
+
+func (v Version) CoversVersion(o Version) bool {
+    if o.Incarnation != v.Incarnation {
+        return o.Incarnation &lt; v.Incarnation
+    }
+    if o.Wrap != v.Wrap {
+        return o.Wrap &lt; v.Wrap
+    }
+    return o.Epoch &lt;= v.Epoch
+}
+
+func (v Version) Less(o Version) bool {
+    if v.Incarnation != o.Incarnation {
+        return v.Incarnation &lt; o.Incarnation
+    }
+    if v.Wrap != o.Wrap {
+        return v.Wrap &lt; o.Wrap
+    }
+    return v.Epoch &lt; o.Epoch
+}
+
+type VV map[uint64]Version
+
+func (vv VV) Clone() VV {
+    out := make(VV, len(vv))
+    for k, v := range vv {
+        out[k] = v
+    }
+    return out
+}
+
+func (vv VV) Join(o VV) {
+    for r, v := range o {
+        if cur, ok := vv[r]; !ok || cur.Less(v) {
+            vv[r] = v
+        }
+    }
+}
+
+func (vv VV) CoversID(id OpID) bool {
+    v, ok := vv[id.Replica]
+    return ok &amp;&amp; v.CoversID(id)
+}
+
+func (vv VV) CoversVV(o VV) bool {
+    for r, ov := range o {
+        v, ok := vv[r]
+        if !ok || !v.CoversVersion(ov) {
+            return false
+        }
+    }
+    return true
+}
+
+func inRange(key, lo, hi string) bool { return key &gt;= lo &amp;&amp; key &lt; hi }
+
+// ---------------------------------------------------------------------------
+// Operations
+// ---------------------------------------------------------------------------
+
+type Put struct {
+    ID  OpID
+    Key string
+    Val string
+}
+
+type Del struct {
+    ID  OpID
+    Lo  string
+    Hi  string
+    Ctx VV // causal context observed when the tombstone was created
+}
+
+type Op struct {
+    Put *Put
+    Del *Del
+}
+
+// ---------------------------------------------------------------------------
+// Bounded replica
+// ---------------------------------------------------------------------------
+
+type Config struct {
+    ReplicaID uint64
+    EpochMod  uint64
+    WrapLimit uint64
+}
+
+type Replica struct {
+    cfg       Config
+    clock     Version
+    truncated bool
+    vv        VV
+    live      map[string]map[OpID]Put
+    dels      []Del
+    delSeen   map[OpID]bool
+}
+
+func NewReplica(cfg Config) *Replica {
+    if cfg.EpochMod == 0 {
+        cfg.EpochMod = 1 &lt;&lt; 32
+    }
+    if cfg.WrapLimit == 0 {
+        cfg.WrapLimit = 1 &lt;&lt; 32
+    }
+    return &amp;Replica{
+        cfg:     cfg,
+        vv:      VV{},
+        live:    map[string]map[OpID]Put{},
+        delSeen: map[OpID]bool{},
+    }
+}
+
+func (r *Replica) Reincarnate() {
+    r.clock = Version{Incarnation: r.clock.Incarnation + 1}
+}
+
+func (r *Replica) nextID() OpID {
+    r.clock.Epoch++
+    if r.clock.Epoch &gt;= r.cfg.EpochMod {
+        r.clock.Epoch = 0
+        r.clock.Wrap++
+        if r.clock.Wrap &gt;= r.cfg.WrapLimit {
+            r.truncated = true
+        }
+    }
+    return OpID{
+        Replica:     r.cfg.ReplicaID,
+        Incarnation: r.clock.Incarnation,
+        Wrap:        r.clock.Wrap,
+        Epoch:       r.clock.Epoch,
+    }
+}
+
+func (r *Replica) Put(key, val string) Put {
+    id := r.nextID()
+    p := Put{ID: id, Key: key, Val: val}
+    r.applyPut(p)
+    r.observe(id)
+    return p
+}
+
+func (r *Replica) DeleteRange(lo, hi string) Del {
+    id := r.nextID()
+    d := Del{ID: id, Lo: lo, Hi: hi, Ctx: r.vv.Clone()}
+    r.applyDel(d)
+    r.observe(id)
+    return d
+}
+
+func (r *Replica) Apply(op Op) {
+    switch {
+    case op.Put != nil:
+        r.applyPut(*op.Put)
+        r.observe(op.Put.ID)
+    case op.Del != nil:
+        r.applyDel(*op.Del)
+        r.observe(op.Del.ID)
+    }
+}
+
+func (r *Replica) applyPut(p Put) {
+    for i := range r.dels {
+        d := &amp;r.dels[i]
+        if inRange(p.Key, d.Lo, d.Hi) &amp;&amp; d.Ctx.CoversID(p.ID) {
+            return
+        }
+    }
+    m := r.live[p.Key]
+    if m == nil {
+        m = map[OpID]Put{}
+        r.live[p.Key] = m
+    }
+    m[p.ID] = p
+}
+
+func (r *Replica) applyDel(d Del) {
+    if r.delSeen[d.ID] {
+        return
+    }
+    r.delSeen[d.ID] = true
+    for key, m := range r.live {
+        if !inRange(key, d.Lo, d.Hi) {
+            continue
+        }
+        for id := range m {
+            if d.Ctx.CoversID(id) {
+                delete(m, id)
+            }
+        }
+        if len(m) == 0 {
+            delete(r.live, key)
+        }
+    }
+    r.dels = append(r.dels, d)
+}
+
+func (r *Replica) observe(id OpID) {
+    nv := Version{Incarnation: id.Incarnation, Wrap: id.Wrap, Epoch: id.Epoch}
+    if cur, ok := r.vv[id.Replica]; !ok || cur.Less(nv) {
+        r.vv[id.Replica] = nv
+    }
+}
+
+func (r *Replica) Merge(o *Replica) {
+    for _, m := range o.live {
+        for _, p := range m {
+            r.applyPut(p)
+            r.observe(p.ID)
+        }
+    }
+    for i := range o.dels {
+        r.applyDel(o.dels[i])
+        r.observe(o.dels[i].ID)
+    }
+    r.vv.Join(o.vv)
+    if o.truncated {
+        r.truncated = true
+    }
+}
+
+func (r *Replica) Snapshot() map[string]string {
+    out := make(map[string]string, len(r.live))
+    for k, m := range r.live {
+        var best *Put
+        for _, p := range m {
+            pp := p
+            if best == nil || best.ID.Less(pp.ID) {
+                best = &amp;pp
+            }
+        }
+        if best != nil {
+            out[k] = best.Val
+        }
+    }
+    return out
+}
+
+func (r *Replica) Compact(f VV) int {
+    kept := r.dels[:0]
+    dropped := 0
+    for i := range r.dels {
+        d := r.dels[i]
+        if f.CoversID(d.ID) &amp;&amp; f.CoversVV(d.Ctx) {
+            dropped++
+            delete(r.delSeen, d.ID)
+            continue
+        }
+        kept = append(kept, d)
+    }
+    r.dels = kept
+    return dropped
+}
+
+// ---------------------------------------------------------------------------
+// Reference history-retaining interpreter
+// ---------------------------------------------------------------------------
+
+type Ref struct {
+    puts map[OpID]Put
+    dels []Del
+}
+
+func NewRef() *Ref { return &amp;Ref{puts: map[OpID]Put{}} }
+
+func (r *Ref) Apply(op Op) {
+    switch {
+    case op.Put != nil:
+        r.puts[op.Put.ID] = *op.Put
+    case op.Del != nil:
+        r.dels = append(r.dels, *op.Del)
+    }
+}
+
+func (r *Ref) live(id OpID) bool {
+    p := r.puts[id]
+    for i := range r.dels {
+        d := &amp;r.dels[i]
+        if inRange(p.Key, d.Lo, d.Hi) &amp;&amp; d.Ctx.CoversID(id) {
+            return false
+        }
+    }
+    return true
+}
+
+func (r *Ref) Snapshot() map[string]string {
+    out := map[string]string{}
+    best := map[string]OpID{}
+    for id := range r.puts {
+        if !r.live(id) {
+            continue
+        }
+        p := r.puts[id]
+        if cur, ok := best[p.Key]; !ok || cur.Less(id) {
+            best[p.Key] = id
+            out[p.Key] = p.Val
+        }
+    }
+    return out
+}
+
+// ---------------------------------------------------------------------------
+// Bounded frontier
+// ---------------------------------------------------------------------------
+
+type Summary struct {
+    ReplicaID uint64
+    Vers      VV
+    Truncated bool
+}
+
+func (r *Replica) Summary() Summary {
+    return Summary{ReplicaID: r.cfg.ReplicaID, Vers: r.vv.Clone(), Truncated: r.truncated}
+}
+
+func MaxSafeFrontier(summaries []Summary) (VV, error) {
+    if len(summaries) == 0 {
+        return VV{}, nil
+    }
+    for _, s := range summaries {
+        if s.Truncated {
+            return nil, ErrNoBoundedFrontier
+        }
+    }
+    replicas := map[uint64]bool{}
+    for _, s := range summaries {
+        for r := range s.Vers {
+            replicas[r] = true
+        }
+    }
+    f := VV{}
+    for r := range replicas {
+        var min Version
+        found := false
+        complete := true
+        for _, s := range summaries {
+            v, ok := s.Vers[r]
+            if !ok {
+                complete = false
+                break
+            }
+            if !found || v.Less(min) {
+                min = v
+                found = true
+            }
+        }
+        if complete &amp;&amp; found {
+            f[r] = min
+        }
+    }
+    return f, nil
+}
+
+// ---------------------------------------------------------------------------
+// Demonstration + differential verification
+// ---------------------------------------------------------------------------
+
+func generateHistory(rng *rand.Rand, n, steps int) []Op {
+    gens := make([]*Replica, n)
+    for i := range gens {
+        gens[i] = NewReplica(Config{ReplicaID: uint64(i), EpochMod: 6})
+    }
+    keys := []string{&quot;a&quot;, &quot;b&quot;, &quot;c&quot;, &quot;d&quot;, &quot;e&quot;, &quot;f&quot;, &quot;g&quot;}
+    var events []Op
+    for s := 0; s &lt; steps; s++ {
+        g := gens[rng.Intn(n)]
+        if rng.Intn(8) == 0 {
+            g.Reincarnate()
+        }
+        if rng.Intn(3) == 0 {
+            i := rng.Intn(len(keys) - 1)
+            j := i + 1 + rng.Intn(len(keys)-1-i)
+            d := g.DeleteRange(keys[i], keys[j]+&quot;\x00&quot;)
+            events = append(events, Op{Del: &amp;d})
+        } else {
+            k := keys[rng.Intn(len(keys))]
+            v := fmt.Sprintf(&quot;r%d-s%d&quot;, g.cfg.ReplicaID, s)
+            p := g.Put(k, v)
+            events = append(events, Op{Put: &amp;p})
+        }
+        for d := 0; d &lt; rng.Intn(4) &amp;&amp; len(events) &gt; 0; d++ {
+            g.Apply(events[rng.Intn(len(events))])
+        }
+    }
+    return events
+}
+
+func fail(format string, args ...any) {
+    fmt.Fprintf(os.Stderr, &quot;FAIL: &quot;+format+&quot;\n&quot;, args...)
+    os.Exit(1)
+}
+
+func equal(a, b map[string]string) bool { return reflect.DeepEqual(a, b) }
+
+func main() {
+    // 1. Wrap regression: a pre-wrap tombstone must not remove a post-wrap put.
+    w := NewReplica(Config{ReplicaID: 1, EpochMod: 4})
+    w.Put(&quot;k&quot;, &quot;v0&quot;)
+    w.DeleteRange(&quot;a&quot;, &quot;z&quot;)
+    w.Put(&quot;k&quot;, &quot;v1&quot;)
+    p3 := w.Put(&quot;k&quot;, &quot;v2&quot;) // wraps to Wrap=1, Epoch=0
+    if p3.ID.Wrap != 1 || p3.ID.Epoch != 0 {
+        fail(&quot;expected an epoch wrap, got %+v&quot;, p3.ID)
+    }
+    if !equal(w.Snapshot(), map[string]string{&quot;k&quot;: &quot;v2&quot;}) {
+        fail(&quot;post-wrap insert removed by pre-wrap tombstone: %v&quot;, w.Snapshot())
+    }
+
+    // 2. Reincarnation: new-incarnation ops survive old tombstones.
+    ri := NewReplica(Config{ReplicaID: 1, EpochMod: 4})
+    ri.Put(&quot;k&quot;, &quot;old&quot;)
+    ri.DeleteRange(&quot;a&quot;, &quot;z&quot;)
+    ri.Reincarnate()
+    ri.Put(&quot;k&quot;, &quot;new&quot;)
+    if !equal(ri.Snapshot(), map[string]string{&quot;k&quot;: &quot;new&quot;}) {
+        fail(&quot;reincarnated insert removed: %v&quot;, ri.Snapshot())
+    }
+
+    // 3. Randomized differential convergence + frontier compaction.
+    for seed := int64(1); seed &lt;= 500; seed++ {
+        rng := rand.New(rand.NewSource(seed))
+        events := generateHistory(rng, 3, 120)
+        ref := NewRef()
+        for _, op := range events {
+            ref.Apply(op)
+        }
+        want := ref.Snapshot()
+        for c := 0; c &lt; 4; c++ {
+            consumer := NewReplica(Config{ReplicaID: uint64(100 + c), EpochMod: 8})
+            for _, i := range rng.Perm(len(events)) {
+                consumer.Apply(events[i])
+            }
+            if !equal(consumer.Snapshot(), want) {
+                fail(&quot;seed %d consumer %d diverged: got %v want %v&quot;,
+                    seed, c, consumer.Snapshot(), want)
+            }
+            f, err := MaxSafeFrontier([]Summary{consumer.Summary()})
+            if err != nil {
+                fail(&quot;seed %d unexpected no-frontier: %v&quot;, seed, err)
+            }
+            consumer.Compact(f)
+            if !equal(consumer.Snapshot(), want) {
+                fail(&quot;seed %d compaction changed snapshot&quot;, seed)
+            }
+        }
+    }
+
+    // 4. No-bounded-frontier detection.
+    tr := NewReplica(Config{ReplicaID: 1, EpochMod: 2, WrapLimit: 2})
+    for i := 0; i &lt; 10; i++ {
+        tr.Put(&quot;k&quot;, &quot;v&quot;)
+    }
+    if _, err := MaxSafeFrontier([]Summary{tr.Summary()}); err != ErrNoBoundedFrontier {
+        fail(&quot;expected ErrNoBoundedFrontier, got %v&quot;, err)
+    }
+
+    fmt.Println(&quot;OK: observed-remove, wrap/reincarnation, 500x differential schedules, frontier certification&quot;)
+}
+</code></pre>
+<h2>Verification</h2>
+<p>The package ships a unit/property test suite in addition to the program above. Run both:</p>
+<pre><code class="language-bash"># self-contained differential + regression proof
+cd standalone &amp;&amp; go run solution.go
+
+# full suite: unit tests, wrap/reincarnation regressions,
+# 300 randomized adversarial schedules, exhaustive interleavings,
+# pairwise-merge convergence, frontier minimality and no-frontier proof
+go test ./... -race -count=1
+</code></pre>
+<p>Observed output:</p>
+<pre><code class="language-text">$ go run solution.go
+OK: observed-remove, wrap/reincarnation, 500x differential schedules, frontier certification
+
+$ go test ./... -race -count=1
+ok      crdt    1.715s
+?       crdt/standalone [no test files]
+</code></pre>
+<p>The assertions that make this a proof rather than a smoke test:</p>
+<ul>
+<li><code>TestObservedRemoveBasic</code> — an observed insert is removed, a concurrent insert survives.</li>
+<li><code>TestEpochWrapReincarnation</code> — a pre-wrap tombstone must <strong>not</strong> remove a post-wrap insert; a post-wrap tombstone must. It also demonstrates that the raw-epoch comparison is wrong on the same input.</li>
+<li><code>TestReincarnation</code> — old-incarnation tombstones never remove new-incarnation inserts.</li>
+<li><code>TestConvergenceRandomSchedules</code> / <code>TestExhaustiveInterleavings</code> — every delivery order (including duplicates) converges to the reference event interpreter.</li>
+<li><code>TestConvergenceViaMerge</code> — pairwise <code>Merge</code> reaches the same fixpoint and compaction at the certified frontier preserves the snapshot.</li>
+<li><code>TestFrontierMinimal</code> / <code>TestUnsafeCompactionBeyondFrontier</code> — the componentwise minimum is the maximal safe frontier; compacting past it leaves a ghost tombstone and diverges from the reference.</li>
+<li><code>TestNoBoundedFrontier</code> — a truncated (wrap-qualification-lost) summary yields <code>ErrNoBoundedFrontier</code>.</li>
+</ul>
+<h2>Complexity / bounds</h2>
+<p>Per replica the engine retains only live puts plus tombstones that are not yet causally stable, so memory is bounded by concurrency, not history length. <code>Merge</code> and <code>Apply</code> are idempotent and order independent; <code>Compact</code> is monotone and never revisits a forgotten tombstone. The frontier is computed in one pass over the summaries in <code>O(replicas²)</code> versions.</p>
+<hr />
+<p><strong>Files written and verified:</strong>
+- <code>~/crdt/SOLUTION.md</code> — the document above
+- <code>~/crdt/{opid,engine,reference,frontier}.go</code> — the library
+- <code>~/crdt/engine_test.go</code> — the test suite
+- <code>~/crdt/standalone/solution.go</code> — the self-contained program</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-20261014-crdt-range-tombstone-epoch-rebase
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-15T04:16:30.730Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a replicated ordered-map merge engine that accepts out-of-order range tombstones, concurrent inserts, and node reincarnations whose compacted epochs may wrap; preserve observed-remove semantics without retaining all historical events. Given bounded per-replica summaries and adversarial delivery schedules, return the minimal safe compaction frontier or prove that no bounded frontier exists, and validate convergence against a reference event interpreter.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-20261014-crdt-range-tombstone-epoch-rebase&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-15T04:16:30.752Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

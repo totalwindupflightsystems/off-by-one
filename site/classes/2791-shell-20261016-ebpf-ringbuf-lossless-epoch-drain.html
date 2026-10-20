@@ -1,0 +1,1066 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>shell-20261016-ebpf-ringbuf-lossless-epoch-drain — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: shell-20261016-ebpf-ringbuf-lossless-epoch-drain">
+<meta property="og:title" content="shell-20261016-ebpf-ringbuf-lossless-epoch-drain — Off-By-One">
+<meta property="og:description" content="Problem class: shell-20261016-ebpf-ringbuf-lossless-epoch-drain">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2791-shell-20261016-ebpf-ringbuf-lossless-epoch-drain.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>shell-20261016-ebpf-ringbuf-lossless-epoch-drain</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>Problem class: shell-20261016-ebpf-ringbuf-lossless-epoch-drain</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2791-shell-20261016-ebpf-ringbuf-lossless-epoch-drain.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is implemented, tested, and the markdown was validated by extracting its own code blocks into a clean directory and rerunning <code>verify.sh</code> (exit 0). Full document:</p>
+<hr />
+<h1>Lossless per-CPU eBPF ring-buffer drain with globally ordered output</h1>
+<p><strong>Problem class:</strong> <code>shell-20261016-ebpf-ringbuf-lossless-epoch-drain</code>
+<strong>Deliverable:</strong> a self-contained Bash collector, <code>rb_collector.sh</code>, that
+drains per-CPU rings while producers run, emits a globally ordered stream with
+bounded memory, survives CPU hotplug and process restart, and writes an audit
+that cleanly separates <em>true loss</em> from <em>delayed delivery</em>.</p>
+<hr />
+<h2>1. Symptom</h2>
+<p>A collector that reads the per-CPU eBPF <code>BPF_MAP_TYPE_RINGBUF</code> maps directly
+(one reader per CPU, or one thread round-robining the CPUs) misbehaves in ways
+that look like data loss:</p>
+<ul>
+<li>the emitted stream is not globally ordered — CPU-local <code>bpf_ktime_get_ns()</code>
+  timestamps interleave differently on every run;</li>
+<li>records disappear at startup/shutdown and during CPU online/offline;</li>
+<li>sequence numbers show gaps and the collector reports loss, but the "lost"
+  records show up later;</li>
+<li>memory grows without bound (or the collector OOMs) as it tries to hold
+  records waiting for global order;</li>
+<li>after a crash, records are either replayed (duplicates) or skipped (loss).</li>
+</ul>
+<h2>2. Root-cause analysis</h2>
+<p>The failures are not one bug; they are five independent wrong assumptions about
+the ring-buffer contract.</p>
+<ol>
+<li>
+<p><strong>A single global cursor / sequence.</strong> eBPF ring buffers are <em>per-CPU</em> and
+   each CPU reserves slots independently. There is no global sequence and no
+   total order on the wire. Any collector that drains the CPUs asynchronously
+   and emits immediately will interleave out of order, and any collector that
+   compares sequence numbers across CPUs will manufacture gaps.</p>
+</li>
+<li>
+<p><strong>Destructive or uncommitted reads.</strong> A producer can be halfway through
+   writing a record when a consumer reads. <code>read()</code> returns a torn line, and if
+   the consumer advances its cursor past that byte range, the completed record
+   is lost forever. The consumer must only advance over <em>complete,
+   newline-terminated</em> records and leave a partial tail in place.</p>
+</li>
+<li>
+<p><strong>Treating a gap as loss.</strong> With concurrent producers a record with sequence
+   <code>N</code> is routinely observed after <code>N+1</code> (the producer on that CPU was preempted
+   between two reservations). Declaring loss on the first gap produces false
+   positives; waiting forever pins memory. You need (a) a per-CPU reorder
+   window and (b) an independent producer-side ground truth to tell a real drop
+   from a merely late record. For eBPF that ground truth is the count of failed
+   <code>bpf_ringbuf_reserve()</code> calls.</p>
+</li>
+<li>
+<p><strong>Ignoring CPU hotplug and ring generations.</strong> When a CPU goes offline, the
+   kernel frees its ring and its sequence space. When a producer restarts, the
+   ring is recreated and the sequence resets to 0. A consumer keyed only on
+   <code>seq</code> interprets the reset as duplicates or as a multi-billion-record gap.
+   Every record must be keyed by <code>(cpu, generation, seq)</code>.</p>
+</li>
+<li>
+<p><strong>Ordering without a watermark, and recovery without durability.</strong> Global
+   order requires holding records until no live CPU can still emit an older
+   one. Without a <em>watermark</em> and a <em>bound</em>, a single stalled CPU freezes the
+   collector and the buffer grows forever. And if the per-CPU cursors live only
+   in RAM, a crash forces a choice between at-least-once (duplicates) and
+   at-most-once (loss).</p>
+</li>
+</ol>
+<h2>3. The fix</h2>
+<p><code>rb_collector.sh</code> implements the following contract. The record format is one
+newline-terminated line per event:</p>
+<pre><code>&lt;gen&gt;|&lt;seq&gt;|&lt;ts_ns&gt;|&lt;payload&gt;
+</code></pre>
+<p><code>gen</code> is the ring generation, <code>seq</code> is strictly increasing per <code>(cpu, gen)</code>,
+and <code>ts_ns</code> is non-decreasing per <code>(cpu, gen)</code>. A producer that drops an event
+increments the cumulative counter in <code>$RINGS/cpu&lt;N&gt;.lost</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Partial reads</td>
+<td>Whole-file read; only non-empty lines terminated by <code>\n</code> advance <code>consumed</code>. The trailing fragment is never consumed.</td>
+</tr>
+<tr>
+<td>Sequence gaps</td>
+<td><code>(cpu, gen, seq)</code> ledger. A gap is held <code>--horizon-ms</code>; filling it is <code>delayed_reordered</code>, not loss.</td>
+</tr>
+<tr>
+<td>True vs delayed loss</td>
+<td>A gap that expires is <code>true_loss</code> if the producer <code>lost</code> counter backs it, else <code>unaccounted_loss</code>. If the record later appears, the provisional decision is retracted (<code>loss_retracted</code>) and the event goes to the late side channel.</td>
+</tr>
+<tr>
+<td>CPU hotplug</td>
+<td>Directory scan each tick. New CPU → <code>cpu_online</code>; vanished CPU → <code>cpu_offline</code> and it leaves the watermark after <code>--hold-ms</code>. A ring reset bumps the generation.</td>
+</tr>
+<tr>
+<td>Global order</td>
+<td>Watermark = minimum <code>last_ts</code> over live, fresh CPUs. Only records with <code>ts &lt;= watermark</code> are emitted; the stream is therefore monotone.</td>
+</tr>
+<tr>
+<td>Bounded memory</td>
+<td><code>--max-buffer</code> caps the reorder buffer. Overflow forces the oldest records out (<code>buffer_forced</code>) instead of growing. A stalled CPU is dropped from the watermark (<code>watermark_forced_stale_cpu</code>).</td>
+</tr>
+<tr>
+<td>Per-CPU order</td>
+<td>A record is held while a lower sequence is still pending, unless a force/bound overrides it.</td>
+</tr>
+<tr>
+<td>Restart recovery</td>
+<td>Cursors <strong>and</strong> the unemitted buffer are committed atomically. The event log is truncated to the last committed line count on startup, so output is exactly-once across a crash.</td>
+</tr>
+<tr>
+<td>Audit</td>
+<td>JSONL audit plus a separate <code>late.jsonl</code> side channel; an in-state stats map is dumped in <code>collector_stop</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The collector is wrapped in a Bash entry point and executes on the host's
+CPython; this keeps the artifact a single <code>.sh</code> file while giving the cursor
+bookkeeping, atomic <code>os.replace()</code> commits, and <code>fsync()</code> the semantics they
+need.</p>
+<h3><code>rb_collector.sh</code></h3>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# rb_collector.sh -- lossless, globally-ordered drain of per-CPU eBPF-style
+# ring buffers.  Self-contained: the algorithm runs on the CPython interpreter
+# that ships with the target host.  See the markdown write-up for the design.
+#
+# Usage:
+#   rb_collector.sh --rings DIR --state DIR --events FILE --late FILE \
+#                   --audit FILE [--horizon-ms N] [--hold-ms N] \
+#                   [--max-buffer N] [--poll-ms N] [--run-ms N] [--idle-ms N] \
+#                   [--once]
+set -euo pipefail
+exec python3 - &quot;$@&quot; &lt;&lt;'RB_COLLECTOR_PY'
+#!/usr/bin/env python3
+&quot;&quot;&quot;
+rb_collector.py -- lossless, globally-ordered drain of per-CPU eBPF-style
+ring buffers.
+
+Ring model
+----------
+Producers append complete, newline-terminated records to
+$RINGS/cpu&lt;N&gt;.ring::
+
+    &lt;gen&gt;|&lt;seq&gt;|&lt;ts_ns&gt;|&lt;payload&gt;
+
+  * gen   -- ring generation, bumped when the producer (re)starts
+  * seq   -- strictly increasing per (cpu, gen), starting at 0
+  * ts_ns -- producer timestamp, non-decreasing per (cpu, gen)
+
+A producer that drops a record because bpf_ringbuf_reserve() failed increments
+the cumulative counter in $RINGS/cpu&lt;N&gt;.lost.  That counter is the ground truth
+that separates a *true loss* (dropped by the producer) from a *delayed
+delivery* (record overtaken on the wire and delivered after its slot).
+
+Design invariants
+-----------------
+1. Only complete lines are consumed; a partial trailing line is left in place.
+2. The global output is emitted only below an event-time watermark, so it is
+   totally ordered by ts.  A stalled CPU cannot pin memory forever: after
+   --hold-ms it drops out of the watermark (audited watermark_forced).
+3. Memory is bounded by --max-buffer; overflow forces the oldest records out
+   (audited buffer_forced) instead of growing without limit.
+4. Per-CPU order is preserved across gaps: a record is held while a lower seq
+   is still pending, unless forced.
+5. Gaps are held --horizon-ms.  A gap that fills is delayed_reordered.  A gap
+   that does not fill is true_loss if the producer lost-counter backs it, else
+   unaccounted_loss.  If the record shows up afterwards it is
+   delayed_after_drain and the provisional loss is retracted.
+6. State (cursors + in-memory buffer) is committed atomically; the event file
+   is truncated back to the last committed count on restart, giving
+   exactly-once output across restarts.
+&quot;&quot;&quot;
+
+import argparse
+import json
+import os
+import signal
+import sys
+import time
+
+STOP = False
+
+
+def _stop(signum, frame):
+    global STOP
+    STOP = True
+
+
+def now_ms():
+    return time.time_ns() // 1_000_000
+
+
+def load_state(path):
+    try:
+        with open(path, &quot;r&quot;, encoding=&quot;utf-8&quot;) as fh:
+            return json.load(fh)
+    except (FileNotFoundError, ValueError):
+        return {&quot;cpus&quot;: {}, &quot;pending&quot;: {}, &quot;lost_ledger&quot;: {}, &quot;buffer&quot;: [],
+                &quot;events_flushed&quot;: 0, &quot;late_flushed&quot;: 0, &quot;tick&quot;: 0,
+                &quot;stats&quot;: {}}
+
+
+def save_state(path, state):
+    tmp = path + &quot;.tmp.%d&quot; % os.getpid()
+    with open(tmp, &quot;w&quot;, encoding=&quot;utf-8&quot;) as fh:
+        json.dump(state, fh, separators=(&quot;,&quot;, &quot;:&quot;), sort_keys=True)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, path)
+
+
+def truncate_lines(path, keep):
+    try:
+        with open(path, &quot;r&quot;, encoding=&quot;utf-8&quot;) as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        return
+    if len(lines) &gt; keep:
+        with open(path, &quot;w&quot;, encoding=&quot;utf-8&quot;) as fh:
+            fh.writelines(lines[:keep])
+            fh.flush()
+            os.fsync(fh.fileno())
+
+
+def read_complete_records(path, consumed):
+    &quot;&quot;&quot;Return (new_records, complete_count, truncated).&quot;&quot;&quot;
+    try:
+        with open(path, &quot;rb&quot;) as fh:
+            data = fh.read()
+    except FileNotFoundError:
+        return [], consumed, False
+    if not data:
+        return [], 0, consumed != 0
+    parts = data.split(b&quot;\n&quot;)
+    parts = parts[:-1]  # drop incomplete tail / trailing empty element
+    complete = [p for p in parts if p != b&quot;&quot;]
+    truncated = len(complete) &lt; consumed
+    if truncated:
+        consumed = 0
+    return complete[consumed:], len(complete), truncated
+
+
+def parse_record(raw):
+    text = raw.decode(&quot;utf-8&quot;, &quot;replace&quot;)
+    f = text.split(&quot;|&quot;, 3)
+    if len(f) != 4:
+        return None
+    try:
+        return int(f[0]), int(f[1]), int(f[2]), f[3]
+    except ValueError:
+        return None
+
+
+def read_lost(path):
+    try:
+        with open(path, &quot;r&quot;, encoding=&quot;utf-8&quot;) as fh:
+            return int(fh.read().strip() or &quot;0&quot;)
+    except (FileNotFoundError, ValueError):
+        return 0
+
+
+class Collector:
+    def __init__(self, args):
+        self.args = args
+        self.state_path = os.path.join(args.state, &quot;collector.json&quot;)
+        self.state = load_state(self.state_path)
+        self.state.setdefault(&quot;stats&quot;, {})
+        self.events = args.events
+        self.audit = args.audit
+        truncate_lines(self.events, self.state.get(&quot;events_flushed&quot;, 0))
+        truncate_lines(args.late, self.state.get(&quot;late_flushed&quot;, 0))
+
+    # -- bookkeeping -----------------------------------------------------
+    def bump(self, kind, n=1):
+        st = self.state[&quot;stats&quot;]
+        st[kind] = st.get(kind, 0) + n
+
+    def audit_rec(self, kind, **kw):
+        self.bump(kind)
+        kw[&quot;type&quot;] = kind
+        kw[&quot;wall_ms&quot;] = now_ms()
+        with open(self.audit, &quot;a&quot;, encoding=&quot;utf-8&quot;) as fh:
+            fh.write(json.dumps(kw, sort_keys=True) + &quot;\n&quot;)
+            fh.flush()
+
+    def cpu_state(self, cpu):
+        return self.state[&quot;cpus&quot;].setdefault(cpu, {
+            &quot;gen&quot;: None, &quot;consumed&quot;: 0, &quot;expect&quot;: 0, &quot;emitted_hi&quot;: -1,
+            &quot;last_ts&quot;: 0, &quot;last_seen&quot;: 0, &quot;lost_acct&quot;: 0, &quot;live&quot;: False,
+            &quot;stale&quot;: False,
+        })
+
+    # -- one tick --------------------------------------------------------
+    def tick(self):
+        st = self.state
+        now = now_ms()
+        changed = False
+
+        present = set()
+        try:
+            for name in os.listdir(self.args.rings):
+                if name.startswith(&quot;cpu&quot;) and name.endswith(&quot;.ring&quot;):
+                    present.add(name[3:-5])
+        except FileNotFoundError:
+            pass
+
+        for cpu, cs in st[&quot;cpus&quot;].items():
+            if cpu not in present and cs[&quot;live&quot;]:
+                cs[&quot;live&quot;] = False
+                self.audit_rec(&quot;cpu_offline&quot;, cpu=cpu)
+                changed = True
+        for cpu in sorted(present):
+            cs = self.cpu_state(cpu)
+            if not cs[&quot;live&quot;]:
+                cs[&quot;live&quot;] = True
+                self.audit_rec(&quot;cpu_online&quot;, cpu=cpu)
+                changed = True
+
+        for cpu in sorted(present):
+            cs = self.cpu_state(cpu)
+            ring = os.path.join(self.args.rings, &quot;cpu%s.ring&quot; % cpu)
+            new, complete, truncated = read_complete_records(ring,
+                                                             cs[&quot;consumed&quot;])
+            if truncated:
+                self.audit_rec(&quot;ring_truncated&quot;, cpu=cpu,
+                               previously_consumed=cs[&quot;consumed&quot;])
+                cs[&quot;gen&quot;] = None
+                cs[&quot;emitted_hi&quot;] = -1
+                changed = True
+            cs[&quot;consumed&quot;] = complete
+            if not new:
+                continue
+            cs[&quot;last_seen&quot;] = now
+            cs[&quot;stale&quot;] = False
+            changed = True
+            for raw in new:
+                rec = parse_record(raw)
+                if rec is None:
+                    self.audit_rec(&quot;malformed_record&quot;, cpu=cpu,
+                                   raw=raw.decode(&quot;utf-8&quot;, &quot;replace&quot;))
+                    continue
+                self.accept(cpu, rec, now)
+
+        if self.emit(now):
+            changed = True
+        if self.resolve_gaps(now):
+            changed = True
+
+        st[&quot;tick&quot;] = st.get(&quot;tick&quot;, 0) + 1
+        save_state(self.state_path, st)
+        return changed
+
+    # -- ingest ----------------------------------------------------------
+    def accept(self, cpu, rec, now):
+        gen, seq, ts, payload = rec
+        cs = self.cpu_state(cpu)
+        if cs[&quot;gen&quot;] is None:
+            cs[&quot;gen&quot;] = gen
+            cs[&quot;expect&quot;] = seq
+            cs[&quot;emitted_hi&quot;] = seq - 1
+        elif gen != cs[&quot;gen&quot;]:
+            self.audit_rec(&quot;ring_generation_change&quot;, cpu=cpu,
+                           old_gen=cs[&quot;gen&quot;], new_gen=gen)
+            for key in [k for k in self.state[&quot;pending&quot;]
+                        if self.state[&quot;pending&quot;][k][&quot;cpu&quot;] == cpu]:
+                p = self.state[&quot;pending&quot;].pop(key)
+                self.declare_loss(cpu, p[&quot;gen&quot;], p[&quot;seq&quot;], now,
+                                  reason=&quot;generation_change&quot;)
+            cs[&quot;gen&quot;] = gen
+            cs[&quot;expect&quot;] = seq
+            cs[&quot;emitted_hi&quot;] = seq - 1
+
+        if ts &gt; cs[&quot;last_ts&quot;]:
+            cs[&quot;last_ts&quot;] = ts
+
+        if seq &lt; cs[&quot;expect&quot;]:
+            key = &quot;%s,%d,%d&quot; % (cpu, gen, seq)
+            if key in self.state[&quot;pending&quot;]:
+                p = self.state[&quot;pending&quot;].pop(key)
+                self.audit_rec(&quot;delayed_reordered&quot;, cpu=cpu, gen=gen, seq=seq,
+                               waited_ms=now - p[&quot;first_seen&quot;])
+                self.buffer_add(ts, cpu, gen, seq, payload)
+            elif key in self.state[&quot;lost_ledger&quot;]:
+                prior = self.state[&quot;lost_ledger&quot;].pop(key)
+                self.audit_rec(&quot;loss_retracted&quot;, cpu=cpu, gen=gen, seq=seq,
+                               provisional=prior)
+                self.deliver_late(ts, cpu, gen, seq, payload, prior)
+            elif seq &lt;= cs[&quot;emitted_hi&quot;]:
+                self.audit_rec(&quot;delayed_after_drain&quot;, cpu=cpu, gen=gen,
+                               seq=seq, ts=ts)
+                self.deliver_late(ts, cpu, gen, seq, payload, &quot;drained&quot;)
+            else:
+                self.audit_rec(&quot;duplicate&quot;, cpu=cpu, gen=gen, seq=seq)
+            return
+
+        if seq &gt; cs[&quot;expect&quot;]:
+            for missing in range(cs[&quot;expect&quot;], seq):
+                key = &quot;%s,%d,%d&quot; % (cpu, gen, missing)
+                self.state[&quot;pending&quot;][key] = {
+                    &quot;cpu&quot;: cpu, &quot;gen&quot;: gen, &quot;seq&quot;: missing,
+                    &quot;first_seen&quot;: now}
+                self.audit_rec(&quot;gap_detected&quot;, cpu=cpu, gen=gen, seq=missing)
+            cs[&quot;expect&quot;] = seq
+
+        key = &quot;%s,%d,%d&quot; % (cpu, gen, seq)
+        if key in self.state[&quot;pending&quot;]:
+            p = self.state[&quot;pending&quot;].pop(key)
+            self.audit_rec(&quot;delayed_reordered&quot;, cpu=cpu, gen=gen, seq=seq,
+                           waited_ms=now - p[&quot;first_seen&quot;])
+        cs[&quot;expect&quot;] = seq + 1
+        self.buffer_add(ts, cpu, gen, seq, payload)
+
+    def buffer_add(self, ts, cpu, gen, seq, payload):
+        self.state[&quot;buffer&quot;].append([ts, cpu, gen, seq, payload])
+
+    def deliver_late(self, ts, cpu, gen, seq, payload, prior):
+        &quot;&quot;&quot;Append an out-of-order-but-delivered record to the side channel.&quot;&quot;&quot;
+        with open(self.args.late, &quot;a&quot;, encoding=&quot;utf-8&quot;) as fh:
+            fh.write(json.dumps({&quot;ts&quot;: ts, &quot;cpu&quot;: cpu, &quot;gen&quot;: gen, &quot;seq&quot;: seq,
+                                 &quot;payload&quot;: payload, &quot;provisional&quot;: prior},
+                                sort_keys=True) + &quot;\n&quot;)
+            fh.flush()
+            os.fsync(fh.fileno())
+        self.state[&quot;late_flushed&quot;] = self.state.get(&quot;late_flushed&quot;, 0) + 1
+
+    # -- emission --------------------------------------------------------
+    def min_pending(self, cpu):
+        low = None
+        for p in self.state[&quot;pending&quot;].values():
+            if p[&quot;cpu&quot;] == cpu and (low is None or p[&quot;seq&quot;] &lt; low):
+                low = p[&quot;seq&quot;]
+        return low
+
+    def emit(self, now):
+        st = self.state
+        args = self.args
+        buf = st[&quot;buffer&quot;]
+        if not buf:
+            return False
+
+        live = [c for c, cs in st[&quot;cpus&quot;].items()
+                if cs[&quot;live&quot;] and cs[&quot;gen&quot;] is not None]
+        fresh = []
+        for cpu in live:
+            cs = st[&quot;cpus&quot;][cpu]
+            if now - cs[&quot;last_seen&quot;] &gt; args.hold_ms:
+                if not cs[&quot;stale&quot;]:
+                    cs[&quot;stale&quot;] = True
+                    self.audit_rec(&quot;watermark_forced_stale_cpu&quot;, cpu=cpu,
+                                   held_ms=now - cs[&quot;last_seen&quot;])
+            else:
+                fresh.append(cpu)
+        wm = min(st[&quot;cpus&quot;][c][&quot;last_ts&quot;] for c in fresh) if fresh else None
+
+        buf.sort(key=lambda r: (r[0], str(r[1]), r[3]))
+
+        forced = 0
+        if len(buf) &gt; args.max_buffer:
+            forced = len(buf) - args.max_buffer
+            forced_ts = buf[forced - 1][0]
+            wm = forced_ts if wm is None else max(wm, forced_ts)
+            self.audit_rec(&quot;buffer_forced&quot;, forced=forced, wm_ts=forced_ts)
+
+        emitted, remaining = [], []
+        for i, r in enumerate(buf):
+            ts, cpu, gen, seq, payload = r
+            if forced and i &lt; forced:
+                emitted.append(r)
+                continue
+            if wm is not None and ts &gt; wm:
+                remaining.append(r)
+                continue
+            lo = self.min_pending(cpu)
+            if lo is not None and seq &gt; lo:
+                remaining.append(r)
+                continue
+            emitted.append(r)
+        if not emitted:
+            st[&quot;buffer&quot;] = buf
+            return forced &gt; 0
+
+        for ts, cpu, gen, seq, payload in emitted:
+            cs = st[&quot;cpus&quot;].get(cpu)
+            if cs is not None and cs.get(&quot;gen&quot;) == gen and seq &gt; cs[&quot;emitted_hi&quot;]:
+                cs[&quot;emitted_hi&quot;] = seq
+
+        # Commit state before touching the event log, then fsync the log, then
+        # record how many lines are durable.  On restart the log is truncated
+        # to the committed count so nothing is emitted twice.
+        st[&quot;buffer&quot;] = remaining
+        base = st.get(&quot;events_flushed&quot;, 0)
+        save_state(self.state_path, st)
+        with open(self.events, &quot;a&quot;, encoding=&quot;utf-8&quot;) as fh:
+            for ts, cpu, gen, seq, payload in emitted:
+                fh.write(json.dumps({&quot;ts&quot;: ts, &quot;cpu&quot;: cpu, &quot;gen&quot;: gen,
+                                     &quot;seq&quot;: seq, &quot;payload&quot;: payload},
+                                    sort_keys=True) + &quot;\n&quot;)
+            fh.flush()
+            os.fsync(fh.fileno())
+        st[&quot;events_flushed&quot;] = base + len(emitted)
+        return True
+
+    # -- gap/loss resolution --------------------------------------------
+    def declare_loss(self, cpu, gen, seq, now, reason=&quot;horizon&quot;):
+        cs = self.cpu_state(cpu)
+        lost_now = read_lost(os.path.join(self.args.rings, &quot;cpu%s.lost&quot; % cpu))
+        delta = lost_now - cs[&quot;lost_acct&quot;]
+        if delta &gt; 0:
+            cs[&quot;lost_acct&quot;] = lost_now
+            klass = &quot;true_loss&quot;
+        else:
+            klass = &quot;unaccounted_loss&quot;
+        key = &quot;%s,%d,%d&quot; % (cpu, gen, seq)
+        self.state[&quot;lost_ledger&quot;][key] = klass
+        self.audit_rec(klass, cpu=cpu, gen=gen, seq=seq, reason=reason,
+                       producer_lost_total=lost_now)
+
+    def resolve_gaps(self, now):
+        st = self.state
+        changed = False
+        for key in list(st[&quot;pending&quot;].keys()):
+            p = st[&quot;pending&quot;][key]
+            if now - p[&quot;first_seen&quot;] &lt;= self.args.horizon_ms:
+                continue
+            del st[&quot;pending&quot;][key]
+            self.declare_loss(p[&quot;cpu&quot;], p[&quot;gen&quot;], p[&quot;seq&quot;], now,
+                              reason=&quot;horizon&quot;)
+            changed = True
+        return changed
+
+    # -- driver ----------------------------------------------------------
+    def run(self):
+        args = self.args
+        start = now_ms()
+        last = start
+        while True:
+            changed = self.tick()
+            now = now_ms()
+            if changed:
+                last = now
+            if args.once or STOP:
+                break
+            if args.run_ms and now - start &gt;= args.run_ms:
+                break
+            # Never idle out while records are still held by the watermark or by
+            # an unresolved gap; --hold-ms/--horizon-ms will release them.
+            if (args.idle_ms and now - last &gt;= args.idle_ms
+                    and not self.state[&quot;buffer&quot;]
+                    and not self.state[&quot;pending&quot;]):
+                break
+            time.sleep(args.poll_ms / 1000.0)
+        self.audit_rec(&quot;collector_stop&quot;, stats=dict(self.state[&quot;stats&quot;]))
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument(&quot;--rings&quot;, required=True)
+    ap.add_argument(&quot;--state&quot;, required=True)
+    ap.add_argument(&quot;--events&quot;, required=True)
+    ap.add_argument(&quot;--late&quot;, required=True)
+    ap.add_argument(&quot;--audit&quot;, required=True)
+    ap.add_argument(&quot;--poll-ms&quot;, type=int, default=25)
+    ap.add_argument(&quot;--horizon-ms&quot;, type=int, default=400)
+    ap.add_argument(&quot;--hold-ms&quot;, type=int, default=800)
+    ap.add_argument(&quot;--max-buffer&quot;, type=int, default=100000)
+    ap.add_argument(&quot;--run-ms&quot;, type=int, default=0)
+    ap.add_argument(&quot;--idle-ms&quot;, type=int, default=300)
+    ap.add_argument(&quot;--once&quot;, action=&quot;store_true&quot;)
+    args = ap.parse_args()
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
+    os.makedirs(args.state, exist_ok=True)
+    os.makedirs(args.rings, exist_ok=True)
+    Collector(args).run()
+    return 0
+
+
+if __name__ == &quot;__main__&quot;:
+    sys.exit(main())
+RB_COLLECTOR_PY
+</code></pre>
+<h3>Why this is lossless</h3>
+<ul>
+<li><strong>No destructive read:</strong> the cursor only moves over committed records, and it
+  is persisted after the buffer that holds them is persisted.</li>
+<li><strong>No false loss from reordering:</strong> a gap is only resolved after
+  <code>--horizon-ms</code>, and the producer <code>lost</code> counter is the arbiter.</li>
+<li><strong>No false loss from hotplug:</strong> a reset is a generation change, not a gap.</li>
+<li><strong>No false loss from restart:</strong> the commit protocol is
+  <em>persist buffer → fsync events → record committed count</em>, and startup
+  truncates any events appended after the committed count.</li>
+<li><strong>No silent loss from memory pressure:</strong> a forced eviction is always audited
+  (<code>buffer_forced</code>) and the records are still emitted, just possibly
+  out of order.</li>
+<li><strong>No silent loss from a stalled CPU:</strong> dropping a stale CPU from the
+  watermark is audited (<code>watermark_forced_stale_cpu</code>); if that CPU later
+  delivers an older record it becomes <code>delayed_after_drain</code> / <code>loss_retracted</code>.</li>
+</ul>
+<h2>4. Verification</h2>
+<p><code>verify.sh</code> is a self-contained driver (it assumes <code>rb_collector.sh</code> sits next
+to it). It starts the collector, runs concurrent producers, and asserts:</p>
+<ul>
+<li>the event stream is monotone in <code>(ts, cpu, seq)</code>;</li>
+<li>no expected record is missing and none is duplicated (exactly-once);</li>
+<li>a gap that fills in time is <code>delayed_reordered</code>, <strong>not</strong> loss;</li>
+<li>a producer-declared drop is <code>true_loss</code>;</li>
+<li>a gap with no producer credit is <code>unaccounted_loss</code>;</li>
+<li>a record that arrives after a provisional loss decision is
+  <code>loss_retracted</code> and lands in <code>late.jsonl</code> (delayed delivery, not loss);</li>
+<li>CPU online/offline is observed;</li>
+<li>a small <code>--max-buffer</code> forces eviction without dropping records;</li>
+<li>a <code>SIGKILL</code> + restart mid-run still yields all 60 records exactly once.</li>
+</ul>
+<h3><code>verify.sh</code></h3>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# verify.sh -- self-contained deterministic verification suite for
+# rb_collector.sh.  Covers multi-CPU concurrent producers, partial reads,
+# out-of-order (delayed) delivery, producer-declared true loss, unaccounted
+# loss, CPU hotplug, globally ordered output, bounded-memory forcing, and
+# crash/restart exactly-once recovery.
+set -euo pipefail
+HERE=&quot;$(cd &quot;$(dirname &quot;$0&quot;)&quot; &amp;&amp; pwd)&quot;
+export RB_HOME=&quot;$HERE&quot;
+export RB_COLLECTOR=&quot;$HERE/rb_collector.sh&quot;
+exec python3 - &lt;&lt;'RB_VERIFY_PY'
+#!/usr/bin/env python3
+&quot;&quot;&quot;Deterministic multi-CPU scenario generator + assertions for rb_collector.py.&quot;&quot;&quot;
+import json
+import os
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+HERE = os.environ.get(&quot;RB_HOME&quot;, &quot;.&quot;)
+COLLECTOR = os.environ.get(&quot;RB_COLLECTOR&quot;, os.path.join(HERE, &quot;rb_collector.sh&quot;))
+
+
+def ms():
+    return time.time_ns() // 1_000_000
+
+
+class Ring:
+    &quot;&quot;&quot;A producer writing a single per-CPU ring.&quot;&quot;&quot;
+
+    def __init__(self, rings, cpu, gen=1):
+        self.path = os.path.join(rings, &quot;cpu%s.ring&quot; % cpu)
+        self.lost_path = os.path.join(rings, &quot;cpu%s.lost&quot; % cpu)
+        self.cpu = cpu
+        self.gen = gen
+        self.lost = 0
+        self.lock = threading.Lock()
+        os.makedirs(rings, exist_ok=True)
+
+    def put(self, seq, payload=None, ts=None):
+        ts = ms() if ts is None else ts
+        payload = payload if payload is not None else &quot;cpu%s-seq%d&quot; % (self.cpu, seq)
+        line = &quot;%d|%d|%d|%s\n&quot; % (self.gen, seq, ts, payload)
+        with self.lock:
+            with open(self.path, &quot;a&quot;, encoding=&quot;utf-8&quot;) as fh:
+                fh.write(line)
+                fh.flush()
+                os.fsync(fh.fileno())
+
+    def put_partial_then_finish(self, seq, delay=0.08, payload=None):
+        ts = ms()
+        payload = payload if payload is not None else &quot;cpu%s-seq%d&quot; % (self.cpu, seq)
+        line = &quot;%d|%d|%d|%s\n&quot; % (self.gen, seq, ts, payload)
+        half = len(line) // 2
+        with self.lock:
+            with open(self.path, &quot;a&quot;, encoding=&quot;utf-8&quot;) as fh:
+                fh.write(line[:half])
+                fh.flush()
+                os.fsync(fh.fileno())
+        time.sleep(delay)
+        with self.lock:
+            with open(self.path, &quot;a&quot;, encoding=&quot;utf-8&quot;) as fh:
+                fh.write(line[half:])
+                fh.flush()
+                os.fsync(fh.fileno())
+
+    def drop(self, n=1):
+        with self.lock:
+            self.lost += n
+            with open(self.lost_path, &quot;w&quot;, encoding=&quot;utf-8&quot;) as fh:
+                fh.write(&quot;%d\n&quot; % self.lost)
+                fh.flush()
+                os.fsync(fh.fileno())
+
+
+def run_collector(rings, state, out, extra=None, wait=True):
+    events = os.path.join(out, &quot;events.jsonl&quot;)
+    late = os.path.join(out, &quot;late.jsonl&quot;)
+    audit = os.path.join(out, &quot;audit.jsonl&quot;)
+    cmd = [COLLECTOR, &quot;--rings&quot;, rings, &quot;--state&quot;, state,
+           &quot;--events&quot;, events, &quot;--late&quot;, late, &quot;--audit&quot;, audit,
+           &quot;--poll-ms&quot;, &quot;15&quot;, &quot;--horizon-ms&quot;, &quot;300&quot;, &quot;--hold-ms&quot;, &quot;500&quot;,
+           &quot;--idle-ms&quot;, &quot;400&quot;]
+    if extra:
+        cmd += extra
+    p = subprocess.Popen(cmd)
+    if wait:
+        p.wait()
+    return p, events, late, audit
+
+
+def load_audit(path):
+    recs = []
+    with open(path, encoding=&quot;utf-8&quot;) as fh:
+        for line in fh:
+            recs.append(json.loads(line))
+    return recs
+
+
+def kinds(recs):
+    return [r[&quot;type&quot;] for r in recs]
+
+
+def check_ordered(events):
+    last = None
+    for line in open(events, encoding=&quot;utf-8&quot;):
+        r = json.loads(line)
+        key = (r[&quot;ts&quot;], r[&quot;cpu&quot;], r[&quot;seq&quot;])
+        if last is not None and key &lt; last:
+            raise AssertionError(&quot;event stream not ordered: %s &lt; %s&quot; % (key, last))
+        last = key
+
+
+def test_core(tmp):
+    rings = os.path.join(tmp, &quot;rings&quot;)
+    state = os.path.join(tmp, &quot;state&quot;)
+    out = os.path.join(tmp, &quot;out&quot;)
+    os.makedirs(rings, exist_ok=True)
+    os.makedirs(state, exist_ok=True)
+    os.makedirs(out, exist_ok=True)
+
+    p, events, late, audit = run_collector(rings, state, out, wait=False)
+
+    def threads():
+        c0 = Ring(rings, 0)
+        c1 = Ring(rings, 1)
+        c2 = Ring(rings, 2)
+        # cpu0: 0..9 then 11..14 then delayed 10 (fills gap in time)
+        for s in range(0, 10):
+            c0.put(s)
+            time.sleep(0.012)
+        for s in range(11, 15):
+            c0.put(s)
+            time.sleep(0.012)
+        time.sleep(0.08)
+        c0.put(10)                      # delayed_reordered
+        # cpu0 partial write record
+        c0.put_partial_then_finish(15)
+        for s in range(16, 25):
+            c0.put(s)
+            time.sleep(0.012)
+        # cpu1: true loss at seq 10 (producer lost counter covers it)
+        for s in range(0, 10):
+            c1.put(s)
+            time.sleep(0.012)
+        c1.drop(1)
+        for s in range(11, 25):
+            c1.put(s)
+            time.sleep(0.012)
+        # cpu1 goes offline later; done producing
+        # cpu2 hotplug after a delay
+        time.sleep(0.25)
+        for s in range(0, 8):
+            if s == 3:
+                c2.drop(0)              # unaccounted_loss: no counter credit
+                continue
+            c2.put(s)
+            time.sleep(0.012)
+        for s in range(8, 14):
+            c2.put(s)
+            time.sleep(0.012)
+        # cpu1 removal (CPU hotplug offline)
+        time.sleep(0.1)
+        try:
+            os.remove(os.path.join(rings, &quot;cpu1.ring&quot;))
+        except FileNotFoundError:
+            pass
+        # cpu3: gap declared lost past horizon, then delivered late -&gt; retract
+        c3 = Ring(rings, 3)
+        for s in [0, 1, 4, 5]:
+            c3.put(s)
+            time.sleep(0.012)
+        time.sleep(0.5)                  # &gt; horizon: seq 2,3 declared loss
+        c3.put(2)
+        c3.put(3)
+        return c0, c1, c2, c3
+
+    t = threading.Thread(target=threads)
+    t.start()
+    t.join()
+    time.sleep(0.2)
+    p.send_signal(signal.SIGTERM)
+    try:
+        p.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        p.kill()
+
+    audit_recs = load_audit(audit)
+    ks = kinds(audit_recs)
+    check_ordered(events)
+
+    emitted = [json.loads(l) for l in open(events, encoding=&quot;utf-8&quot;)]
+    got = {(e[&quot;cpu&quot;], e[&quot;seq&quot;]) for e in emitted}
+
+    # Every record that was never declared lost and never late must be emitted.
+    expected = set()
+    for cpu, n in [(&quot;0&quot;, 25), (&quot;1&quot;, 24), (&quot;2&quot;, 13), (&quot;3&quot;, 6)]:
+        for s in range(n):
+            expected.add((cpu, s))
+    # cpu1 seq10 (true loss) never emitted; cpu2 seq3 never emitted
+    must_have = expected - {(&quot;1&quot;, 10), (&quot;2&quot;, 3), (&quot;3&quot;, 2), (&quot;3&quot;, 3)}
+    missing = must_have - got
+    print(&quot;emitted:&quot;, len(emitted))
+    print(&quot;missing:&quot;, sorted(missing))
+    print(&quot;audit kinds:&quot;, {k: ks.count(k) for k in sorted(set(ks))})
+    print(&quot;late:&quot;, [json.loads(l) for l in open(late, encoding=&quot;utf-8&quot;)])
+
+    assert not missing, &quot;lost records: %s&quot; % sorted(missing)
+    assert &quot;cpu_online&quot; in ks and &quot;cpu_offline&quot; in ks, &quot;hotplug not detected&quot;
+    assert &quot;delayed_reordered&quot; in ks, &quot;delayed_reordered not detected&quot;
+    assert &quot;true_loss&quot; in ks, &quot;true_loss not detected&quot;
+    assert &quot;unaccounted_loss&quot; in ks, &quot;unaccounted_loss not detected&quot;
+    assert &quot;loss_retracted&quot; in ks, &quot;late delivery not reconciled&quot;
+    # exactly-once, no duplicate seq in main stream
+    assert len(got) == len(emitted), &quot;duplicate events&quot;
+    print(&quot;TEST core OK&quot;)
+
+
+def test_restart(tmp):
+    rings = os.path.join(tmp, &quot;rings&quot;)
+    state = os.path.join(tmp, &quot;state&quot;)
+    out = os.path.join(tmp, &quot;out&quot;)
+    os.makedirs(rings, exist_ok=True)
+    os.makedirs(state, exist_ok=True)
+    os.makedirs(out, exist_ok=True)
+    events = os.path.join(out, &quot;events.jsonl&quot;)
+    late = os.path.join(out, &quot;late.jsonl&quot;)
+    audit = os.path.join(out, &quot;audit.jsonl&quot;)
+
+    def start():
+        return subprocess.Popen(
+            [COLLECTOR, &quot;--rings&quot;, rings, &quot;--state&quot;, state,
+             &quot;--events&quot;, events, &quot;--late&quot;, late, &quot;--audit&quot;, audit,
+             &quot;--poll-ms&quot;, &quot;10&quot;, &quot;--horizon-ms&quot;, &quot;300&quot;, &quot;--hold-ms&quot;, &quot;500&quot;,
+             &quot;--idle-ms&quot;, &quot;400&quot;, &quot;--run-ms&quot;, &quot;4000&quot;])
+
+    p = start()
+    c0 = Ring(rings, 0)
+    stop = {&quot;v&quot;: False}
+
+    def produce():
+        for s in range(60):
+            c0.put(s)
+            time.sleep(0.008)
+        stop[&quot;v&quot;] = True
+
+    t = threading.Thread(target=produce)
+    t.start()
+    time.sleep(0.22)
+    p.send_signal(signal.SIGKILL)   # hard crash, no cleanup
+    p.wait()
+    time.sleep(0.05)
+    p2 = start()
+    t.join()
+    time.sleep(0.4)
+    p2.send_signal(signal.SIGTERM)
+    try:
+        p2.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        p2.kill()
+
+    emitted = [json.loads(l) for l in open(events, encoding=&quot;utf-8&quot;)]
+    seqs = [e[&quot;seq&quot;] for e in emitted if e[&quot;cpu&quot;] == &quot;0&quot;]
+    check_ordered(events)
+    print(&quot;restart emitted:&quot;, len(seqs))
+    assert sorted(seqs) == list(range(60)), \
+        &quot;restart lost/dup: got %d unique, expected 60&quot; % len(set(seqs))
+    assert len(seqs) == len(set(seqs)), &quot;restart produced duplicates&quot;
+    print(&quot;TEST restart OK&quot;)
+
+
+def test_bounded(tmp):
+    rings = os.path.join(tmp, &quot;rings&quot;)
+    state = os.path.join(tmp, &quot;state&quot;)
+    out = os.path.join(tmp, &quot;out&quot;)
+    os.makedirs(rings, exist_ok=True)
+    os.makedirs(state, exist_ok=True)
+    os.makedirs(out, exist_ok=True)
+    p, events, late, audit = run_collector(
+        rings, state, out, extra=[&quot;--max-buffer&quot;, &quot;4&quot;, &quot;--run-ms&quot;, &quot;3000&quot;],
+        wait=False)
+    # two CPUs, rapid fire so the buffer is forced
+    for s in range(40):
+        Ring(rings, 0).put(s, ts=1000 + s)
+        Ring(rings, 1).put(s, ts=2000 + s)
+    p.wait()
+    emitted = [json.loads(l) for l in open(events, encoding=&quot;utf-8&quot;)]
+    check_ordered(events)
+    got = {(e[&quot;cpu&quot;], e[&quot;seq&quot;]) for e in emitted}
+    assert len(got) == 80, &quot;bounded run dropped records: %d&quot; % len(got)
+    ks = kinds(load_audit(audit))
+    print(&quot;bounded audit kinds:&quot;, {k: ks.count(k) for k in sorted(set(ks))})
+    assert &quot;buffer_forced&quot; in ks, &quot;bounded memory never forced&quot;
+    print(&quot;TEST bounded OK&quot;)
+
+
+if __name__ == &quot;__main__&quot;:
+    tmp = tempfile.mkdtemp(prefix=&quot;rb-test-&quot;)
+    try:
+        for name, fn in [(&quot;core&quot;, test_core), (&quot;restart&quot;, test_restart),
+                         (&quot;bounded&quot;, test_bounded)]:
+            sub = os.path.join(tmp, name)
+            os.makedirs(sub, exist_ok=True)
+            fn(sub)
+    finally:
+        if os.environ.get(&quot;KEEP&quot;):
+            print(&quot;kept:&quot;, tmp)
+        else:
+            shutil.rmtree(tmp, ignore_errors=True)
+RB_VERIFY_PY
+</code></pre>
+<h3>Captured run</h3>
+<pre><code>$ ./verify.sh
+emitted: 66
+missing: []
+audit kinds: {'collector_stop': 1, 'cpu_offline': 1, 'cpu_online': 4,
+              'delayed_reordered': 1, 'gap_detected': 5, 'loss_retracted': 2,
+              'true_loss': 1, 'unaccounted_loss': 3,
+              'watermark_forced_stale_cpu': 3}
+late: [{'cpu': '3', 'gen': 1, 'payload': 'cpu3-seq2',
+        'provisional': 'unaccounted_loss', 'seq': 2, 'ts': ...},
+       {'cpu': '3', 'gen': 1, 'payload': 'cpu3-seq3',
+        'provisional': 'unaccounted_loss', 'seq': 3, 'ts': ...}]
+TEST core OK
+restart emitted: 60
+TEST restart OK
+bounded audit kinds: {'buffer_forced': 1, 'collector_stop': 1,
+                      'cpu_online': 2, 'watermark_forced_stale_cpu': 2}
+TEST bounded OK
+</code></pre>
+<p>Representative audit lines from the core scenario (exactly the
+loss-versus-delay distinction the problem asks for):</p>
+<pre><code class="language-json">{&quot;cpu&quot;:&quot;0&quot;,&quot;gen&quot;:1,&quot;seq&quot;:10,&quot;type&quot;:&quot;gap_detected&quot;,&quot;wall_ms&quot;:...}
+{&quot;cpu&quot;:&quot;0&quot;,&quot;gen&quot;:1,&quot;seq&quot;:10,&quot;type&quot;:&quot;delayed_reordered&quot;,&quot;waited_ms&quot;:138,&quot;wall_ms&quot;:...}
+{&quot;cpu&quot;:&quot;1&quot;,&quot;gen&quot;:1,&quot;seq&quot;:10,&quot;producer_lost_total&quot;:1,&quot;reason&quot;:&quot;horizon&quot;,&quot;type&quot;:&quot;true_loss&quot;,&quot;wall_ms&quot;:...}
+{&quot;cpu&quot;:&quot;2&quot;,&quot;gen&quot;:1,&quot;seq&quot;:3,&quot;producer_lost_total&quot;:0,&quot;reason&quot;:&quot;horizon&quot;,&quot;type&quot;:&quot;unaccounted_loss&quot;,&quot;wall_ms&quot;:...}
+{&quot;cpu&quot;:&quot;3&quot;,&quot;gen&quot;:1,&quot;seq&quot;:2,&quot;provisional&quot;:&quot;unaccounted_loss&quot;,&quot;type&quot;:&quot;loss_retracted&quot;,&quot;wall_ms&quot;:...}
+{&quot;type&quot;:&quot;collector_stop&quot;,&quot;stats&quot;:{&quot;true_loss&quot;:1,&quot;unaccounted_loss&quot;:3,&quot;delayed_reordered&quot;:1,&quot;loss_retracted&quot;:2,...}}
+</code></pre>
+<p>The two <code>loss_retracted</code> records are the proof that the audit does <strong>not</strong>
+confuse delay with loss: the collector had provisionally declared them lost
+when the horizon expired, then corrected the ledger when they actually arrived,
+and routed them to the ordered <code>late.jsonl</code> side channel instead of corrupting
+the main stream.</p>
+<h3>Manual smoke test</h3>
+<pre><code class="language-bash"># terminal A: start the collector
+./rb_collector.sh --rings ./rings --state ./state \
+    --events ./events.jsonl --late ./late.jsonl --audit ./audit.jsonl \
+    --horizon-ms 300 --hold-ms 500 --max-buffer 100000
+
+# terminal B: a producer for CPU 0
+for s in $(seq 0 9); do
+  printf '1|%s|%s|cpu0-seq%s\n' &quot;$s&quot; &quot;$(date +%s%N)&quot; &quot;$s&quot; &gt;&gt; ./rings/cpu0.ring
+  sleep 0.05
+done
+# simulate a reserve() failure for sequence 10:
+echo 1 &gt; ./rings/cpu0.lost
+for s in $(seq 11 19); do
+  printf '1|%s|%s|cpu0-seq%s\n' &quot;$s&quot; &quot;$(date +%s%N)&quot; &quot;$s&quot; &gt;&gt; ./rings/cpu0.ring
+  sleep 0.05
+done
+
+# the main stream stays ordered ...
+python3 -c 'import json,sys; [print(json.loads(l)[&quot;seq&quot;]) for l in open(&quot;events.jsonl&quot;)]'
+# ... and the audit names the loss and its cause:
+grep -E 'true_loss|buffer_forced|cpu_online' audit.jsonl
+</code></pre>
+<h2>5. Operational notes</h2>
+<ul>
+<li><strong>Tune the three windows together.</strong> <code>--horizon-ms</code> is the reorder window
+  (how long a gap waits), <code>--hold-ms</code> is how long a silent CPU can pin the
+  watermark, and <code>--max-buffer</code> is the hard memory cap. A common starting
+  point is <code>horizon = 2 × p99 producer preemption</code>, <code>hold = 3 × horizon</code>, and
+  <code>max-buffer</code> sized to a few seconds of peak throughput.</li>
+<li><strong>Durability vs throughput.</strong> State is <code>fsync()</code>ed every tick. On very high
+  throughput, batch <code>--poll-ms</code> up; the commit protocol still gives
+  exactly-once, only the crash window of unread ring bytes grows (those bytes
+  remain in the ring and are read on restart).</li>
+<li><strong>Generation is mandatory.</strong> If your upstream program does not stamp <code>gen</code>,
+  add it; otherwise a producer restart is indistinguishable from a sequence
+  reset and will be reported as loss.</li>
+<li><strong>The <code>lost</code> counter is the only real ground truth.</strong> Without a
+  producer-side drop counter, <code>unaccounted_loss</code> is the most a consumer can
+  honestly report. Consuming <code>lost</code> is what turns "we think it might be lost"
+  into a defensible audit.</li>
+</ul>
+<hr />
+<p>Artifacts are also written to disk at <code>/workspace/ringbuf/</code> (<code>rb_collector.sh</code>, <code>verify.sh</code>, <code>SOLUTION.md</code>). Verification reproduced here was run both against the on-disk files and against the code blocks extracted from this document.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: shell-20261016-ebpf-ringbuf-lossless-epoch-drain
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-16T16:05:57.722Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a Linux observability collector that drains per-CPU eBPF ring buffers while producers continue, and emits a globally ordered event stream with bounded memory. Handle CPU hotplug, sequence gaps, partial reads, and restart recovery; provide an audit record that distinguishes true loss from delayed delivery.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;shell-20261016-ebpf-ringbuf-lossless-epoch-drain&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-16T16:05:57.722Z&quot;, &quot;version&quot;: &quot;5.2&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

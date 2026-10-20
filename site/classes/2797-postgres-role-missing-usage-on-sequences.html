@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>postgres-role-missing-usage-on-sequences — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: postgres-role-missing-usage-on-sequences">
+<meta property="og:title" content="postgres-role-missing-usage-on-sequences — Off-By-One">
+<meta property="og:description" content="Problem class: postgres-role-missing-usage-on-sequences">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2797-postgres-role-missing-usage-on-sequences.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>postgres-role-missing-usage-on-sequences</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'></span><span class='badge v'>go</span></div><div class='desc'><p>Problem class: postgres-role-missing-usage-on-sequences</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2797-postgres-role-missing-usage-on-sequences.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>Verified solution written to <strong><code>/workspace/SOLUTION.md</code></strong>. It was empirically reproduced and tested against a live PostgreSQL cluster (full transcript below the fix). Here is the document:</p>
+<hr />
+<h1>Fix: <code>permission denied for sequence &lt;table&gt;_id_seq</code> (SQLSTATE 42501) under <code>SET ROLE</code></h1>
+<p><strong>Problem class:</strong> <code>postgres-role-missing-usage-on-sequences</code>
+<strong>Environment:</strong> PostgreSQL 16 (<code>pgvector/pgvector:pg16</code>); Go service whose <code>AfterConnect</code> hook runs <code>SET ROLE app_role</code> and sets an RLS GUC.</p>
+<h2>Symptom</h2>
+<p>After a migration that grants table privileges, every insert into a table with a <code>bigserial</code> primary key fails:</p>
+<pre><code>ERROR:  42501: permission denied for sequence documents_id_seq
+LOCATION:  nextval_internal, sequence.c:652
+</code></pre>
+<h2>Root cause</h2>
+<p>PostgreSQL keeps <strong>separate ACLs per object kind</strong>. <code>GRANT ... ON ALL TABLES</code> walks <code>pg_class</code> entries whose <code>relkind</code> is a table/view/foreign table and rewrites only their <code>relacl</code>. Sequences are <code>relkind = 'S'</code> and have their <strong>own</strong> <code>relacl</code>, so a table-only grant never touches them.</p>
+<p><code>bigserial</code> expands to:</p>
+<pre><code class="language-sql">id bigint NOT NULL DEFAULT nextval('documents_id_seq')
+</code></pre>
+<p>and the sequence functions require:</p>
+<table>
+<thead>
+<tr>
+<th>Sequence function</th>
+<th>Required privilege (at least one)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nextval()</code></td>
+<td><code>USAGE</code> or <code>UPDATE</code></td>
+</tr>
+<tr>
+<td><code>currval()</code>, <code>lastval()</code></td>
+<td><code>USAGE</code> or <code>SELECT</code></td>
+</tr>
+<tr>
+<td><code>setval()</code></td>
+<td><code>UPDATE</code></td>
+</tr>
+</tbody>
+</table>
+<p>The table owner (migration role) can use the sequence implicitly, but <code>app_role</code> cannot. Because the service runs <strong>every</strong> connection under <code>SET ROLE app_role</code>, every insert reaches <code>nextval()</code> as <code>app_role</code> and is denied.</p>
+<p><strong>Verified reproduction:</strong></p>
+<pre><code>GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO app_role;  -- misses sequences
+SET ROLE app_role; SET app.tenant_id='…';
+INSERT INTO documents(tenant_id, body) VALUES ('…','hello');
+-- ERROR: 42501: permission denied for sequence documents_id_seq
+</code></pre>
+<h2>The fix</h2>
+<p>Add a <strong>new numbered migration</strong> (never edit an applied one) granting sequence privileges <strong>catalog-wide</strong>, and cover future sequences too:</p>
+<pre><code class="language-sql">-- migrations/0002_grant_app_role_sequence_usage.sql
+BEGIN;
+
+-- 1. Existing sequences in public.
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO app_role;
+
+-- 2. Future sequences created by the migration role.
+ALTER DEFAULT PRIVILEGES FOR ROLE app_owner IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO app_role;
+
+COMMIT;
+</code></pre>
+<p>Apply: <code>psql "$DATABASE_URL" -f migrations/0002_grant_app_role_sequence_usage.sql</code></p>
+<p>Notes:
+- <code>USAGE</code> is what <code>nextval()</code> needs; <code>SELECT</code> covers <code>currval()</code>/ORM introspection. Do <strong>not</strong> grant <code>UPDATE</code>/<code>ALL</code> (that would allow <code>setval</code>).
+- <code>ON ALL SEQUENCES IN SCHEMA</code> is point-in-time; <code>ALTER DEFAULT PRIVILEGES</code> closes the future-sequence hole for the named creator role(s).
+- <code>GENERATED … AS IDENTITY</code> sequences are internally managed, need no <code>USAGE</code>, and are excluded from <code>information_schema.sequences</code> (via <code>pg_depend.deptype='i'</code>). This fix targets explicit <code>serial</code>/<code>bigserial</code>.
+- No Go change needed for the defect; the service login role just needs membership in <code>app_role</code>.</p>
+<h2>Verification</h2>
+<h3>1. Catalog check (authoritative — run as owner/superuser)</h3>
+<p><code>information_schema.sequences</code> is privilege-filtered, so querying it as <code>app_role</code> can return <strong>0 rows and pass vacuously</strong>.</p>
+<pre><code class="language-sql">-- Should return 0 rows.
+SELECT s.sequence_name
+FROM information_schema.sequences s
+WHERE s.sequence_schema = 'public'
+  AND NOT has_sequence_privilege('app_role', s.sequence_name, 'USAGE');
+</code></pre>
+<p>Exhaustive variant that excludes identity sequences (which need no grant):</p>
+<pre><code class="language-sql">-- Should return 0 rows.
+SELECT c.oid::regclass AS seq
+FROM pg_class c
+JOIN pg_namespace n ON n.oid = c.relnamespace
+WHERE c.relkind = 'S'
+  AND n.nspname = 'public'
+  AND NOT EXISTS (
+      SELECT 1 FROM pg_depend d
+      WHERE d.classid = 'pg_class'::regclass
+        AND d.objid = c.oid AND d.deptype = 'i'
+  )
+  AND NOT has_sequence_privilege('app_role', c.oid, 'USAGE');
+</code></pre>
+<h3>2. Behavioral probe (always <code>SET ROLE</code> + set the RLS GUC)</h3>
+<pre><code class="language-sql">BEGIN;
+SET LOCAL ROLE app_role;
+SET LOCAL app.tenant_id = '11111111-1111-1111-1111-111111111111';
+INSERT INTO documents (tenant_id, body)
+VALUES ('11111111-1111-1111-1111-111111111111', 'probe') RETURNING id;
+ROLLBACK;
+</code></pre>
+<pre><code>before fix:  ERROR: 42501: permission denied for sequence documents_id_seq
+after fix:   INSERT 0 1   (id returned)
+</code></pre>
+<h3>3. Layer-attribution gotcha (RLS vs. sequence) — verified nuance</h3>
+<ul>
+<li>For a classic <code>bigserial</code>/<code>serial</code> default, <code>nextval()</code> is evaluated during tuple projection <strong>before</strong> the RLS <code>WITH CHECK</code> (<code>ExecWithCheckOptions</code>). The sequence <code>42501</code> surfaces whether or not the GUC is set.</li>
+<li>The RLS-first ordering <strong>does</strong> occur for <code>GENERATED … AS IDENTITY</code> PKs: without the GUC the insert reports <code>new row violates row-level security policy</code>, and with the GUC it succeeds (identity sequences need no grant).</li>
+<li>Rule: always run the probe with the RLS GUC set and confirm with the catalog query — never infer the layer from a GUC-less probe or one run as the app role.</li>
+</ul>
+<h3>4. Future-sequence check</h3>
+<pre><code class="language-sql">-- as app_owner
+CREATE TABLE notes (id bigserial PRIMARY KEY, tenant_id uuid NOT NULL, body text);
+
+SELECT sequence_name, has_sequence_privilege('app_role', sequence_name, 'USAGE')
+FROM information_schema.sequences WHERE sequence_schema = 'public' ORDER BY 1;
+-- documents_id_seq | t
+-- notes_id_seq     | t
+</code></pre>
+<h3>5. Go regression test (env-gated, skips when unset)</h3>
+<pre><code class="language-go">package seqprivtest
+
+import (
+    &quot;database/sql&quot;
+    &quot;os&quot;
+    &quot;testing&quot;
+
+    _ &quot;github.com/lib/pq&quot;
+)
+
+// Connect with a migration/owner (or superuser) URL: information_schema.sequences
+// is privilege-filtered and would otherwise return zero rows and pass vacuously.
+func TestAllPublicSequencesGrantUsage(t *testing.T) {
+    dsn := os.Getenv(&quot;TEST_DATABASE_URL&quot;)
+    if dsn == &quot;&quot; {
+        t.Skip(&quot;TEST_DATABASE_URL not set; skipping sequence-privilege regression test&quot;)
+    }
+    role := os.Getenv(&quot;APP_ROLE&quot;)
+    if role == &quot;&quot; {
+        role = &quot;app_role&quot;
+    }
+
+    db, err := sql.Open(&quot;postgres&quot;, dsn)
+    if err != nil {
+        t.Fatalf(&quot;open: %v&quot;, err)
+    }
+    defer db.Close()
+
+    rows, err := db.Query(`SELECT s.sequence_name
+        FROM information_schema.sequences s
+       WHERE s.sequence_schema = 'public'
+       ORDER BY s.sequence_name`)
+    if err != nil {
+        t.Fatalf(&quot;list sequences: %v&quot;, err)
+    }
+    var seqs []string
+    for rows.Next() {
+        var name string
+        if err := rows.Scan(&amp;name); err != nil {
+            t.Fatalf(&quot;scan: %v&quot;, err)
+        }
+        seqs = append(seqs, name)
+    }
+    if err := rows.Err(); err != nil {
+        t.Fatalf(&quot;iterate: %v&quot;, err)
+    }
+    if len(seqs) == 0 {
+        t.Fatalf(&quot;no sequences in public; wrong database or insufficient visibility&quot;)
+    }
+
+    for _, seq := range seqs {
+        var ok bool
+        if err := db.QueryRow(
+            `SELECT has_sequence_privilege($1::name, $2::text, 'USAGE')`,
+            role, seq).Scan(&amp;ok); err != nil {
+            t.Fatalf(&quot;has_sequence_privilege(%s, %s): %v&quot;, role, seq, err)
+        }
+        if !ok {
+            t.Errorf(&quot;role %q lacks USAGE on sequence %q&quot;, role, seq)
+        }
+    }
+}
+</code></pre>
+<p>Verified test behavior:</p>
+<pre><code>TEST_DATABASE_URL=&quot;host=… user=app_owner dbname=appdb&quot; APP_ROLE=app_role go test ./...
+  with fix:            PASS
+  after REVOKE USAGE:  FAIL  role &quot;app_role&quot; lacks USAGE on sequence &quot;documents_id_seq&quot;
+  without TEST_DATABASE_URL: SKIP
+</code></pre>
+<h2>Checklist</h2>
+<ul>
+<li>[ ] New numbered migration grants <code>USAGE, SELECT ON ALL SEQUENCES IN SCHEMA …</code>.</li>
+<li>[ ] <code>ALTER DEFAULT PRIVILEGES FOR ROLE &lt;migration_role&gt;</code> covers future sequences.</li>
+<li>[ ] Catalog query (as owner/superuser) returns 0 rows.</li>
+<li>[ ] Behavioral probe under <code>SET ROLE</code> + RLS GUC succeeds.</li>
+<li>[ ] Go regression test in CI with an owner URL, skipping when unset.</li>
+</ul>
+<hr />
+<p><strong>What I actually verified</strong> (live PG18; same ACL semantics as PG16): the 42501 repro, the fix, <code>has_sequence_privilege</code> catalog checks, <code>ALTER DEFAULT PRIVILEGES</code> covering a post-fix <code>bigserial</code>, the identity-PK RLS-first ordering, the vacuous-pass of the privilege-filtered view, and the Go test passing/failing/skipping. One correction to the problem's framing, verified and documented rather than repeated: for a classic <code>bigserial</code> default <code>nextval()</code> runs before the RLS <code>WITH CHECK</code>, so RLS does not mask the sequence error there — it only reorders for identity PKs, which don't need the grant. The fix and the mandatory "set the GUC + run the catalog check" probe design are unaffected.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: postgres-role-missing-usage-on-sequences
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-16T16:56:20.788Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;&quot;, &quot;environment&quot;: &quot;PostgreSQL 16 (pgvector/pgvector:pg16); Go service with per-connection SET ROLE app_role (AfterConnect hook) + RLS policies gated on a custom session GUC&quot;, &quot;language&quot;: &quot;&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;postgres-role-missing-usage-on-sequences&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-16T16:56:20.788Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

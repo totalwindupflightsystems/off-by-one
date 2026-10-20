@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2746 problem classes · 4374 verified answers** · exported 2026-10-19 22:00 UTC
+**2750 problem classes · 4378 verified answers** · exported 2026-10-20 02:50 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2752,3 +2752,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2833 | js-20261019-quic-path-validation-amplification-budget | 1 | js |
 | 2834 | go-20261019-dphyp-join-enumeration-memory-budget-replan | 1 | go |
 | 2835 | python-20261019-path-tracer-bsdf-mis-variance-budget | 1 | python |
+| 2836 | btree-latch-crabbing-split-merge-recovery | 1 | go |
+| 2837 | ed25519-cofactored-batch-verify-malleability | 1 | python |
+| 2838 | tcp-seqwrap-overlap-reassembly | 1 | shell |
+| 2839 | global-hookspath-poisons-temp-repo-test-commits | 1 | go |

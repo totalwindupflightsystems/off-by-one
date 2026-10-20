@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-20261017-quorum-lease-fencing-under-clock-skew — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: go-20261017-quorum-lease-fencing-under-clock-skew">
+<meta property="og:title" content="go-20261017-quorum-lease-fencing-under-clock-skew — Off-By-One">
+<meta property="og:description" content="Problem class: go-20261017-quorum-lease-fencing-under-clock-skew">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2813-go-20261017-quorum-lease-fencing-under-clock-skew.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-20261017-quorum-lease-fencing-under-clock-skew</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-20261017-quorum-lease-fencing-under-clock-skew</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2813-go-20261017-quorum-lease-fencing-under-clock-skew.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Fenced Quorum Leases: Safe Lease Coordination under Delayed Messages, Process Pauses, and Bounded-but-Unknown Clock Skew</h1>
+<p><strong>Problem class:</strong> <code>go-20261017-quorum-lease-fencing-under-clock-skew</code></p>
+<p><strong>TL;DR.</strong> Time-based leases cannot be made safe when the clock-skew bound is unknown: no lease duration can be proven longer than the worst pause/skew. The fix is to stop using time for <em>safety</em>. A majority-backed coordinator mints a <strong>strictly monotonic fencing token</strong> for every grant, and the storage service accepts a write only if its token is at least the largest token it has already accepted. A stale holder can then be paused arbitrarily and its clock can be arbitrarily wrong — its old token is rejected by the storage, so it can never overwrite a newer holder's committed write. Clocks and timeouts are still used, but only for <em>liveness</em> (retrying acquisition), never for correctness.</p>
+<blockquote>
+<p>Verified implementation lives in <code>~/quorum-lease-fencing/</code> (<code>fencing.go</code>, <code>coordinator.go</code>, <code>lease_test.go</code>, <code>clock_test.go</code>, <code>cmd/demo/main.go</code>, <code>SOLUTION.md</code>). All tests pass under <code>-race</code>.</p>
+</blockquote>
+<hr />
+<h2>1. System and failure model</h2>
+<p>Roles:</p>
+<ul>
+<li><strong>Replicas</strong> <code>R = {r_1 … r_N}</code>, <code>N = 2f+1</code>. They hold the durable coordination state (the largest promise each has made). <code>quorum = f+1 = floor(N/2)+1</code>.</li>
+<li><strong>Coordinators.</strong> Active client-facing lease coordinator. On failover, another coordinator takes over with no shared in-memory state.</li>
+<li><strong>Storage</strong> (the "partitioned storage service"). The protected resource. It is reachable by holders even when they are partitioned from the coordinator, which is exactly the dangerous case.</li>
+</ul>
+<p>Assumptions (crash-stop, partially synchronous, non-Byzantine):</p>
+<ol>
+<li><strong>Crash-stop + stable storage.</strong> A replica or coordinator may crash, pause, or be partitioned at any time. If a replica has durably recorded a promise, that promise survives the crash/pause. Replicas never lose durable state or lie.</li>
+<li><strong>Asynchronous network.</strong> Messages may be delayed arbitrarily and reordered. They are not corrupted. During <em>stabilized</em> periods a majority can exchange messages within some finite, unknown time Δ.</li>
+<li><strong>Clocks.</strong> Physical clocks may be skewed/drifted by an amount that is <em>bounded but unknown</em>. Consequently no timeout derived from clocks can be trusted for safety. Process pauses (GC, VM suspend, SIGSTOP) can exceed any fixed lease duration.</li>
+<li><strong>No Byzantine faults.</strong> Replicas and storage follow the protocol.</li>
+</ol>
+<p>Goal:</p>
+<ul>
+<li><strong>Safety:</strong> a stale holder can never commit a write that overwrites a newer holder's committed write, under any delay/pause/skew allowed above.</li>
+<li><strong>Availability:</strong> after stabilization (a majority reachable and responsive, no contention), a coordinator acquires a lease within <code>O(N · Δ)</code>.</li>
+</ul>
+<hr />
+<h2>2. Root-cause analysis</h2>
+<h3>2.1 Why the obvious design fails</h3>
+<p>A textbook lease coordinator does this:</p>
+<pre><code>grant(holder, D):
+    if now &lt; expiry: reject        # lease still believed active
+    holder, expiry = holder, now + D
+
+holder may act while local_now &lt; expiry
+</code></pre>
+<p>This makes <strong>safety depend on timing</strong>. Two things break it:</p>
+<ul>
+<li><strong>Unknown skew.</strong> For the check to be safe you must pick <code>D &gt; 2·max_skew + max_RTT</code>. If the skew bound is unknown, there is no <code>D</code> you can justify. An adversary/reality with a larger skew grants <code>B</code> while <code>A</code>'s slow clock still says <code>A</code> holds the lease.</li>
+<li><strong>Pauses.</strong> A GC pause, VM freeze, or SIGSTOP can exceed any fixed <code>D</code>. The holder wakes up and continues as if it still held the lease.</li>
+</ul>
+<p>Even if the coordinator uses only its own clock, the <em>holder</em> decides it may act using its own clock, so skew on the holder reintroduces the bug. Coordinator grants A at <code>T0</code> for <code>D</code>, grants B at <code>T0+D+ε</code>; A's clock is behind by 2ε, so A still believes it is valid and writes concurrently with B. <strong>Two writers enter, corruption comes out.</strong> (Verified by <code>TestClockSkewBreaksNaiveLeaseButNotFencing</code>.)</p>
+<h3>2.2 The real invariant that was missing</h3>
+<p>Mutual exclusion of <em>holders</em> is not the property the storage actually needs, and under unknown skew it is impossible to guarantee without also giving up availability. The property the storage needs is:</p>
+<blockquote>
+<p><strong>Fencing safety:</strong> if the storage has accepted a write with token <code>t</code>, then it will never again accept a write with token <code>&lt; t</code>.</p>
+</blockquote>
+<p>If every <em>newer</em> grant carries a <em>larger</em> token, then a stale holder is automatically fenced once the newer holder writes. This decouples correctness from clocks entirely.</p>
+<hr />
+<h2>3. The fix</h2>
+<p>Two ideas, both required:</p>
+<h3>3.1 Mint tokens through a majority (Paxos-style promise)</h3>
+<p>Each replica keeps one durable value <code>promised</code>. A coordinator runs ballots until a majority promises a token <code>t</code> <strong>strictly greater than everything promised before</strong>:</p>
+<ul>
+<li><code>Prepare(t)</code> succeeds at a replica iff <code>t &gt; promised</code>; it durably sets <code>promised = t</code>.</li>
+<li>A grant with token <code>t</code> requires <code>OK</code> from a majority.</li>
+</ul>
+<p>Because any two majorities intersect, and because <code>promised</code> never decreases:</p>
+<ul>
+<li>Two different grants can never receive the same token.</li>
+<li>If grant G2 starts after grant G1 has its majority, then <code>token(G2) &gt; token(G1)</code>.</li>
+</ul>
+<p>No clock is consulted. Delays and reordering only affect how many ballots are needed, never the monotonicity.</p>
+<h3>3.2 Enforce the token at the storage</h3>
+<p>The storage keeps <code>max_token</code> and accepts a write iff <code>token &gt;= max_token</code>, updating <code>max_token</code>. This is the linearization point. A stale writer holding <code>t_old &lt; max_token</code> is rejected even though it is partitioned from the coordinator, paused, or its clock is wrong.</p>
+<h3>3.3 Recovery</h3>
+<p>A replacement coordinator starts with <code>hint = 0</code>. Its first ballot loses at exactly the replicas that still carry the previous grant's promise; those replicas report their <code>promised</code> value, the coordinator jumps past it, and the next ballot wins a strictly larger token. <strong>No clock-based "wait for the old lease to expire" is needed or used.</strong> Hence failover is fast <em>and</em> safe.</p>
+<h3>3.4 What time is still used for</h3>
+<p>Timeouts/backoff are used only to decide when to retry <code>Acquire</code>. If a majority is unreachable, <code>Acquire</code> returns <code>ErrNoQuorum</code>. That is a liveness failure and can never expose a stale writer.</p>
+<hr />
+<h2>4. Safety argument</h2>
+<p><strong>Lemmas.</strong></p>
+<ul>
+<li><em>L1 (replica monotonicity).</em> For every replica <code>r</code>, <code>r.promised</code> is non-decreasing, and once <code>r.promised = p</code>, <code>r.Prepare(t)</code> returns <code>OK</code> only if <code>t &gt; p</code>. Immediate from the code (<code>promised</code> is only assigned when <code>t &gt; promised</code>).</li>
+<li><em>L2 (majority intersection).</em> Any two majority sets of <code>N = 2f+1</code> replicas intersect. Standard pigeonhole: <code>|M1| + |M2| &gt;= 2(f+1) = N+1 &gt; N</code>.</li>
+<li><em>L3 (grant order).</em> If grant G1 with token <code>t1</code> has completed (majority <code>M1</code> promised <code>t1</code>), any later successful grant G2 with token <code>t2</code> satisfies <code>t2 &gt; t1</code>. Let <code>M2</code> be G2's majority. Pick <code>r ∈ M1 ∩ M2</code>. When G2's ballot reached <code>r</code>, <code>r.promised &gt;= t1</code> (L1); for <code>r</code> to answer <code>OK</code>, <code>t2 &gt; r.promised &gt;= t1</code>. If G2's ballot was concurrent with G1's, then <code>M1 ∩ M2</code> promised one of the two first; whichever is later in token order is the one whose promise reached the intersection first, so completed grants remain totally ordered by token.</li>
+</ul>
+<p><strong>Theorem (stale-write exclusion).</strong> Consider a failover: holder <code>S</code> was granted <code>t_S</code>, then holder <code>F</code> was granted <code>t_F</code> in a grant that completed after <code>S</code>'s grant. By L3, <code>t_F &gt; t_S</code>.</p>
+<ul>
+<li>If <code>F</code> writes before <code>S</code>'s post-pause write, the storage's <code>max_token &gt;= t_F &gt; t_S</code>, so <code>S</code>'s write is rejected.</li>
+<li>If <code>S</code> writes before <code>F</code>, then <code>S</code>'s write is ordered before <code>F</code>'s; when <code>F</code> writes, <code>t_F &gt;= max_token</code> so it is accepted and supersedes <code>S</code>.</li>
+</ul>
+<p>In both cases <code>S</code> can never overwrite <code>F</code>'s committed value. The argument holds even though <code>S</code> may be paused arbitrarily long, <code>S</code>'s write may be delayed arbitrarily, and <code>S</code>'s clock may be arbitrarily wrong, because neither the coordinator nor the storage consults a clock. ∎</p>
+<p><strong>Corollary (linearizable resource).</strong> All writes accepted by the storage form a non-decreasing token sequence. Any observer that reads the stored token gets the largest granted token that has committed so far, so the resource is linearizable with respect to the token order (and hence with respect to the grant order).</p>
+<p><strong>Remark on mutual exclusion.</strong> We deliberately do <strong>not</strong> promise that two holders are never simultaneously past <code>Acquire</code>. Under unknown skew that promise is unprovable without sacrificing availability. Fencing is the safety mechanism; the lease is an efficiency/liveness optimization. If a workload needs true mutual exclusion for non-idempotent side effects, make those side effects idempotent or fence them too.</p>
+<hr />
+<h2>5. Availability bound after stabilization</h2>
+<p>After stabilization assume a majority answers within Δ and no new grants occur by other coordinators. Let <code>P</code> be the largest promise held by any replica.</p>
+<ul>
+<li>Each failed ballot strictly increases the coordinator's next proposal number (it sets <code>hint</code> to the largest rejected promise and then proposes <code>hint+1</code>).</li>
+<li>Every rejection reports a <code>promised</code> value drawn from the at most <code>N</code> replicas' durable values, and it is strictly larger than the current proposal.</li>
+<li>Therefore at most <code>N</code> ballots can fail before the proposal exceeds <code>P</code>; one more ballot succeeds.</li>
+</ul>
+<p>Bound: <code>O(N)</code> ballots, i.e. <code>O(N·Δ)</code> wall-clock once the network stabilizes. With <code>N = 5</code> this is at most a handful of round trips; the tests show a fresh coordinator recovering in one or two ballots in the uncontended case. If a majority is down, <code>Acquire</code> returns <code>ErrNoQuorum</code> (safety is preserved by refusing to mint). This is the standard CAP trade-off: the coordinator is CP; fencing guarantees the storage is never corrupted regardless.</p>
+<hr />
+<h2>6. Exact implementation</h2>
+<p>Layout:</p>
+<pre><code>quorum-lease-fencing/
+├── go.mod
+├── fencing.go        # storage + fencing-token validation
+├── coordinator.go    # replicas, quorum, coordinators, Acquire
+├── lease_test.go     # safety/liveness/fencing tests
+├── clock_test.go     # proves naive time leases fail, fencing does not
+└── cmd/demo/main.go  # prints a concrete execution trace
+</code></pre>
+<h3><code>go.mod</code></h3>
+<pre><code class="language-go">module quorumlease
+
+go 1.26
+</code></pre>
+<h3><code>fencing.go</code></h3>
+<pre><code class="language-go">package quorumlease
+
+import (
+    &quot;errors&quot;
+    &quot;fmt&quot;
+    &quot;sync&quot;
+)
+
+var ErrStaleToken = errors.New(&quot;stale fencing token&quot;)
+
+type Token uint64
+
+type Storage struct {
+    mu       sync.Mutex
+    maxToken Token
+    value    []byte
+    accepted []AcceptedWrite
+}
+
+type AcceptedWrite struct {
+    Token Token
+    Value []byte
+}
+
+func NewStorage() *Storage { return &amp;Storage{} }
+
+// Write commits value iff token is not older than the highest token seen.
+func (s *Storage) Write(token Token, value []byte) error {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+
+    if token &lt; s.maxToken {
+        return fmt.Errorf(&quot;%w: presented %d, highest accepted %d&quot;, ErrStaleToken, token, s.maxToken)
+    }
+    s.maxToken = token
+    s.value = append(s.value[:0], value...)
+    s.accepted = append(s.accepted, AcceptedWrite{Token: token, Value: append([]byte(nil), value...)})
+    return nil
+}
+
+func (s *Storage) Read() (Token, []byte) {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    return s.maxToken, append([]byte(nil), s.value...)
+}
+
+func (s *Storage) AcceptedTokens() []Token {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    out := make([]Token, len(s.accepted))
+    for i, w := range s.accepted {
+        out[i] = w.Token
+    }
+    return out
+}
+
+func (s *Storage) Accepted() []AcceptedWrite {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    out := make([]AcceptedWrite, len(s.accepted))
+    copy(out, s.accepted)
+    return out
+}
+</code></pre>
+<h3><code>coordinator.go</code></h3>
+<pre><code class="language-go">package quorumlease
+
+import (
+    &quot;errors&quot;
+    &quot;sync&quot;
+)
+
+var ErrNoQuorum = errors.New(&quot;no quorum reachable&quot;)
+
+type Replica struct {
+    id int
+
+    mu        sync.Mutex
+    promised  Token
+    available bool
+}
+
+func NewReplica(id int) *Replica {
+    return &amp;Replica{id: id, available: true}
+}
+
+type PrepareResp struct {
+    Responded bool
+    OK        bool
+    Promised  Token
+}
+
+// Prepare: durable promise step. Promises never decrease.
+func (r *Replica) Prepare(t Token) PrepareResp {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+
+    if !r.available {
+        return PrepareResp{Responded: false}
+    }
+    if t &gt; r.promised {
+        r.promised = t
+        return PrepareResp{Responded: true, OK: true, Promised: t}
+    }
+    return PrepareResp{Responded: true, OK: false, Promised: r.promised}
+}
+
+func (r *Replica) Close()  { r.mu.Lock(); r.available = false; r.mu.Unlock() }
+func (r *Replica) Pause()  { r.mu.Lock(); r.available = false; r.mu.Unlock() }
+func (r *Replica) Resume() { r.mu.Lock(); r.available = true; r.mu.Unlock() }
+
+func (r *Replica) Promised() Token {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    return r.promised
+}
+
+type Cluster struct {
+    mu       sync.Mutex
+    replicas []*Replica
+}
+
+func NewCluster(n int) *Cluster {
+    c := &amp;Cluster{}
+    for i := 0; i &lt; n; i++ {
+        c.replicas = append(c.replicas, NewReplica(i))
+    }
+    return c
+}
+
+func (c *Cluster) Size() int              { return len(c.replicas) }
+func (c *Cluster) Quorum() int            { return len(c.replicas)/2 + 1 }
+func (c *Cluster) Replica(i int) *Replica { return c.replicas[i] }
+func (c *Cluster) Replicas() []*Replica   { return c.replicas }
+
+func (c *Cluster) BroadcastPrepare(t Token) []PrepareResp {
+    c.mu.Lock()
+    reps := append([]*Replica(nil), c.replicas...)
+    c.mu.Unlock()
+
+    resps := make([]PrepareResp, len(reps))
+    for i, r := range reps {
+        resps[i] = r.Prepare(t)
+    }
+    return resps
+}
+
+type Coordinator struct {
+    name    string
+    cluster *Cluster
+
+    mu          sync.Mutex
+    hint        Token
+    maxAttempts int
+}
+
+type Lease struct {
+    Token  Token
+    Holder string
+}
+
+func NewCoordinator(name string, cluster *Cluster) *Coordinator {
+    return &amp;Coordinator{name: name, cluster: cluster, maxAttempts: 1_000_000}
+}
+
+func (c *Coordinator) SetMaxAttempts(n int) {
+    c.mu.Lock()
+    defer c.mu.Unlock()
+    c.maxAttempts = n
+}
+
+// Acquire: majority-promised, strictly increasing token. No wall clock.
+func (c *Coordinator) Acquire() (Lease, error) {
+    quorum := c.cluster.Quorum()
+
+    c.mu.Lock()
+    budget := c.maxAttempts
+    c.mu.Unlock()
+
+    for attempts := 0; attempts &lt; budget; attempts++ {
+        c.mu.Lock()
+        c.hint++
+        t := c.hint
+        c.mu.Unlock()
+
+        acks := 0
+        var highestRejected Token
+        for _, resp := range c.cluster.BroadcastPrepare(t) {
+            if !resp.Responded {
+                continue
+            }
+            if resp.OK {
+                acks++
+            } else if resp.Promised &gt; highestRejected {
+                highestRejected = resp.Promised
+            }
+        }
+
+        if acks &gt;= quorum {
+            return Lease{Token: t, Holder: c.name}, nil
+        }
+
+        c.mu.Lock()
+        if highestRejected &gt; c.hint {
+            c.hint = highestRejected
+        }
+        c.mu.Unlock()
+    }
+    return Lease{}, ErrNoQuorum
+}
+</code></pre>
+<blockquote>
+<p>In a production coordinator (Raft/etcd/ZooKeeper-style) the token should be the committed log index/epoch of a <code>Grant</code> entry, and the <code>Grant</code> entry must be committed by a majority before its token is returned. The promise register above is the minimal safety core; replacing it with a real replicated log preserves the same argument.</p>
+</blockquote>
+<hr />
+<h2>7. Verification</h2>
+<h3>7.1 Commands</h3>
+<pre><code class="language-bash">cd quorum-lease-fencing
+go vet ./...
+go test -count=1 -v ./...
+go test -race -count=10 ./...
+go run ./cmd/demo
+</code></pre>
+<h3>7.2 Test results</h3>
+<pre><code>=== RUN   TestClockSkewBreaksNaiveLeaseButNotFencing
+--- PASS
+=== RUN   TestStaleHolderRejectedAfterFailover
+--- PASS
+=== RUN   TestStaleWriteRejectedEvenAfterArbitraryPause
+--- PASS
+=== RUN   TestRecoveryAcrossCoordinatorCrash
+--- PASS
+=== RUN   TestSequentialGrantsStrictlyIncrease
+--- PASS
+=== RUN   TestConcurrentAcquiresAreUnique
+--- PASS
+=== RUN   TestDelayedPrepareCannotDowngradePromise
+--- PASS
+=== RUN   TestMajorityIntersectionUnderInterleaving
+--- PASS
+=== RUN   TestNoQuorumNoLeaseThenAvailableAfterStabilization
+--- PASS
+=== RUN   TestPausedReplicasRetainDurablePromises
+--- PASS
+=== RUN   TestConcurrentWritersNeverCorruptResource
+--- PASS
+PASS
+ok  quorumlease  0.004s
+
+$ go test -race -count=10 ./...
+ok  quorumlease  1.149s
+
+$ go test -cover ./...
+ok  quorumlease  coverage: 88.6% of statements
+</code></pre>
+<h3>7.3 Demo trace</h3>
+<pre><code>$ go run ./cmd/demo
+cluster: 5 replicas, quorum=3
+
+A acquired lease token=1
+B acquired lease token=2 (failover, no clock wait)
+B write token=2 accepted; resource=&quot;B-committed&quot;
+A write token=1 rejected: stale fencing token: presented 1, highest accepted 2
+resource after stale attempt=&quot;B-committed&quot; token=2
+
+C recovered from empty state with token=3 (&gt; B=2)
+D acquired token=4 promptly after stabilization
+
+accepted token order: [2]
+</code></pre>
+<h3>7.4 What each test establishes</h3>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Property verified</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TestClockSkewBreaksNaiveLeaseButNotFencing</code></td>
+<td>A time-based lease checked with a skewed local clock lets two holders overlap (root cause); the fenced coordinator rejects the stale writer (fix).</td>
+</tr>
+<tr>
+<td><code>TestStaleHolderRejectedAfterFailover</code></td>
+<td>After <code>B</code> takes over with a larger token, <code>A</code>'s old token is fenced and the stored value is not corrupted.</td>
+</tr>
+<tr>
+<td><code>TestStaleWriteRejectedEvenAfterArbitraryPause</code></td>
+<td>The stale holder keeps retrying forever; every write is rejected, independent of pause length.</td>
+</tr>
+<tr>
+<td><code>TestRecoveryAcrossCoordinatorCrash</code></td>
+<td>A replacement coordinator starting from <strong>empty state</strong> obtains a strictly larger token; the crashed coordinator's zombie write is fenced.</td>
+</tr>
+<tr>
+<td><code>TestSequentialGrantsStrictlyIncrease</code></td>
+<td>200 sequential grants produce a strictly increasing token sequence.</td>
+</tr>
+<tr>
+<td><code>TestConcurrentAcquiresAreUnique</code></td>
+<td>64 concurrent coordinators never receive the same token (majority intersection).</td>
+</tr>
+<tr>
+<td><code>TestDelayedPrepareCannotDowngradePromise</code></td>
+<td>A delayed/reordered <code>Prepare</code> for an older token cannot lower durable <code>promised</code>.</td>
+</tr>
+<tr>
+<td><code>TestMajorityIntersectionUnderInterleaving</code></td>
+<td>Two coordinators cannot both win the same ballot; the second is forced strictly higher.</td>
+</tr>
+<tr>
+<td><code>TestNoQuorumNoLeaseThenAvailableAfterStabilization</code></td>
+<td>With a majority paused, acquisition fails (<code>ErrNoQuorum</code>) instead of risking safety; after replicas resume it succeeds promptly.</td>
+</tr>
+<tr>
+<td><code>TestPausedReplicasRetainDurablePromises</code></td>
+<td>A paused/resumed replica keeps its promise, so no token regression across pauses.</td>
+</tr>
+<tr>
+<td><code>TestConcurrentWritersNeverCorruptResource</code></td>
+<td>32 writers × 40 gain/write cycles under <code>-race</code>: the storage's accepted-token sequence is always non-decreasing; stale writes are dropped.</td>
+</tr>
+</tbody>
+</table>
+<p>Safety is checked under the race detector, and <code>Storage.AcceptedTokens</code> is asserted monotonic after the concurrent stress run, which is exactly the fencing invariant of §4.</p>
+<hr />
+<h2>8. Assumptions, caveats, and extensions</h2>
+<ul>
+<li><strong>Stable storage is mandatory.</strong> If a replica can forget a promise (disk wiped, Byzantine, or "recover by reinstalling"), majority intersection no longer holds and two grants could share a token. Persist <code>promised</code> with <code>fsync</code>/write-ahead logging before replying <code>OK</code>. In Raft terms, only commit the <code>Grant</code> entry after it is on a majority's durable log.</li>
+<li><strong>Byzantine faults are out of scope.</strong> A lying replica can violate <code>promised</code> monotonicity. Fencing tokens still protect against <em>stale honest</em> holders, but token minting needs BFT consensus (PBFT/HotStuff) under Byzantine assumptions.</li>
+<li><strong>Equal tokens are accepted by <code>Storage</code> for idempotent retries.</strong> This is safe because L3 guarantees two distinct grants never carry the same token. If you prefer strict <code>&gt;</code>, add a per-request idempotency key.</li>
+<li><strong>This does not provide mutual exclusion of holders.</strong> Under unknown skew that is impossible without sacrificing availability; fencing is the safety boundary. Keep critical-section side effects idempotent and fence every side effect with the token (not just the final write).</li>
+<li><strong>Availability requires eventual synchrony.</strong> <code>Acquire</code> needs a reachable, responsive majority. It correctly returns <code>ErrNoQuorum</code> otherwise rather than guessing.</li>
+<li><strong>Real deployment.</strong> Return the token as <code>X-Fencing-Token</code> (or a generation number) on every write; make the resource enforce it with a compare-and-set on <code>(max_token, value)</code>. This pattern matches Google Chubby, ZooKeeper <code>zxid</code>, etcd <code>revision</code>, and object-store conditional writes via generation match.</li>
+</ul>
+<hr />
+<h2>9. One-paragraph summary</h2>
+<p>The root cause is that the naive design makes <strong>safety</strong> depend on <strong>time</strong>, which is unsound when skew is unknown and pauses are unbounded. The fix makes safety a pure function of a <strong>durable, majority-minted, strictly monotonic fencing token</strong> checked at the resource, and relegates time to liveness only. Majority intersection after a Paxos-style durable promise guarantees later grants get larger tokens, so recovery needs no clock-based wait, and the storage's token check guarantees a paused or skewed stale holder can never commit after a newer holder. The included tests verify stale-write fencing, crash recovery, delayed messages, replica pauses, concurrent uniqueness, no-quorum safety, and the availability bound after stabilization.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-20261017-quorum-lease-fencing-under-clock-skew
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-17T22:23:23.745Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Design a replicated lease coordinator that tolerates delayed messages, process pauses, and bounded but unknown clock skew while preventing stale holders from committing writes to a partitioned storage service. Implement recovery and fencing-token validation across coordinator failover, and prove safety under the given failure model while meeting the specified availability bound after stabilization.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-20261017-quorum-lease-fencing-under-clock-skew&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-17T22:23:23.745Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
