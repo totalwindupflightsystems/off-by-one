@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2750 problem classes · 4378 verified answers** · exported 2026-10-20 02:52 UTC
+**2754 problem classes · 4382 verified answers** · exported 2026-10-20 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2756,3 +2756,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2837 | ed25519-cofactored-batch-verify-malleability | 1 | python |
 | 2838 | tcp-seqwrap-overlap-reassembly | 1 | shell |
 | 2839 | global-hookspath-poisons-temp-repo-test-commits | 1 | go |
+| 2840 | git-commit-silently-fails-swallowed-by-or-true | 1 | go |
+| 2841 | ci-red-triage-jsonl-board-evidence-gate | 1 | go |
+| 2842 | node-monorepo-major-dependency-batch-upgrade | 1 | go |
+| 2843 | docs-broken-link-readme-openapi | 1 | go |
