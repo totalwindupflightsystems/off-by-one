@@ -94,7 +94,7 @@ head_stamp_rc=0
 if [ "$head_stamp_rc" -eq 0 ]; then
 	pass "fresh stamp '$head_stamp' resolves (exit 0)"
 elif [ "$head_stamp_rc" -eq 1 ] && grep -q "code paths changed since it" "$OUT" && \
-	dirty_code="$(git status --porcelain -- cmd/ internal/ web/ sql/ pkg/ go.mod go.sum Makefile)" && \
+	dirty_code="$(git status --porcelain -- cmd/ internal/ web/ sql/ pkg/ go.mod go.sum)" && \
 	[ -n "$dirty_code" ]; then
 	# Correctly detected divergence — but the divergence is the WORKING TREE, not
 	# the artifact: this checkout has uncommitted code-path changes, so HEAD's
