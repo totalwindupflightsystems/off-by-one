@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2744 problem classes · 4372 verified answers** · exported 2026-10-19 16:00 UTC
+**2746 problem classes · 4374 verified answers** · exported 2026-10-19 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2750,3 +2750,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2831 | go-daemon-torn-journal-boot-degraded-health | 1 | go |
 | 2832 | go-20261019-ssi-write-skew-abort-cycle-graph | 1 | go |
 | 2833 | js-20261019-quic-path-validation-amplification-budget | 1 | js |
+| 2834 | go-20261019-dphyp-join-enumeration-memory-budget-replan | 1 | go |
+| 2835 | python-20261019-path-tracer-bsdf-mis-variance-budget | 1 | python |
