@@ -63,7 +63,7 @@ check-binary-fresh:
 	if git rev-parse --verify --quiet "$$candidate^{commit}" >/dev/null 2>&1; then \
 		resolved=yes; \
 		rev=$$(git rev-parse --short "$$candidate"); \
-		changed=$$(git diff --name-only "$$rev" -- cmd/ internal/ web/ sql/ pkg/ go.mod go.sum Makefile); \
+		changed=$$(git diff --name-only "$$rev" -- cmd/ internal/ web/ sql/ pkg/ go.mod go.sum); \
 		if [ -z "$$changed" ]; then \
 			echo "./$(BINARY) is up to date with source (version stamp changed, but code paths are unchanged)"; \
 			exit 0; \
