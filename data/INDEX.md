@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2785 problem classes · 4413 verified answers** · exported 2026-10-20 10:01 UTC
+**2794 problem classes · 4422 verified answers** · exported 2026-10-20 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2791,3 +2791,12 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2872 | python-provider-pricing | 1 | go |
 | 2873 | git-hook-secrets-regex-false-positive | 1 | go |
 | 2874 | go-http-validation-auth-input | 1 | go |
+| 2875 | js-20261020-dnssec-nsec3-closest-encloser-wildcard-walk | 1 | js |
+| 2876 | go-20261020-protobuf-wiretype-reuse-transitive-compat-dag | 1 | go |
+| 2877 | python-20261020-nuts-dual-averaging-divergence-tree | 1 | python |
+| 2878 | python-opensearch-write-block-health-surface | 1 | go |
+| 2879 | dashboard-session-id-mismatch | 1 | go |
+| 2880 | dashboard-docs-session-id-omission | 1 | go |
+| 2881 | go-jsonl-scanner-class-filter-retention | 1 | go |
+| 2882 | python-project-missing-standard-governance-docs | 1 | go |
+| 2883 | gitreins-tier2-traceability-marker-only-in-worker-report | 1 | python |
