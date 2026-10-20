@@ -977,3 +977,116 @@ code (`make gate-deploy` PASS; scratch binaries and the running unit both stamp 
   catalog, matching the README's quoted ~114 s; the only rescue needed was Go's own toolchain
   auto-download, which is itself documentation the README does not mention.
 
+
+## §20 — 2026-10-20: deploy truth — "the repo has the fix" vs "the service runs the fix" (DF-OFF-BY-ONE-29-R2, DF-52, DF-37-R2, DF-53, DF-54, QA-OFF-BY-ONE-20-R2, INSTALL-OFF-BY-ONE-1)
+
+**Why this section exists.** Every deploy row this repo ever filed (`OB-GAP-077`, `OB-GAP-085`,
+`DF-OFF-BY-ONE-77`, `OB-GAP-094`) asked *"is the on-disk artifact current?"*. This run asked the
+next question — *"is the RUNNING deployment configured the way the repo says?"* — and found two
+independent ways for a green repo to serve something else. Both are one command to check.
+
+### The two questions, and the commands that answer them
+
+```bash
+cd ~/off-by-one
+make check-binary-fresh   # Q1: is ./off-by-one on disk built from HEAD's code paths?
+make check-deploy         # Q2: is the RUNNING service the repo artifact, from HEAD's code?
+./scripts/gate-deploy     # Q2 + "do I own this deployment?" (SKIPs loudly in a worktree)
+```
+
+**Q1 can be green while the service is stale.** `check-binary-fresh` only inspects the file on
+disk. On 2026-10-20 the daemon (pid 2852325) had been launched at 01:06:38 and the artifact was
+rebuilt at 03:53 — so the running process mapped a *deleted* inode:
+
+```bash
+$ make check-binary-fresh          # rc=0, "up to date with source"
+$ make check-deploy                # rc=2
+check-deploy: FAIL — leg 3: running process (pid 2852325) executes
+'/home/kara/off-by-one/off-by-one (deleted)', not the repo artifact '/home/kara/off-by-one/off-by-one'
+```
+
+The cheapest staleness tell in that state — no tooling needed:
+
+```bash
+readlink /proc/$(systemctl show off-by-one -p MainPID --value)/exe   # → path ending in " (deleted)"
+strings -a /proc/$(systemctl show off-by-one -p MainPID --value)/exe | grep '^v0\.1\.1-'
+./off-by-one --version                                                # compare the two stamps
+```
+
+A stamp printed from `/proc/<pid>/exe` is the *running* binary; the same command against the file
+on disk is the *staged* one. When they differ, `check-binary-fresh` will not tell you.
+
+### Q2 (the artifact) is not Q3 (the flags)
+
+`check-deploy` legs 1–4 verify: artifact freshness, `MainPID`, `/proc/<pid>/exe == <repo>/off-by-one`,
+and the *running stamp's* code paths vs HEAD. **None of them reads the running process's flags.**
+So the repo can ship a P0 fix in `deploy/off-by-one.service` while the host unit keeps the pre-fix
+`ExecStart` — which is exactly the state this run measured, 16 days after the rows closed:
+
+```bash
+$ systemctl show off-by-one -p ExecStart --value
+/home/kara/off-by-one/off-by-one --port 8766 -load-threshold -1 -cron-interval 60s \
+  -pi-agent /home/kara/.local/bin/pi-agent -bwrap /usr/bin/bwrap        # gate OFF, no -solve-mem-mb
+$ grep ExecStart deploy/off-by-one.service
+ExecStart=... --port 8766 -load-threshold 4 ... -solve-mem-mb 6144      # the vendored canonical unit
+```
+
+**The running flags ARE readable and comparable — do it in the deploy check:**
+
+```bash
+diff <(systemctl show off-by-one -p ExecStart --value | tr ' ' '\n' | sort) \
+     <(grep -oP '^ExecStart=\K.*' deploy/off-by-one.service | tr ' ' '\n' | sort)
+```
+
+Consequence measured the same hour: `/proc/loadavg` 20.01 on a 16-core box while
+`journalctl -u off-by-one` showed solves finishing every few minutes and
+`curl -s :8766/metrics` reported `"skipped_host_pressure":0`. The idle gate the product is named
+after was off, and every repo-side surface was green.
+
+### The submission-side truth (what an agent sees)
+
+The host-pressure gate itself is now honest — the DF-45/47 fixes hold (scratch instance,
+`-load-threshold 4`, host load 11–21):
+
+```
+GET /api/v1/queue/sub_7fe5c6
+  {"status":"deferred","stage":"gated","position":1,"gate_reason":"load","estimated_time":"", ...}   ×4 polls
+/metrics            {"skipped_host_pressure":23,"last_skip_reason":"load"}
+journal             cron: deferred — host busy (load): used 12.230 / threshold 4.000
+```
+
+The 409 dedup arms, however, are not equivalent. Same class, two tuples, same instance:
+
+| Submitted tuple | Response |
+|---|---|
+| `(class, environment=docker, language=go, version=latest)` — the corpus answer's tuple | `409 {"submission_id":"","status":"deduplicated","position":0,"existing_solutions":1}` |
+| the same class with any other env (e.g. the SPA's `local`) | `200 {"status":"queued","position":3,"existing_solutions":1,"estimated_time":"1m30s"}` |
+
+`handlers.go:340-355` stamps the existing **queue** entry's id; the corpus arm has no entry to
+stamp (`queue.go:266-272`), so the documented "poll the existing `submission_id`" flow dies on that
+arm — and the SPA cannot even express the corpus tuple (its env select is
+Any/dev/staging/prod/ci/local), so a UI user queues a duplicate solve while the panel prints
+"1 existing solution found." Test with the corpus tuple, not with a fresh class:
+
+```bash
+curl -s -X POST :8766/api/v1/problems/submit -H 'Content-Type: application/json' \
+  -d '{"problem_class":"<class-with-a-verified-answer>","environment":"docker","language":"go",
+       "version":"latest","cadence":"post-debug"}' -w '\n%{http_code}\n'
+```
+
+### Lessons worth carrying to the next tick
+
+- **"Filed" is a claim, not a fact.** `DF-OFF-BY-ONE-21` (taxonomy truncation, 2026-09-25) is
+  narrated in `tasks.md` and the dogfood log as filed — and `grep -c '"id": "DF-OFF-BY-ONE-21"'`
+  over the board returns **0**. 25 days later the defect is unchanged (1000 of 2785 classes, 9.8 MB
+  payload). Verify a row exists on the board, not in the prose.
+- **A metric that is dominated by page cache is not process memory.** The service cgroup read
+  `Memory: 5.8G` while `/metrics.peak_rss_bytes_max` said 75 MB. `memory.stat` settled it:
+  `anon 11.5 MB / file 5.9 GB`. Read `memory.stat` before filing a "77× under-report".
+- **Scratch instances must be given the same environment as the unit** (`EnvironmentFile=.env`) or
+  the LLM-backed surfaces fail for a reason that is yours, not the product's. Attribute before
+  filing: the chat's generic "Agent encountered an error." was this run's missing key
+  (`pi-agent exec: exit status 2`), so it was recorded, not filed.
+- **Load the box's real load into the report.** Every number in this run was measured at
+  loadavg 11–20; seeding took 68.7 s where an idle host takes 23–36 s. A measurement without the
+  host state beside it is not a benchmark.

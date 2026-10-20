@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.12.0
+version: 1.13.0
 category: software-development
 ---
 
@@ -519,3 +519,59 @@ Recipe that produced the numbers above: three scratch nodes and one ephemeral bu
 `--load-threshold -1 --mem-fraction 0.001 -cron-interval 2s`; bounds arm 1 `--solve-mem-mb 32`
 (dies ~70ms), arm 2 `--solve-mem-mb 128 --solve-timeout 30s` (dies at 30.0s); install leg on
 bunker-mvp with `make gate-deploy` proving the scratch binaries serve HEAD's code.
+
+## Field-tested 2026-10-20 (dogfood tick #19): verdict 🟡 PROMISING-BUT-ROUGH for the DEPLOYMENT/TRUTH surface
+
+The engine is fine — discover 0.68 ms warm (n=20), WS chat upgrade 1–10 ms, gate deferral, dedup and
+the Explore UI all verified working on a fresh HEAD build. What this run broke is the assumption that
+"the repo has the fix" means "the service runs the fix", and the assumption that a dedup 409 always
+hands you something to poll. Three pitfalls, in the order they bite:
+
+41. **The repo's fix and the RUNNING configuration can differ, and nothing checks the flags
+    (`DF-OFF-BY-ONE-29-R2`, P1 — live).** The vendored `deploy/off-by-one.service` ships
+    `-load-threshold 4 … -solve-mem-mb 6144`; the host unit still runs
+    `-load-threshold -1` (idle gate OFF) with no per-solve cap, so the lab solves on a box at
+    loadavg 20. Before blaming the product, read the RUNNING deployment — all four commands are
+    read-only:
+    ```bash
+    systemctl show off-by-one -p ExecStart --value                  # the flags actually in use
+    grep -oP '^ExecStart=\K.*' deploy/off-by-one.service            # what the repo says it should be
+    readlink /proc/$(systemctl show off-by-one -p MainPID --value)/exe   # "... (deleted)" ⇒ stale image
+    make check-deploy     # the ONLY one of these that fails on a stale running image — NOT check-binary-fresh
+    ```
+    `make check-binary-fresh` returns rc=0 in exactly the state where the running process maps a
+    deleted inode (it only inspects the file on disk). `gate-deploy` has no machine-side caller, so a
+    tick can claim "rebuild+redeploy" having only rebuilt (`DF-OFF-BY-ONE-52`).
+42. **A dedup 409 hands back an EMPTY `submission_id` when the hit is a verified ANSWER, not a queue
+    entry (`DF-OFF-BY-ONE-37-R2`, P2).** Test with the corpus tuple, not with a fresh class:
+    ```bash
+    curl -s -X POST :8766/api/v1/problems/submit -H 'Content-Type: application/json' \
+      -d '{"problem_class":"<class-with-a-verified-answer>","environment":"docker","language":"go",
+           "version":"latest","cadence":"post-debug"}' -w '\n%{http_code}\n'
+    # → 409 {"submission_id":"","status":"deduplicated","position":0,"existing_solutions":1,...}
+    ```
+    The queue arm is fine (`submission_id` populated — DF-37's fix), so do not conclude "dedup works"
+    from a double-submit alone. When the id is empty: the class already has an answer — call
+    `POST /api/v1/problems/discover` instead of polling. Related UI trap (`DF-OFF-BY-ONE-54`, P2): the
+    Submit form's env select (Any/dev/staging/prod/ci/local) cannot express the corpus's `docker`, so
+    from the SPA the corpus arm is unreachable and re-submitting an answered class queues a fresh
+    solve while the panel says "1 existing solution found."
+43. **`GET /api/v1/taxonomy` is truncated at 1000 classes with no total and no notice
+    (`DF-OFF-BY-ONE-53`, P2).** On a 2785-class lab it returns a 9.8 MB tree whose `title` count is
+    exactly 1000, and the Explore tab renders those 1000 rows under "Browse the full problem-class
+    tree". If you walk the tree to build an inventory, you are missing ~64% of the catalog: compare
+    against `GET /api/v1/stats` → `total_problems` (and page/search instead of trusting the tree).
+
+Re-proven FIXED on this run's HEAD (do not re-report): `DF-OFF-BY-ONE-45` (a gated submission now reads
+`status:"deferred", stage:"gated", gate_reason:"load"`, `estimated_time` empty — the pitfall #37 above
+is obsolete), `DF-OFF-BY-ONE-47` (the skip now logs `cron: deferred — host busy (load): used X /
+threshold 4.000`, not `tick error`), `DF-OFF-BY-ONE-42/43/44` (Explore drill-down renders answers,
+409 dedup renders as success with the id, one in-place chat status line with the user message echoed),
+`DF-OFF-BY-ONE-26` (WS upgrade 1–10 ms), `DF-OFF-BY-ONE-51` (the memcap round-trip test is now
+cap-tolerant — the 3 GiB chaos-resource cell PASSES).
+
+Install leg (fresh box, HEAD fda8b3a2, `bunker-qa.sh launch/collect` on bunker-mvp): fresh-install OK,
+native suite PASS, upgrade v0.1.0→HEAD OK, chaos-resource PASS, chaos-errorpath OK; `ui-probe` graded a
+FALSE N/A ("no web UI detected") for a repo whose SPA this run drove in a browser — filed as
+`QA-OFF-BY-ONE-20-R2`. Full trail: `docs/dogfood/2026-10-20-deploy-truth-integration.md`,
+`docs/dogfood/diagnostics.md` §20.
