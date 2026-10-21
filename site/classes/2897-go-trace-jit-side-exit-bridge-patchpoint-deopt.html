@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-trace-jit-side-exit-bridge-patchpoint-deopt — Off-By-One verified answer</title>
+<meta name="description" content="We need a tracing JIT for a small register-based bytecode VM:">
+<meta property="og:title" content="go-trace-jit-side-exit-bridge-patchpoint-deopt — Off-By-One">
+<meta property="og:description" content="We need a tracing JIT for a small register-based bytecode VM:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2897-go-trace-jit-side-exit-bridge-patchpoint-deopt.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-trace-jit-side-exit-bridge-patchpoint-deopt</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>We need a tracing JIT for a small register-based bytecode VM:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2897-go-trace-jit-side-exit-bridge-patchpoint-deopt.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Tracing JIT for a Register VM: hot-loop recording, guard side exits, bridge compilation, and patchpoint invalidation</h1>
+<h2>1. Problem</h2>
+<p>We need a tracing JIT for a small register-based bytecode VM:</p>
+<ul>
+<li>detect hot loops,</li>
+<li>record one loop trip and linearize it into IR,</li>
+<li>emit guards for every assumption (types, array bounds, integer overflow, call targets),</li>
+<li>compile the trace to native Go code rather than interpreting bytecode,</li>
+<li>handle guard failure by resuming the interpreter at the exact pc with the exact register state,</li>
+<li>support nested side exits and bridge compilation,</li>
+<li>invalidate/repair already-compiled traces when type feedback changes (patchpoints), and</li>
+<li>prove equivalence with the pure interpreter on a fuzz corpus and show a real speedup on a benchmark that starts monomorphic and becomes polymorphic mid-run.</li>
+</ul>
+<p>The working implementation is in <code>~/tracejit</code> (module <code>tracejit</code>).</p>
+<h2>2. Root-cause analysis</h2>
+<p>A naive tracing JIT fails for several reasons that are easy to miss:</p>
+<ol>
+<li>
+<p><strong>Recording the wrong value for a branch guard.</strong> A conditional branch guard must record the observed <em>condition value</em>, not the jump decision. If <code>jmpifnot</code> records <code>!cond</code>, the first execution of the trace immediately fails because the condition has not changed; the JIT then side-exits on every iteration and never runs the trace. The recorded branch direction is encoded by the next IR instruction, so the guard must check <code>cond == observed</code>.</p>
+</li>
+<li>
+<p><strong>Re-entering a trace after a side exit at the trace entry.</strong> If a guard fails at the first instruction of the trace (which is also the loop header), setting <code>vm.PC = sideExit.PC</code> and looping back to <code>TryExecute</code> finds the same trace again. The JIT must execute the failing instruction in the interpreter to make progress. This is what caused the original overflow test to spin and hit the step limit.</p>
+</li>
+<li>
+<p><strong>Bridge recording mutating state on failure.</strong> Bridge recording executes bytecode. If the path does not return to the loop header (or throws), the recording attempt must restore the VM snapshot, otherwise the next interpreter step starts from a corrupted state.</p>
+</li>
+<li>
+<p><strong>Retrying an unrecordable loop forever.</strong> If recording fails because the observed path leaves the loop, the header's hot counter must be cleared or the header blacklisted; otherwise <code>ShouldRecord</code> returns true on every iteration and recording is retried forever.</p>
+</li>
+<li>
+<p><strong>Stale traces after type-feedback changes.</strong> A call site that was monomorphic when the trace was compiled must not keep using the old inlined target when dynamic feedback changes. Feedback needs a <em>patchpoint</em>: a mutable validity flag referenced by the compiled call guard. When a new function is observed at the site, the old patchpoint is invalidated and the trace that uses it is discarded and recompiled.</p>
+</li>
+</ol>
+<p>The implementation below fixes all five points.</p>
+<h2>3. Exact fix</h2>
+<h3>File layout</h3>
+<pre><code>tracejit/
+├── go.mod
+├── SOLUTION.md
+├── cmd/demo/main.go        # benchmark / statistics driver
+└── vm/
+    ├── value.go            # tagged Value, Array, VMError
+    ├── bytecode.go         # opcodes, Program, builtins
+    ├── interp.go           # reference interpreter + VM.Run
+    ├── jit.go              # recorder, IR, compiler, guards, side exits, bridges, patchpoints
+    ├── samples.go          # benchmark and nested-side-exit programs
+    ├── fuzz_test.go        # fuzz equivalence against the pure interpreter
+    ├── poly_test.go        # monomorphic -&gt; polymorphic benchmark test
+    ├── nested_test.go      # nested side exits + bridges
+    ├── traps_test.go       # overflow, bounds, explicit throw side exits
+    ├── bench_test.go       # go benchmark for interpreter vs JIT
+    └── vm_test.go          # basic JIT sanity
+</code></pre>
+<h3>3.1 Branch guards record the condition value</h3>
+<p><code>vm/jit.go</code>:</p>
+<pre><code class="language-go">case JmpIf, JmpIfNot:
+    v := vm.Regs[in.A]
+    if v.K != KBool {
+        return nil, fmt.Errorf(&quot;record: branch on non-bool&quot;)
+    }
+    // The guard records the value of the condition, not the jump
+    // decision.  The direction of the branch is already encoded by
+    // which instruction follows in the trace.
+    return []IR{{Kind: IRGuardBool, A: in.A, Want: v.B, PC: pc}}, nil
+</code></pre>
+<p>The compiled guard then checks <code>v.B == n.Want</code>.</p>
+<h3>3.2 Guard compilation and side exits</h3>
+<p>Each IR node that can fail gets one or more side-exit ids. <code>compileTrace</code> allocates them:</p>
+<pre><code class="language-go">switch n.Kind {
+case IRAdd, IRSub, IRMul:
+    n.ExitType = t.addExit(n.PC, &quot;type&quot;)
+    n.ExitOverflow = t.addExit(n.PC, &quot;overflow&quot;)
+case IRDiv:
+    n.ExitType = t.addExit(n.PC, &quot;type&quot;)
+    n.ExitDivZero = t.addExit(n.PC, &quot;divzero&quot;)
+case IRAGet:
+    n.ExitType = t.addExit(n.PC, &quot;type&quot;)
+    n.ExitBounds = t.addExit(n.PC, &quot;bounds&quot;)
+case IRGuardBool:
+    n.ExitGuard = t.addExit(n.PC, &quot;guard&quot;)
+case IRCall:
+    n.ExitType = t.addExit(n.PC, &quot;type&quot;)
+    n.ExitOverflow = t.addExit(n.PC, &quot;overflow&quot;)
+    n.ExitCall = t.addExit(n.PC, &quot;call&quot;)
+}
+</code></pre>
+<p>The IR is compiled into a chain of Go closures that call the next operation directly. There is no bytecode or IR dispatch at run time:</p>
+<pre><code class="language-go">case IRAdd:
+    next = func(vm *VM) (int, error) {
+        a, b := vm.Regs[n.B], vm.Regs[n.C]
+        if a.K != KInt || b.K != KInt {
+            return n.ExitType, nil
+        }
+        x, y := a.I, b.I
+        r := x + y
+        if (r &gt; x) != (y &gt; 0) {
+            return n.ExitOverflow, nil
+        }
+        vm.Regs[n.A] = Int(r)
+        vm.JITSteps++
+        return nxt(vm)
+    }
+</code></pre>
+<p>A side exit carries the interpreter pc to resume at and the register state is already correct because the guard failed before its instruction was executed.</p>
+<h3>3.3 Side exit handling, nested exits, and bridges</h3>
+<p><code>TryExecute</code> runs a trace and, on a side exit, either follows an existing bridge, records a new bridge when the exit is hot, or makes progress by executing exactly one interpreter instruction:</p>
+<pre><code class="language-go">if se.Bridge != nil &amp;&amp; se.Bridge.Valid &amp;&amp; se.Bridge.Code != nil {
+    t = se.Bridge
+    continue
+}
+if se.Hits &gt;= j.bridgeThreshold &amp;&amp; !j.recording {
+    // snapshot VM, record a bridge from se.PC to the original header
+    // ...
+    br := j.record(vm, se.PC, header, depth+1)
+    if br != nil {
+        se.Bridge = br
+        vm.PC = header
+        return true, nil
+    }
+    // restore snapshot on failure
+    // ...
+}
+// Execute the failing instruction in the interpreter so Run makes
+// progress even when the side exit is at the trace entry pc.
+vm.PC = se.PC
+if stepErr := vm.step(); stepErr != nil {
+    return true, stepErr
+}
+return true, nil
+</code></pre>
+<p>The nested-side-exit test (<code>vm/nested_test.go</code>) produces two successive divergence points and verifies that two bridges are compiled and that the second bridge is executed (<code>BridgeRuns &gt; 0</code>).</p>
+<h3>3.4 Patchpoints for call-site type feedback</h3>
+<p><code>ObserveCall</code> records the observed builtin id at a call site. When the id changes, the old patchpoint is invalidated and every trace that references it is marked invalid:</p>
+<pre><code class="language-go">func (j *JIT) ObserveCall(pc int, fn int32) {
+    cs := j.getCallSite(pc)
+    cs.Seen[fn]++
+    if cs.Patch == nil {
+        cs.Patch = &amp;Patchpoint{PC: pc, Fn: fn, Valid: true}
+        return
+    }
+    if cs.Patch.Fn == fn {
+        return
+    }
+    old := cs.Patch
+    old.Valid = false
+    j.Stats.PatchpointInvalidations++
+    j.invalidateTracesUsing(old)
+    cs.Patch = &amp;Patchpoint{PC: pc, Fn: fn, Valid: true}
+    j.Stats.Recompiles++
+}
+</code></pre>
+<p>The compiled call guard checks the patchpoint validity before comparing the function id:</p>
+<pre><code class="language-go">case IRCall:
+    next = func(vm *VM) (int, error) {
+        if n.Patch != nil &amp;&amp; !n.Patch.Valid {
+            return n.ExitCall, nil
+        }
+        fn := vm.Regs[n.B]
+        if fn.K != KFunc || fn.F != n.Fn {
+            return n.ExitCall, nil
+        }
+        // ...
+    }
+</code></pre>
+<p>Invalidated traces fall back to the interpreter; the next hot iteration recompiles a trace for the new feedback value. This is the "discard-and-recompile" form of patchpoint repair.</p>
+<h2>4. Verification</h2>
+<p>All commands are run from <code>~/tracejit</code>.</p>
+<h3>4.1 Full test suite</h3>
+<pre><code class="language-bash">go test ./... -v
+</code></pre>
+<p>Expected highlights:</p>
+<pre><code>--- PASS: TestFuzzEquivalence
+    fuzz_test.go:117: fuzz: 2000 seeds, jit executed traces on 12 programs
+--- PASS: TestNestedSideExitsAndBridges
+    nested_test.go:60: stats: {TracesCompiled:3 BridgesCompiled:2 TracesInvalidated:0 PatchpointInvalidations:0 Recompiles:0 TraceRuns:197 GuardFailures:151 SideExitHits:151 BridgeRuns:99}
+--- PASS: TestPolymorphicCallSite
+    poly_test.go:45: stats: {TracesCompiled:3 BridgesCompiled:1 TracesInvalidated:1 PatchpointInvalidations:1 Recompiles:1 TraceRuns:94 GuardFailures:2 SideExitHits:2 BridgeRuns:0}
+--- PASS: TestOverflowSideExit
+--- PASS: TestBoundsSideExit
+--- PASS: TestExplicitThrowThroughSideExit
+--- PASS: TestSimpleLoopJIT
+</code></pre>
+<p>The fuzz test generates 2000 random loops containing arithmetic, arrays, builtins, comparisons and calls. It compares both the returned value and the exact error text with the pure interpreter. The dedicated trap tests cover overflow, bounds, and exceptions thrown after a guard side exit.</p>
+<h3>4.2 Benchmark: interpreter vs JIT</h3>
+<pre><code class="language-bash">go run ./cmd/demo
+</code></pre>
+<p>Representative output:</p>
+<pre><code>=== trace-JIT benchmark ===
+iterations                 : 200000
+interpreter                : 15.7ms
+jit                        : 11.1ms
+interpreter/jit ratio      : 1.41x
+
+=== JIT statistics (single full run) ===
+traces compiled            : 3
+bridges compiled           : 1
+traces invalidated         : 1
+patchpoint invalidations   : 1
+recompilations             : 1
+trace runs                 : 199994
+guard failures / side exits: 2
+side-exit sites in IR      : 9
+side exits per loop trip   : 0.000
+
+=== nested side-exit / bridge demo ===
+traces compiled            : 3
+bridges compiled           : 2
+bridge runs                : 9999
+guard failures / side exits: 15001
+side exits per loop trip   : 0.500
+</code></pre>
+<p>The benchmark starts monomorphic (builtin <code>inc</code> for the first half of the loop), then becomes polymorphic (<code>dbl</code> for the second half). The patchpoint observes the change, invalidates the first trace, and the JIT recompiles exactly once. The nested demo shows a positive bridge run count, proving nested side exits are exercised.</p>
+<h3>4.3 <code>go test</code> benchmark</h3>
+<pre><code class="language-bash">go test ./vm -run '^$' -bench 'Benchmark.*Poly' -benchtime=3x -v
+</code></pre>
+<p>Example:</p>
+<pre><code>BenchmarkInterpPoly-16    3   15569674 ns/op
+BenchmarkJITPoly-16       3   11302493 ns/op
+</code></pre>
+<h2>5. Using the implementation</h2>
+<p>The VM exposes:</p>
+<ul>
+<li><code>vm.NewVM(program)</code> and <code>vm.RunPure(program, limit)</code> for the interpreter,</li>
+<li><code>vm.NewJIT(program)</code> for the tracing JIT,</li>
+<li><code>vm.Value</code>, <code>vm.Instr</code>, <code>vm.Program</code> to build bytecode,</li>
+<li><code>vm.PolyProgram(n)</code> and <code>vm.NestedProgram(n)</code> for the built-in benchmark programs.</li>
+</ul>
+<p>To run a program with the JIT:</p>
+<pre><code class="language-go">p := vm.PolyProgram(200000)
+v := vm.NewVM(p)
+j := vm.NewJIT(p)
+j.SetThreshold(1)
+j.SetBridgeThreshold(1)
+v.JIT = j
+res, err := v.Run(-1)
+</code></pre>
+<p><code>j.Stats</code> reports traces, bridges, invalidations, recompiles, trace runs and side-exit hits. <code>j.TotalSideExitSites()</code> reports the number of guard bail-out sites compiled across all live traces and bridges.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-trace-jit-side-exit-bridge-patchpoint-deopt
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-21T04:36:23.053Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Build a tracing JIT for a small register-based bytecode VM: a recorder that detects hot loops, linearizes a trace, emits guards for every assumption (type feedback, array bounds, integer overflow), and compiles the trace to a simple IR that is executed natively-in-Go rather than interpreted. Implement nested side exits and bridge compilation so a guard failure resumes at the exact interpreter pc with the exact register and stack state, and implement patchpoint-based guard invalidation when type feedback changes so already-compiled traces are either repaired or discarded. Prove equivalence with the pure interpreter over a fuzz corpus (including overflow, polymorphic call sites and exceptions thrown inside traces), and demonstrate that the JIT actually wins: report the interpreter/JIT ratio, the number of side exits per loop and the recompilation count on a benchmark that starts monomorphic and becomes polymorphic mid-run.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-trace-jit-side-exit-bridge-patchpoint-deopt&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-21T04:36:23.053Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2805 problem classes · 4433 verified answers** · exported 2026-10-21 04:00 UTC
+**2810 problem classes · 4438 verified answers** · exported 2026-10-21 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2811,3 +2811,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2892 | go-swept-capsule-conservative-advance-toi | 1 | go |
 | 2893 | node20-bbrv2-delivery-rate-round-model-replay | 1 | js |
 | 2894 | toolsd-diff3-gnu-differential-divergence | 1 |  |
+| 2895 | python-sha3-keccak-cshake-sponge-domain-separation | 1 | python |
+| 2896 | js-quickhull-3d-coplanar-exact-predicates | 1 | js |
+| 2897 | go-trace-jit-side-exit-bridge-patchpoint-deopt | 1 | go |
+| 2898 | gitreins-guard-foreign-interpreter-tests-lane-fail | 1 | bash |
+| 2899 | typescript-deploy-recreate-kills-inflight-game-strands-run | 1 | typescript |
