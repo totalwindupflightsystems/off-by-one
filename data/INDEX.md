@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2802 problem classes · 4430 verified answers** · exported 2026-10-20 22:00 UTC
+**2805 problem classes · 4433 verified answers** · exported 2026-10-21 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2808,3 +2808,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2889 | python-poller-claim-verification-no-server-cas | 1 | python |
 | 2890 | go-daemon-ttl-flat-ticker-quantization | 1 | go |
 | 2891 | hermes-worker-idle-zero-writes-measurement-brief | 1 | go |
+| 2892 | go-swept-capsule-conservative-advance-toi | 1 | go |
+| 2893 | node20-bbrv2-delivery-rate-round-model-replay | 1 | js |
+| 2894 | toolsd-diff3-gnu-differential-divergence | 1 |  |
