@@ -10,11 +10,29 @@
 #   4. The RUNNING process's --version stamp resolves to a commit whose code
 #      paths (cmd/ internal/ web/ sql/ pkg/ go.mod go.sum Makefile) match HEAD.
 #      Data-only drift (corpus commits) is tolerated; code drift is not.
+#   5. The running unit's effective ExecStart flags match the vendored deploy
+#      contract deploy/off-by-one.service (DF-OFF-BY-ONE-29-R2). Legs 1-4 prove
+#      the artifact; none of them reads the process's FLAGS — the repo can ship
+#      a fix in the vendored unit while the host unit keeps the pre-fix
+#      ExecStart (measured live 2026-10-20: -load-threshold -1 and no
+#      -solve-mem-mb, 16 days after the rows closed). A fresh artifact running
+#      pre-fix flags is still a failed deploy. Drift fails with
+#      expected-vs-observed per flag; an intentional host deviation is recorded
+#      by editing BOTH the vendored unit and the host unit (with a comment),
+#      never by leaving them silently apart.
 #
-# Unit-testable seam (touches neither systemctl nor /proc):
+# Unit-testable seams (touch neither systemctl nor /proc):
 #   scripts/check-deploy --resolve-stamp <stamp>
 #     exit 0 — resolvable stamp whose code paths match HEAD
 #     exit 1 — divergence, dirty stamp, or unparseable stamp
+#   scripts/check-deploy --check-flags <contract-unit-file> <execstart-value>
+#     exit 0 — the running unit's flags match the vendored contract
+#     exit 1 — drift (expected-vs-observed printed per flag) or an
+#              unparseable/flagless contract
+#     <execstart-value> is what `systemctl show <unit> -p ExecStart --value`
+#     prints; both the structured form ({ path=... ; argv[]=... ; ... }) and a
+#     plain command line are accepted, and systemd quoting/binary-path
+#     formatting is normalized away so only real flag drift fails.
 #
 # Docs: docs/dogfood/diagnostics.md → "Deploy check after any code commit".
 set -euo pipefail
@@ -83,6 +101,122 @@ resolve_stamp() {
 	return 1
 }
 
+# --- Flag contract (leg 5, DF-OFF-BY-ONE-29-R2) ------------------------------
+# The vendored unit deploy/off-by-one.service is the daemon flag contract; the
+# running unit's effective ExecStart argv must carry the same flags. The binary
+# path (leg 3's evidence) and systemd quoting are normalized away so only real
+# flag drift fails.
+
+# Print the vendored unit's daemon flags: the ExecStart line minus the binary
+# path, whitespace-collapsed.
+contract_flags() {
+	local unit_file="$1"
+	sed -n 's/^ExecStart=[^[:space:]]*[[:space:]]*//p' "$unit_file" | head -1
+}
+
+# Print a running unit's daemon flags from its ExecStart property value.
+# Accepts systemctl's structured form
+#   { path=/x/off-by-one ; argv[]=/x/off-by-one --port 8766 ... ; ... }
+# and a plain command line alike; strips the binary path (first token).
+running_flags() {
+	local execstart="$1" argv
+	case "$execstart" in
+	\{*argv\[\]=*)
+		# Flag values for this daemon never contain ';', so the first ';'
+		# after argv[]= terminates the flag list.
+		argv="$(printf '%s\n' "$execstart" | sed -n 's/.*argv\[\]=\([^;]*\);.*/\1/p' | head -1)"
+		;;
+	*)
+		argv="$execstart"
+		;;
+	esac
+	printf '%s\n' "$argv" | sed 's/^[^[:space:]]*[[:space:]]*//'
+}
+
+# Collapse whitespace and strip one layer of surrounding quotes per token, so
+# systemd's quoting of the same argument is never reported as drift.
+normalize_flags() {
+	local raw="$1" tok out=""
+	local -a toks=()
+	read -r -a toks <<<"$raw"
+	for tok in ${toks[@]+"${toks[@]}"}; do
+		tok="${tok%\"}"
+		tok="${tok#\"}"
+		tok="${tok%\'}"
+		tok="${tok#\'}"
+		out="${out}${out:+ }${tok}"
+	done
+	printf '%s\n' "$out"
+}
+
+# Print expected-vs-observed for every drifted flag. A token starts a new flag
+# when it looks like -x/--word; a negative NUMBER (-1) stays a value, so
+# '-load-threshold -1' parses as load-threshold=-1.
+report_flag_drift() {
+	local want="$1" have="$2"
+	local -A want_map=() have_map=()
+	local -a want_order=() toks=()
+	local tok cur k
+	cur=""
+	read -r -a toks <<<"$want"
+	for tok in ${toks[@]+"${toks[@]}"}; do
+		if [[ $tok =~ ^--?[a-zA-Z] ]]; then
+			cur="$tok"
+			want_map["$cur"]=""
+			want_order+=("$cur")
+		elif [ -n "$cur" ]; then
+			want_map["$cur"]="${want_map[$cur]}${want_map[$cur]:+ }$tok"
+		fi
+	done
+	cur=""
+	read -r -a toks <<<"$have"
+	for tok in ${toks[@]+"${toks[@]}"}; do
+		if [[ $tok =~ ^--?[a-zA-Z] ]]; then
+			cur="$tok"
+			have_map["$cur"]=""
+		elif [ -n "$cur" ]; then
+			have_map["$cur"]="${have_map[$cur]}${have_map[$cur]:+ }$tok"
+		fi
+	done
+	for k in ${want_order[@]+"${want_order[@]}"}; do
+		if [ -z "${have_map[$k]+x}" ]; then
+			printf '  %s: expected %s, observed <absent>\n' "$k" "${want_map[$k]:-<none>}"
+		elif [ "${want_map[$k]}" != "${have_map[$k]}" ]; then
+			printf '  %s: expected %s, observed %s\n' "$k" "${want_map[$k]:-<none>}" "${have_map[$k]:-<none>}"
+		fi
+	done
+	for k in "${!have_map[@]}"; do
+		if [ -z "${want_map[$k]+x}" ]; then
+			printf '  %s: not in contract, observed %s\n' "$k" "${have_map[$k]:-<none>}"
+		fi
+	done
+	printf '  contract flags: %s\n' "$want"
+	printf '  observed flags: %s\n' "$have"
+}
+
+# exit 0 — running flags match the contract; exit 1 — drift or no contract.
+check_flag_contract() {
+	local contract_file="$1" execstart="$2"
+	local want have
+	if [ ! -f "$contract_file" ]; then
+		echo "FAIL: deploy contract $contract_file is missing — the running unit's flags cannot be verified (restore it: git checkout -- deploy/off-by-one.service)"
+		return 1
+	fi
+	want="$(normalize_flags "$(contract_flags "$contract_file")")"
+	have="$(normalize_flags "$(running_flags "$execstart")")"
+	if [ -z "$want" ]; then
+		echo "FAIL: $contract_file carries no daemon flags to contract against (its ExecStart has no arguments?)"
+		return 1
+	fi
+	if [ "$want" = "$have" ]; then
+		echo "PASS: running unit's ExecStart flags match $contract_file"
+		return 0
+	fi
+	echo "FAIL: running unit's ExecStart flags drifted from $contract_file:"
+	report_flag_drift "$want" "$have"
+	return 1
+}
+
 main() {
 	cd "$REPO_ROOT"
 
@@ -123,11 +257,21 @@ main() {
 		echo "remedy: run 'make build' and relaunch the service, then re-run make check-deploy"
 		exit 1
 	fi
-	if resolve_stamp "$stamp"; then
-		echo "check-deploy: PASS — running service (pid $pid, stamp $stamp) serves HEAD's code"
-	else
+	if ! resolve_stamp "$stamp"; then
 		echo "check-deploy: FAIL — leg 4: running service (pid $pid, stamp $stamp) does not serve HEAD's code"
 		echo "remedy: cd $REPO_ROOT && make build && kill $pid  # systemd Restart=always relaunches the service; re-run make check-deploy"
+		exit 1
+	fi
+
+	# Leg 5: the running unit's ExecStart flags must match the vendored deploy
+	# contract — a fresh artifact running pre-fix flags is still a failed
+	# deploy (DF-OFF-BY-ONE-29-R2).
+	running_execstart="$(systemctl show "$UNIT" -p ExecStart --value 2>/dev/null || true)"
+	if check_flag_contract "$REPO_ROOT/deploy/off-by-one.service" "$running_execstart"; then
+		echo "check-deploy: PASS — running service (pid $pid, stamp $stamp) serves HEAD's code under the contracted flags"
+	else
+		echo "check-deploy: FAIL — leg 5: running unit (pid $pid) ExecStart flags drifted from deploy/off-by-one.service"
+		echo "remedy: install -m 0644 deploy/off-by-one.service /etc/systemd/system/off-by-one.service && systemctl daemon-reload && systemctl restart off-by-one — or, for an intentional deviation, record it in BOTH the host unit and the vendored copy, then re-run make check-deploy"
 		exit 1
 	fi
 }
@@ -145,11 +289,22 @@ case "${1:-}" in
 		exit 1
 	fi
 	;;
+--check-flags)
+	[ "$#" -eq 3 ] || {
+		echo "usage: $0 --check-flags <contract-unit-file> <execstart-value>" >&2
+		exit 2
+	}
+	if check_flag_contract "$2" "$3"; then
+		exit 0
+	else
+		exit 1
+	fi
+	;;
 "")
 	main
 	;;
 *)
-	echo "usage: $0 [--resolve-stamp <stamp>]" >&2
+	echo "usage: $0 [--resolve-stamp <stamp> | --check-flags <contract-unit-file> <execstart-value>]" >&2
 	exit 2
 	;;
 esac

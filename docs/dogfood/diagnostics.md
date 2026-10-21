@@ -298,6 +298,12 @@ exits non-zero and names the remedy:
    semantics as `check-binary-fresh`, mirrored in
    `scripts/check-deploy --resolve-stamp <stamp>` (the unit-testable seam; it
    touches neither systemctl nor /proc).
+5. the running unit's effective `ExecStart` FLAGS match the vendored deploy
+   contract `deploy/off-by-one.service` (DF-OFF-BY-ONE-29-R2; unit-testable
+   seam: `scripts/check-deploy --check-flags <contract-unit-file>
+   <execstart-value>`). Legs 1–4 prove the artifact; leg 5 proves the
+   deployment CONFIGURATION — a fresh artifact running pre-fix flags is still
+   a failed deploy.
 
 **The one command, run after ANY code commit on master:**
 
@@ -313,6 +319,7 @@ cd ~/off-by-one && make check-deploy
 | 2 | `unit off-by-one not running (MainPID empty/0)` | start the service, re-run |
 | 3 | `running process (pid N) executes '<path>', not the repo artifact` | `make build` and relaunch so `/proc/<MainPID>/exe` points at the repo binary |
 | 4 | `running service (pid N, stamp S) does not serve HEAD's code` | `cd ~/off-by-one && make build && kill N` — systemd `Restart=always` relaunches the service; re-run `make check-deploy` |
+| 5 | `running unit (pid N) ExecStart flags drifted from deploy/off-by-one.service` (expected-vs-observed per flag) | `install -m 0644 deploy/off-by-one.service /etc/systemd/system/off-by-one.service && systemctl daemon-reload && systemctl restart off-by-one` — or record an intentional deviation in BOTH the host unit and the vendored copy, then re-run |
 
 Self-test (fresh / divergence / garbage / live verdict-presence):
 `bash scripts/check-deploy-test.sh`.
@@ -407,7 +414,10 @@ throwaway instance — never the live service): `make check-deploy-test` /
 `bash scripts/check-deploy-test.sh` — cases GATE-WORKTREE (SKIP), GATE-NOTAREPO
 (FAIL), GATE-NOWORK (missing probe, FAIL), GATE-RED (stale artifact → FAIL with
 remedy), GATE-NOSTAMP (bare `go build` → FAIL), GATE-FOREIGN (unit bound
-elsewhere → FAIL), GATE-GREEN (rebuilt from HEAD → PASS).
+elsewhere → FAIL), GATE-GREEN (rebuilt from HEAD → PASS), GATE-DRIFT (fresh
+artifact but pre-fix unit flags → FAIL naming the drift), plus the FLAGS seam
+cases (exact match / structured-form PASS, stale-drift and missing-contract
+FAIL).
 
 
 ### Transcript #1 — stale live server, captured pre-deploy (2026-09-19)
@@ -1019,8 +1029,8 @@ on disk is the *staged* one. When they differ, `check-binary-fresh` will not tel
 ### Q2 (the artifact) is not Q3 (the flags)
 
 `check-deploy` legs 1–4 verify: artifact freshness, `MainPID`, `/proc/<pid>/exe == <repo>/off-by-one`,
-and the *running stamp's* code paths vs HEAD. **None of them reads the running process's flags.**
-So the repo can ship a P0 fix in `deploy/off-by-one.service` while the host unit keeps the pre-fix
+and the *running stamp's* code paths vs HEAD. **None of them reads the running process's flags** —
+so the repo shipped a P0 fix in `deploy/off-by-one.service` while the host unit kept the pre-fix
 `ExecStart` — which is exactly the state this run measured, 16 days after the rows closed:
 
 ```bash
@@ -1031,12 +1041,24 @@ $ grep ExecStart deploy/off-by-one.service
 ExecStart=... --port 8766 -load-threshold 4 ... -solve-mem-mb 6144      # the vendored canonical unit
 ```
 
-**The running flags ARE readable and comparable — do it in the deploy check:**
+**This comparison is no longer manual.** DF-OFF-BY-ONE-29-R2 made it a machine-checkable gate:
+`check-deploy` leg 5 normalizes the vendored unit's `ExecStart` and the running unit's effective
+`ExecStart` (systemd quoting and the binary path are not drift) and fails the deploy check —
+and with it `make gate-deploy` at tick close-out — on any flag mismatch, printing
+expected-vs-observed per flag:
 
-```bash
-diff <(systemctl show off-by-one -p ExecStart --value | tr ' ' '\n' | sort) \
-     <(grep -oP '^ExecStart=\K.*' deploy/off-by-one.service | tr ' ' '\n' | sort)
 ```
+FAIL: running unit's ExecStart flags drifted from deploy/off-by-one.service:
+  -load-threshold: expected 4, observed -1
+  -solve-mem-mb: expected 6144, observed <absent>
+```
+
+The remedy is to install the vendored unit (`install -m 0644 deploy/off-by-one.service
+/etc/systemd/system/off-by-one.service && systemctl daemon-reload && systemctl restart
+off-by-one`); an intentional host deviation is recorded by editing BOTH copies with a comment,
+never by leaving them silently apart. The unit-testable seam is
+`scripts/check-deploy --check-flags deploy/off-by-one.service "$(systemctl show off-by-one -p
+ExecStart --value)"`.
 
 Consequence measured the same hour: `/proc/loadavg` 20.01 on a 16-core box while
 `journalctl -u off-by-one` showed solves finishing every few minutes and
