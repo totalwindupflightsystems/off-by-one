@@ -228,6 +228,10 @@ func main() {
 	// --- 5. API server -------------------------------------------------
 	specBytes := openapiBytes
 	apiServer := apihttp.New(store, queue, specBytes)
+	// Version feeds the /health "version" field (REVIEW-OB-021): the SPA
+	// status chip reads j.version from /health and must not ship the
+	// static v0.0.0 fallback.
+	apiServer.Version = version
 	apiServer.ExportLocalDir = *cfg.exportDir
 	apiServer.ImportLocalDir = *cfg.importDir
 	apiServer.ReadOnly = *cfg.readOnly

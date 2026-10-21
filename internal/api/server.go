@@ -69,6 +69,13 @@ type Server struct {
 
 	// StartedAt is set in New and used by /health to report uptime.
 	StartedAt time.Time
+
+	// Version is the binary version reported by /health. The web SPA
+	// version chip (web/js/app.js) reads this field to replace the
+	// static fallback in web/index.html. Empty when unset (e.g. in
+	// tests) — set after construction from main's ldflags-injected
+	// version variable.
+	Version string
 }
 
 // New builds a Server. The OpenAPI spec is optional — when nil the
@@ -276,12 +283,14 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(s.OpenAPISpec)
 }
 
-// handleHealth returns a minimal status object with uptime. Used by
-// docker/k8s liveness probes.
+// handleHealth returns a minimal status object with uptime and the
+// binary version. Used by docker/k8s liveness probes and the web UI
+// version chip.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok",
-		"uptime": time.Since(s.StartedAt).Truncate(time.Second).String(),
+		"status":  "ok",
+		"uptime":  time.Since(s.StartedAt).Truncate(time.Second).String(),
+		"version": s.Version,
 	})
 }
 
