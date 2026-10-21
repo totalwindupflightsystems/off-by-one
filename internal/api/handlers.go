@@ -770,7 +770,26 @@ func (s *Server) handleGetQueueStatus(w http.ResponseWriter, r *http.Request) {
 // commits can introduce hierarchy without changing the response
 // shape.
 func (s *Server) handleTaxonomy(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Store.ListProblemClassesWithCounts(r.Context(), 1000, 0)
+	limit := 1000
+	if value, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil {
+		if value > 0 {
+			limit = value
+		}
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+	offset := 0
+	if value, err := strconv.Atoi(r.URL.Query().Get("offset")); err == nil && value >= 0 {
+		offset = value
+	}
+
+	rows, err := s.Store.ListProblemClassesWithCounts(r.Context(), limit, offset)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	total, err := s.Store.CountProblemClasses(r.Context(), "", "", "")
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
@@ -789,7 +808,10 @@ func (s *Server) handleTaxonomy(w http.ResponseWriter, r *http.Request) {
 		}
 		tree = append(tree, node)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"tree": tree})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"tree": tree, "total": total, "limit": limit, "offset": offset,
+		"truncated": offset+len(tree) < total,
+	})
 }
 
 // handleStats returns the aggregate counters. The queue depth is

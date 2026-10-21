@@ -573,9 +573,19 @@ curl -s -X POST http://localhost:8766/api/v1/import \
 
 ### `GET /api/v1/taxonomy`
 
-Return the full problem-class tree. Each node includes title, description, optional children, and any cached answers.
+Return the problem-class tree. Each node includes title, description, optional children, and any cached answers. The default window is 1,000 classes; large catalogs can therefore be truncated. Use `total` to determine whether more pages are available.
+
+**Query parameters**
+
+| Parameter | Default | Description |
+|---|---:|---|
+| `limit` | `1000` | Number of classes to return (1–1000). Invalid, zero, or negative values use the default. |
+| `offset` | `0` | Number of classes to skip. Invalid or negative values use the default. |
 
 **Response `200 OK`**
+
+The response contains `tree` (same node shape as before), `total` (full catalog count), `limit` (applied page size), `offset` (applied starting position), and `truncated` (whether classes remain after this page).
+
 
 ```json
 {
@@ -584,15 +594,13 @@ Return the full problem-class tree. Each node includes title, description, optio
       "title": "so-nil-pointer-deref",
       "description": "Nil pointer dereference in Go code",
       "children": [],
-      "answers": [
-        {
-          "id": 42,
-          "problem_class": "so-nil-pointer-deref",
-          ...
-        }
-      ]
+      "answers": []
     }
-  ]
+  ],
+  "total": 2785,
+  "limit": 1000,
+  "offset": 0,
+  "truncated": true
 }
 ```
 
@@ -601,7 +609,7 @@ Return the full problem-class tree. Each node includes title, description, optio
 **Example**
 
 ```bash
-curl -s http://localhost:8766/api/v1/taxonomy
+curl -s 'http://localhost:8766/api/v1/taxonomy?limit=100&offset=100'
 ```
 
 ---

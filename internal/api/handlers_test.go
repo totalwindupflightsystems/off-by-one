@@ -349,7 +349,7 @@ func TestSubmit_RelatedProblemsPopulated(t *testing.T) {
 // returns 409 with reason "answered", an EMPTY submission_id (no queue
 // entry exists, so there is nothing to poll), and a machine-readable
 // next_action pointing at the discover endpoint for the same class.
-// ch:trace row=DF-OFF-BY-ONE-37-R2 spec=docs/api-reference.md:73 wave=none:serial-tick test=internal/api/handlers_test.go::TestSubmit_DedupVerifiedAnswer doc=docs/api-reference.md prompt=/tmp/off-by-one-foreman-2026-10-20-22-11-24-DF-OFF-BY-ONE-37-R2-brief.txt evidence=internal/api/handlers_test.go witness=none:no-external-witness verdict=none:foreman-will-run-gitreins commit=none:worker-commit memory=none:foreman-will-write
+// ch:trace row=DF-OFF-BY-ONE-37-R2 spec=docs/api-reference.md:73 wave=none:serial-tick test=internal/api/handlers_test.go::TestSubmit_DedupVerifiedAnswer doc=docs/api-reference.md prompt=/tmp/off-by-one-foreman-2026-10-20-22-11-24-DF-OFF-BY-ONE-37-R2-brief.txt evidence=internal/api/handlers_test.go witness=none:no-external-witness verdict=none:foreman-will-run-gitreins commit=92904d16d38b6500ef87e3d8895f06f5791a8b04 memory=none:foreman-will-write
 func TestSubmit_DedupVerifiedAnswer(t *testing.T) {
 	s, store, _ := newTestServer(t)
 	// Pre-seed a verified answer for "docker-perms".
@@ -2231,6 +2231,61 @@ func TestTaxonomy_WithData(t *testing.T) {
 	}
 	if len(body.Tree[0].Answers) != 1 {
 		t.Errorf("tree[0].answers len = %d, want 1", len(body.Tree[0].Answers))
+	}
+}
+
+func TestTaxonomy_PaginationWindow(t *testing.T) {
+	// ch:trace row=DF-OFF-BY-ONE-53 spec=docs/api-reference.md#taxonomy--stats wave=none:serial-tick test=internal/api/handlers_test.go::TestTaxonomy_PaginationWindow doc=docs/api-reference.md prompt=/tmp/off-by-one-foreman-2026-10-21-14-47-29-DF-OFF-BY-ONE-53-brief.txt evidence=internal/api/handlers_test.go witness=none:no-external-witness verdict=none:foreman-will-run-gitreins commit=92904d16d38b6500ef87e3d8895f06f5791a8b04 memory=none:foreman-will-write
+	s, store, _ := newTestServer(t)
+	seedClass(t, store, "alpha", "first", "docker", "go", "1.0", "one", graph.AnswerVerified)
+	seedClass(t, store, "bravo", "second", "docker", "go", "1.0", "two", graph.AnswerVerified)
+	seedClass(t, store, "charlie", "third", "docker", "go", "1.0", "three", graph.AnswerVerified)
+
+	type response struct {
+		Tree      []taxonomyNode `json:"tree"`
+		Total     int            `json:"total"`
+		Limit     int            `json:"limit"`
+		Offset    int            `json:"offset"`
+		Truncated bool           `json:"truncated"`
+	}
+	get := func(path string) response {
+		t.Helper()
+		rr := do(t, s, "GET", path, nil)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("GET %s status = %d", path, rr.Code)
+		}
+		var got response
+		if err := json.Unmarshal(rr.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode %s: %v", path, err)
+		}
+		if got.Tree == nil {
+			t.Fatalf("GET %s tree is null", path)
+		}
+		return got
+	}
+	defaults := get("/api/v1/taxonomy")
+	if defaults.Total != 3 || defaults.Limit != 1000 || defaults.Offset != 0 || defaults.Truncated {
+		t.Errorf("default response = %+v", defaults)
+	}
+	first := get("/api/v1/taxonomy?limit=1")
+	if len(first.Tree) != 1 || first.Total != 3 || !first.Truncated {
+		t.Errorf("first page = %+v", first)
+	}
+	second := get("/api/v1/taxonomy?limit=1&offset=1")
+	if len(second.Tree) != 1 || second.Tree[0].Title != "bravo" || second.Total != 3 || second.Offset != 1 {
+		t.Errorf("second page = %+v", second)
+	}
+	pastEnd := get("/api/v1/taxonomy?offset=99999")
+	if len(pastEnd.Tree) != 0 || pastEnd.Total != 3 || pastEnd.Truncated {
+		t.Errorf("past-end page = %+v", pastEnd)
+	}
+	invalid := get("/api/v1/taxonomy?limit=abc&offset=xyz")
+	if invalid.Limit != 1000 || invalid.Offset != 0 || len(invalid.Tree) != 3 {
+		t.Errorf("invalid params response = %+v", invalid)
+	}
+	negative := get("/api/v1/taxonomy?limit=-5")
+	if negative.Limit != 1000 {
+		t.Errorf("negative limit response = %+v", negative)
 	}
 }
 
