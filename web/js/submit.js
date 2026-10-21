@@ -107,6 +107,10 @@
     var envSelect = el('select', 'form-input');
     envSelect.id = 'submit-env';
     envSelect.name = 'environment';
+    // Environment vocabulary must cover the values the bundled corpus and
+    // API ship (docker, linux) in addition to the generic deploy targets, or
+    // the Submit form cannot express classes the corpus already carries.
+    // ch:trace row=DF-OFF-BY-ONE-54 spec=none:current-row-contract wave=off-by-one-foreman-2026-10-21-21-32-28#serial test=none:existing-API-suite doc=none:ui-option-contract prompt=/tmp/off-by-one-foreman-2026-10-21-21-32-28-DF-OFF-BY-ONE-54-brief.txt evidence=none:pending-foreman-verification witness=none:pending verdict=none:pending commit=none:pending-foreman-trace memory=none:pending
     [
       { v: '', l: '— Any —' },
       { v: 'dev', l: 'Dev' },
@@ -114,6 +118,8 @@
       { v: 'prod', l: 'Prod' },
       { v: 'ci', l: 'CI' },
       { v: 'local', l: 'Local' },
+      { v: 'docker', l: 'Docker' },
+      { v: 'linux', l: 'Linux' },
     ].forEach(function (opt) {
       var o = el('option');
       o.value = opt.v;
