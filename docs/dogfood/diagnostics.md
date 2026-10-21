@@ -359,13 +359,23 @@ refuse to lie about a deployment it does not own:
 - **Missing/unexecutable probe → FAIL.** A broken gate is never a pass.
 - **Not a git checkout → FAIL.** Without git the artifact cannot be tied to HEAD.
 
+**The caller (DF-OFF-BY-ONE-52): `make tick-closeout`** (Makefile target →
+`scripts/tick-closeout.sh`). The gate shipped with no caller — CI ran only the
+hermetic self-test — so a superseded image served 4 h 45 m while the gate sat
+red untripped. `tick-closeout` is the machine-side close-out entry point: it
+invokes `scripts/gate-deploy` and propagates its exit status as the close-out
+verdict (a missing/unexecutable gate fails the close-out; the worktree SKIP
+passes through unchanged). It never restarts or mutates the service — the
+remedy stays with the operator in the owning checkout. Regression test:
+`make tick-closeout-selftest` (`scripts/tests/tick-closeout-test.sh`).
+
 **Close-out checklist (after any code commit):**
 
 1. commit or stash board/gitreins state — a dirty tree stamps the artifact
    `<rev>-dirty`, which `check-binary-fresh` refuses by design;
 2. `make build`;
 3. `kill <MainPID>` — systemd `Restart=always` relaunches the service;
-4. `make gate-deploy` — must PASS before the tick is closed out.
+4. `make tick-closeout` (which invokes `scripts/gate-deploy`) — must PASS before the tick is closed out.
 
 **Red/green proof, captured hermetically** (throwaway `--shared` clone +
 PATH-stubbed `systemctl` + a throwaway instance on port 18998; the live service

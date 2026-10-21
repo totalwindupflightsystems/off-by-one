@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest check-distribute-deploy deploy-distribute check-distribute-deploy-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test tick-closeout tick-closeout-selftest connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest check-distribute-deploy deploy-distribute check-distribute-deploy-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -110,6 +110,23 @@ check-deploy:
 # `kill <MainPID>` — systemd Restart=always relaunches the service.
 gate-deploy:
 	./scripts/gate-deploy
+
+# TICK CLOSE-OUT CALLER (DF-OFF-BY-ONE-52): the machine-side invocation of the
+# gate above. OB-GAP-085 shipped gate-deploy with no caller — CI ran only the
+# hermetic self-test — so a superseded image served 4h45m while the gate sat
+# red with nobody to trip it. `make tick-closeout` runs scripts/tick-closeout.sh,
+# which invokes the gate and propagates its verdict as the close-out verdict
+# (PASS/FAIL, and the loud worktree SKIP preserved unchanged). It never
+# restarts or mutates the service.
+tick-closeout:
+	./scripts/tick-closeout.sh
+
+# Regression test for the close-out caller: stub gates prove the caller
+# actually invokes the gate (marker files) and propagates green/red/SKIP
+# verdicts; a no-override arm invokes the REAL scripts/gate-deploy from this
+# worktree and asserts its loud worktree SKIP. No live-service contact.
+tick-closeout-selftest:
+	bash scripts/tests/tick-closeout-test.sh
 
 # Regression self-test for the deploy gate + probe: hermetic scratch clones,
 # stub systemd unit and stub systemctl — it never touches the live service.
