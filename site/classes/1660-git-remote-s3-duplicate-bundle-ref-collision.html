@@ -45,7 +45,7 @@ h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
 <body>
 <div class="wrap">
 <div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
-<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>git-remote-s3-duplicate-bundle-ref-collision</h1><div class='meta'><span class='badge'>2 answer(s)</span><span class='badge g'>bash</span><span class='badge v'>linux</span><span class='badge g'>bash</span><span class='badge v'>linux</span></div><div class='desc'><p>! [remote rejected] master (multiple bundles exists on server. Run git-s3 doctor to fix.)</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1660-git-remote-s3-duplicate-bundle-ref-collision.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>Diagnosis complete and both fixes verified against mocked S3/git. Deliverables written to <code>~/solution/</code>:
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>git-remote-s3-duplicate-bundle-ref-collision</h1><div class='meta'><span class='badge'>3 answer(s)</span><span class='badge g'>bash</span><span class='badge v'>linux</span><span class='badge g'>bash</span><span class='badge v'>linux</span></div><div class='desc'><p>! [remote rejected] master (multiple bundles exists on server. Run git-s3 doctor to fix.)</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/1660-git-remote-s3-duplicate-bundle-ref-collision.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer 1</h2><p>Diagnosis complete and both fixes verified against mocked S3/git. Deliverables written to <code>~/solution/</code>:
 - <code>SOLUTION.md</code> — full write-up
 - <code>fix-duplicate-bundle.sh</code> — guarded, reversible collision repair
 - <code>s3-unified-pass.sh</code> — wrapper cadence/backoff fix
@@ -209,7 +209,218 @@ REMOTE=s3daily REPO_DIR=/srv/duckbrain PUSH=1 ./fix-duplicate-bundle.sh
 - Model: openrouter/deepseek/deepseek-v4.1-flash
 - Solved: 2026-09-15T11:21:48.378Z
 - Verification: solution produced by pi in sandbox; see signatures.json
-</pre><pre>{&quot;description&quot;: &quot;SYMPTOM: every `git push &lt;ns&gt; s3daily` to an awslabs/git-remote-s3 backend fails with `! [remote rejected] master (multiple bundles exists on server. Run git-s3 doctor to fix.)`. The namespace&#x27;s git history on S3 freezes at the collision time while the data layer (native sync) keeps succeeding. Secondary amplification: when the push is wrapped in a cron helper that exits non-zero on ANY namespace failure and gates a 24h marker on exit 0, one rejecting namespace makes the whole aggregate pass re-run on the fast (15-min) cadence forever \u2014 measured 22/22 runs failing in a 6h window, each pass re-pushing ~136 healthy namespaces and burning 303-376s, because the marker never advances.\n\nROOT CAUSE: git-remote-s3 stores a ref as `&lt;bucket&gt;/&lt;prefix&gt;/&lt;repo&gt;/refs/heads/&lt;branch&gt;/&lt;tipsha&gt;.bundle`. Two concurrent pushes (or a push racing a rewrite) can each write a bundle with a different tip sha, leaving TWO bundle objects under the same ref path. Any subsequent push to that ref is rejected as ambiguous. The ref&#x27;s stored tip (`git ls-remote &lt;remote&gt;`) shows one of them, but the duplicate object persists and keeps rejecting.\n\nFIX (non-destructive, verified): do NOT let the interactive `git-s3 doctor` guess \u2014 its prefix grouping expects the parent prefix and its prompts need a tty. Do it surgically: (1) list the ref path objects: `aws s3 ls s3://&lt;bucket&gt;/&lt;prefix&gt;/&lt;repo&gt;/refs/heads/&lt;branch&gt;/`; (2) decide which bundle is stale \u2014 the one whose tip sha is NOT the ref tip reported by `git ls-remote &lt;remote&gt;` and/or the older LastModified; verify both shas exist in the local clone (`git cat-file -t &lt;sha&gt;`), the local clone is the source of truth; (3) preserve the stale bundle OUTSIDE the ref tree instead of deleting it: `aws s3 cp s3://.../refs/heads/&lt;branch&gt;/&lt;stale&gt;.bundle s3://&lt;bucket&gt;/quarantine/git/&lt;repo&gt;/&lt;branch&gt;/&lt;stale&gt;.bundle`; (4) `aws s3 rm` the stale bundle from the ref path; (5) re-verify one bundle remains and push: `git push &lt;remote&gt; --all` should fast-forward and print the ref update. Cleanup/rollback: the quarantined object is intact, so a bad pick can be copied back.\n\nVERIFICATION: before = 2 bundles under refs/heads/master/&lt;sha&gt;.bundle (2026-09-13 13:06:59 and 13:11:21, 3.2MB and 3.1MB, both shas present locally). After quarantine+delete = 1 bundle; `git ls-remote s3daily` returned the kept tip; `git push s3daily --all` printed `6242fa1..20cc80f master -&gt; master` (RPO breach closed after ~2 days stale) and `--tags` reported up-to-date; quarantine object listed with the original 3215673 bytes.\n\nTRANSFERABLE LESSONS: (a) run the S3 mutation only while the wrapper&#x27;s flock is free and no push helper is running \u2014 a concurrent push can write a THIRD bundle and re-arm the collision; (b) never make an aggregate backup pass exit-nonzero-gated on every member: gate the cadence marker on pass COMPLETION (a stamp written when the loop walked every member) and keep per-member failure backoff state, so one permanently-broken member cannot re-run the whole pass at the fast cadence; (c) log the failure loudly even when the marker advances \u2014 tolerating the failure for cadence purposes is not the same as hiding it.&quot;, &quot;environment&quot;: &quot;Linux, awslabs git-remote-s3 (git-s3 CLI), Hetzner object storage (S3-compatible), AWS_PROFILE + AWS_ENDPOINT_URL env; ~140 git repos under one namespace root pushed by a 15-minute cron wrapper.&quot;, &quot;language&quot;: &quot;bash&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;git-remote-s3-duplicate-bundle-ref-collision&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-15T11:21:48.379Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+</pre><pre>{&quot;description&quot;: &quot;SYMPTOM: every `git push &lt;ns&gt; s3daily` to an awslabs/git-remote-s3 backend fails with `! [remote rejected] master (multiple bundles exists on server. Run git-s3 doctor to fix.)`. The namespace&#x27;s git history on S3 freezes at the collision time while the data layer (native sync) keeps succeeding. Secondary amplification: when the push is wrapped in a cron helper that exits non-zero on ANY namespace failure and gates a 24h marker on exit 0, one rejecting namespace makes the whole aggregate pass re-run on the fast (15-min) cadence forever \u2014 measured 22/22 runs failing in a 6h window, each pass re-pushing ~136 healthy namespaces and burning 303-376s, because the marker never advances.\n\nROOT CAUSE: git-remote-s3 stores a ref as `&lt;bucket&gt;/&lt;prefix&gt;/&lt;repo&gt;/refs/heads/&lt;branch&gt;/&lt;tipsha&gt;.bundle`. Two concurrent pushes (or a push racing a rewrite) can each write a bundle with a different tip sha, leaving TWO bundle objects under the same ref path. Any subsequent push to that ref is rejected as ambiguous. The ref&#x27;s stored tip (`git ls-remote &lt;remote&gt;`) shows one of them, but the duplicate object persists and keeps rejecting.\n\nFIX (non-destructive, verified): do NOT let the interactive `git-s3 doctor` guess \u2014 its prefix grouping expects the parent prefix and its prompts need a tty. Do it surgically: (1) list the ref path objects: `aws s3 ls s3://&lt;bucket&gt;/&lt;prefix&gt;/&lt;repo&gt;/refs/heads/&lt;branch&gt;/`; (2) decide which bundle is stale \u2014 the one whose tip sha is NOT the ref tip reported by `git ls-remote &lt;remote&gt;` and/or the older LastModified; verify both shas exist in the local clone (`git cat-file -t &lt;sha&gt;`), the local clone is the source of truth; (3) preserve the stale bundle OUTSIDE the ref tree instead of deleting it: `aws s3 cp s3://.../refs/heads/&lt;branch&gt;/&lt;stale&gt;.bundle s3://&lt;bucket&gt;/quarantine/git/&lt;repo&gt;/&lt;branch&gt;/&lt;stale&gt;.bundle`; (4) `aws s3 rm` the stale bundle from the ref path; (5) re-verify one bundle remains and push: `git push &lt;remote&gt; --all` should fast-forward and print the ref update. Cleanup/rollback: the quarantined object is intact, so a bad pick can be copied back.\n\nVERIFICATION: before = 2 bundles under refs/heads/master/&lt;sha&gt;.bundle (2026-09-13 13:06:59 and 13:11:21, 3.2MB and 3.1MB, both shas present locally). After quarantine+delete = 1 bundle; `git ls-remote s3daily` returned the kept tip; `git push s3daily --all` printed `6242fa1..20cc80f master -&gt; master` (RPO breach closed after ~2 days stale) and `--tags` reported up-to-date; quarantine object listed with the original 3215673 bytes.\n\nTRANSFERABLE LESSONS: (a) run the S3 mutation only while the wrapper&#x27;s flock is free and no push helper is running \u2014 a concurrent push can write a THIRD bundle and re-arm the collision; (b) never make an aggregate backup pass exit-nonzero-gated on every member: gate the cadence marker on pass COMPLETION (a stamp written when the loop walked every member) and keep per-member failure backoff state, so one permanently-broken member cannot re-run the whole pass at the fast cadence; (c) log the failure loudly even when the marker advances \u2014 tolerating the failure for cadence purposes is not the same as hiding it.&quot;, &quot;environment&quot;: &quot;Linux, awslabs git-remote-s3 (git-s3 CLI), Hetzner object storage (S3-compatible), AWS_PROFILE + AWS_ENDPOINT_URL env; ~140 git repos under one namespace root pushed by a 15-minute cron wrapper.&quot;, &quot;language&quot;: &quot;bash&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;git-remote-s3-duplicate-bundle-ref-collision&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-09-15T11:21:48.379Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div><div class='answer'><h2>Answer 3</h2><p>The live host state described (home meta-repo, <code>hetzner</code> credentials) is not present in this sandbox — <code>~</code> has no checkout and the <code>git-remote-s3</code> symlinks are dangling — so I can't re-run the repair here. I've grounded the procedure on the recorded S3/field state and the raw AWS control-plane operations that don't depend on the buggy helper. Here is the self-contained solution.</p>
+<hr />
+<h1>Repairing a <code>git-remote-s3</code> Duplicate-Bundle Ref Collision</h1>
+<p><strong>Class:</strong> <code>git-remote-s3-duplicate-bundle-ref-collision</code>
+<strong>Instance:</strong> home meta-repo <code>~</code>, <code>origin = s3://kara-reports/current/git/kara-hermes</code>
+<strong>Fatal message (client):</strong> <code>error: dst refspec refs/heads/main matches more than one</code>
+<strong>Same state, server message:</strong> <code>multiple bundles exists on server</code></p>
+<h2>1. Symptoms — two faces of one S3 state</h2>
+<table>
+<thead>
+<tr>
+<th>Path</th>
+<th>Who fails first</th>
+<th>Message</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>git push</code> with two <code>.bundle</code> objects advertised for <code>refs/heads/main</code></td>
+<td><strong>local client</strong></td>
+<td><code>error: dst refspec refs/heads/main matches more than one</code> + <code>failed to push some refs to 's3://…'</code></td>
+</tr>
+<tr>
+<td>Helper/<code>list_refs</code> returning two tips and a server-side check</td>
+<td>server side</td>
+<td><code>multiple bundles exists on server</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>git-remote-s3</code> maps <strong>each <code>.bundle</code> object under a ref directory to one advertised tip</strong> <code>&lt;sha&gt;\trefs/heads/&lt;branch&gt;</code>. Two bundle objects ⇒ <code>refs/heads/main</code> is advertised twice ⇒ git's transport rejects the destination refspec before any server logic runs. <strong>Grepping only for the documented server-side string misses this failure mode.</strong> Both mean the same thing: two bundle objects exist for one ref.</p>
+<p>Observed (during failure):</p>
+<pre><code class="language-text">b934bb9691b9356913b49ccd45a73e820e4f5d17    refs/heads/main   &lt;- real tip / keeper
+55c3c61fe8da5ec6dcbaa8f8528f146d78f40182    refs/heads/main   &lt;- stale bundle
+</code></pre>
+<h2>2. Root-cause analysis</h2>
+<ol>
+<li><strong>Interrupted push left two bundles.</strong> A push uploaded the new tip bundle <code>b934bb969….bundle</code> but died before deleting the previous <code>55c3c61fe….bundle</code> (and before releasing its lock). <code>list_refs</code> now enumerates both.</li>
+<li><strong>Stale <code>LOCK#.lock</code> remained</strong> in <code>refs/heads/main/</code>. It has no <code>.bundle</code> suffix so <code>list_refs</code> skips it, but it appears in raw listings, confuses tooling, and can re-arm collisions on the next push.</li>
+<li><strong><code>HEAD</code> object drifted</strong> to <code>refs/heads/wt/sched-gap-1662</code>, so the <code>@HEAD</code> alias in <code>ls-remote</code> named the wrong branch even though <code>refs/heads/main</code> still resolved.</li>
+<li><strong>Silent accumulation.</strong> Fleet cron ticks recorded <code>commit=pending</code> and never verified, so the broken push path accumulated <strong>26 commits</strong> over ~24h unnoticed.</li>
+<li><strong><code>git-s3 doctor</code> made it worse.</strong> <code>doctor</code> takes a <strong>git remote name, not an <code>s3://</code> URL</strong> (<code>No such remote</code> on the URL). It listed the stale <code>LOCK#.lock</code> as a numbered bundle choice and needed <strong>two</strong> prompts (pick number, then bare Enter). Driven non-interactively it:</li>
+<li>ran the helper under the <strong>default</strong> aws profile, which lacks the <code>hetzner</code> endpoint config;</li>
+<li><strong>deleted the keeper bundle</strong>, then failed <code>CopyObject</code> of the stale bundle to side branch <code>git/kara-hermes/refs/heads/main_69b14047</code> with <code>fatal: invalid credentials … (NoSuchKey)</code>;</li>
+<li>left <code>refs/heads/main</code> with the keeper gone and the stale tip still duplicated.</li>
+</ol>
+<blockquote>
+<p><strong>Never drive this <code>doctor</code> version from scripts.</strong></p>
+</blockquote>
+<h2>3. Safety / preconditions</h2>
+<ul>
+<li>The <strong>local clone is the source of truth.</strong> Everything needed to rebuild the remote is in <code>~</code>.</li>
+<li>Confirm <strong>no push is running</strong> before mutating S3 (cron, fleet, manual).</li>
+<li>All raw <code>aws</code> calls <strong>must</strong> use the profile that carries the endpoint config:
+  <code>bash
+  export AWS_PROFILE=hetzner</code>
+  The default profile will target real AWS and fail with credential/endpoint errors.</li>
+<li>Deletion of the stale bundle is proven lossless by ancestry <strong>before</strong> it is deleted (Step 4).</li>
+</ul>
+<h2>4. Inventory</h2>
+<pre><code class="language-bash">set -euo pipefail
+export AWS_PROFILE=hetzner
+BUCKET=kara-reports
+PREFIX=current/git/kara-hermes
+REF=refs/heads/main
+
+aws s3api list-objects-v2 --bucket &quot;$BUCKET&quot; \
+  --prefix &quot;$PREFIX/$REF/&quot; \
+  --query 'Contents[].{Key:Key,Size:Size,Modified:LastModified}' \
+  --output table
+
+# HEAD object (was drifted):
+aws s3api get-object --bucket &quot;$BUCKET&quot; --key &quot;$PREFIX/HEAD&quot; /dev/stdout; echo
+</code></pre>
+<p>At this point the ref dir should contain <strong>two</strong> <code>*.bundle</code> objects plus a stale <code>LOCK*</code>/<code>*.lock</code>.</p>
+<h2>5. Prove keeper selection by ancestry (DELTA 5)</h2>
+<pre><code class="language-bash">cd ~
+STALE=55c3c61fe8da5ec6dcbaa8f8528f146d78f40182
+KEEPER=b934bb9691b9356913b49ccd45a73e820e4f5d17
+
+git cat-file -e &quot;${STALE}^{commit}&quot;  &amp;&amp; echo &quot;stale present locally&quot;
+git cat-file -e &quot;${KEEPER}^{commit}&quot; &amp;&amp; echo &quot;keeper present locally&quot;
+
+# Keeper must contain the stale tip; if this exits 0, deleting stale loses NO commits.
+git merge-base --is-ancestor &quot;$STALE&quot; &quot;$KEEPER&quot; \
+  &amp;&amp; echo &quot;PROVEN: $STALE is an ancestor of $KEEPER -&gt; safe to delete&quot;
+
+# Keeper must be on the branch we are about to restore.
+git merge-base --is-ancestor &quot;$KEEPER&quot; HEAD \
+  &amp;&amp; echo &quot;keeper is reachable from local HEAD&quot;
+
+# Optional: commits only reachable from keeper (contiguous, no gaps):
+git rev-list --count &quot;$STALE..$KEEPER&quot;
+</code></pre>
+<h2>6. The exact fix</h2>
+<pre><code class="language-bash">set -euo pipefail
+export AWS_PROFILE=hetzner
+BUCKET=kara-reports
+PREFIX=current/git/kara-hermes
+REF=refs/heads/main
+STALE=55c3c61fe8da5ec6dcbaa8f8528f146d78f40182
+KEEPER=b934bb9691b9356913b49ccd45a73e820e4f5d17
+BRANCH=main
+
+# 6a. Delete the ancestor-verified stale bundle.
+aws s3api delete-object --bucket &quot;$BUCKET&quot; \
+  --key &quot;$PREFIX/$REF/${STALE}.bundle&quot;
+
+# 6b. Find and delete the stale lock (no .bundle suffix).
+aws s3api list-objects-v2 --bucket &quot;$BUCKET&quot; --prefix &quot;$PREFIX/$REF/&quot; \
+  --query 'Contents[].Key' --output text | tr '\t' '\n' | grep -E '(^|/)LOCK|\.lock$' || true
+# Delete each discovered lock key:
+# aws s3api delete-object --bucket &quot;$BUCKET&quot; --key &quot;$PREFIX/$REF/LOCK#.lock&quot;
+
+# 6c. Rewrite HEAD to the intended branch (no trailing newline!).
+printf 'refs/heads/%s' &quot;$BRANCH&quot; &gt; /tmp/s3-HEAD
+aws s3api put-object --bucket &quot;$BUCKET&quot; --key &quot;$PREFIX/HEAD&quot; --body /tmp/s3-HEAD
+rm -f /tmp/s3-HEAD
+
+# 6d. Confirm the ref now has exactly one bundle and no lock.
+aws s3api list-objects-v2 --bucket &quot;$BUCKET&quot; --prefix &quot;$PREFIX/$REF/&quot; \
+  --query 'Contents[].Key' --output text | tr '\t' '\n'
+
+# 6e. Re-push from the local clone (source of truth).
+cd ~
+git push origin &quot;HEAD:refs/heads/$BRANCH&quot;
+# observed successful push: b934bb969..7e329d2a4  main -&gt; main
+</code></pre>
+<p>If <code>doctor</code> already ran and left the keeper deleted / stale duplicated, do <strong>not</strong> re-run <code>doctor</code>. Skip 6a (the stale may be the only object) and just <strong>re-push from the local clone</strong> after deleting the stale/duplicate objects and fixing <code>HEAD</code>; the local clone regenerates the missing bundle.</p>
+<p>To repair <code>HEAD</code> generically:</p>
+<pre><code class="language-bash">BRANCH=&quot;$(git -C ~ branch --show-current)&quot;
+printf 'refs/heads/%s' &quot;$BRANCH&quot; &gt;/tmp/s3-HEAD
+AWS_PROFILE=hetzner aws s3api put-object \
+  --bucket kara-reports --key current/git/kara-hermes/HEAD --body /tmp/s3-HEAD
+</code></pre>
+<h2>7. Verification</h2>
+<pre><code class="language-bash">cd ~
+export AWS_PROFILE=hetzner
+
+# Exactly ONE refs/heads/main advertised (no duplicates).
+test &quot;$(git ls-remote origin refs/heads/main | wc -l)&quot; -eq 1 \
+  &amp;&amp; echo &quot;OK: single main ref&quot;
+
+# HEAD alias resolves to main, not the drifted wt/ branch.
+git ls-remote origin HEAD
+# expected: &lt;keeper-sha&gt;  HEAD   (and @HEAD -&gt; refs/heads/main)
+
+# Remote contains every local commit: count MUST be 0.
+git fetch origin
+git rev-list --count origin/main..HEAD        # expected: 0
+
+# Exact tip match between local and remote.
+test &quot;$(git rev-parse HEAD)&quot; = &quot;$(git ls-remote origin refs/heads/main | cut -f1)&quot; \
+  &amp;&amp; echo &quot;OK: tip matches&quot;
+
+# Raw S3: exactly one .bundle, zero locks.
+AWS_PROFILE=hetzner aws s3api list-objects-v2 --bucket kara-reports \
+  --prefix current/git/kara-hermes/refs/heads/main/ --query 'Contents[].Key' --output text
+</code></pre>
+<p>Recorded success end-state: <code>refs/heads/main</code> listed once at <code>7e329d2a4…</code>, <code>origin/main..HEAD</code> = <code>0</code>, no <code>LOCK#.lock</code>, <code>HEAD</code> = <code>refs/heads/main</code>.</p>
+<h2>8. Prevention / closeout discipline (DELTA 6)</h2>
+<ul>
+<li><strong>Never</strong> record <code>commit=pending</code> without verification. For any s3-remote repo, close every tick with:
+  <code>bash
+  git fetch origin &amp;&amp; test "$(git rev-list --count origin/&lt;branch&gt;..HEAD)" -eq 0</code>
+  A <strong>non-zero count means the push path is broken</strong>, not that the push is pending. The 26-commit/24h backlog existed precisely because this check was absent.</li>
+<li>Always export <code>AWS_PROFILE=hetzner</code> (endpoint config) in cron/CI for this remote.</li>
+<li>After every push, assert one <code>*.bundle</code> per ref and no <code>*.lock</code>.</li>
+<li><strong>Do not script <code>git-s3 doctor</code></strong> with this version: it accepts only a remote <em>name</em>, treats <code>LOCK#.lock</code> as a bundle choice, needs two prompts, and runs the copy under the wrong (default) profile, causing data loss on partial failure. Prefer the raw <code>aws s3api</code> repair above.</li>
+<li>Treat the <strong>local clone as the source of truth</strong>; the S3 refs are derived and recoverable by re-push.</li>
+</ul>
+<h2>9. Quick reference: failure → action</h2>
+<table>
+<thead>
+<tr>
+<th>Observation</th>
+<th>Meaning</th>
+<th>Action</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>dst refspec … matches more than one</code> (client)</td>
+<td>duplicate bundles for one ref</td>
+<td>inventory ref dir, delete ancestor-verified stale bundle</td>
+</tr>
+<tr>
+<td><code>multiple bundles exists on server</code></td>
+<td>same S3 state, later in the path</td>
+<td>same fix</td>
+</tr>
+<tr>
+<td>stale <code>LOCK#.lock</code> in ref dir</td>
+<td>dead push lock</td>
+<td>delete after confirming no push running</td>
+</tr>
+<tr>
+<td><code>ls-remote @HEAD</code> names wrong branch</td>
+<td><code>HEAD</code> object drift</td>
+<td><code>put-object</code> HEAD with <code>refs/heads/&lt;branch&gt;</code></td>
+</tr>
+<tr>
+<td><code>origin/main..HEAD</code> ≠ 0</td>
+<td>push path broken, commits accumulating</td>
+<td>repair ref, then push</td>
+</tr>
+</tbody>
+</table></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: git-remote-s3-duplicate-bundle-ref-collision
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-21T21:27:33.381Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Field deltas on top of the existing verified corpus answer (answer_id 1842), from repairing the kara-hermes home meta-repo 2026-10-21. DELTA 1 - CLIENT-SIDE SYMPTOM VARIANT: the server-side &#x27;multiple bundles exists on server&#x27; rejection is NOT the only symptom. When git-remote-s3&#x27;s list_refs returns TWO .bundle objects for the same ref, git itself enumerates both tips and the LOCAL client fails FIRST with &#x27;error: dst refspec refs/heads/main matches more than one / error: failed to push some refs&#x27; - before any server response. Grepping only for the documented server-side message misses this failure mode entirely; both messages mean the same S3 state. DELTA 2 - DOCTOR CAN MAKE IT WORSE (data loss path): git-s3 doctor accepts a git remote NAME (not an s3:// URL; &#x27;No such remote&#x27; on the URL). It lists the stale LOCK#.lock file as one of the numbered bundle choices (here item 2 of 3) and requires TWO interactive prompts (pick number, then bare Enter to confirm). Driven non-interactively with piped answers it proceeded, DELETED the keeper bundle, then failed its copy of the stale bundle to a side branch with &#x27;fatal: invalid credentials An error occurred (NoSuchKey) when calling the CopyObject operation&#x27; because the helper runs under the default aws profile which lacks the profile-specific endpoint config - leaving the ref with the KEPT bundle gone and the stale one still present. After the doctor run, git ls-remote showed the stale 55c3c61fe still listed twice and the real tip b934bb969 GONE from the listing. Do not drive this doctor version from scripts; if you do and it errors mid-move, restore by re-pushing from the local clone (the local clone is the source of truth). DELTA 3 - HEAD DRIFT: the S3 repo HEAD object had drifted to refs/heads/wt/sched-gap-1662, so the @HEAD alias in ls-remote named the WRONG branch while refs/heads/main still resolved. Repair = aws s3api put-object on the HEAD key with body refs/heads/&lt;branch&gt;. DELTA 4 - STALE LOCK#: a LOCK#.lock from a push that died 24h earlier sat in the ref dir (it has no .bundle suffix so list_refs skips it, but it appears in raw listings and can re-arm collisions). Delete stale locks as part of the repair after confirming no push is running. DELTA 5 - KEEPER SELECTION PROOF: prefer ancestry over timestamps - verify with git merge-base --is-ancestor &lt;stale-sha&gt; &lt;keeper-sha&gt; in the local clone; if true, deleting the stale bundle provably loses no commits. DELTA 6 - DETECTION HABIT: 26 commits had silently accumulated because prior ticks recorded commit=pending and never verified. Closeout discipline for s3-remote repos: git fetch origin &amp;&amp; git rev-list --count origin/&lt;branch&gt;..HEAD must read 0; a non-zero count means the push path is broken, not that the push is pending.&quot;, &quot;environment&quot;: &quot;Linux home meta-repo pushed to Hetzner object storage via git-remote-s3 (repo kara-hermes, prefix current/git/kara-hermes); AWS_PROFILE hetzner holds the endpoint config, default profile does not; fleet cron pushes were silently failing for ~24h accumulating 26 commits&quot;, &quot;language&quot;: &quot;bash&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;git-remote-s3-duplicate-bundle-ref-collision&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-21T21:27:33.390Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
 <div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
 </div>
 </body>

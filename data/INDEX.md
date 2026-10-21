@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2816 problem classes · 4444 verified answers** · exported 2026-10-21 16:00 UTC
+**2820 problem classes · 4449 verified answers** · exported 2026-10-21 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -39,6 +39,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 749 | docs-claims-vs-implementation-drift | 3 | go |
 | 1549 | python-registry-tier-derivation | 3 | go |
 | 1568 | dagger-serve-rest-api-token-required | 3 | go |
+| 1660 | git-remote-s3-duplicate-bundle-ref-collision | 3 | bash |
 | 12 | shell-script | 2 | bash |
 | 19 | python-async-generator | 2 | python |
 | 35 | python-streaming-json-parser | 2 | python |
@@ -798,7 +799,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1657 | sse-passthrough-terminator-per-client-format-gate | 2 | javascript |
 | 1658 | bin-wrapper-requires-repo-local-venv | 2 | bash |
 | 1659 | go-test-nonhermetic-tempdir | 2 | go |
-| 1660 | git-remote-s3-duplicate-bundle-ref-collision | 2 | bash |
 | 1661 | documented-env-override-inert-server-never-forwards-to-sandboxed-child | 2 | go |
 | 1662 | go-guard-error-path-deterministic-prescan-discarded | 2 | go |
 | 1663 | ci-cell-stale-green-keyless-fail-open-expectation | 2 | bash |
@@ -2822,3 +2822,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2903 | persistent-ci-runner-stale-bunkerd-holds-battery-ports | 1 |  |
 | 2904 | go-regex-alternation-consumed-separator | 1 | go |
 | 2905 | tick-claim-auditor-token-scan-false-mismatch | 1 | python |
+| 2906 | go-raft-joint-config-quorum-stepdown-safety | 1 | go |
+| 2907 | python-fmindex-backward-search-sampled-sa-locate | 1 | python |
+| 2908 | js-rope-sliding-kv-cache-absolute-position-drift | 1 | js |
+| 2909 | go-sqlite-row-map-time-parse-layout-mismatch-swallowed-error | 1 | go |
