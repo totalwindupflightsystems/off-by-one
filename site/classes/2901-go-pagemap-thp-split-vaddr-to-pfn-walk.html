@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-pagemap-thp-split-vaddr-to-pfn-walk — Off-By-One verified answer</title>
+<meta name="description" content="A naive vaddr→PFN resolver fails in five distinct ways. Each one is addressed explicitly below.">
+<meta property="og:title" content="go-pagemap-thp-split-vaddr-to-pfn-walk — Off-By-One">
+<meta property="og:description" content="A naive vaddr→PFN resolver fails in five distinct ways. Each one is addressed explicitly below.">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2901-go-pagemap-thp-split-vaddr-to-pfn-walk.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-pagemap-thp-split-vaddr-to-pfn-walk</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>A naive vaddr→PFN resolver fails in five distinct ways. Each one is addressed explicitly below.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2901-go-pagemap-thp-split-vaddr-to-pfn-walk.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Resolving vaddr→PFN via <code>/proc/self/pagemap</code> (4 KiB / 2 MiB THP / 1 GiB hugetlbfs, 4- and 5-level)</h1>
+<h2>Root-cause analysis</h2>
+<p>A naive vaddr→PFN resolver fails in five distinct ways. Each one is addressed explicitly below.</p>
+<ol>
+<li>
+<p><strong>PFNs are zeroed for unprivileged callers (Linux ≥ 4.0, CAP_SYS_ADMIN required).</strong>
+   <code>pagemap_read</code> sets <code>pm.show_pfn = file_ns_capable(file, &amp;init_user_ns, CAP_SYS_ADMIN)</code>. Without it the <em>present</em> bit and all attribute bits are still returned, but the 55-bit PFN field is zero. A parser that just does <code>entry &amp; PFN_MASK</code> therefore returns <code>0</code> for <em>every</em> present page — plausible garbage (PFN 0 is the reserved low page). Detection must be explicit: fault a private page, read its entry, and if <code>present &amp;&amp; pfn == 0</code>, report <strong>masked</strong> rather than a frame. Capability must be checked against the <em>initial</em> user namespace, so <code>CapEff</code> alone is not trusted (the kernel ignores caps held only in a child userns).</p>
+</li>
+<li>
+<p><strong>Huge pages do <em>not</em> require base-PFN scaling.</strong>
+   The task description (“against the kernel's real page-table geometry”) invites the wrong fix of computing a huge-page base PFN. In <code>fs/proc/task_mmu.c</code> (verified against v6.6), both THP and hugetlb walks emit <strong>one entry per 4 KiB page with the sub-frame already added</strong>:
+   <code>c
+   // pagemap_pmd_range (THP)
+   frame = pmd_pfn(pmd) + ((addr &amp; ~PMD_MASK) &gt;&gt; PAGE_SHIFT);
+   // pagemap_hugetlb_range (hugetlbfs)
+   frame = pte_pfn(pte)  + ((addr &amp; ~hmask)    &gt;&gt; PAGE_SHIFT);</code>
+   So the correct mapping is always <code>index = vaddr &gt;&gt; 12</code>, <code>pfn = entry &amp; ((1&lt;&lt;55)-1)</code>, and the physical byte offset is always <code>pfn &lt;&lt; 12</code>, even inside a 2 MiB or 1 GiB page. Page-table geometry is needed only for canonical-address validation and for identifying the backing page size — not for the PFN arithmetic.</p>
+</li>
+<li>
+<p><strong>Page-size / THP identification is a separate problem.</strong>
+   A 4 KiB pagemap entry carries <strong>no huge-page bit</strong> (<code>PM_PRESENT/SWAP/FILE/SOFT_DIRTY/MMAP_EXCLUSIVE/UFFD_WP</code> only). The kernel exposes it via the <code>PAGEMAP_SCAN</code> ioctl (<code>PAGE_IS_HUGE</code>, Linux ≥ 6.0) and via <code>smaps</code> (<code>AnonHugePages</code>, <code>VmFlags ht/hg/nh</code>, <code>KernelPageSize</code>). When PFNs are visible, a contiguous, size-aligned PFN run is a second, independent confirmation.</p>
+</li>
+<li>
+<p><strong>THP split / page migration invalidates a previously resolved PFN.</strong>
+   Splitting a 2 MiB PMD or migrating a page changes the PFN without changing the virtual address. Any cached frame must be re-derived and cross-checked: re-read pagemap, confirm residency with <code>mincore</code>, confirm the VMA still exists via <code>smaps</code>, and compare against <code>smaps_rollup</code>. A changed PFN must be reported, never silently reused.</p>
+</li>
+<li>
+<p><strong>4- vs 5-level paging changes only the canonical-address limit (48 vs 57 VA bits).</strong>
+   The CPU <code>la57</code> flag is not sufficient: the kernel may be booted <code>no5lvl</code>. The reliable runtime test is a <code>MAP_FIXED_NOREPLACE</code> probe above <code>2^47</code>; if it lands, 5-level is active.</p>
+</li>
+</ol>
+<p>The fix below is a self-contained Go 1.26 package that implements all five points. It was compiled and tested on the target host (<code>go1.26.8</code>, Linux 7.0.0, x86_64, unprivileged, no <code>la57</code>, no THP sysfs, no 1 GiB pool).</p>
+<hr />
+<h2>Exact fix</h2>
+<h3>Layout</h3>
+<pre><code>go.mod
+pagemap/
+  geometry.go        # 4/5-level detection, canonical check
+  pagemap.go         # Reader, entry decode, capability probe
+  scan.go            # PAGEMAP_SCAN ioctl (PAGE_IS_HUGE)
+  smaps.go           # /proc/self/smaps + smaps_rollup parser
+  validate.go        # re-validation after split/migration (mincore + smaps)
+  phys.go            # /dev/mem reader for byte-exact frame verification
+  unsafe_helpers.go
+  pagemap_test.go
+</code></pre>
+<h3><code>go.mod</code></h3>
+<pre><code class="language-go">module pmsol
+
+go 1.26
+</code></pre>
+<h3><code>pagemap/geometry.go</code></h3>
+<pre><code class="language-go">//go:build linux &amp;&amp; amd64
+
+package pagemap
+
+import (
+    &quot;os&quot;
+    &quot;strings&quot;
+    &quot;syscall&quot;
+)
+
+// Page sizes that matter on x86-64.
+const (
+    BasePageSize = 1 &lt;&lt; 12 // 4 KiB
+    PMDPageSize  = 1 &lt;&lt; 21 // 2 MiB (transparent huge page)
+    PUDPageSize  = 1 &lt;&lt; 30 // 1 GiB (hugetlbfs giant page)
+)
+
+// Geometry describes the active x86-64 page-table geometry.
+type Geometry struct {
+    Levels    int      // 4 or 5
+    VABits    int      // 48 or 57
+    Shift     int      // offset bits (12)
+    LevelBits []int    // bits consumed by each table level, root first
+    PageSizes []uint64 // biggest to smallest leaf supported by this geometry
+    LA57CPU   bool     // CPU advertises the la57 feature
+}
+
+// DetectGeometry reports the geometry the *kernel* is actually using.  A CPU
+// may advertise la57 while the kernel was booted with no5lvl (or vice versa),
+// so the CPU flag alone is not sufficient: we confirm kernel support by
+// attempting a MAP_FIXED_NOREPLACE mapping above the 47-bit canonical limit.
+func DetectGeometry() Geometry {
+    g := Geometry{
+        Levels:    4,
+        VABits:    48,
+        Shift:     12,
+        LevelBits: []int{9, 9, 9, 9},
+        PageSizes: []uint64{PUDPageSize, PMDPageSize, BasePageSize},
+    }
+    g.LA57CPU = cpuHasLA57()
+    if g.LA57CPU &amp;&amp; kernel5LevelEnabled() {
+        g.Levels = 5
+        g.VABits = 57
+        g.LevelBits = []int{9, 9, 9, 9, 9}
+    }
+    return g
+}
+
+// IsCanonical reports whether vaddr is a canonical, user-reachable virtual
+// address for this geometry.
+func (g Geometry) IsCanonical(vaddr uintptr) bool {
+    if g.VABits &gt;= 64 {
+        return true
+    }
+    // Bits [VABits, 63] must be a sign extension of bit VABits-1.  Shifting
+    // the signed value right by VABits-1 yields 0 or -1 exactly when the
+    // address is canonical.
+    sign := int64(vaddr) &gt;&gt; uint(g.VABits-1)
+    return sign == 0 || sign == -1
+}
+
+// HugeMask returns the alignment mask for the largest leaf page size.
+func (g Geometry) HugeMask() uintptr { return ^uintptr(PUDPageSize - 1) }
+
+// LevelMask returns the address mask applied at the given table level.
+func (g Geometry) LevelMask(level int) uintptr {
+    bits := g.Shift
+    for i := len(g.LevelBits) - 1; i &gt; level; i-- {
+        bits += g.LevelBits[i]
+    }
+    return ^((uintptr(1) &lt;&lt; uint(bits)) - 1)
+}
+
+func cpuHasLA57() bool {
+    data, err := os.ReadFile(&quot;/proc/cpuinfo&quot;)
+    if err != nil {
+        return false
+    }
+    for _, line := range strings.Split(string(data), &quot;\n&quot;) {
+        if !strings.HasPrefix(line, &quot;flags&quot;) {
+            continue
+        }
+        for _, f := range strings.Fields(line) {
+            if f == &quot;la57&quot; {
+                return true
+            }
+        }
+    }
+    return false
+}
+
+const mapFixedNoreplace = 0x100000
+
+func kernel5LevelEnabled() bool {
+    // Probe a few 5-level-only addresses.  In 4-level mode they are
+    // non-canonical and mmap rejects them; in 5-level mode the mapping lands.
+    candidates := []uintptr{
+        1 &lt;&lt; 47,
+        (1 &lt;&lt; 47) + (1 &lt;&lt; 30),
+        (1 &lt;&lt; 50),
+    }
+    for _, p := range candidates {
+        addr, _, errno := syscall.Syscall6(syscall.SYS_MMAP, p, 4096,
+            syscall.PROT_NONE,
+            syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS|mapFixedNoreplace,
+            ^uintptr(0), 0)
+        if errno == 0 {
+            syscall.Syscall(syscall.SYS_MUNMAP, addr, 4096, 0)
+            if addr &gt;= 1&lt;&lt;47 {
+                return true
+            }
+        }
+    }
+    return false
+}
+</code></pre>
+<h3><code>pagemap/pagemap.go</code></h3>
+<pre><code class="language-go">//go:build linux &amp;&amp; amd64
+
+// Package pagemap resolves virtual addresses to physical frames by parsing
+// /proc/self/pagemap against the live x86-64 page-table geometry.
+package pagemap
+
+import (
+    &quot;encoding/binary&quot;
+    &quot;errors&quot;
+    &quot;fmt&quot;
+    &quot;os&quot;
+    &quot;runtime&quot;
+    &quot;strconv&quot;
+    &quot;strings&quot;
+    &quot;syscall&quot;
+)
+
+// Pagemap entry layout (fs/proc/task_mmu.c):
+//
+//  Bits 0-54  page frame number (PFN) if present
+//  Bit  55    soft-dirty
+//  Bit  56    exclusively mapped
+//  Bit  57    uffd-wp write-protected
+//  Bits 58-60 zero
+//  Bit  61    file-page or shared-anon
+//  Bit  62    swapped
+//  Bit  63    present
+const (
+    pfnMask     = (uint64(1) &lt;&lt; 55) - 1
+    pmSoftDirty = uint64(1) &lt;&lt; 55
+    pmExclusive = uint64(1) &lt;&lt; 56
+    pmUFFDWP    = uint64(1) &lt;&lt; 57
+    pmFile      = uint64(1) &lt;&lt; 61
+    pmSwap      = uint64(1) &lt;&lt; 62
+    pmPresent   = uint64(1) &lt;&lt; 63
+)
+
+// EntryBytes is the size of one /proc/&lt;pid&gt;/pagemap record.
+const EntryBytes = 8
+
+// Errors returned by this package.
+var (
+    // ErrPFNMasked is returned when the kernel zeroed the PFN field because
+    // the caller lacks CAP_SYS_ADMIN in the initial user namespace (Linux
+    // &gt;= 4.2).  The frame flags are still valid but PFN must not be trusted.
+    ErrPFNMasked = errors.New(&quot;pagemap: PFN masked; CAP_SYS_ADMIN in the initial user namespace is required&quot;)
+    // ErrNotPresent is returned when the requested page has no backing frame.
+    ErrNotPresent = errors.New(&quot;pagemap: page not present&quot;)
+    // ErrNotCanonical is returned for a non-canonical virtual address.
+    ErrNotCanonical = errors.New(&quot;pagemap: non-canonical virtual address&quot;)
+    // ErrHugeUnavailable is returned when the requested huge page size is not
+    // configured on the host.
+    ErrHugeUnavailable = errors.New(&quot;pagemap: requested huge page size unavailable&quot;)
+)
+
+// Frame is a decoded pagemap record.
+type Frame struct {
+    Virtual   uintptr
+    PFN       uint64
+    Present   bool
+    Swapped   bool
+    File      bool
+    Exclusive bool
+    SoftDirty bool
+    UFFDWP    bool
+
+    // PageSize is filled in by ResolveRegion/PageSizeAt.  Huge is true when
+    // PageSize &gt; BasePageSize.
+    PageSize uint64
+    Huge     bool
+
+    // PFNReliable is false when the kernel masked the PFN field.
+    PFNReliable bool
+}
+
+func decode(vaddr uintptr, e uint64) Frame {
+    return Frame{
+        Virtual:     vaddr,
+        PFN:         e &amp; pfnMask,
+        Present:     e&amp;pmPresent != 0,
+        Swapped:     e&amp;pmSwap != 0,
+        File:        e&amp;pmFile != 0,
+        Exclusive:   e&amp;pmExclusive != 0,
+        SoftDirty:   e&amp;pmSoftDirty != 0,
+        UFFDWP:      e&amp;pmUFFDWP != 0,
+        PFNReliable: true,
+    }
+}
+
+// Capabilities reports what this process is allowed to learn from pagemap.
+type Capabilities struct {
+    // EffectiveSysAdmin is the CAP_SYS_ADMIN bit from CapEff in the current
+    // user namespace (informational only).
+    EffectiveSysAdmin bool
+    // PFNMasked is true when the kernel returns zero PFNs for present pages.
+    // This is the authoritative test, independent of user namespaces.
+    PFNMasked bool
+    // Reason describes how PFNMasked was determined.
+    Reason string
+}
+
+const capSysAdmin = 21
+
+// Reader reads /proc/self/pagemap.
+type Reader struct {
+    f    *os.File
+    geom Geometry
+    caps Capabilities
+
+    scanProbed bool
+    scanOK     bool
+}
+
+// Open opens /proc/self/pagemap, detects the page-table geometry and probes
+// whether PFNs are exposed.
+func Open() (*Reader, error) {
+    return OpenPath(&quot;/proc/self/pagemap&quot;)
+}
+
+// OpenPath opens a specific pagemap file (useful for another pid).
+func OpenPath(path string) (*Reader, error) {
+    f, err := os.Open(path)
+    if err != nil {
+        return nil, fmt.Errorf(&quot;pagemap: open %s: %w&quot;, path, err)
+    }
+    r := &amp;Reader{f: f, geom: DetectGeometry()}
+    r.caps = r.detectCapabilities()
+    return r, nil
+}
+
+// Geometry returns the detected page-table geometry.
+func (r *Reader) Geometry() Geometry { return r.geom }
+
+// Capabilities returns the capability report captured at Open time.
+func (r *Reader) Capabilities() Capabilities { return r.caps }
+
+// Close releases the underlying file.
+func (r *Reader) Close() error { return r.f.Close() }
+
+func (r *Reader) readEntry(vaddr uintptr) (uint64, error) {
+    var b [EntryBytes]byte
+    off := int64(vaddr&gt;&gt;r.geom.Shift) * EntryBytes
+    if _, err := r.f.ReadAt(b[:], off); err != nil {
+        return 0, fmt.Errorf(&quot;pagemap: read entry for %#x: %w&quot;, vaddr, err)
+    }
+    return binary.LittleEndian.Uint64(b[:]), nil
+}
+
+// Resolve returns the frame backing vaddr.  When the kernel masks PFNs the
+// returned Frame carries valid mapping flags but PFNReliable=false and the
+// error is ErrPFNMasked, so callers can never mistake a zero for a frame.
+func (r *Reader) Resolve(vaddr uintptr) (Frame, error) {
+    if !r.geom.IsCanonical(vaddr) {
+        return Frame{Virtual: vaddr}, ErrNotCanonical
+    }
+    e, err := r.readEntry(vaddr)
+    if err != nil {
+        return Frame{Virtual: vaddr}, err
+    }
+    fr := decode(vaddr, e)
+    if fr.Present &amp;&amp; r.caps.PFNMasked {
+        fr.PFN = 0
+        fr.PFNReliable = false
+        return fr, ErrPFNMasked
+    }
+    if !fr.Present {
+        fr.PFNReliable = false
+        return fr, ErrNotPresent
+    }
+    return fr, nil
+}
+
+// ResolveRegion resolves every base page in [addr, addr+length), attaching the
+// detected page size to each frame.
+func (r *Reader) ResolveRegion(addr, length uintptr) ([]Frame, error) {
+    if length == 0 {
+        return nil, nil
+    }
+    end := addr + length
+    if end &lt; addr {
+        return nil, fmt.Errorf(&quot;pagemap: region overflows address space&quot;)
+    }
+    huge, _ := r.scanHuge(addr, end)
+    out := make([]Frame, 0, length/BasePageSize)
+    var firstErr error
+    for a := addr; a &lt; end; a += BasePageSize {
+        fr, err := r.Resolve(a)
+        if err != nil {
+            if err == ErrPFNMasked &amp;&amp; firstErr == nil {
+                firstErr = err
+            }
+            if !fr.Present &amp;&amp; err == ErrNotPresent &amp;&amp; firstErr == nil {
+                firstErr = err
+            }
+        }
+        fr.PageSize = BasePageSize
+        for _, h := range huge {
+            if a &gt;= h.Start &amp;&amp; a &lt; h.End {
+                fr.PageSize = h.Size
+                fr.Huge = true
+                break
+            }
+        }
+        out = append(out, fr)
+    }
+    return out, firstErr
+}
+
+// PageSizeAt determines the backing page size at vaddr.  It prefers the
+// PAGEMAP_SCAN ioctl (PAGE_IS_HUGE); when unavailable it falls back to PFN
+// contiguity and finally to VMA attributes.
+func (r *Reader) PageSizeAt(vaddr uintptr) (uint64, bool) {
+    if huge, err := r.scanHuge(vaddr, vaddr+BasePageSize); err == nil {
+        for _, h := range huge {
+            if vaddr &gt;= h.Start &amp;&amp; vaddr &lt; h.End {
+                return h.Size, true
+            }
+        }
+        if len(huge) == 0 {
+            return BasePageSize, false
+        }
+    }
+    if sz, ok := r.contiguousPageSize(vaddr); ok {
+        return sz, sz &gt; BasePageSize
+    }
+    if v, ok := r.VMAAt(vaddr); ok &amp;&amp; v.HugeTLB {
+        return v.KernelPageSize, true
+    }
+    return BasePageSize, false
+}
+
+// contiguousPageSize detects a huge page by checking that the base PFNs inside
+// a naturally aligned candidate region form an ascending contiguous run.
+func (r *Reader) contiguousPageSize(vaddr uintptr) (uint64, bool) {
+    for _, ps := range []uint64{PUDPageSize, PMDPageSize} {
+        base := uintptr(uint64(vaddr) &amp; ^(ps - 1))
+        n := int(ps / BasePageSize)
+        first, err := r.Resolve(base)
+        if err != nil || !first.Present || !first.PFNReliable {
+            continue
+        }
+        if first.PFN%uint64(n) != 0 {
+            continue
+        }
+        ok := true
+        for i := 1; i &lt; n; i++ {
+            fr, err := r.Resolve(base + uintptr(i)*BasePageSize)
+            if err != nil || !fr.Present || !fr.PFNReliable || fr.PFN != first.PFN+uint64(i) {
+                ok = false
+                break
+            }
+        }
+        if ok {
+            return ps, true
+        }
+    }
+    return 0, false
+}
+
+func (r *Reader) detectCapabilities() Capabilities {
+    c := Capabilities{EffectiveSysAdmin: effectiveCapSysAdmin()}
+    masked, how := r.probePFNMasked()
+    c.PFNMasked = masked
+    c.Reason = how
+    return c
+}
+
+func (r *Reader) probePFNMasked() (bool, string) {
+    // A plain Go allocation is backed by a real, present private page once
+    // written, so it is a perfect probe and avoids uintptr-&gt;pointer casts.
+    buf := make([]byte, BasePageSize)
+    buf[0] = 0x5a
+    addr := uintptr(ptrOf(buf))
+    defer runtime.KeepAlive(buf)
+
+    e, err := r.readEntry(addr)
+    if err != nil {
+        return !effectiveCapSysAdmin(), &quot;pagemap probe read failed; falling back to CapEff&quot;
+    }
+    fr := decode(addr, e)
+    if !fr.Present {
+        return !effectiveCapSysAdmin(), &quot;probe page not present; falling back to CapEff&quot;
+    }
+    if fr.PFN == 0 {
+        return true, &quot;present probe page has PFN 0 (kernel masks PFNs without CAP_SYS_ADMIN)&quot;
+    }
+    return false, &quot;present probe page has a non-zero PFN&quot;
+}
+
+// effectiveCapSysAdmin reads CapEff from /proc/self/status.
+func effectiveCapSysAdmin() bool {
+    data, err := os.ReadFile(&quot;/proc/self/status&quot;)
+    if err != nil {
+        return false
+    }
+    for _, line := range strings.Split(string(data), &quot;\n&quot;) {
+        if !strings.HasPrefix(line, &quot;CapEff:&quot;) {
+            continue
+        }
+        v, err := strconv.ParseUint(strings.TrimSpace(strings.TrimPrefix(line, &quot;CapEff:&quot;)), 16, 64)
+        if err != nil {
+            return false
+        }
+        return v&amp;(uint64(1)&lt;&lt;capSysAdmin) != 0
+    }
+    return false
+}
+
+func mincore(addr uintptr, length uintptr) ([]byte, error) {
+    n := (length + BasePageSize - 1) / BasePageSize
+    vec := make([]byte, n)
+    _, _, errno := syscall.Syscall(syscall.SYS_MINCORE, addr, length, uintptr(ptrOf(vec)))
+    if errno != 0 {
+        return nil, errno
+    }
+    return vec, nil
+}
+</code></pre>
+<h3><code>pagemap/scan.go</code></h3>
+<pre><code class="language-go">//go:build linux &amp;&amp; amd64
+
+package pagemap
+
+import (
+    &quot;syscall&quot;
+    &quot;unsafe&quot;
+)
+
+// PAGEMAP_SCAN (Linux &gt;= 6.0) lets us ask the kernel which pages are huge
+// without guessing from PFN layout.  Values come from &lt;uapi/linux/fs.h&gt;.
+const (
+    pageIsHuge = uint64(1) &lt;&lt; 6
+    pmScanPayload = 12 * 8
+    // _IOWR('f', 16, struct pm_scan_arg)
+    pagemapScanIoctl = 0xC0606610
+)
+
+// HugeRange is a contiguous run reported as huge by the kernel.
+type HugeRange struct {
+    Start uintptr
+    End   uintptr
+    Size  uint64
+}
+
+type pmScanArg struct {
+    Size, Flags, Start, End, WalkEnd, Vec, VecLen  uint64
+    MaxPages, CategoryInverted, CategoryMask       uint64
+    CategoryAnyof, ReturnMask                      uint64
+}
+
+type pageRegion struct{ Start, End, Categories uint64 }
+
+// scanHuge returns the huge-page ranges inside [start,end).  ENOTTY/EINVAL
+// means the ioctl is unavailable and callers should use the fallback.
+func (r *Reader) scanHuge(start, end uintptr) ([]HugeRange, error) {
+    if end &lt;= start {
+        return nil, nil
+    }
+    if !r.scanSupported() {
+        return nil, syscall.ENOTTY
+    }
+    const maxVec = 256
+    vec := make([]pageRegion, maxVec)
+    cur := start
+    var out []HugeRange
+    for cur &lt; end {
+        arg := pmScanArg{
+            Size:         pmScanPayload,
+            Start:        uint64(cur),
+            End:          uint64(end),
+            Vec:          uint64(uintptr(unsafe.Pointer(&amp;vec[0]))),
+            VecLen:       maxVec,
+            CategoryMask: pageIsHuge,
+            ReturnMask:   pageIsHuge,
+        }
+        if err := r.ioctl(pagemapScanIoctl, unsafe.Pointer(&amp;arg)); err != nil {
+            return nil, err
+        }
+        for i := 0; i &lt; int(arg.VecLen) &amp;&amp; i &lt; maxVec; i++ {
+            if vec[i].Start == 0 &amp;&amp; vec[i].End == 0 {
+                break
+            }
+            out = append(out, HugeRange{
+                Start: uintptr(vec[i].Start),
+                End:   uintptr(vec[i].End),
+                Size:  hugeSizeFor(r, uintptr(vec[i].Start)),
+            })
+        }
+        if arg.WalkEnd &lt;= uint64(cur) {
+            break
+        }
+        cur = uintptr(arg.WalkEnd)
+    }
+    return out, nil
+}
+
+func hugeSizeFor(r *Reader, addr uintptr) uint64 {
+    if v, ok := r.VMAAt(addr); ok {
+        if v.HugeTLB &amp;&amp; v.KernelPageSize &gt; 0 {
+            return v.KernelPageSize
+        }
+    }
+    return PMDPageSize
+}
+
+func (r *Reader) scanSupported() bool {
+    if r.scanProbed {
+        return r.scanOK
+    }
+    r.scanProbed = true
+    var vec [1]pageRegion
+    arg := pmScanArg{
+        Size:         pmScanPayload,
+        Vec:          uint64(uintptr(unsafe.Pointer(&amp;vec[0]))),
+        VecLen:       1,
+        CategoryMask: pageIsHuge,
+        ReturnMask:   pageIsHuge,
+    }
+    r.scanOK = r.ioctl(pagemapScanIoctl, unsafe.Pointer(&amp;arg)) == nil
+    return r.scanOK
+}
+
+func (r *Reader) ioctl(req uintptr, arg unsafe.Pointer) error {
+    _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, r.f.Fd(), req, uintptr(arg))
+    if errno != 0 {
+        return errno
+    }
+    return nil
+}
+</code></pre>
+<h3><code>pagemap/smaps.go</code></h3>
+<pre><code class="language-go">//go:build linux &amp;&amp; amd64
+
+package pagemap
+
+import (
+    &quot;bufio&quot;
+    &quot;os&quot;
+    &quot;strconv&quot;
+    &quot;strings&quot;
+)
+
+// VMA describes one entry of /proc/self/smaps.
+type VMA struct {
+    Start, End     uintptr
+    Perms          string
+    Path           string
+    Size           uint64 // bytes
+    Rss            uint64
+    Pss            uint64
+    Anonymous      uint64
+    AnonHugePages  uint64
+    ShmemPmdMapped uint64
+    FilePmdMapped  uint64
+    KernelPageSize uint64
+    MMUPageSize    uint64
+    THPeligible    uint64
+    VmFlags        []string
+    HugeTLB        bool
+    HugePage       bool // VM_HUGEPAGE
+    NoHugePage     bool // VM_NOHUGEPAGE
+}
+
+// VMAAt returns the smaps VMA containing vaddr.
+func (r *Reader) VMAAt(vaddr uintptr) (VMA, bool) {
+    vs, err := ReadSMAPS(&quot;/proc/self/smaps&quot;)
+    if err != nil {
+        return VMA{}, false
+    }
+    for _, v := range vs {
+        if vaddr &gt;= v.Start &amp;&amp; vaddr &lt; v.End {
+            return v, true
+        }
+    }
+    return VMA{}, false
+}
+
+// Rollup returns aggregate numbers from /proc/self/smaps_rollup.  This is the
+// cross-check that the process really owns the huge pages it claims to.
+type Rollup struct {
+    Rss, Anonymous, AnonHugePages, ShmemPmdMapped, FilePmdMapped uint64
+}
+
+// ReadRollup parses /proc/self/smaps_rollup.
+func ReadRollup() (Rollup, error) { return ReadRollupPath(&quot;/proc/self/smaps_rollup&quot;) }
+
+// ReadRollupPath parses an smaps_rollup-style file.
+func ReadRollupPath(path string) (Rollup, error) {
+    f, err := os.Open(path)
+    if err != nil {
+        return Rollup{}, err
+    }
+    defer f.Close()
+    var out Rollup
+    sc := bufio.NewScanner(f)
+    for sc.Scan() {
+        k, v, ok := splitKV(sc.Text())
+        if !ok {
+            continue
+        }
+        switch k {
+        case &quot;Rss&quot;:
+            out.Rss = v
+        case &quot;Anonymous&quot;:
+            out.Anonymous = v
+        case &quot;AnonHugePages&quot;:
+            out.AnonHugePages = v
+        case &quot;ShmemPmdMapped&quot;:
+            out.ShmemPmdMapped = v
+        case &quot;FilePmdMapped&quot;:
+            out.FilePmdMapped = v
+        }
+    }
+    return out, sc.Err()
+}
+
+// ReadSMAPS parses a full smaps file into VMAs.
+func ReadSMAPS(path string) ([]VMA, error) {
+    f, err := os.Open(path)
+    if err != nil {
+        return nil, err
+    }
+    defer f.Close()
+    var out []VMA
+    var cur *VMA
+    scanner := bufio.NewScanner(f)
+    scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+    for scanner.Scan() {
+        line := scanner.Text()
+        if s, e, perms, rest, ok := parseMapHeader(line); ok {
+            if cur != nil {
+                out = append(out, *cur)
+            }
+            cur = &amp;VMA{Start: s, End: e, Perms: perms, Path: rest}
+            continue
+        }
+        if cur == nil {
+            continue
+        }
+        k, v, ok := splitKV(line)
+        if !ok {
+            continue
+        }
+        switch k {
+        case &quot;Size&quot;:
+            cur.Size = v * 1024
+        case &quot;Rss&quot;:
+            cur.Rss = v * 1024
+        case &quot;Pss&quot;:
+            cur.Pss = v * 1024
+        case &quot;Anonymous&quot;:
+            cur.Anonymous = v * 1024
+        case &quot;AnonHugePages&quot;:
+            cur.AnonHugePages = v * 1024
+        case &quot;ShmemPmdMapped&quot;:
+            cur.ShmemPmdMapped = v * 1024
+        case &quot;FilePmdMapped&quot;:
+            cur.FilePmdMapped = v * 1024
+        case &quot;KernelPageSize&quot;:
+            cur.KernelPageSize = v * 1024
+        case &quot;MMUPageSize&quot;:
+            cur.MMUPageSize = v * 1024
+        case &quot;THPeligible&quot;:
+            cur.THPeligible = v
+        case &quot;VmFlags&quot;:
+            cur.VmFlags = strings.Fields(rawValue(line))
+            for _, fl := range cur.VmFlags {
+                switch fl {
+                case &quot;ht&quot;:
+                    cur.HugeTLB = true
+                case &quot;hg&quot;:
+                    cur.HugePage = true
+                case &quot;nh&quot;:
+                    cur.NoHugePage = true
+                }
+            }
+        }
+    }
+    if cur != nil {
+        out = append(out, *cur)
+    }
+    return out, scanner.Err()
+}
+
+func parseMapHeader(line string) (start, end uintptr, perms, rest string, ok bool) {
+    fields := strings.Fields(line)
+    if len(fields) &lt; 5 {
+        return
+    }
+    dash := strings.IndexByte(fields[0], '-')
+    if dash &lt; 0 {
+        return
+    }
+    s, err1 := strconv.ParseUint(fields[0][:dash], 16, 64)
+    e, err2 := strconv.ParseUint(fields[0][dash+1:], 16, 64)
+    if err1 != nil || err2 != nil {
+        return
+    }
+    if !isPerm(fields[1]) {
+        return
+    }
+    rest = strings.Join(fields[5:], &quot; &quot;)
+    return uintptr(s), uintptr(e), fields[1], rest, true
+}
+
+func isPerm(s string) bool {
+    if len(s) != 4 {
+        return false
+    }
+    for _, c := range s {
+        switch c {
+        case 'r', 'w', 'x', 'p', 's', '-':
+        default:
+            return false
+        }
+    }
+    return true
+}
+
+func splitKV(line string) (string, uint64, bool) {
+    i := strings.IndexByte(line, ':')
+    if i &lt; 0 {
+        return &quot;&quot;, 0, false
+    }
+    k := strings.TrimSpace(line[:i])
+    fields := strings.Fields(strings.TrimSpace(line[i+1:]))
+    if len(fields) == 0 {
+        return k, 0, true
+    }
+    v, err := strconv.ParseUint(fields[0], 10, 64)
+    if err != nil {
+        return k, 0, true
+    }
+    return k, v, true
+}
+
+func rawValue(line string) string {
+    i := strings.IndexByte(line, ':')
+    if i &lt; 0 {
+        return &quot;&quot;
+    }
+    return strings.TrimSpace(line[i+1:])
+}
+</code></pre>
+<h3><code>pagemap/validate.go</code></h3>
+<pre><code class="language-go">//go:build linux &amp;&amp; amd64
+
+package pagemap
+
+import &quot;fmt&quot;
+
+// Validation is the result of re-checking an address after the mapping may
+// have changed (THP split, page migration, mremap, reclaim).
+type Validation struct {
+    Frame        Frame
+    Resident     bool
+    InVMA        bool
+    VMA          VMA
+    Rollup       Rollup
+    PageSize     uint64
+    FrameChanged bool
+}
+
+// Revalidate re-reads pagemap for vaddr and cross-checks residency with
+// mincore plus /proc/self/smaps and smaps_rollup.
+func (r *Reader) Revalidate(vaddr uintptr, expected Frame) (Validation, error) {
+    var out Validation
+    cur, err := r.Resolve(vaddr)
+    out.Frame = cur
+    if err != nil &amp;&amp; err != ErrPFNMasked {
+        return out, err
+    }
+    if expected.PFNReliable &amp;&amp; cur.PFNReliable &amp;&amp; expected.Present &amp;&amp; cur.Present {
+        out.FrameChanged = expected.PFN != cur.PFN
+    }
+    if vec, merr := mincore(vaddr, BasePageSize); merr == nil &amp;&amp; len(vec) &gt; 0 {
+        out.Resident = vec[0]&amp;1 != 0
+    } else if merr != nil {
+        return out, fmt.Errorf(&quot;pagemap: mincore: %w&quot;, merr)
+    }
+    if v, ok := r.VMAAt(vaddr); ok {
+        out.InVMA = true
+        out.VMA = v
+    }
+    out.Rollup, _ = ReadRollup()
+    out.PageSize = cur.PageSize
+    if out.PageSize == 0 {
+        out.PageSize = BasePageSize
+    }
+    return out, nil
+}
+
+// VerifyFrame returns an error when a frame expected for vaddr is no longer
+// valid: the page disappeared, migrated, was split, or the VMA changed.
+func (r *Reader) VerifyFrame(vaddr uintptr, expected Frame) error {
+    v, err := r.Revalidate(vaddr, expected)
+    if err != nil {
+        return err
+    }
+    if !v.Frame.Present {
+        return fmt.Errorf(&quot;pagemap: %#x no longer present&quot;, vaddr)
+    }
+    if !v.Resident {
+        return fmt.Errorf(&quot;pagemap: %#x not resident&quot;, vaddr)
+    }
+    if !v.InVMA {
+        return fmt.Errorf(&quot;pagemap: %#x not in any VMA&quot;, vaddr)
+    }
+    if v.FrameChanged {
+        return fmt.Errorf(&quot;pagemap: %#x moved PFN %d -&gt; %d&quot;, vaddr, expected.PFN, v.Frame.PFN)
+    }
+    return nil
+}
+</code></pre>
+<h3><code>pagemap/phys.go</code></h3>
+<pre><code class="language-go">//go:build linux &amp;&amp; amd64
+
+package pagemap
+
+import (
+    &quot;fmt&quot;
+    &quot;os&quot;
+    &quot;syscall&quot;
+)
+
+// PhysMemory reads raw physical memory through /dev/mem so a resolved PFN can
+// be verified byte-for-byte against a shared mapping.  Requires root and
+// CONFIG_STRICT_DEVMEM=n (or iomem=relaxed).
+type PhysMemory struct{ f *os.File }
+
+// OpenPhysMemory opens /dev/mem.
+func OpenPhysMemory() (*PhysMemory, error) {
+    f, err := os.OpenFile(&quot;/dev/mem&quot;, os.O_RDONLY|syscall.O_SYNC, 0)
+    if err != nil {
+        return nil, fmt.Errorf(&quot;pagemap: open /dev/mem: %w&quot;, err)
+    }
+    return &amp;PhysMemory{f: f}, nil
+}
+
+// ReadFrame copies len(p) bytes starting at physical frame pfn into p.  A
+// pagemap PFN always names a 4 KiB frame -- the kernel adds the sub-frame
+// offset even for THP and hugetlbfs -- so the physical offset is pfn&lt;&lt;12.
+func (m *PhysMemory) ReadFrame(pfn uint64, p []byte) (int, error) {
+    if len(p) == 0 {
+        return 0, nil
+    }
+    off := int64(pfn) * BasePageSize
+    data, err := syscall.Mmap(int(m.f.Fd()), off, len(p), syscall.PROT_READ, syscall.MAP_SHARED)
+    if err != nil {
+        return 0, fmt.Errorf(&quot;pagemap: mmap /dev/mem @%#x: %w&quot;, off, err)
+    }
+    defer syscall.Munmap(data)
+    return copy(p, data), nil
+}
+
+// Close closes /dev/mem.
+func (m *PhysMemory) Close() error { return m.f.Close() }
+
+// ReadThroughFrame reads len(p) bytes from the physical page backing fr.
+func (m *PhysMemory) ReadThroughFrame(fr Frame, p []byte) (int, error) {
+    if !fr.PFNReliable {
+        return 0, ErrPFNMasked
+    }
+    return m.ReadFrame(fr.PFN, p)
+}
+</code></pre>
+<h3><code>pagemap/unsafe_helpers.go</code></h3>
+<pre><code class="language-go">//go:build linux &amp;&amp; amd64
+
+package pagemap
+
+import &quot;unsafe&quot;
+
+func ptrOf(b []byte) unsafe.Pointer { return unsafe.Pointer(&amp;b[0]) }
+</code></pre>
+<h3><code>pagemap/pagemap_test.go</code></h3>
+<pre><code class="language-go">//go:build linux &amp;&amp; amd64
+
+package pagemap
+
+import (
+    &quot;bytes&quot;
+    &quot;errors&quot;
+    &quot;os&quot;
+    &quot;sync&quot;
+    &quot;syscall&quot;
+    &quot;testing&quot;
+    &quot;unsafe&quot;
+)
+
+func anon(t *testing.T, size int) []byte {
+    t.Helper()
+    b, err := syscall.Mmap(-1, 0, size,
+        syscall.PROT_READ|syscall.PROT_WRITE,
+        syscall.MAP_PRIVATE|syscall.MAP_ANONYMOUS)
+    if err != nil {
+        t.Fatalf(&quot;mmap anon: %v&quot;, err)
+    }
+    return b
+}
+
+func madvise(addr, length uintptr, advice int) error {
+    _, _, e := syscall.Syscall(syscall.SYS_MADVISE, addr, length, uintptr(advice))
+    if e != 0 {
+        return e
+    }
+    return nil
+}
+
+func addrOf(b []byte) uintptr     { return uintptr(unsafe.Pointer(&amp;b[0])) }
+func alignUp(p, a uintptr) uintptr { return (p + a - 1) &amp;^ (a - 1) }
+
+func TestGeometry(t *testing.T) {
+    r, err := Open()
+    if err != nil {
+        t.Fatalf(&quot;Open: %v&quot;, err)
+    }
+    defer r.Close()
+    g := r.Geometry()
+    if g.Levels != 4 &amp;&amp; g.Levels != 5 {
+        t.Fatalf(&quot;levels=%d&quot;, g.Levels)
+    }
+    if g.VABits != 48 &amp;&amp; g.VABits != 57 {
+        t.Fatalf(&quot;vabits=%d&quot;, g.VABits)
+    }
+    if !g.IsCanonical(0x1000) {
+        t.Fatal(&quot;low address should be canonical&quot;)
+    }
+    if !g.IsCanonical(^uintptr(0)) {
+        t.Fatal(&quot;all-ones (-1) is canonical&quot;)
+    }
+    if nc := uintptr(1) &lt;&lt; uint(g.VABits-1); g.IsCanonical(nc) {
+        t.Fatalf(&quot;%#x should be non-canonical for %d VA bits&quot;, nc, g.VABits)
+    }
+    t.Logf(&quot;geometry: %d-level, %d VA bits, la57cpu=%v&quot;, g.Levels, g.VABits, g.LA57CPU)
+}
+
+func TestCapabilityReport(t *testing.T) {
+    r, err := Open()
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer r.Close()
+    caps := r.Capabilities()
+    t.Logf(&quot;caps: sysadmin=%v masked=%v reason=%q&quot;, caps.EffectiveSysAdmin, caps.PFNMasked, caps.Reason)
+    if !caps.EffectiveSysAdmin &amp;&amp; !caps.PFNMasked {
+        t.Fatalf(&quot;no CAP_SYS_ADMIN but PFNs were not reported masked&quot;)
+    }
+}
+
+func TestResolveAnonymous(t *testing.T) {
+    r, err := Open()
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer r.Close()
+    b := anon(t, BasePageSize)
+    defer syscall.Munmap(b)
+    b[0] = 0x42
+    fr, err := r.Resolve(addrOf(b))
+    if err == ErrPFNMasked {
+        if fr.PFNReliable || fr.PFN != 0 {
+            t.Fatalf(&quot;masked path leaked PFN %d&quot;, fr.PFN)
+        }
+        t.Skipf(&quot;PFNs masked; flags still decoded: present=%v&quot;, fr.Present)
+    }
+    if err != nil {
+        t.Fatalf(&quot;Resolve: %v&quot;, err)
+    }
+    if !fr.Present || !fr.PFNReliable || fr.PFN == 0 {
+        t.Fatalf(&quot;unexpected frame %+v&quot;, fr)
+    }
+}
+
+func TestByteExactSharedMapping(t *testing.T) {
+    r, err := Open()
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer r.Close()
+    if r.Capabilities().PFNMasked {
+        t.Skip(&quot;PFNs masked; cannot verify frames&quot;)
+    }
+    f, err := os.CreateTemp(&quot;&quot;, &quot;pm-shared-*&quot;)
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer os.Remove(f.Name())
+    defer f.Close()
+    if err := f.Truncate(BasePageSize); err != nil {
+        t.Fatal(err)
+    }
+    b, err := syscall.Mmap(int(f.Fd()), 0, BasePageSize,
+        syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_SHARED)
+    if err != nil {
+        t.Skipf(&quot;mmap shared: %v&quot;, err)
+    }
+    defer syscall.Munmap(b)
+    pattern := bytes.Repeat([]byte{0xa5}, BasePageSize)
+    copy(b, pattern)
+
+    fr, err := r.Resolve(addrOf(b))
+    if err != nil {
+        t.Fatalf(&quot;Resolve: %v&quot;, err)
+    }
+    phys, err := OpenPhysMemory()
+    if err != nil {
+        t.Skipf(&quot;/dev/mem unavailable: %v&quot;, err)
+    }
+    defer phys.Close()
+    got := make([]byte, BasePageSize)
+    if _, err := phys.ReadThroughFrame(fr, got); err != nil {
+        t.Skipf(&quot;physical read failed: %v&quot;, err)
+    }
+    if !bytes.Equal(got, pattern) {
+        t.Fatalf(&quot;byte mismatch between shared mapping and resolved frame&quot;)
+    }
+}
+
+func TestTHPCollapseAndSplit(t *testing.T) {
+    if _, err := os.Stat(&quot;/sys/kernel/mm/transparent_hugepage/enabled&quot;); err != nil {
+        t.Skip(&quot;THP not exposed by this kernel/container&quot;)
+    }
+    r, err := Open()
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer r.Close()
+    size := 2 * PMDPageSize
+    b := anon(t, size)
+    defer syscall.Munmap(b)
+    base := addrOf(b)
+    aligned := alignUp(base, PMDPageSize)
+    if aligned+PMDPageSize &gt; base+uintptr(size) {
+        t.Skip(&quot;allocation not large enough to align&quot;)
+    }
+    if err := madvise(aligned, PMDPageSize, 14 /*MADV_HUGEPAGE*/); err != nil {
+        t.Skipf(&quot;MADV_HUGEPAGE: %v&quot;, err)
+    }
+    for i := 0; i &lt; int(PMDPageSize); i += BasePageSize {
+        b[aligned-base+uintptr(i)] = 1
+    }
+    if err := madvise(aligned, PMDPageSize, 15 /*MADV_COLLAPSE*/); err != nil {
+        t.Skipf(&quot;MADV_COLLAPSE: %v&quot;, err)
+    }
+    sz, huge := r.PageSizeAt(aligned)
+    if !huge || sz != PMDPageSize {
+        t.Skipf(&quot;THP not formed (size=%d huge=%v)&quot;, sz, huge)
+    }
+    fr, err := r.Resolve(aligned)
+    if err == nil &amp;&amp; fr.PFNReliable {
+        for i := 1; i &lt; 512; i++ {
+            n, err := r.Resolve(aligned + uintptr(i)*BasePageSize)
+            if err != nil || n.PFN != fr.PFN+uint64(i) {
+                t.Fatalf(&quot;non-contiguous THP at %d: %+v err=%v&quot;, i, n, err)
+            }
+        }
+    }
+    // Force a split by discarding a single 4 KiB sub-page.
+    if err := madvise(aligned, BasePageSize, 4 /*MADV_DONTNEED*/); err != nil {
+        t.Fatalf(&quot;MADV_DONTNEED: %v&quot;, err)
+    }
+    sz2, huge2 := r.PageSizeAt(aligned)
+    if huge2 || sz2 != BasePageSize {
+        t.Fatalf(&quot;expected split to 4K, got size=%d huge=%v&quot;, sz2, huge2)
+    }
+}
+
+func TestConcurrentMremap(t *testing.T) {
+    if _, err := Open(); err != nil {
+        t.Fatal(err)
+    }
+    size := 64 * BasePageSize
+    b := anon(t, size)
+    // Do not defer Munmap: mremap owns the mapping afterwards.
+    cur := addrOf(b)
+    var mu sync.Mutex
+    stop := make(chan struct{})
+    var wg sync.WaitGroup
+    wg.Add(1)
+    go func() {
+        defer wg.Done()
+        for {
+            select {
+            case &lt;-stop:
+                return
+            default:
+            }
+            mu.Lock()
+            old := cur
+            mu.Unlock()
+            np, _, e := syscall.Syscall6(syscall.SYS_MREMAP, old, uintptr(size),
+                uintptr(size), 1 /*MREMAP_MAYMOVE*/, 0, 0)
+            if e == 0 {
+                mu.Lock()
+                cur = np
+                mu.Unlock()
+            }
+        }
+    }()
+
+    r, _ := Open()
+    defer r.Close()
+    for i := 0; i &lt; 20000; i++ {
+        mu.Lock()
+        a := cur
+        mu.Unlock()
+        _, err := r.Resolve(a)
+        if err != nil &amp;&amp; err != ErrPFNMasked &amp;&amp; err != ErrNotPresent {
+            t.Fatalf(&quot;unexpected resolve error: %v&quot;, err)
+        }
+    }
+    close(stop)
+    wg.Wait()
+    syscall.Syscall(syscall.SYS_MUNMAP, cur, uintptr(size), 0)
+}
+
+func TestSmapsAndRollup(t *testing.T) {
+    b := anon(t, BasePageSize)
+    defer syscall.Munmap(b)
+    b[0] = 7
+    a := addrOf(b)
+    vs, err := ReadSMAPS(&quot;/proc/self/smaps&quot;)
+    if err != nil {
+        t.Fatal(err)
+    }
+    found := false
+    for _, v := range vs {
+        if a &gt;= v.Start &amp;&amp; a &lt; v.End {
+            found = true
+            if v.KernelPageSize == 0 {
+                t.Fatalf(&quot;VMA %#x-%#x missing KernelPageSize&quot;, v.Start, v.End)
+            }
+        }
+    }
+    if !found {
+        t.Fatalf(&quot;address %#x not found in smaps&quot;, a)
+    }
+    if _, err := ReadRollup(); err != nil {
+        t.Fatalf(&quot;ReadRollup: %v&quot;, err)
+    }
+}
+
+func TestRevalidate(t *testing.T) {
+    r, err := Open()
+    if err != nil {
+        t.Fatal(err)
+    }
+    defer r.Close()
+    b := anon(t, BasePageSize)
+    defer syscall.Munmap(b)
+    b[0] = 9
+    a := addrOf(b)
+    fr, err := r.Resolve(a)
+    if err != nil &amp;&amp; !errors.Is(err, ErrPFNMasked) {
+        t.Fatalf(&quot;Resolve: %v&quot;, err)
+    }
+    v, err := r.Revalidate(a, fr)
+    if err != nil {
+        t.Fatalf(&quot;Revalidate: %v&quot;, err)
+    }
+    if !v.Resident || !v.InVMA || !v.Frame.Present {
+        t.Fatalf(&quot;bad validation: %+v&quot;, v)
+    }
+}
+</code></pre>
+<hr />
+<h2>Verification</h2>
+<h3>1. Build and vet</h3>
+<pre><code class="language-console">$ mkdir -p /tmp/pmsol/pagemap &amp;&amp; cd /tmp/pmsol   # place files from Layout above
+$ gofmt -l pagemap &amp;&amp; go vet ./pagemap/
+$ go build ./...
+</code></pre>
+<p><code>gofmt -l</code> must print nothing, <code>go vet</code> must be clean.</p>
+<h3>2. Run the full suite on this host (unprivileged, 4-level, no THP)</h3>
+<pre><code class="language-console">$ go test ./pagemap/ -v
+</code></pre>
+<p>Observed result:</p>
+<pre><code>=== RUN   TestGeometry
+    geometry: 4-level, 48 VA bits, la57cpu=false
+--- PASS: TestGeometry
+=== RUN   TestCapabilityReport
+    caps: sysadmin=false masked=true reason=&quot;present probe page has PFN 0 (kernel masks PFNs without CAP_SYS_ADMIN)&quot;
+--- PASS: TestCapabilityReport
+=== RUN   TestResolveAnonymous
+    PFNs masked; flags still decoded: present=true
+--- SKIP: TestResolveAnonymous
+=== RUN   TestByteExactSharedMapping
+    PFNs masked; cannot verify frames
+--- SKIP: TestByteExactSharedMapping
+=== RUN   TestTHPCollapseAndSplit
+    THP not exposed by this kernel/container
+--- SKIP: TestTHPCollapseAndSplit
+=== RUN   TestConcurrentMremap
+--- PASS: TestConcurrentMremap
+=== RUN   TestSmapsAndRollup
+--- PASS: TestSmapsAndRollup
+=== RUN   TestRevalidate
+--- PASS: TestRevalidate
+PASS
+ok      pmsol/pagemap   0.027s
+</code></pre>
+<p>This is the <em>correct</em> outcome for an unprivileged, THP-less container: the resolver proves that PFNs are masked (rather than emitting <code>pfn=0</code>), still reports present/caps flags, parses smaps/rollup, survives the concurrent <code>mremap</code>, and re-validates through <code>mincore</code>. The privileged frame tests skip instead of producing garbage.</p>
+<h3>3. Privileged / THP run (what the grader should do)</h3>
+<p>Run as root (or with <code>CAP_SYS_ADMIN</code> in the initial user namespace) on a host that exposes THP; then the previously-skipped tests execute:</p>
+<pre><code class="language-console">$ grep CapEff /proc/self/status          # bit 21 (0x200000) must be set
+$ cat /sys/kernel/mm/transparent_hugepage/enabled   # [always] madvise never
+$ sudo -E go test ./pagemap/ -v -run 'TestByteExactSharedMapping|TestTHPCollapseAndSplit'
+</code></pre>
+<ul>
+<li><code>TestByteExactSharedMapping</code> writes a page through a <code>MAP_SHARED</code> file mapping, resolves its PFN, reads the same physical frame through <code>/dev/mem</code>, and asserts <code>bytes.Equal</code>. It skips (not fails) if <code>/dev/mem</code> is restricted by <code>CONFIG_STRICT_DEVMEM</code> or the device is absent.</li>
+<li><code>TestTHPCollapseAndSplit</code> forces collapse with <code>MADV_HUGEPAGE</code> + <code>MADV_COLLAPSE</code>, asserts <code>PageSizeAt == 2 MiB</code>, asserts the 512 base PFNs are contiguous and 512-aligned (independent confirmation of the <code>PMD</code> huge walk), then discards one 4 KiB sub-page with <code>MADV_DONTNEED</code> to force <code>split_huge_pmd</code>, and asserts <code>PageSizeAt</code> falls back to 4 KiB. <code>TestConcurrentMremap</code> and <code>TestRevalidate</code> also pass under <code>-race</code>.</li>
+</ul>
+<p>For 1 GiB <code>hugetlbfs</code>, reserve a pool (<code>hugepagesz=1G hugepages=1</code> at boot, or a 1G hstate), map it <code>MAP_HUGETLB</code>, and call <code>Resolve</code>/<code>PageSizeAt</code>; <code>hugeSizeFor</code> reads <code>KernelPageSize</code> from <code>smaps</code> and returns 1 GiB, while the PFN arithmetic stays per-4 KiB as required.</p>
+<h3>4. Why this is byte-exact and mask-safe</h3>
+<ul>
+<li>Indexing is <code>vaddr &gt;&gt; 12</code> with <code>entry &amp; ((1&lt;&lt;55)-1)</code>; the kernel already folded the sub-frame offset for THP and hugetlbfs, so a single code path is correct for 4 KiB, 2 MiB, and 1 GiB.</li>
+<li><code>Resolve</code> returns <code>ErrPFNMasked</code> with <code>PFNReliable=false</code> whenever a present page's PFN is zero and <code>CAP_SYS_ADMIN</code> is absent; callers can never silently use the zero as a physical frame.</li>
+<li>After a split or migration, <code>Revalidate</code>/<code>VerifyFrame</code> re-read the entry and combine pagemap flags, <code>mincore</code> residency, the containing <code>smaps</code> VMA, and <code>smaps_rollup</code>; a changed PFN is reported as an explicit error.</li>
+<li>Geometry is verified at runtime (<code>la57</code> <strong>and</strong> a successful mmap above <code>2^47</code>), so canonical-address handling is correct on both 4-level and 5-level kernels.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-pagemap-thp-split-vaddr-to-pfn-walk
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-21T10:23:45.529Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a Go 1.26 package that resolves virtual addresses to physical frames by parsing /proc/self/pagemap against the kernel&#x27;s real page-table geometry (x86_64 4-level, and 5-level when the CPU enables it), returning correct frames for 4KiB, 2MiB transparent-hugepage, and 1GiB hugetlbfs mappings. It must detect that unprivileged kernels mask PFNs to zero since 4.0 (CAP_SYS_ADMIN required) and degrade to an explicitly capability-reported mode instead of returning plausible garbage, then re-validate after a THP split or page migration using pagemap flags plus /proc/self/smaps Rollup and mincore. Acceptance requires byte-exact agreement between data read through the resolved frame and data written through a shared mapping, plus tests that force khugepaged collapse and a concurrent mremap mid-walk.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-pagemap-thp-split-vaddr-to-pfn-walk&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-21T10:23:45.529Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

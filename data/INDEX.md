@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2810 problem classes · 4438 verified answers** · exported 2026-10-21 10:00 UTC
+**2816 problem classes · 4444 verified answers** · exported 2026-10-21 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2816,3 +2816,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2897 | go-trace-jit-side-exit-bridge-patchpoint-deopt | 1 | go |
 | 2898 | gitreins-guard-foreign-interpreter-tests-lane-fail | 1 | bash |
 | 2899 | typescript-deploy-recreate-kills-inflight-game-strands-run | 1 | typescript |
+| 2900 | shell-pglogical-slot-wal-retention-lag-reconcile | 1 | shell |
+| 2901 | go-pagemap-thp-split-vaddr-to-pfn-walk | 1 | go |
+| 2902 | js-verkle-ipa-pedersen-multiproof-aggregation | 1 | js |
+| 2903 | persistent-ci-runner-stale-bunkerd-holds-battery-ports | 1 |  |
+| 2904 | go-regex-alternation-consumed-separator | 1 | go |
+| 2905 | tick-claim-auditor-token-scan-false-mismatch | 1 | python |
