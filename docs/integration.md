@@ -224,7 +224,7 @@ integration run ([docs/dogfood/2026-09-24-integration.md](dogfood/2026-09-24-int
 curl -s http://localhost:8766/api/v1/taxonomy
 ```
 
-Returns the full problem-class tree. Each node contains a `title`, `description`, optional `children`, and any cached `answers`.
+Returns the problem-class tree. Each node contains a `title`, `description`, optional `children`, and any cached `answers`. The default page is 1,000 classes; use `?limit=100&offset=100` to page, and check `total`/`truncated` for remaining classes.
 
 ### Stats
 

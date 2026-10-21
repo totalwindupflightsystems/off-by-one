@@ -20,10 +20,14 @@
     tree: [],
     loading: false,
     loaded: false,
+    total: 0,
+    limit: 1000,
+    offset: 0,
     expandedNodes: {}, // key: "type:value" -> boolean
     selectedClass: null,
     d3Loaded: false,
     d3Loading: false,
+    loadingMore: false,
   };
 
   // ---------- Public entry point ----------
@@ -89,13 +93,16 @@
     treeArea.innerHTML = '';
     treeArea.appendChild(loadingEl('Loading taxonomy…'));
 
-    fetch('/api/v1/taxonomy', { headers: { Accept: 'application/json' } })
+    fetch('/api/v1/taxonomy?limit=' + state.limit + '&offset=0', { headers: { Accept: 'application/json' } })
       .then(function (r) {
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
       .then(function (data) {
         state.tree = data.tree || [];
+        state.total = data.total || 0;
+        state.offset = 0;
+        state.limit = data.limit || 1000;
         state.loaded = true;
         state.loading = false;
         renderTree(treeArea);
@@ -121,17 +128,55 @@
       return;
     }
 
-    // Summary line
+    var returned = state.tree.length;
     var summary = el('div', 'explore-summary');
-    summary.textContent =
-      state.tree.length + ' problem class' +
-      (state.tree.length === 1 ? '' : 'es');
+    summary.textContent = returned + ' problem class' + (returned === 1 ? '' : 'es');
     area.appendChild(summary);
+    if (returned < state.total) {
+      var notice = el('div', 'explore-pagination-notice');
+      notice.textContent = 'Showing ' + returned + ' of ' + state.total + ' problem classes.';
+      area.appendChild(notice);
+    }
 
-    // Build the tree
     state.tree.forEach(function (node) {
       area.appendChild(renderClassNode(node));
     });
+    if (returned < state.total) {
+      var more = el('button', 'explore-load-more');
+      more.type = 'button';
+      more.textContent = state.loadingMore ? 'Loading…' : 'Load more';
+      more.disabled = state.loadingMore;
+      more.addEventListener('click', loadMoreTaxonomy);
+      area.appendChild(more);
+    }
+  }
+
+  function loadMoreTaxonomy() {
+    if (state.loadingMore) return;
+    state.loadingMore = true;
+    var treeArea = state.container.querySelector('.explore-tree');
+    renderTree(treeArea);
+    fetch('/api/v1/taxonomy?limit=' + state.limit + '&offset=' + state.tree.length, {
+      headers: { Accept: 'application/json' },
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function (data) {
+        var newNodes = data.tree || [];
+        state.tree = state.tree.concat(newNodes);
+        state.total = data.total || state.total;
+        state.loadingMore = false;
+        renderTree(treeArea);
+      })
+      .catch(function (err) {
+        state.loadingMore = false;
+        renderTree(treeArea);
+        var e = el('div', 'explore-error');
+        e.textContent = 'Failed to load more taxonomy: ' + err.message;
+        treeArea.appendChild(e);
+      });
   }
 
   function renderClassNode(node) {
