@@ -1,0 +1,458 @@
+commit 8981ebdb06412fd4281549be030b7b1dc411732f
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Tue Oct 20 20:35:55 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Tue Oct 20 20:35:55 2026 -0500
+
+    fix(deploy): enforce running unit flag contract. Addresses DF-OFF-BY-ONE-29-R2.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ docs/dogfood/diagnostics.md  |  36 ++++++++--
+ scripts/check-deploy         | 165 +++++++++++++++++++++++++++++++++++++++++--
+ scripts/check-deploy-test.sh | 101 +++++++++++++++++++++++++-
+ 3 files changed, 289 insertions(+), 13 deletions(-)
+
+diff --git a/docs/dogfood/diagnostics.md b/docs/dogfood/diagnostics.md
+index 6f258c82..9ec3cbc0 100644
+--- a/docs/dogfood/diagnostics.md
++++ b/docs/dogfood/diagnostics.md
+@@ -298,6 +298,12 @@ exits non-zero and names the remedy:
+    semantics as `check-binary-fresh`, mirrored in
+    `scripts/check-deploy --resolve-stamp <stamp>` (the unit-testable seam; it
+    touches neither systemctl nor /proc).
++5. the running unit's effective `ExecStart` FLAGS match the vendored deploy
++   contract `deploy/off-by-one.service` (DF-OFF-BY-ONE-29-R2; unit-testable
++   seam: `scripts/check-deploy --check-flags <contract-unit-file>
++   <execstart-value>`). Legs 1–4 prove the artifact; leg 5 proves the
++   deployment CONFIGURATION — a fresh artifact running pre-fix flags is still
++   a failed deploy.
+ 
+ **The one command, run after ANY code commit on master:**
+ 
+@@ -313,6 +319,7 @@ cd ~/off-by-one && make check-deploy
+ | 2 | `unit off-by-one not running (MainPID empty/0)` | start the service, re-run |
+ | 3 | `running process (pid N) executes '<path>', not the repo artifact` | `make build` and relaunch so `/proc/<MainPID>/exe` points at the repo binary |
+ | 4 | `running service (pid N, stamp S) does not serve HEAD's code` | `cd ~/off-by-one && make build && kill N` — systemd `Restart=always` relaunches the service; re-run `make check-deploy` |
++| 5 | `running unit (pid N) ExecStart flags drifted from deploy/off-by-one.service` (expected-vs-observed per flag) | `install -m 0644 deploy/off-by-one.service /etc/systemd/system/off-by-one.service && systemctl daemon-reload && systemctl restart off-by-one` — or record an intentional deviation in BOTH the host unit and the vendored copy, then re-run |
+ 
+ Self-test (fresh / divergence / garbage / live verdict-presence):
+ `bash scripts/check-deploy-test.sh`.
+@@ -407,7 +414,10 @@ throwaway instance — never the live service): `make check-deploy-test` /
+ `bash scripts/check-deploy-test.sh` — cases GATE-WORKTREE (SKIP), GATE-NOTAREPO
+ (FAIL), GATE-NOWORK (missing probe, FAIL), GATE-RED (stale artifact → FAIL with
+ remedy), GATE-NOSTAMP (bare `go build` → FAIL), GATE-FOREIGN (unit bound
+-elsewhere → FAIL), GATE-GREEN (rebuilt from HEAD → PASS).
++elsewhere → FAIL), GATE-GREEN (rebuilt from HEAD → PASS), GATE-DRIFT (fresh
++artifact but pre-fix unit flags → FAIL naming the drift), plus the FLAGS seam
++cases (exact match / structured-form PASS, stale-drift and missing-contract
++FAIL).
+ 
+ 
+ ### Transcript #1 — stale live server, captured pre-deploy (2026-09-19)
+@@ -1019,8 +1029,8 @@ on disk is the *staged* one. When they differ, `check-binary-fresh` will not tel
+ ### Q2 (the artifact) is not Q3 (the flags)
+ 
+ `check-deploy` legs 1–4 verify: artifact freshness, `MainPID`, `/proc/<pid>/exe == <repo>/off-by-one`,
+-and the *running stamp's* code paths vs HEAD. **None of them reads the running process's flags.**
+-So the repo can ship a P0 fix in `deploy/off-by-one.service` while the host unit keeps the pre-fix
++and the *running stamp's* code paths vs HEAD. **None of them reads the running process's flags** —
++so the repo shipped a P0 fix in `deploy/off-by-one.service` while the host unit kept the pre-fix
+ `ExecStart` — which is exactly the state this run measured, 16 days after the rows closed:
+ 
+ ```bash
+@@ -1031,12 +1041,24 @@ $ grep ExecStart deploy/off-by-one.service
+ ExecStart=... --port 8766 -load-threshold 4 ... -solve-mem-mb 6144      # the vendored canonical unit
+ ```
+ 
+-**The running flags ARE readable and comparable — do it in the deploy check:**
++**This comparison is no longer manual.** DF-OFF-BY-ONE-29-R2 made it a machine-checkable gate:
++`check-deploy` leg 5 normalizes the vendored unit's `ExecStart` and the running unit's effective
++`ExecStart` (systemd quoting and the binary path are not drift) and fails the deploy check —
++and with it `make gate-deploy` at tick close-out — on any flag mismatch, printing
++expected-vs-observed per flag:
+ 
+-```bash
+-diff <(systemctl show off-by-one -p ExecStart --value | tr ' ' '\n' | sort) \
+-     <(grep -oP '^ExecStart=\K.*' deploy/off-by-one.service | tr ' ' '\n' | sort)
+ ```
++FAIL: running unit's ExecStart flags drifted from deploy/off-by-one.service:
++  -load-threshold: expected 4, observed -1
++  -solve-mem-mb: expected 6144, observed <absent>
++```
++
++The remedy is to install the vendored unit (`install -m 0644 deploy/off-by-one.service
++/etc/systemd/system/off-by-one.service && systemctl daemon-reload && systemctl restart
++off-by-one`); an intentional host deviation is recorded by editing BOTH copies with a comment,
++never by leaving them silently apart. The unit-testable seam is
++`scripts/check-deploy --check-flags deploy/off-by-one.service "$(systemctl show off-by-one -p
++ExecStart --value)"`.
+ 
+ Consequence measured the same hour: `/proc/loadavg` 20.01 on a 16-core box while
+ `journalctl -u off-by-one` showed solves finishing every few minutes and
+diff --git a/scripts/check-deploy b/scripts/check-deploy
+index 2f9778b5..800623f5 100755
+--- a/scripts/check-deploy
++++ b/scripts/check-deploy
+@@ -10,11 +10,29 @@
+ #   4. The RUNNING process's --version stamp resolves to a commit whose code
+ #      paths (cmd/ internal/ web/ sql/ pkg/ go.mod go.sum Makefile) match HEAD.
+ #      Data-only drift (corpus commits) is tolerated; code drift is not.
++#   5. The running unit's effective ExecStart flags match the vendored deploy
++#      contract deploy/off-by-one.service (DF-OFF-BY-ONE-29-R2). Legs 1-4 prove
++#      the artifact; none of them reads the process's FLAGS — the repo can ship
++#      a fix in the vendored unit while the host unit keeps the pre-fix
++#      ExecStart (measured live 2026-10-20: -load-threshold -1 and no
++#      -solve-mem-mb, 16 days after the rows closed). A fresh artifact running
++#      pre-fix flags is still a failed deploy. Drift fails with
++#      expected-vs-observed per flag; an intentional host deviation is recorded
++#      by editing BOTH the vendored unit and the host unit (with a comment),
++#      never by leaving them silently apart.
+ #
+-# Unit-testable seam (touches neither systemctl nor /proc):
++# Unit-testable seams (touch neither systemctl nor /proc):
+ #   scripts/check-deploy --resolve-stamp <stamp>
+ #     exit 0 — resolvable stamp whose code paths match HEAD
+ #     exit 1 — divergence, dirty stamp, or unparseable stamp
++#   scripts/check-deploy --check-flags <contract-unit-file> <execstart-value>
++#     exit 0 — the running unit's flags match the vendored contract
++#     exit 1 — drift (expected-vs-observed printed per flag) or an
++#              unparseable/flagless contract
++#     <execstart-value> is what `systemctl show <unit> -p ExecStart --value`
++#     prints; both the structured form ({ path=... ; argv[]=... ; ... }) and a
++#     plain command line are accepted, and systemd quoting/binary-path
++#     formatting is normalized away so only real flag drift fails.
+ #
+ # Docs: docs/dogfood/diagnostics.md → "Deploy check after any code commit".
+ set -euo pipefail
+@@ -83,6 +101,122 @@ resolve_stamp() {
+ 	return 1
+ }
+ 
++# --- Flag contract (leg 5, DF-OFF-BY-ONE-29-R2) ------------------------------
++# The vendored unit deploy/off-by-one.service is the daemon flag contract; the
++# running unit's effective ExecStart argv must carry the same flags. The binary
++# path (leg 3's evidence) and systemd quoting are normalized away so only real
++# flag drift fails.
++
++# Print the vendored unit's daemon flags: the ExecStart line minus the binary
++# path, whitespace-collapsed.
++contract_flags() {
++	local unit_file="$1"
++	sed -n 's/^ExecStart=[^[:space:]]*[[:space:]]*//p' "$unit_file" | head -1
++}
++
++# Print a running unit's daemon flags from its ExecStart property value.
++# Accepts systemctl's structured form
++#   { path=/x/off-by-one ; argv[]=/x/off-by-one --port 8766 ... ; ... }
++# and a plain command line alike; strips the binary path (first token).
++running_flags() {
++	local execstart="$1" argv
++	case "$execstart" in
++	\{*argv\[\]=*)
++		# Flag values for this daemon never contain ';', so the first ';'
++		# after argv[]= terminates the flag list.
++		argv="$(printf '%s\n' "$execstart" | sed -n 's/.*argv\[\]=\([^;]*\);.*/\1/p' | head -1)"
++		;;
++	*)
++		argv="$execstart"
++		;;
++	esac
++	printf '%s\n' "$argv" | sed 's/^[^[:space:]]*[[:space:]]*//'
++}
++
++# Collapse whitespace and strip one layer of surrounding quotes per token, so
++# systemd's quoting of the same argument is never reported as drift.
++normalize_flags() {
++	local raw="$1" tok out=""
++	local -a toks=()
++	read -r -a toks <<<"$raw"
++	for tok in ${toks[@]+"${toks[@]}"}; do
++		tok="${tok%\"}"
++		tok="${tok#\"}"
++		tok="${tok%\'}"
++		tok="${tok#\'}"
++		out="${out}${out:+ }${tok}"
++	done
++	printf '%s\n' "$out"
++}
++
++# Print expected-vs-observed for every drifted flag. A token starts a new flag
++# when it looks like -x/--word; a negative NUMBER (-1) stays a value, so
++# '-load-threshold -1' parses as load-threshold=-1.
++report_flag_drift() {
++	local want="$1" have="$2"
++	local -A want_map=() have_map=()
++	local -a want_order=() toks=()
++	local tok cur k
++	cur=""
++	read -r -a toks <<<"$want"
++	for tok in ${toks[@]+"${toks[@]}"}; do
++		if [[ $tok =~ ^--?[a-zA-Z] ]]; then
++			cur="$tok"
++			want_map["$cur"]=""
++			want_order+=("$cur")
++		elif [ -n "$cur" ]; then
++			want_map["$cur"]="${want_map[$cur]}${want_map[$cur]:+ }$tok"
++		fi
++	done
++	cur=""
++	read -r -a toks <<<"$have"
++	for tok in ${toks[@]+"${toks[@]}"}; do
++		if [[ $tok =~ ^--?[a-zA-Z] ]]; then
++			cur="$tok"
++			have_map["$cur"]=""
++		elif [ -n "$cur" ]; then
++			have_map["$cur"]="${have_map[$cur]}${have_map[$cur]:+ }$tok"
++		fi
++	done
++	for k in ${want_order[@]+"${want_order[@]}"}; do
++		if [ -z "${have_map[$k]+x}" ]; then
++			printf '  %s: expected %s, observed <absent>\n' "$k" "${want_map[$k]:-<none>}"
++		elif [ "${want_map[$k]}" != "${have_map[$k]}" ]; then
++			printf '  %s: expected %s, observed %s\n' "$k" "${want_map[$k]:-<none>}" "${have_map[$k]:-<none>}"
++		fi
++	done
++	for k in "${!have_map[@]}"; do
++		if [ -z "${want_map[$k]+x}" ]; then
++			printf '  %s: not in contract, observed %s\n' "$k" "${have_map[$k]:-<none>}"
++		fi
++	done
++	printf '  contract flags: %s\n' "$want"
++	printf '  observed flags: %s\n' "$have"
++}
++
++# exit 0 — running flags match the contract; exit 1 — drift or no contract.
++check_flag_contract() {
++	local contract_file="$1" execstart="$2"
++	local want have
++	if [ ! -f "$contract_file" ]; then
++		echo "FAIL: deploy contract $contract_file is missing — the running unit's flags cannot be verified (restore it: git checkout -- deploy/off-by-one.service)"
++		return 1
++	fi
++	want="$(normalize_flags "$(contract_flags "$contract_file")")"
++	have="$(normalize_flags "$(running_flags "$execstart")")"
++	if [ -z "$want" ]; then
++		echo "FAIL: $contract_file carries no daemon flags to contract against (its ExecStart has no arguments?)"
++		return 1
++	fi
++	if [ "$want" = "$have" ]; then
++		echo "PASS: running unit's ExecStart flags match $contract_file"
++		return 0
++	fi
++	echo "FAIL: running unit's ExecStart flags drifted from $contract_file:"
++	report_flag_drift "$want" "$have"
++	return 1
++}
++
+ main() {
+ 	cd "$REPO_ROOT"
+ 
+@@ -123,13 +257,23 @@ main() {
+ 		echo "remedy: run 'make build' and relaunch the service, then re-run make check-deploy"
+ 		exit 1
+ 	fi
+-	if resolve_stamp "$stamp"; then
+-		echo "check-deploy: PASS — running service (pid $pid, stamp $stamp) serves HEAD's code"
+-	else
++	if ! resolve_stamp "$stamp"; then
+ 		echo "check-deploy: FAIL — leg 4: running service (pid $pid, stamp $stamp) does not serve HEAD's code"
+ 		echo "remedy: cd $REPO_ROOT && make build && kill $pid  # systemd Restart=always relaunches the service; re-run make check-deploy"
+ 		exit 1
+ 	fi
++
++	# Leg 5: the running unit's ExecStart flags must match the vendored deploy
++	# contract — a fresh artifact running pre-fix flags is still a failed
++	# deploy (DF-OFF-BY-ONE-29-R2).
++	running_execstart="$(systemctl show "$UNIT" -p ExecStart --value 2>/dev/null || true)"
++	if check_flag_contract "$REPO_ROOT/deploy/off-by-one.service" "$running_execstart"; then
++		echo "check-deploy: PASS — running service (pid $pid, stamp $stamp) serves HEAD's code under the contracted flags"
++	else
++		echo "check-deploy: FAIL — leg 5: running unit (pid $pid) ExecStart flags drifted from deploy/off-by-one.service"
++		echo "remedy: install -m 0644 deploy/off-by-one.service /etc/systemd/system/off-by-one.service && systemctl daemon-reload && systemctl restart off-by-one — or, for an intentional deviation, record it in BOTH the host unit and the vendored copy, then re-run make check-deploy"
++		exit 1
++	fi
+ }
+ 
+ case "${1:-}" in
+@@ -145,11 +289,22 @@ case "${1:-}" in
+ 		exit 1
+ 	fi
+ 	;;
++--check-flags)
++	[ "$#" -eq 3 ] || {
++		echo "usage: $0 --check-flags <contract-unit-file> <execstart-value>" >&2
++		exit 2
++	}
++	if check_flag_contract "$2" "$3"; then
++		exit 0
++	else
++		exit 1
++	fi
++	;;
+ "")
+ 	main
+ 	;;
+ *)
+-	echo "usage: $0 [--resolve-stamp <stamp>]" >&2
++	echo "usage: $0 [--resolve-stamp <stamp> | --check-flags <contract-unit-file> <execstart-value>]" >&2
+ 	exit 2
+ 	;;
+ esac
+diff --git a/scripts/check-deploy-test.sh b/scripts/check-deploy-test.sh
+index cd3a39b3..50494524 100755
+--- a/scripts/check-deploy-test.sh
++++ b/scripts/check-deploy-test.sh
+@@ -10,6 +10,11 @@
+ # Cases:
+ #   STAMP  — fresh / divergence / garbage --resolve-stamp verdicts (the
+ #            check-deploy seam; deterministic, no systemctl).
++#   FLAGS  — the ExecStart flag-contract seam (DF-OFF-BY-ONE-29-R2): exact
++#            match / systemd structured form + binary-path re-spelling (PASS),
++#            and the concrete stale live state -load-threshold -1 with no
++#            -solve-mem-mb (FAIL naming both drifts). Deterministic, no
++#            systemctl.
+ #   UNIT   — the VENDORED systemd unit (OB-GAP-089) still carries the
+ #            properties the deploy story assumes: Restart=always, the
+ #            documented ExecStart/WorkingDirectory, and both docs pointing at
+@@ -22,6 +27,8 @@
+ #              NOSTAMP   bare go build (no -ldflags stamp) -> FAIL by design
+ #              FOREIGN   unit bound to another directory   -> FAIL
+ #              GREEN     artifact rebuilt from HEAD        -> PASS
++#              DRIFT     fresh artifact, pre-fix unit flags (DF-OFF-BY-ONE-29-R2)
++#                                                          -> FAIL naming the drift
+ set -euo pipefail
+ 
+ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+@@ -61,7 +68,7 @@ install_stub_systemctl() {
+ 		printf '%s\n' '    -p|--value) ;;'
+ 		printf '%s\n' '    MainPID) emit MainPID "${OB1_STUB_MAINPID:-}" ;;'
+ 		printf '%s\n' '    WorkingDirectory) emit WorkingDirectory "${OB1_STUB_WORKDIR:-}" ;;'
+-		printf '%s\n' '    ExecStart) emit ExecStart "{ path=${OB1_STUB_EXEC:-} ; argv[]=${OB1_STUB_EXEC:-} ; }" ;;'
++		printf '%s\n' '    ExecStart) emit ExecStart "{ path=${OB1_STUB_EXEC:-} ; argv[]=${OB1_STUB_EXEC:-} ${OB1_STUB_ARGV:-} ; }" ;;'
+ 		printf '%s\n' '  esac'
+ 		printf '%s\n' 'done'
+ 		printf '%s\n' 'exit 0'
+@@ -147,6 +154,74 @@ else
+ 	sed 's/^/    /' "$OUT"
+ fi
+ 
++# --- FLAGS cases (ExecStart flag-contract seam, DF-OFF-BY-ONE-29-R2) ---------
++#
++# Legs 1-4 prove the artifact; none reads the running process's FLAGS. The
++# --check-flags seam compares the vendored unit's ExecStart against the running
++# unit's effective ExecStart — the exact drift measured live on 2026-10-20
++# (-load-threshold -1, no -solve-mem-mb) must fail by name.
++echo "--- FLAGS: running unit vs vendored ExecStart contract (DF-OFF-BY-ONE-29-R2) ---"
++
++CONTRACT_UNIT="$REPO_ROOT/deploy/off-by-one.service"
++contract_exec="$(sed -n 's/^ExecStart=//p' "$CONTRACT_UNIT" | head -1)"
++
++# MATCH (plain argv): the contract's own ExecStart satisfies the contract.
++set +e
++"$CHECK" --check-flags "$CONTRACT_UNIT" "$contract_exec" >"$OUT" 2>&1
++flags_match_rc=$?
++set -e
++if [ "$flags_match_rc" -eq 0 ] && grep -q "^PASS: running unit's ExecStart flags match" "$OUT"; then
++	pass "flag contract: exact match exits 0"
++else
++	fail "flag contract: exact match should exit 0; rc=$flags_match_rc; output:"
++	sed 's/^/    /' "$OUT"
++fi
++
++# MATCH (systemd structured form + re-spelled binary path): what
++# `systemctl show -p ExecStart --value` actually prints, running the same flags
++# from a different binary location — quoting/path formatting is not drift.
++structured_exec="{ path=/usr/local/bin/off-by-one ; argv[]=/usr/local/bin/off-by-one ${contract_exec#* } ; ignore_errors=no ; start_time=[n/a] ; }"
++set +e
++"$CHECK" --check-flags "$CONTRACT_UNIT" "$structured_exec" >"$OUT" 2>&1
++flags_struct_rc=$?
++set -e
++if [ "$flags_struct_rc" -eq 0 ]; then
++	pass "flag contract: systemd structured form with a re-spelled binary path exits 0"
++else
++	fail "flag contract: structured form should exit 0 (path formatting is not drift); rc=$flags_struct_rc; output:"
++	sed 's/^/    /' "$OUT"
++fi
++
++# DRIFT: the concrete stale live state — -load-threshold -1 (idle gate off) and
++# no -solve-mem-mb. Must exit non-zero and name BOTH drifts with expected vs
++# observed values.
++stale_argv="/home/kara/off-by-one/off-by-one --port 8766 -load-threshold -1 -cron-interval 60s -pi-agent /home/kara/.local/bin/pi-agent -bwrap /usr/bin/bwrap"
++set +e
++"$CHECK" --check-flags "$CONTRACT_UNIT" "$stale_argv" >"$OUT" 2>&1
++flags_drift_rc=$?
++set -e
++if [ "$flags_drift_rc" -ne 0 ] && \
++	grep -q "load-threshold: expected 4, observed -1" "$OUT" && \
++	grep -q "solve-mem-mb: expected 6144, observed <absent>" "$OUT"; then
++	pass "flag contract: stale drift (-load-threshold -1, no -solve-mem-mb) exits $flags_drift_rc naming both drifts"
++else
++	fail "flag contract: stale drift should exit non-zero and name -load-threshold/-solve-mem-mb; rc=$flags_drift_rc; output:"
++	sed 's/^/    /' "$OUT"
++fi
++
++# MISSING CONTRACT: no vendored unit means the flags cannot be verified —
++# fail-closed, never a pass.
++set +e
++"$CHECK" --check-flags "$SCRATCH_ROOT/no-such-unit.service" "$contract_exec" >"$OUT" 2>&1
++flags_nocontract_rc=$?
++set -e
++if [ "$flags_nocontract_rc" -ne 0 ] && grep -q "contract .* is missing" "$OUT"; then
++	pass "flag contract: missing vendored unit exits $flags_nocontract_rc (fail-closed)"
++else
++	fail "flag contract: missing vendored unit should exit non-zero; rc=$flags_nocontract_rc; output:"
++	sed 's/^/    /' "$OUT"
++fi
++
+ # --- UNIT case (OB-GAP-089) ---------------------------------------------------
+ #
+ # The deploy story (check-deploy legs 2-3, gate-deploy Leg B, the README
+@@ -345,6 +420,8 @@ else
+ 
+ 	# GREEN: rebuild from HEAD, then point the stub unit at a throwaway
+ 	# instance of that artifact. This is the red→green half of the proof.
++	# The stub unit's argv is read back from the scratch clone's vendored
++	# contract so leg 5 (the flag contract) passes only when they agree.
+ 	set +e
+ 	( cd "$SCRATCH_REPO" && go build -ldflags "-X main.version=${scratch_head:0:7}" \
+ 		-o off-by-one ./cmd/off-by-one ) >"$OUT" 2>&1
+@@ -357,9 +434,11 @@ else
+ 		echo "SKIP: GREEN case — the throwaway instance did not come up (port 18997 busy?); output:"
+ 		sed 's/^/    /' "$SCRATCH_ROOT/instance.log"
+ 	else
++		green_argv="$(sed -n 's/^ExecStart=[^[:space:]]*[[:space:]]*//p' "$SCRATCH_REPO/deploy/off-by-one.service" | head -1)"
+ 		set +e
+ 		( cd "$SCRATCH_REPO" && OB1_UNIT_SOURCE="$SCRATCH_REPO" \
+ 			OB1_STUB_MAINPID="$SCRATCH_PID" OB1_STUB_WORKDIR="$SCRATCH_REPO" OB1_STUB_EXEC="$SCRATCH_REPO/off-by-one" \
++			OB1_STUB_ARGV="$green_argv" \
+ 			PATH="$STUB_BIN:$PATH" ./scripts/gate-deploy ) >"$OUT" 2>&1
+ 		green_rc=$?
+ 		set -e
+@@ -369,6 +448,26 @@ else
+ 			fail "gate should be GREEN after rebuild; rc=$green_rc; output:"
+ 			sed 's/^/    /' "$OUT"
+ 		fi
++
++		# DRIFT (DF-OFF-BY-ONE-29-R2): the SAME fresh artifact and instance,
++		# but the unit's ExecStart carries the pre-fix flags measured live on
++		# 2026-10-20 (-load-threshold -1, no -solve-mem-mb). Artifact legs 1-4
++		# all pass here, so the flag contract alone must fail the gate.
++		set +e
++		( cd "$SCRATCH_REPO" && OB1_UNIT_SOURCE="$SCRATCH_REPO" \
++			OB1_STUB_MAINPID="$SCRATCH_PID" OB1_STUB_WORKDIR="$SCRATCH_REPO" OB1_STUB_EXEC="$SCRATCH_REPO/off-by-one" \
++			OB1_STUB_ARGV="--port 8766 -load-threshold -1 -cron-interval 60s -pi-agent /home/kara/.local/bin/pi-agent -bwrap /usr/bin/bwrap" \
++			PATH="$STUB_BIN:$PATH" ./scripts/gate-deploy ) >"$OUT" 2>&1
++		drift_rc=$?
++		set -e
++		if [ "$drift_rc" -ne 0 ] && grep -q "^gate-deploy: FAIL" "$OUT" && \
++			grep -q "load-threshold: expected 4, observed -1" "$OUT" && \
++			grep -q "solve-mem-mb: expected 6144, observed <absent>" "$OUT"; then
++			pass "gate RED on pre-fix unit flags despite a fresh artifact (exit $drift_rc, drift named)"
++		else
++			fail "gate should be RED on pre-fix unit flags; rc=$drift_rc; output:"
++			sed 's/^/    /' "$OUT"
++		fi
+ 	fi
+ fi
+ 
