@@ -1132,7 +1132,7 @@ func TestGetProblemClass_NotFound(t *testing.T) {
 // The slug arm must keep behaving exactly as before (title 200, unknown
 // title 404) — that is the regression half of these tests.
 //
-// ch:trace row=REVIEW-OB-020 spec=internal/graph/store.go#GetProblemClass test=internal/api/handlers_test.go::numeric-id-fallback evidence=commit
+// ch:trace row=REVIEW-OB-020 spec=internal/graph/store.go#GetProblemClass test=internal/api/handlers_test.go::numeric-id-fallback evidence=37ff301ad7f0b6941061bd3e56bbf86b4a01f15d
 
 // TestGetProblemClass_NumericIDFallback: GET /api/v1/problems/{id} returns
 // the same detail payload as GET /api/v1/problems/{title} — not a 404.

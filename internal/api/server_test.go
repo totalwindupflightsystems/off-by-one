@@ -43,7 +43,7 @@ func TestHealthReportsVersion(t *testing.T) {
 	}
 }
 
-// ch:trace row=REVIEW-OB-022 spec=internal/api/server.go#readJSON test=internal/api/server_test.go::TestReadJSONRejectsTrailingDocument evidence=commit
+// ch:trace row=REVIEW-OB-022 spec=internal/api/server.go#readJSON test=internal/api/server_test.go::TestReadJSONRejectsTrailingDocument evidence=7ba22593c43eb65b61920e7ee1f438a1d063dd7d
 
 // readJSONTarget is the minimal request shape for the readJSON unit
 // tests below. It carries one tagged field plus a numeric field so the

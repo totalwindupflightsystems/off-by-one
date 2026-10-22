@@ -111,7 +111,7 @@ func TestMetricsRouterDispatch(t *testing.T) {
 	}
 }
 
-// ch:trace row=REVIEW-OB-019 spec=internal/metrics/metrics.go#Observer wave=none:serial-slot test=internal/api/metrics_endpoint_test.go::TestMetricsDiscoveryCounters doc=none:reason evidence=commit
+// ch:trace row=REVIEW-OB-019 spec=internal/metrics/metrics.go#Observer wave=none:serial-slot test=internal/api/metrics_endpoint_test.go::TestMetricsDiscoveryCounters doc=none:reason evidence=8387d2104d50e17d0f07fa016f3c9855464f6b3d
 //
 // TestMetricsDiscoveryCounters pins the additive discovery counters
 // (REVIEW-OB-019): POST /api/v1/problems/discover records a hit when an

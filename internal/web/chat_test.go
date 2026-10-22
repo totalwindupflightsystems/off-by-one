@@ -533,7 +533,7 @@ func TestChat_StatusFrameBeforeAgentFrame(t *testing.T) {
 // defect (error frame, closed connection, bad JSON) still fails on the
 // first attempt, so the retry cannot mask a regression.
 //
-// ch:trace row=DF-OFF-BY-ONE-56 spec=internal/web/chat_test.go#TestChat_PeriodicStatusUntilAgentFrame test=same evidence=commit
+// ch:trace row=DF-OFF-BY-ONE-56 spec=internal/web/chat_test.go#TestChat_PeriodicStatusUntilAgentFrame test=same evidence=0a13957875d4730e81dc2d78dc5abf00f0c4d613
 func TestChat_PeriodicStatusUntilAgentFrame(t *testing.T) {
 	agent := &mockAgent{
 		responses: []ChatMessage{{Type: "agent", Message: "finally"}},
