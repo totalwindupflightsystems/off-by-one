@@ -18,7 +18,7 @@ const errorSchemaRef = "#/components/schemas/Error"
 // endpoints that can fail on a default (unconfigured) install:
 //
 //	POST /api/v1/export  — 200, 400 (invalid request), 501 (not configured), 500 (failed)
-//	POST /api/v1/import  — 200, 400 (invalid request), 501 (not configured), 500 (failed)
+//	POST /api/v1/import  — 200, 400 (invalid request), 409 (conflict: import_dest_not_empty or source_repo_mismatch), 501 (not configured), 500 (failed)
 //	GET  /api/v1/problems — 200, 500 (internal error)
 //
 // Before OB-GAP-082 every one of these operations declared ONLY '200', so an
@@ -39,7 +39,7 @@ func TestOpenAPISpec_ErrorResponsesDocumented(t *testing.T) {
 		want   []string
 	}{
 		{"/api/v1/export", "post", []string{"200", "400", "500", "501"}},
-		{"/api/v1/import", "post", []string{"200", "400", "500", "501"}},
+		{"/api/v1/import", "post", []string{"200", "400", "409", "500", "501"}},
 		{"/api/v1/problems", "get", []string{"200", "500"}},
 	}
 

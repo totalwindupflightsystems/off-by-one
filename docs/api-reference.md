@@ -553,7 +553,7 @@ Import answers from a git repository.
 }
 ```
 
-**Status codes:** `200`, `400` (missing required fields), `501` (import not configured), `500` (import failed).
+**Status codes:** `200`, `400` (missing required fields), `409` (conflict — `import_dest_not_empty`: the target clone directory already contains a non-empty answer set for this class; resolve by changing `conflict_strategy` or clearing the destination. `source_repo_mismatch`: the existing shared local clone points at a different origin URL than `source_repo` — re-point or remove the stale clone), `501` (import not configured), `500` (import failed).
 
 **Example**
 

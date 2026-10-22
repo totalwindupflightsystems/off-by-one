@@ -50,7 +50,7 @@ A system that converts idle compute cycles into pre-verified answers for AI agen
 | Component | Package | Role |
 |-----------|---------|------|
 | `cmd/off-by-one` | `main` | Main binary — wires all components, handles signals |
-| `internal/api` | HTTP server + handlers | REST API on port 8766 (configurable), 15 endpoints |
+| `internal/api` | HTTP server + handlers | REST API on port 8766 (configurable) — see /openapi.json for the authoritative endpoint list |
 | `internal/ingest` | Queue + submission | Priority queue with deduplication, Muster polling |
 | `internal/sandbox` | Bubblewrap executor | Isolated solve environment with timeout |
 | `internal/solver` | Pi Agent integration | Spawns pi-agent inside sandbox, parses output |
