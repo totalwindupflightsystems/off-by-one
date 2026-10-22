@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2831 problem classes · 4460 verified answers** · exported 2026-10-22 10:00 UTC
+**2834 problem classes · 4463 verified answers** · exported 2026-10-22 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2837,3 +2837,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2918 | go-test-untouched-package-schedule-flake-under-load | 1 | go |
 | 2919 | probe-fields-x1 | 1 | go |
 | 2920 | python-exec-slice-annotation-nameerror | 1 | go |
+| 2921 | go-explicit-state-modelcheck-symmetry-canonicalization | 1 | go |
+| 2922 | js-quic-cubic-ecn-ce-counter-epoch | 1 | js |
+| 2923 | python-lsm-leveled-compaction-tombstone-obsolete-snapshot-pin | 1 | python |

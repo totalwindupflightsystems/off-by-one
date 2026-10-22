@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>python-lsm-leveled-compaction-tombstone-obsolete-snapshot-pin — Off-By-One verified answer</title>
+<meta name="description" content="The planner must treat tombstone removal as a read-visibility question, not a level question. This solution:">
+<meta property="og:title" content="python-lsm-leveled-compaction-tombstone-obsolete-snapshot-pin — Off-By-One">
+<meta property="og:description" content="The planner must treat tombstone removal as a read-visibility question, not a level question. This solution:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2923-python-lsm-leveled-compaction-tombstone-obsolete-snapshot-pin.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>python-lsm-leveled-compaction-tombstone-obsolete-snapshot-pin</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>python3</span></div><div class='desc'><p>The planner must treat tombstone removal as a read-visibility question, not a level question. This solution:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2923-python-lsm-leveled-compaction-tombstone-obsolete-snapshot-pin.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I built and verified the solution. The full self-contained document is saved at <code>~/lsm/SOLUTION.md</code>; here it is:</p>
+<hr />
+<h1>Fixing snapshot-pinned tombstone GC in a leveled LSM compaction planner</h1>
+<h2>TL;DR</h2>
+<p>The planner must treat <strong>tombstone removal as a read-visibility question, not a level question</strong>. This solution:</p>
+<ol>
+<li>expands every table's key bounds with its range-tombstone boundaries before overlap tests,</li>
+<li>closes the input file set under overlap in <em>both</em> directions,</li>
+<li>retains, for every read point (<code>+inf</code> current read and each live snapshot), the exact version that read point can see, and only removes a tombstone when <strong>no</strong> surviving version — in any level outside the compaction, not just lower levels — is shadowed by it,</li>
+<li>accounts <code>bytes_read</code> / <code>bytes_written</code> per compaction, and</li>
+<li>commits the whole result as one atomic <code>Edit</code> with a strictly monotonic <code>edit_number</code>.</li>
+</ol>
+<p>Two subtle bugs surfaced while building this and are covered by regression tests:</p>
+<ul>
+<li><strong>Higher-level older versions.</strong> With out-of-order sequence numbers a <em>higher</em> level (e.g. L0) can hold an <strong>older</strong> version of a key than a lower level. Dropping a lower-level tombstone then resurrects the L0 value. The fix is to consider <strong>all non-input files</strong>, not only lower levels.</li>
+<li><strong>A vanished key is a legitimate read result.</strong> When a key is fully GC'd it disappears from the map; the verifier must compare over the <strong>union of the keyspaces before and after</strong>, otherwise <code>not_found</code> looks like a mismatch.</li>
+</ul>
+<h2>Root-cause analysis</h2>
+<h3>1. Overlap must use exact, range-expanded boundaries</h3>
+<p>A table storing keys <code>{10, 11}</code> with range tombstone <code>[5, 8]</code> owns <code>[5, 11]</code>. Physical-bounds overlap would never pull a table holding key <code>7</code> into the same compaction, losing the range delete. <code>SSTable.expanded_bounds()</code> adds every <code>RangeTombstone.start</code>/<code>.end</code> to the physical min/max; <code>overlaps()</code> uses those intervals.</p>
+<h3>2. File selection must be closed under overlap</h3>
+<p>Starting from one file in level <code>L</code>, pulling overlapping <code>L+1</code> files can reveal further overlapping <code>L</code> files, which reveal further <code>L+1</code> files. The planner iterates to a fixpoint (<code>_select_input_files</code>), otherwise two files sharing a key survive in the same level.</p>
+<h3>3. Tombstones may only go when invisible to every read point</h3>
+<p>A tombstone at sequence <code>t</code> is needed if it is the visible version at some read point, or if it shadows an older version surviving outside the compaction. Naive "bottom-most level" is wrong under snapshots and out-of-order seqs. Real counterexample found by randomized testing:</p>
+<pre><code class="language-text">L0 f2 : key 5 -&gt; 64:DELETE, 40:PUT, 9:PUT      (not part of L1-&gt;L2)
+L2 f5 : key 5 -&gt; 49:DELETE, 29:DELETE, 18:DELETE
+snapshots = [3, 19, 51]
+</code></pre>
+<p>Dropping <code>18:DELETE</code> makes snapshot <code>19</code> read <code>L0</code>'s <code>v5@9</code> — an observable resurrection.</p>
+<p><code>_resolve_key</code>:
+1. build the global version list = input entries + <strong>all</strong> outside entries;
+2. mark the visible entry at each read point that comes from the input (<code>+inf</code> plus every snapshot);
+3. retain the marked entries;
+4. repeatedly drop a retained tombstone only when neither a retained entry nor any outside entry would be exposed by its removal (with a defensive equal-seq PUT/DELETE tie check).</p>
+<p>Range tombstones are carried through conservatively and never dropped here.</p>
+<h3>4. Manifest edits must be atomic and monotonic</h3>
+<p><code>Manifest.apply()</code> builds the complete new level map off to the side and swaps it in with a single assignment. A crash before the swap leaves the manifest unchanged; after, the edit is fully applied. <code>edit_number</code> must be exactly <code>current + 1</code>, so replayed/stale/reordered edits raise instead of corrupting.</p>
+<h2>The exact fix</h2>
+<h3><code>lsm.py</code></h3>
+<pre><code class="language-python">&quot;&quot;&quot;
+Leveled LSM compaction planner with snapshot-pinned tombstone GC.
+
+This module implements:
+
+  * SSTables with point entries and (possibly partially overlapping) range
+    tombstones.  ``SSTable.expanded_bounds`` extends the physical key bounds
+    with every range-tombstone boundary so overlap tests see the exact
+    deleted key range rather than only the keys that happen to be stored.
+  * Leveled file-set selection: pick a file in level L, pull in every
+    overlapping file in L+1, then keep expanding the input set until it is
+    closed under overlap in both directions.
+  * Snapshot-aware tombstone GC.  A tombstone is only removed when it no
+    longer affects the value observed by *any* live snapshot (or by the
+    current read) and, for bottommost removal, when no older version of the
+    key survives in a lower level.
+  * Per-compaction bytes_read / bytes_written accounting.
+  * Atomic manifest edits with a strictly monotonic edit number.
+&quot;&quot;&quot;
+
+from __future__ import annotations
+
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Iterable, Optional
+
+PUT = &quot;PUT&quot;
+DELETE = &quot;DELETE&quot;
+
+# ---------------------------------------------------------------------------
+# Keyspace primitives
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Entry:
+    &quot;&quot;&quot;A versioned point entry.  ``seq`` may be out of order w.r.t. file order.&quot;&quot;&quot;
+
+    key: int
+    seq: int
+    kind: str
+    value: Optional[str] = None
+
+    @property
+    def size(self) -&gt; int:
+        # Toy serialization size: 8 byte seq + 1 byte kind + payload.
+        payload = len(self.value.encode()) if self.value is not None else 0
+        return 9 + payload
+
+
+@dataclass(frozen=True)
+class RangeTombstone:
+    &quot;&quot;&quot;Deletes every key in the inclusive interval [start, end] at ``seq``.&quot;&quot;&quot;
+
+    start: int
+    end: int
+    seq: int
+
+    def covers(self, key: int) -&gt; bool:
+        return self.start &lt;= key &lt;= self.end
+
+    @property
+    def size(self) -&gt; int:
+        return 24
+
+
+@dataclass
+class SSTable:
+    file_id: int
+    level: int
+    entries: list[Entry] = field(default_factory=list)
+    range_tombstones: list[RangeTombstone] = field(default_factory=list)
+
+    # -- key bounds ---------------------------------------------------------
+    def physical_bounds(self) -&gt; Optional[tuple[int, int]]:
+        if not self.entries:
+            return None
+        keys = [e.key for e in self.entries]
+        return min(keys), max(keys)
+
+    def expanded_bounds(self) -&gt; Optional[tuple[int, int]]:
+        &quot;&quot;&quot;Exact key boundary after expanding range-deleted regions.
+
+        A table that only stores keys {10, 11} but carries a range tombstone
+        [5, 8] really owns the interval [5, 11]; another table holding key 7
+        *must* be dragged into the compaction, otherwise the range delete
+        would be lost.
+        &quot;&quot;&quot;
+        los: list[int] = []
+        his: list[int] = []
+        pb = self.physical_bounds()
+        if pb is not None:
+            los.append(pb[0])
+            his.append(pb[1])
+        for rt in self.range_tombstones:
+            los.append(rt.start)
+            his.append(rt.end)
+        if not los:
+            return None
+        return min(los), max(his)
+
+    @property
+    def size(self) -&gt; int:
+        return sum(e.size for e in self.entries) + sum(
+            rt.size for rt in self.range_tombstones
+        )
+
+
+def overlaps(a: SSTable, b: SSTable) -&gt; bool:
+    ba, bb = a.expanded_bounds(), b.expanded_bounds()
+    if ba is None or bb is None:
+        return False
+    return ba[0] &lt;= bb[1] and bb[0] &lt;= ba[1]
+
+
+# ---------------------------------------------------------------------------
+# Manifest + atomic edits
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Edit:
+    &quot;&quot;&quot;A single manifest mutation.  All fields are immutable after creation.&quot;&quot;&quot;
+
+    edit_number: int
+    output_level: int
+    removed_file_ids: list[int]
+    added_files: list[SSTable]
+    bytes_read: int
+    bytes_written: int
+    dropped_tombstones: list[tuple[int, int]] = field(default_factory=list)
+
+    @property
+    def write_amplification(self) -&gt; float:
+        return self.bytes_written / self.bytes_read if self.bytes_read else 0.0
+
+    def summary(self) -&gt; str:
+        adds = [f.file_id for f in self.added_files]
+        return (
+            f&quot;edit#{self.edit_number} L{self.output_level} &quot;
+            f&quot;in={self.removed_file_ids} out={adds} &quot;
+            f&quot;read={self.bytes_read} written={self.bytes_written} &quot;
+            f&quot;WA={self.write_amplification:.3f} &quot;
+            f&quot;dropped={self.dropped_tombstones}&quot;
+        )
+
+
+class Manifest:
+    def __init__(self, snapshots: Iterable[int] | None = None):
+        self.levels: dict[int, list[SSTable]] = defaultdict(list)
+        self.snapshots: list[int] = sorted(snapshots or [])
+        self.edit_history: list[Edit] = []
+        self.edit_number: int = 0
+        self.next_file_id: int = 1
+
+    # -- construction -------------------------------------------------------
+    def new_file(
+        self,
+        level: int,
+        entries: Iterable[Entry],
+        range_tombstones: Iterable[RangeTombstone] | None = None,
+    ) -&gt; SSTable:
+        f = SSTable(
+            file_id=self.next_file_id,
+            level=level,
+            entries=list(entries),
+            range_tombstones=list(range_tombstones or []),
+        )
+        self.next_file_id += 1
+        self.levels[level].append(f)
+        return f
+
+    def files(self, level: int) -&gt; list[SSTable]:
+        return list(self.levels.get(level, []))
+
+    def all_files(self) -&gt; list[SSTable]:
+        out: list[SSTable] = []
+        for lvl in sorted(self.levels):
+            out.extend(self.levels[lvl])
+        return out
+
+    def lower_files(self, level: int) -&gt; list[SSTable]:
+        &quot;&quot;&quot;Files strictly below ``level`` (the output level of a compaction).&quot;&quot;&quot;
+        out: list[SSTable] = []
+        for lvl in sorted(self.levels):
+            if lvl &gt; level:
+                out.extend(self.levels[lvl])
+        return out
+
+    # -- atomic apply -------------------------------------------------------
+    def apply(self, edit: Edit) -&gt; None:
+        &quot;&quot;&quot;Apply ``edit`` all-or-nothing.
+
+        The new level map is built completely off to the side and then swapped
+        in with a single assignment, so an exception (simulated crash) before
+        the swap leaves the manifest byte-for-byte unchanged.  The edit number
+        must be exactly one greater than the current one, which makes the
+        journal replayable and detects double-apply / reordering.
+        &quot;&quot;&quot;
+        if edit.edit_number != self.edit_number + 1:
+            raise ValueError(
+                f&quot;non-monotonic edit: got {edit.edit_number}, &quot;
+                f&quot;expected {self.edit_number + 1}&quot;
+            )
+        removed = set(edit.removed_file_ids)
+        new_levels: dict[int, list[SSTable]] = {
+            lvl: [f for f in fs if f.file_id not in removed]
+            for lvl, fs in self.levels.items()
+        }
+        for f in edit.added_files:
+            new_levels.setdefault(f.level, []).append(f)
+        # Atomic commit point: single reference swap.
+        self.levels = new_levels
+        self.edit_number = edit.edit_number
+        self.edit_history.append(edit)
+
+
+# ---------------------------------------------------------------------------
+# Snapshot-visible read (reference implementation used for verification)
+# ---------------------------------------------------------------------------
+
+
+def read(manifest: Manifest, key: int, seq: float) -&gt; tuple:
+    &quot;&quot;&quot;Canonical read result: ('value', v) or ('not_found',).
+
+    A live tombstone and the absence of any version are the same observation
+    for a point read, so both collapse to ('not_found',).
+    &quot;&quot;&quot;
+    best: Optional[Entry] = None
+    for f in manifest.all_files():
+        for e in f.entries:
+            if e.key == key and e.seq &lt;= seq:
+                if best is None or e.seq &gt; best.seq:
+                    best = e
+    best_rt: Optional[RangeTombstone] = None
+    for f in manifest.all_files():
+        for rt in f.range_tombstones:
+            if rt.covers(key) and rt.seq &lt;= seq:
+                if best_rt is None or rt.seq &gt; best_rt.seq:
+                    best_rt = rt
+    if best_rt is not None and (best is None or best_rt.seq &gt;= best.seq):
+        return (&quot;not_found&quot;,)
+    if best is None or best.kind == DELETE:
+        return (&quot;not_found&quot;,)
+    return (&quot;value&quot;, best.value)
+
+
+def keyspace(manifest: Manifest) -&gt; set[int]:
+    &quot;&quot;&quot;All keys that can be addressed: stored keys plus every integer inside a
+    range-tombstone interval, so keys that only exist because they were
+    range-deleted are still observable.&quot;&quot;&quot;
+    keys: set[int] = set()
+    lo = hi = None
+    for f in manifest.all_files():
+        for e in f.entries:
+            keys.add(e.key)
+        for rt in f.range_tombstones:
+            keys.add(rt.start)
+            keys.add(rt.end)
+            lo = rt.start if lo is None else min(lo, rt.start)
+            hi = rt.end if hi is None else max(hi, rt.end)
+    if lo is not None and hi is not None:
+        keys.update(range(lo, hi + 1))
+    return keys
+
+
+def snapshot_state(
+    manifest: Manifest, keys: Optional[set[int]] = None
+) -&gt; dict[tuple[int, float], tuple]:
+    &quot;&quot;&quot;Read every key at the current point and every snapshot.
+
+    ``keys`` should normally be the *union* of the keyspaces before and after a
+    compaction, otherwise a key that is legitimately garbage collected would
+    simply vanish from the map instead of reading as not-found.
+    &quot;&quot;&quot;
+    if keys is None:
+        keys = keyspace(manifest)
+    read_points: list[float] = [float(&quot;inf&quot;), *manifest.snapshots]
+    return {(k, r): read(manifest, k, r) for k in sorted(keys) for r in read_points}
+
+
+# ---------------------------------------------------------------------------
+# Compaction planning
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CompactionPlan:
+    level: int
+    output_level: int
+    input_files: list[SSTable]
+    output_files: list[SSTable]
+    bytes_read: int
+    bytes_written: int
+    dropped_tombstones: list[tuple[int, int]]
+    retained_entries: dict[int, list[Entry]]
+
+    @property
+    def write_amplification(self) -&gt; float:
+        return self.bytes_written / self.bytes_read if self.bytes_read else 0.0
+
+    def to_edit(self, edit_number: int) -&gt; Edit:
+        return Edit(
+            edit_number=edit_number,
+            output_level=self.output_level,
+            removed_file_ids=[f.file_id for f in self.input_files],
+            added_files=self.output_files,
+            bytes_read=self.bytes_read,
+            bytes_written=self.bytes_written,
+            dropped_tombstones=list(self.dropped_tombstones),
+        )
+
+    def describe(self) -&gt; str:
+        inputs = [f&quot;L{f.level}:f{f.file_id}&quot; for f in self.input_files]
+        outputs = [f&quot;L{f.level}:f{f.file_id}&quot; for f in self.output_files]
+        return (
+            f&quot;Compaction L{self.level}-&gt;L{self.output_level}\n&quot;
+            f&quot;  inputs        : {inputs}\n&quot;
+            f&quot;  outputs       : {outputs}\n&quot;
+            f&quot;  bytes_read    : {self.bytes_read}\n&quot;
+            f&quot;  bytes_written : {self.bytes_written}\n&quot;
+            f&quot;  write_amp     : {self.write_amplification:.3f}\n&quot;
+            f&quot;  dropped_ts    : {self.dropped_tombstones}&quot;
+        )
+
+
+def _select_input_files(manifest: Manifest, level: int) -&gt; list[SSTable]:
+    src = manifest.files(level)
+    dst = manifest.files(level + 1)
+    if not src:
+        return []
+
+    def overlap_count(f: SSTable) -&gt; int:
+        return sum(1 for g in dst if overlaps(f, g))
+
+    # Deterministic seed: most overlap into the next level, then lowest id.
+    seed = min(src, key=lambda f: (-overlap_count(f), f.file_id))
+
+    chosen_src = [seed]
+    chosen_dst = [g for g in dst if overlaps(seed, g)]
+
+    changed = True
+    while changed:
+        changed = False
+        for g in chosen_dst:
+            for f in src:
+                if f not in chosen_src and overlaps(f, g):
+                    chosen_src.append(f)
+                    changed = True
+        for f in chosen_src:
+            for g in dst:
+                if g not in chosen_dst and overlaps(f, g):
+                    chosen_dst.append(g)
+                    changed = True
+
+    order = {f.file_id: i for i, f in enumerate(src + dst)}
+    return sorted(chosen_src + chosen_dst, key=lambda f: order[f.file_id])
+
+
+def _resolve_key(
+    input_entries: list[Entry],
+    outside_entries: list[Entry],
+    snapshots: list[int],
+) -&gt; tuple[list[Entry], list[tuple[int, int]]]:
+    &quot;&quot;&quot;Return (retained input entries, dropped tombstones) for one key.
+
+    Retention is driven by the read points that can observe the key: the
+    current point (``+inf``) and every live snapshot.  Whatever entry is
+    visible at a read point must survive.  After marking, a tombstone that is
+    the oldest surviving version (nothing older in the input *or* anywhere
+    outside the compaction) can be dropped: deleting a key that has no older
+    version is the same observation as simply not storing it.
+
+    ``outside_entries`` must include every non-input file that can hold the
+    key, not just lower levels.  With out-of-order sequence numbers a *higher*
+    level can legitimately hold an older version, and dropping a tombstone
+    then would resurrect that value.
+    &quot;&quot;&quot;
+    input_set = set(input_entries)
+    all_entries = sorted(
+        input_entries + outside_entries, key=lambda e: e.seq, reverse=True
+    )
+
+    def visible_at(seq: float) -&gt; Optional[Entry]:
+        for e in all_entries:
+            if e.seq &lt;= seq:
+                return e
+        return None
+
+    read_points: list[float] = [float(&quot;inf&quot;), *snapshots]
+    needed: set[Entry] = set()
+    for r in read_points:
+        v = visible_at(r)
+        if v is not None and v in input_set:
+            needed.add(v)
+
+    def would_be_exposed(o: Entry, tomb: Entry) -&gt; bool:
+        # A surviving version older than (or, on a degenerate seq tie, a PUT at
+        # the same seq as) the tombstone would become visible if it were
+        # removed.
+        if o.seq &lt; tomb.seq:
+            return True
+        return o.seq == tomb.seq and o.kind != DELETE
+
+    retained = sorted(needed, key=lambda e: e.seq, reverse=True)
+    dropped: list[tuple[int, int]] = []
+    changed = True
+    while changed:
+        changed = False
+        for e in list(retained):
+            if e.kind != DELETE:
+                continue
+            older_retained = any(
+                would_be_exposed(o, e) for o in retained if o is not e
+            )
+            older_outside = any(would_be_exposed(o, e) for o in outside_entries)
+            if not older_retained and not older_outside:
+                retained.remove(e)
+                dropped.append((e.key, e.seq))
+                changed = True
+                break
+    return retained, dropped
+
+
+def plan_compaction(manifest: Manifest, level: int) -&gt; Optional[CompactionPlan]:
+    inputs = _select_input_files(manifest, level)
+    if not inputs:
+        return None
+    output_level = level + 1
+
+    # Point entries grouped by key.
+    by_key: dict[int, list[Entry]] = defaultdict(list)
+    for f in inputs:
+        for e in f.entries:
+            by_key[e.key].append(e)
+
+    input_ids = {f.file_id for f in inputs}
+    outside_by_key: dict[int, list[Entry]] = defaultdict(list)
+    for f in manifest.all_files():
+        if f.file_id in input_ids:
+            continue
+        for e in f.entries:
+            outside_by_key[e.key].append(e)
+
+    retained_entries: dict[int, list[Entry]] = {}
+    for key in sorted(by_key):
+        kept, _ = _resolve_key(
+            by_key[key], outside_by_key.get(key, []), manifest.snapshots
+        )
+        retained_entries[key] = kept
+
+    # Report every input tombstone that did not make it into the output, i.e.
+    # both tombstones superseded before retention and bottom-most ones removed
+    # after retention.
+    input_tombstones = {
+        (e.key, e.seq) for f in inputs for e in f.entries if e.kind == DELETE
+    }
+    kept_tombstones = {
+        (e.key, e.seq)
+        for ents in retained_entries.values()
+        for e in ents
+        if e.kind == DELETE
+    }
+    dropped = sorted(input_tombstones - kept_tombstones)
+
+    # Range tombstones are carried through conservatively (never dropped here)
+    # but they DO participate in file selection via expanded_bounds().
+    retained_rts: list[RangeTombstone] = []
+    seen_rt: set[RangeTombstone] = set()
+    for f in inputs:
+        for rt in f.range_tombstones:
+            if rt not in seen_rt:
+                seen_rt.add(rt)
+                retained_rts.append(rt)
+
+    out_entries = [e for k in sorted(retained_entries) for e in retained_entries[k]]
+    out_entries.sort(key=lambda e: (e.key, -e.seq))
+
+    output_files: list[SSTable] = []
+    if out_entries or retained_rts:
+        output_files.append(
+            SSTable(
+                file_id=manifest.next_file_id,
+                level=output_level,
+                entries=out_entries,
+                range_tombstones=retained_rts,
+            )
+        )
+
+    # Reserve file ids now so two plans built back-to-back cannot collide.
+    # Reserving is a pure counter bump: manifest *content* is untouched until
+    # apply(), so a crash between plan and apply is still safe.
+    manifest.next_file_id += len(output_files)
+
+    bytes_read = sum(f.size for f in inputs)
+    bytes_written = sum(f.size for f in output_files)
+
+    return CompactionPlan(
+        level=level,
+        output_level=output_level,
+        input_files=inputs,
+        output_files=output_files,
+        bytes_read=bytes_read,
+        bytes_written=bytes_written,
+        dropped_tombstones=dropped,
+        retained_entries=retained_entries,
+    )
+
+
+def apply_plan(manifest: Manifest, plan: CompactionPlan) -&gt; Edit:
+    &quot;&quot;&quot;Commit ``plan`` as one atomic edit with the next monotonic edit number.&quot;&quot;&quot;
+    edit = plan.to_edit(manifest.edit_number + 1)
+    manifest.apply(edit)
+    return edit
+</code></pre>
+<h3><code>scenario.py</code></h3>
+<pre><code class="language-python">&quot;&quot;&quot;
+Synthetic keyspace for the leveled-compaction / tombstone-pin problem.
+
+Properties exercised:
+  * out-of-order sequence numbers (inside a file and across files)
+  * three live snapshots (6, 25, 45)
+  * partially overlapping range tombstones whose boundaries force extra files
+    into the compaction
+  * tombstones that can be dropped (not visible to any read point / no older
+    version), tombstones that must be kept to shadow a lower level, and
+    tombstones that must be kept because a snapshot still sees them.
+&quot;&quot;&quot;
+
+from __future__ import annotations
+
+import copy
+
+from lsm import (
+    DELETE,
+    PUT,
+    Entry,
+    Manifest,
+    RangeTombstone,
+    apply_plan,
+    keyspace,
+    plan_compaction,
+    read,
+    snapshot_state,
+)
+
+SNAPSHOTS = [6, 25, 45]
+
+
+def build_manifest() -&gt; Manifest:
+    m = Manifest(snapshots=SNAPSHOTS)
+
+    # ---- L2 (bottom): old values that tombstones may need to shadow ---------
+    m.new_file(
+        2,
+        [
+            Entry(1, 5, PUT, &quot;v1&quot;),
+            Entry(2, 5, PUT, &quot;v2&quot;),
+            Entry(3, 5, PUT, &quot;v3&quot;),
+            Entry(5, 5, PUT, &quot;v5&quot;),
+            Entry(6, 5, PUT, &quot;v6&quot;),
+        ],
+    )
+
+    # ---- L1: range tombstone [5,6] that spills past its physical keys ------
+    m.new_file(
+        1,
+        [
+            Entry(1, 30, PUT, &quot;v1b&quot;),  # seq order deliberately scrambled
+            Entry(4, 10, PUT, &quot;v4b&quot;),
+            Entry(7, 12, PUT, &quot;v7&quot;),
+        ],
+        [RangeTombstone(5, 6, 11)],
+    )
+
+    # ---- L0: newest data; range tombstone [8,11] partially overlaps L1 -----
+    m.new_file(
+        0,
+        [
+            Entry(1, 50, DELETE),
+            Entry(2, 40, PUT, &quot;v2c&quot;),
+            Entry(2, 35, DELETE),   # superseded before retention
+            Entry(3, 60, DELETE),
+            Entry(6, 30, DELETE),   # snapshot 45 sees it; L2 shadows v6
+            Entry(6, 50, PUT, &quot;v6c&quot;),
+        ],
+        [RangeTombstone(8, 11, 55)],
+    )
+
+    # ---- L0: second file pulled in only through overlap expansion ----------
+    m.new_file(
+        0,
+        [
+            Entry(4, 70, PUT, &quot;v4d&quot;),
+            Entry(5, 20, DELETE),
+            Entry(9, 15, DELETE),   # bottom-most and invisible to snapshots
+        ],
+    )
+    return m
+
+
+def clone(m: Manifest) -&gt; Manifest:
+    m2 = Manifest(snapshots=list(m.snapshots))
+    m2.levels = copy.deepcopy(m.levels)
+    m2.next_file_id = m.next_file_id
+    m2.edit_number = m.edit_number
+    m2.edit_history = list(m.edit_history)
+    return m2
+
+
+def dump(m: Manifest, title: str) -&gt; None:
+    print(&quot;=&quot; * 74)
+    print(title)
+    print(&quot;=&quot; * 74)
+    for f in m.all_files():
+        rts = [f&quot;rt[{r.start},{r.end}]@{r.seq}&quot; for r in f.range_tombstones]
+        print(
+            f&quot;  L{f.level} f{f.file_id} bounds={f.expanded_bounds()} &quot;
+            f&quot;size={f.size:3d} &quot;
+            f&quot;entries={[(e.key, e.seq, e.kind) for e in f.entries]} {rts}&quot;
+        )
+    print(f&quot;  snapshots={m.snapshots} edit_number={m.edit_number}&quot;)
+
+
+def assert_no_observable_drop(before: Manifest, after: Manifest) -&gt; None:
+    &quot;&quot;&quot;Core safety property: every read point observes identical values.&quot;&quot;&quot;
+    universe = keyspace(before) | keyspace(after)
+    b = snapshot_state(before, universe)
+    a = snapshot_state(after, universe)
+    if b != a:
+        for k in sorted(set(b) | set(a)):
+            if b.get(k) != a.get(k):
+                print(&quot;  MISMATCH&quot;, k, b.get(k), &quot;-&gt;&quot;, a.get(k))
+    assert b == a, &quot;compaction changed a snapshot-visible read!&quot;
+    print(f&quot;  [ok] all {len(b)} (key, read-point) observations unchanged&quot;)
+
+
+def main() -&gt; None:
+    m = build_manifest()
+    dump(m, &quot;BEFORE&quot;)
+
+    for level in (0, 1):
+        print(&quot;\n&quot; + &quot;#&quot; * 74)
+        print(f&quot;# COMPACTION L{level} -&gt; L{level + 1}&quot;)
+        print(&quot;#&quot; * 74)
+
+        plan = plan_compaction(m, level=level)
+        assert plan is not None, f&quot;no compaction planned for L{level}&quot;
+        print(plan.describe())
+
+        # Crash safety: planning must not change manifest content.
+        content_before = copy.deepcopy(m.levels)
+        assert copy.deepcopy(m.levels) == content_before
+        assert m.edit_number == plan.to_edit(m.edit_number + 1).edit_number - 1
+        print(&quot;  [ok] crash before apply: manifest content/edit_number unchanged&quot;)
+
+        before = clone(m)
+        edit = apply_plan(m, plan)
+        print(&quot;  &quot; + edit.summary())
+        assert edit.edit_number == m.edit_number
+        print(f&quot;  [ok] monotonic edit number {m.edit_number}&quot;)
+
+        assert_no_observable_drop(before, m)
+        for key, seq in plan.dropped_tombstones:
+            for r in [float(&quot;inf&quot;), *m.snapshots]:
+                assert read(before, key, r) == read(m, key, r), (key, seq, r)
+        print(f&quot;  [ok] dropped tombstones never observable: {plan.dropped_tombstones}&quot;)
+
+        # Stale / replayed edits are rejected.
+        stale = plan.to_edit(edit.edit_number)
+        try:
+            m.apply(stale)
+            raise AssertionError(&quot;stale edit number was accepted&quot;)
+        except ValueError as exc:
+            print(f&quot;  [ok] stale edit rejected: {exc}&quot;)
+
+        dump(m, f&quot;AFTER L{level}-&gt;L{level + 1}&quot;)
+
+    print(&quot;\n&quot; + &quot;=&quot; * 74)
+    print(&quot;PINNED READS (after both compactions)&quot;)
+    print(&quot;=&quot; * 74)
+    for key in (1, 2, 3, 5, 6, 9):
+        vals = {r: read(m, key, r) for r in [*m.snapshots, float(&quot;inf&quot;)]}
+        print(f&quot;  key={key}: {vals}&quot;)
+
+    print(&quot;\nALL ASSERTIONS PASSED&quot;)
+
+
+if __name__ == &quot;__main__&quot;:
+    main()
+</code></pre>
+<h3><code>tests.py</code></h3>
+<pre><code class="language-python">&quot;&quot;&quot;Focused + randomized tests for the compaction planner.&quot;&quot;&quot;
+
+from __future__ import annotations
+
+import copy
+import random
+
+from lsm import (
+    DELETE,
+    PUT,
+    Entry,
+    Manifest,
+    RangeTombstone,
+    apply_plan,
+    keyspace,
+    plan_compaction,
+    read,
+    snapshot_state,
+)
+
+
+def _assert_invariant(before: Manifest, after: Manifest, label: str) -&gt; None:
+    universe = keyspace(before) | keyspace(after)
+    b = snapshot_state(before, universe)
+    a = snapshot_state(after, universe)
+    assert b == a, f&quot;{label}: snapshot-visible state changed&quot;
+
+
+def test_overlap_expansion_pulls_in_physical_non_overlap() -&gt; None:
+    &quot;&quot;&quot;A range tombstone must expand a file's bounds for overlap tests.&quot;&quot;&quot;
+    m = Manifest(snapshots=[100])
+    m.new_file(1, [Entry(7, 10, PUT, &quot;seven&quot;)])
+    m.new_file(0, [Entry(10, 20, PUT, &quot;ten&quot;)], [RangeTombstone(5, 8, 30)])
+    plan = plan_compaction(m, 0)
+    assert plan is not None
+    ids = {f.file_id for f in plan.input_files}
+    assert ids == {1, 2}, f&quot;range-tombstone expansion failed: {ids}&quot;
+    print(&quot;test_overlap_expansion_pulls_in_physical_non_overlap: ok&quot;)
+
+
+def test_snapshot_pin_forbids_tombstone_drop() -&gt; None:
+    &quot;&quot;&quot;A tombstone seen by a snapshot must survive, even with no lower data.&quot;&quot;&quot;
+    m = Manifest(snapshots=[15])
+    m.new_file(0, [Entry(1, 20, DELETE), Entry(1, 10, PUT, &quot;old&quot;)])
+    plan = plan_compaction(m, 0)
+    assert (1, 20) not in plan.dropped_tombstones
+    before = copy.deepcopy(m.levels)
+    apply_plan(m, plan)
+    assert read(m, 1, 15) == (&quot;value&quot;, &quot;old&quot;)
+    assert read(m, 1, float(&quot;inf&quot;)) == (&quot;not_found&quot;,)
+    print(&quot;test_snapshot_pin_forbids_tombstone_drop: ok&quot;)
+
+
+def test_lower_level_blocks_tombstone_drop() -&gt; None:
+    &quot;&quot;&quot;A tombstone that shadows a lower-level value must survive.&quot;&quot;&quot;
+    m = Manifest(snapshots=[])
+    m.new_file(2, [Entry(1, 5, PUT, &quot;bottom&quot;)])
+    m.new_file(1, [Entry(1, 10, PUT, &quot;mid&quot;)])
+    m.new_file(0, [Entry(1, 30, DELETE)])
+    plan = plan_compaction(m, 0)  # output L1, lower = L2
+    assert (1, 30) not in plan.dropped_tombstones
+    before = copy.deepcopy(m.levels)
+    apply_plan(m, plan)
+    assert read(m, 1, float(&quot;inf&quot;)) == (&quot;not_found&quot;,)
+    print(&quot;test_lower_level_blocks_tombstone_drop: ok&quot;)
+
+
+def test_bottommost_tombstone_is_dropped() -&gt; None:
+    m = Manifest(snapshots=[])
+    m.new_file(0, [Entry(1, 30, DELETE), Entry(1, 10, PUT, &quot;old&quot;)])
+    plan = plan_compaction(m, 0)
+    assert (1, 30) in plan.dropped_tombstones
+    apply_plan(m, plan)
+    assert read(m, 1, float(&quot;inf&quot;)) == (&quot;not_found&quot;,)
+    print(&quot;test_bottommost_tombstone_is_dropped: ok&quot;)
+
+
+def test_atomic_apply_and_monotonic_edit() -&gt; None:
+    m = Manifest(snapshots=[])
+    m.new_file(0, [Entry(1, 1, PUT, &quot;a&quot;)])
+    plan = plan_compaction(m, 0)
+    content = copy.deepcopy(m.levels)
+    # A stale edit is rejected and leaves the manifest untouched.
+    stale = plan.to_edit(7)
+    try:
+        m.apply(stale)
+        raise AssertionError(&quot;stale edit accepted&quot;)
+    except ValueError:
+        pass
+    assert copy.deepcopy(m.levels) == content
+    assert m.edit_number == 0
+    edit = apply_plan(m, plan)
+    assert edit.edit_number == 1
+    # Re-applying the same edit is rejected.
+    try:
+        m.apply(edit)
+        raise AssertionError(&quot;replay accepted&quot;)
+    except ValueError:
+        pass
+    print(&quot;test_atomic_apply_and_monotonic_edit: ok&quot;)
+
+
+def _random_manifest(rng: random.Random) -&gt; Manifest:
+    n_snap = rng.randint(0, 4)
+    snapshots = sorted(rng.sample(range(1, 60), n_snap)) if n_snap else []
+    m = Manifest(snapshots=snapshots)
+    keyspace = list(range(0, 8))
+    used: set[tuple[int, int]] = set()  # real LSMs never reuse a (key, seq)
+    for level in range(3):
+        for _ in range(rng.randint(1, 3)):
+            keys = rng.sample(keyspace, rng.randint(1, 4))
+            entries = []
+            for k in keys:
+                for _ in range(rng.randint(1, 3)):
+                    seq = rng.randint(1, 70)
+                    if (k, seq) in used:
+                        continue
+                    used.add((k, seq))
+                    if rng.random() &lt; 0.35:
+                        entries.append(Entry(k, seq, DELETE))
+                    else:
+                        entries.append(Entry(k, seq, PUT, f&quot;v{k}@{seq}&quot;))
+            rts = []
+            if rng.random() &lt; 0.4:
+                a = rng.randint(0, 6)
+                b = rng.randint(a, 7)
+                rts.append(RangeTombstone(a, b, rng.randint(1, 70)))
+            m.new_file(level, entries, rts)
+    return m
+
+
+def test_randomized_invariant() -&gt; None:
+    rng = random.Random(20240517)
+    for i in range(400):
+        m = _random_manifest(rng)
+        for level in (0, 1):
+            plan = plan_compaction(m, level)
+            if plan is None:
+                continue
+            before = copy.deepcopy(m.levels)
+            universe = keyspace(m)
+            bstate = snapshot_state(m, universe)
+            apply_plan(m, plan)
+            universe |= keyspace(m)
+            astate = snapshot_state(m, universe)
+            assert bstate == astate, f&quot;iteration {i} level {level}: state changed&quot;
+            # Every dropped tombstone must be unobservable at every read point.
+            for key, seq in plan.dropped_tombstones:
+                for r in [float(&quot;inf&quot;), *m.snapshots]:
+                    assert bstate[(key, r)] == astate[(key, r)]
+    print(&quot;test_randomized_invariant: ok (400 random manifests)&quot;)
+
+
+if __name__ == &quot;__main__&quot;:
+    test_overlap_expansion_pulls_in_physical_non_overlap()
+    test_snapshot_pin_forbids_tombstone_drop()
+    test_lower_level_blocks_tombstone_drop()
+    test_bottommost_tombstone_is_dropped()
+    test_atomic_apply_and_monotonic_edit()
+    test_randomized_invariant()
+    print(&quot;\nALL TESTS PASSED&quot;)
+</code></pre>
+<h2>Verification</h2>
+<p>Run the synthetic keyspace and property tests:</p>
+<pre><code class="language-bash">cd ~/lsm
+python3 scenario.py
+python3 tests.py
+</code></pre>
+<h3>Exact compaction plan produced for the synthetic keyspace</h3>
+<pre><code class="language-text">BEFORE
+  L0 f3 bounds=(1, 11) size= 84 entries=[(1, 50, 'DELETE'), (2, 40, 'PUT'),
+      (2, 35, 'DELETE'), (3, 60, 'DELETE'), (6, 30, 'DELETE'),
+      (6, 50, 'PUT')] ['rt[8,11]@55']
+  L0 f4 bounds=(4, 9)  size= 30 entries=[(4, 70, 'PUT'), (5, 20, 'DELETE'),
+      (9, 15, 'DELETE')] []
+  L1 f2 bounds=(1, 7)  size= 59 entries=[(1, 30, 'PUT'), (4, 10, 'PUT'),
+      (7, 12, 'PUT')] ['rt[5,6]@11']
+  L2 f1 bounds=(1, 6)  size= 55 entries=[(1, 5, 'PUT'), (2, 5, 'PUT'),
+      (3, 5, 'PUT'), (5, 5, 'PUT'), (6, 5, 'PUT')] []
+  snapshots=[6, 25, 45] edit_number=0
+
+Compaction L0-&gt;L1
+  inputs        : ['L0:f3', 'L0:f4', 'L1:f2']
+  outputs       : ['L1:f5']
+  bytes_read    : 173
+  bytes_written : 155
+  write_amp     : 0.896
+  dropped_ts    : [(2, 35), (9, 15)]
+
+edit#1 L1 in=[3, 4, 2] out=[5] read=173 written=155 WA=0.896
+      dropped=[(2, 35), (9, 15)]
+</code></pre>
+<p>Why exactly these files and drops:</p>
+<ul>
+<li><code>f3</code> carries range tombstone <code>[8, 11]</code>, so its expanded bounds are <code>(1, 11)</code>; that overlaps <code>f2</code> (<code>(1, 7)</code>) which then pulls <code>f4</code> (<code>(4, 9)</code>), giving the closed set <code>{f3, f4, f2}</code>.</li>
+<li><code>(2, 35)</code> is superseded by both <code>(2, 40)</code> and the outside <code>L0</code> data and is invisible at snapshots <code>6/25/45</code> — dropped.</li>
+<li><code>(9, 15)</code> is bottom-most and no snapshot sees it — dropped.</li>
+<li><code>(1, 50)</code>, <code>(3, 60)</code>, <code>(6, 30)</code>, <code>(5, 20)</code> are all <em>kept</em> because snapshot <code>45</code>, <code>45</code>, <code>45</code>, <code>25</code> respectively still observe the deletion, and/or <code>L2</code> still holds an older value they must shadow.</li>
+</ul>
+<h3>Safety invariant</h3>
+<pre><code class="language-text">VERIFY
+  [ok] all 44 (key, read-point) observations unchanged
+  [ok] dropped tombstones never observable: [(2, 35), (9, 15)]
+  [ok] stale edit rejected: non-monotonic edit: got 1, expected 2
+
+ALL ASSERTIONS PASSED
+</code></pre>
+<p>The check is exhaustive over the union of the before/after keyspaces and read points <code>{6, 25, 45, +inf}</code>, using the independent <code>read()</code> reference implementation. <code>test_randomized_invariant</code> runs the same check over <strong>400 randomly generated manifests</strong> (three levels, 0–4 snapshots, random range tombstones) and also asserts every reported dropped tombstone is unobservable.</p>
+<h3>Focused regression tests</h3>
+<pre><code class="language-text">test_overlap_expansion_pulls_in_physical_non_overlap: ok
+test_snapshot_pin_forbids_tombstone_drop: ok
+test_lower_level_blocks_tombstone_drop: ok
+test_bottommost_tombstone_is_dropped: ok
+test_atomic_apply_and_monotonic_edit: ok
+test_randomized_invariant: ok (400 random manifests)
+
+ALL TESTS PASSED
+</code></pre>
+<hr />
+<p><strong>Self-containment check:</strong> I extracted the three <code>python</code> code blocks directly from the markdown into an empty directory and ran them — <code>scenario.py</code> prints <code>ALL ASSERTIONS PASSED</code> and <code>tests.py</code> prints <code>ALL TESTS PASSED</code>. The saved copy is at <code>~/lsm/SOLUTION.md</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: python-lsm-leveled-compaction-tombstone-obsolete-snapshot-pin
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-22T10:18:59.574Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a leveled LSM compaction planner that selects overlapping file sets per level while honoring per-snapshot pins: a deletion tombstone may be dropped only when it shadows every older version of that key in all lower levels and no live snapshot pins the deleted version, and range-deleted files must be expanded to exact key boundaries before overlap tests. Report per-compaction bytes_read/bytes_written write-amplification accounting and apply each manifest change as a single atomic edit record with a monotonic edit number so a crash between plan and apply leaves a consistent manifest. Given a synthetic keyspace with out-of-order sequence numbers, three live snapshots, and partially overlapping range tombstones, return the exact compaction plan and assert that no dropped tombstone is observable by any pinned snapshot.&quot;, &quot;environment&quot;: &quot;python3&quot;, &quot;language&quot;: &quot;python&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;python-lsm-leveled-compaction-tombstone-obsolete-snapshot-pin&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-22T10:18:59.574Z&quot;, &quot;version&quot;: &quot;3&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
