@@ -500,11 +500,23 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	res, err := s.Store.Discovery(r.Context(), slug, req.Environment, req.Language, req.Version, includeRelated)
 	if err != nil {
 		if errors.Is(err, graph.ErrNotFound) {
+			// Discovery miss: the class is absent from the catalog. The
+			// counter is request-path (not the stats hit_rate ratio) and
+			// is recorded only for real outcomes — the 400 arm above and
+			// the 500 arm below record nothing.
+			if s.Observer != nil {
+				s.Observer.RecordDiscovery(false)
+			}
 			writeError(w, http.StatusNotFound, "not_found", "problem class not found")
 			return
 		}
 		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
+	}
+	// Discovery outcome for /metrics: an exact answer is a hit, a
+	// resolution without one (related edges only) is a miss.
+	if s.Observer != nil {
+		s.Observer.RecordDiscovery(res.Exact != nil)
 	}
 	// Initialize both collection fields to non-nil empty slices so the
 	// response always honors the published array contract, even when

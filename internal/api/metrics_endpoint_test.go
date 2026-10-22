@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
 )
 
@@ -107,6 +108,99 @@ func TestMetricsRouterDispatch(t *testing.T) {
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /metrics via Handler() = %d, want 200 (route must stay registered)", resp.StatusCode)
+	}
+}
+
+// ch:trace row=REVIEW-OB-019 spec=internal/metrics/metrics.go#Observer wave=none:serial-slot test=internal/api/metrics_endpoint_test.go::TestMetricsDiscoveryCounters doc=none:reason evidence=commit
+//
+// TestMetricsDiscoveryCounters pins the additive discovery counters
+// (REVIEW-OB-019): POST /api/v1/problems/discover records a hit when an
+// exact answer resolves, a miss on the 404 not_found arm, and nothing
+// for a 400 invalid request; GET /metrics then serves discovery_hits and
+// discovery_misses as real JSON keys. The counters are request-path
+// telemetry and must not shadow the catalog-wide /api/v1/stats hit_rate.
+func TestMetricsDiscoveryCounters(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	s.Observer = metrics.New(1<<30, log.New(testDiscard{}, "", 0))
+	seedClass(t, store, "ob019-hit", "permissions", "docker", "go", "1.0", "use --user", graph.AnswerVerified)
+
+	// Hit arm: an existing class resolves an exact answer.
+	rr := do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{
+		ProblemClass: "ob019-hit",
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "1.0",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("discover (seeded class) status = %d, want 200, body = %s", rr.Code, rr.Body.String())
+	}
+	var found discoverResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &found); err != nil {
+		t.Fatalf("decode discover: %v", err)
+	}
+	if !found.Found {
+		t.Fatalf("discover found = false for the seeded class, want true")
+	}
+
+	// Miss arm: an absent class answers 404 not_found.
+	rr = do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{ProblemClass: "ob019-absent"})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("discover (absent class) status = %d, want 404, body = %s", rr.Code, rr.Body.String())
+	}
+
+	// 400 arm: an invalid request records nothing.
+	rr = do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("discover (invalid request) status = %d, want 400, body = %s", rr.Code, rr.Body.String())
+	}
+
+	rr = do(t, s, "GET", "/metrics", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("GET /metrics status = %d, want 200", rr.Code)
+	}
+	// Presence, not just value: decoding into Snapshot would silently
+	// accept a zero when the JSON tag is missing, so read the raw keys.
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("/metrics body is not a JSON object: %v\n%s", err, rr.Body.String())
+	}
+	for _, key := range []string{"discovery_hits", "discovery_misses"} {
+		if _, ok := raw[key]; !ok {
+			t.Errorf("/metrics payload is missing the %q key; body = %s", key, rr.Body.String())
+		}
+	}
+	if _, ok := raw["hit_rate"]; ok {
+		t.Errorf("/metrics must not serve a hit_rate field — that ratio belongs to /api/v1/stats; body = %s", rr.Body.String())
+	}
+	var hits, misses int64
+	if err := json.Unmarshal(raw["discovery_hits"], &hits); err != nil {
+		t.Fatalf("decode discovery_hits: %v", err)
+	}
+	if err := json.Unmarshal(raw["discovery_misses"], &misses); err != nil {
+		t.Fatalf("decode discovery_misses: %v", err)
+	}
+	if hits != 1 {
+		t.Errorf("discovery_hits = %d, want 1 (one 200 discover; the 400 must not count)", hits)
+	}
+	if misses != 1 {
+		t.Errorf("discovery_misses = %d, want 1 (one 404 not_found)", misses)
+	}
+
+	// Nil observer (metrics disabled) must not panic the discover path
+	// with the nil-check the handler shares with handleMetrics.
+	s.Observer = nil
+	rr = do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{
+		ProblemClass: "ob019-hit",
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "1.0",
+	})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("discover with nil observer status = %d, want 200 (no panic), body = %s", rr.Code, rr.Body.String())
+	}
+	rr = do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{ProblemClass: "ob019-absent"})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("discover miss with nil observer status = %d, want 404 (no panic), body = %s", rr.Code, rr.Body.String())
 	}
 }
 

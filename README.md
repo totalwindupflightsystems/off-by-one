@@ -171,7 +171,8 @@ For detailed integration examples and a per-route reference, see [`docs/integrat
 
 `GET /metrics` returns the daemon's runtime metrics snapshot (fields include
 `solve_count`, `solve_rejected`, `over_budget`, and `alert_threshold_bytes`); it
-answers 404 when the metrics observer is not configured.
+answers 404 when the metrics observer is not configured. It also carries
+`discovery_hits`/`discovery_misses` — per-request counters for `POST /api/v1/problems/discover` (hit = answer found, miss = `not_found`), distinct from the catalog-wide `hit_rate` on `/api/v1/stats`.
 
 ### Example: Submit a Problem
 
