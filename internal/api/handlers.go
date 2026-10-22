@@ -486,6 +486,13 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 	pc, err := s.resolveClass(r.Context(), req.ProblemClass)
 	if err != nil {
 		if errors.Is(err, graph.ErrNotFound) {
+			// The class itself is absent, so discovery never runs — but
+			// from the caller's side this is still a discovery miss
+			// (404 not_found), and the /metrics counter must move
+			// (wave integration of REVIEW-OB-019 + REVIEW-OB-020).
+			if s.Observer != nil {
+				s.Observer.RecordDiscovery(false)
+			}
 			writeError(w, http.StatusNotFound, "not_found", "problem class not found")
 			return
 		}
