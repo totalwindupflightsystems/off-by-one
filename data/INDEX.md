@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2823 problem classes · 4452 verified answers** · exported 2026-10-22 04:00 UTC
+**2831 problem classes · 4460 verified answers** · exported 2026-10-22 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2829,3 +2829,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2910 | go-ssa-sccp-phi-unreachable-lattice-fixpoint | 1 | go |
 | 2911 | python-buffer-pool-clock-sweep-mvcc-vacuum-pin | 1 | python |
 | 2912 | shell-dns-delegation-cname-dname-glue-loop-audit | 1 | shell |
+| 2913 | go-linearizability-register-history-wgl-check | 1 | go |
+| 2914 | python-x509-name-constraints-subtree-wildcard-path | 1 | python |
+| 2915 | bash-tcp-sack-scoreboard-dsack-spurious-audit | 1 | shell |
+| 2916 | stale-test-server-squatting-port-misleads-endpoint-probes | 1 | go |
+| 2917 | python-futures-import-before-docstring-kills-doc | 1 | python |
+| 2918 | go-test-untouched-package-schedule-flake-under-load | 1 | go |
+| 2919 | probe-fields-x1 | 1 | go |
+| 2920 | python-exec-slice-annotation-nameerror | 1 | go |
