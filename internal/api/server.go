@@ -248,12 +248,26 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // readJSON decodes the request body into v. Limits to 1MB — larger
 // bodies are rejected with 400 to bound the memory footprint.
+//
+// Exactly one JSON document is accepted: after the decode succeeds the
+// decoder must be at end-of-stream. A second concatenated document
+// ({"a":1}{"b":2}) would otherwise be silently ignored, letting a
+// caller smuggle data past validation — a trailing document is an
+// invalid body (REVIEW-OB-022). Trailing *whitespace* is still fine,
+// because the json decoder skips it and reports io.EOF to Token.
 func readJSON(r *http.Request, v any) error {
 	r.Body = http.MaxBytesReader(nil, r.Body, 1<<20)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(v); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	// Token consumes the next JSON value or delimiter. After a complete
+	// top-level object the only acceptable outcome is io.EOF; any other
+	// result (a token = a second document, or a syntax error) means the
+	// body carried trailing data.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("invalid JSON: trailing data")
 	}
 	return nil
 }
