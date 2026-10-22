@@ -87,6 +87,14 @@ type Observer struct {
 	skips       int64
 	lastSkipped *HostSnapshot
 	lastHost    *HostSnapshot
+
+	// discoveryHits/discoveryMisses are request-path counters for
+	// POST /api/v1/problems/discover. They are deliberately separate
+	// from the /api/v1/stats hit_rate ratio, which is
+	// verified_answers/total_answers over the catalog — not a
+	// discovery-outcome measure.
+	discoveryHits   int64
+	discoveryMisses int64
 }
 
 // New returns an Observer that keeps the last keepRecent records and
@@ -163,6 +171,24 @@ func (o *Observer) RecordHost(snap HostSnapshot) {
 	o.mu.Unlock()
 }
 
+// RecordDiscovery counts one discover request outcome: found true when
+// the request resolved an exact answer, false when the problem class
+// was absent (the 404 not_found arm). Invalid requests (400) and
+// internal errors (500) are not counted — they measure the caller and
+// the store respectively, not discovery outcomes.
+func (o *Observer) RecordDiscovery(found bool) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	if found {
+		o.discoveryHits++
+	} else {
+		o.discoveryMisses++
+	}
+	o.mu.Unlock()
+}
+
 // Skips returns the number of runs skipped for host pressure.
 func (o *Observer) Skips() int64 {
 	if o == nil {
@@ -196,6 +222,15 @@ type Snapshot struct {
 	// SkippedHostPressure counts cron/feeder runs skipped because the
 	// host was under pressure (load or memory gate tripped).
 	SkippedHostPressure int64 `json:"skipped_host_pressure"`
+	// DiscoveryHits counts POST /api/v1/problems/discover requests that
+	// resolved an exact answer. A request-path counter: distinct from
+	// the /api/v1/stats hit_rate ratio (verified_answers/total_answers),
+	// which measures catalog coverage, not discovery outcomes.
+	DiscoveryHits int64 `json:"discovery_hits"`
+	// DiscoveryMisses counts discover requests that found no answer for
+	// the requested problem class (the 404 not_found arm). 400/500
+	// responses are not counted.
+	DiscoveryMisses int64 `json:"discovery_misses"`
 	// OverBudget solves — peak RSS exceeded the alert threshold.
 	OverBudget int `json:"over_budget"`
 	// Rejected solves — the harness refused the solve because its
@@ -227,6 +262,8 @@ func (o *Observer) Snapshot() Snapshot {
 	snap := Snapshot{
 		SolveCount:          len(o.records),
 		SkippedHostPressure: o.skips,
+		DiscoveryHits:       o.discoveryHits,
+		DiscoveryMisses:     o.discoveryMisses,
 		AlertThresholdBytes: o.alertBytes,
 	}
 	var maxRSS uint64

@@ -171,3 +171,44 @@ func TestSnapshotRejected(t *testing.T) {
 		t.Errorf("Recent = %+v, want the first record stamped Rejected", recent)
 	}
 }
+
+// TestRecordDiscovery pins the request-path discovery counters
+// (REVIEW-OB-019): found=true increments hits, found=false increments
+// misses, and Snapshot surfaces both. They are independent of the solve
+// records and of the /api/v1/stats hit_rate ratio.
+func TestRecordDiscovery(t *testing.T) {
+	obs := New(DefaultRSSAlertBytes, log.Default())
+
+	snap := obs.Snapshot()
+	if snap.DiscoveryHits != 0 || snap.DiscoveryMisses != 0 {
+		t.Fatalf("fresh snapshot discovery counters = (%d, %d), want (0, 0)",
+			snap.DiscoveryHits, snap.DiscoveryMisses)
+	}
+
+	obs.RecordDiscovery(true)
+	obs.RecordDiscovery(true)
+	obs.RecordDiscovery(false)
+
+	snap = obs.Snapshot()
+	if snap.DiscoveryHits != 2 {
+		t.Errorf("DiscoveryHits = %d, want 2", snap.DiscoveryHits)
+	}
+	if snap.DiscoveryMisses != 1 {
+		t.Errorf("DiscoveryMisses = %d, want 1", snap.DiscoveryMisses)
+	}
+	// Recording discovery outcomes must not disturb the solve ledger.
+	if snap.SolveCount != 0 {
+		t.Errorf("SolveCount = %d, want 0 after RecordDiscovery", snap.SolveCount)
+	}
+}
+
+// TestRecordDiscoveryNilObserver — a nil *Observer is a no-op, so the
+// handler's nil-check and the method-level guard cannot panic.
+func TestRecordDiscoveryNilObserver(t *testing.T) {
+	var obs *Observer
+	obs.RecordDiscovery(true)
+	obs.RecordDiscovery(false)
+	if snap := obs.Snapshot(); snap.DiscoveryHits != 0 || snap.DiscoveryMisses != 0 {
+		t.Errorf("nil observer snapshot = %+v, want zeroed", snap)
+	}
+}
