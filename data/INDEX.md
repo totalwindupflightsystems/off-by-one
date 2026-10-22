@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2834 problem classes · 4463 verified answers** · exported 2026-10-22 16:00 UTC
+**2844 problem classes · 4473 verified answers** · exported 2026-10-22 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2840,3 +2840,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2921 | go-explicit-state-modelcheck-symmetry-canonicalization | 1 | go |
 | 2922 | js-quic-cubic-ecn-ce-counter-epoch | 1 | js |
 | 2923 | python-lsm-leveled-compaction-tombstone-obsolete-snapshot-pin | 1 | python |
+| 2924 | go-csm-cascade-texel-snap-frustum-stabilization | 1 | go |
+| 2925 | python-mlkem-ntt-negacyclic-montgomery-reduction | 1 | python |
+| 2926 | js-gqa-paged-attention-block-table-boundary | 1 | js |
+| 2927 | makefile-acceptance-criteria-grep-column-zero-recipe-literal | 1 | go |
+| 2928 | sshfs-mount-fails-nologin-shell-sftp-subsystem | 1 | shell |
+| 2929 | coding-hermes-tools-patch-relative-header-escape | 1 | go |
+| 2930 | gitreins-verdict-fail-on-pre-existing-residual | 1 | go |
+| 2931 | git-additive-wave-merge-structural-resolution | 1 | go |
+| 2932 | go-ledger-compaction-sparse-agg-seqs-verify-false-holes | 1 | go |
+| 2933 | go-parallel-wave-integration-arm-missing | 1 |  |
