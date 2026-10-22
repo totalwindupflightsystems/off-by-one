@@ -1,0 +1,28 @@
+{
+  "class_id": 2911,
+  "title": "python-buffer-pool-clock-sweep-mvcc-vacuum-pin",
+  "description": "python-buffer-pool-clock-sweep-mvcc-vacuum-pin",
+  "created_at": "2026-10-21 22:10:50",
+  "answers": [
+    {
+      "answer_id": 4643,
+      "language": "python",
+      "environment": "python3",
+      "version": "3.11",
+      "solution": "Done. The complete solution is at **`~/solution/SOLUTION.md`** (1,216 lines), with the verified implementation in `buffer_pool.py` and tests in `test_buffer_pool.py`.\n\n## Diagnosis (root cause)\n\nThe whole hazard set is one missing property: **there is no single atomic decision point tying pin acquisition, the eviction predicate, and a frame's flush state together.** Concretely:\n\n| # | Defect | Consequence |\n|---|--------|-------------|\n| 1 | `pin_count += 1` and sweep-victim selection not atomic | pinned page evicted / frame theft |\n| 2 | page-table entry removed before write-back finishes | re-entrant load races in-flight flush → lost dirty write |\n| 3 | `disk.write` before `wal.flush(page_lsn)` | data page newer than durable log |\n| 4 | MVCC snapshot holds no *buffer* pin; eviction/vacuum test only `pin_count` | open transaction's page reclaimed |\n| 5 | flush unconditionally sets `dirty = False` | write landing during flush is lost |\n| 6 | vacuum ignores active snapshots | dead-but-visible version reclaimed |\n\n## The fix\n\nA frame state machine (`FREE / LOADING / RESIDENT / FLUSHING`) plus one metadata mutex; disk/WAL I/O runs outside the lock while `FLUSHING + evict_pending` reserves the frame:\n\n1. **Atomic pin vs. sweep** — pin increment and victim choice happen under the same lock.\n2. **Reservation prevents double eviction** — dirty victim is marked `FLUSHING` *before* I/O; page-table removal happens once, after I/O, only if still unclaimed.\n3. **Log-before-data** — `_do_flush()` does `wal.flush(page_lsn)` then `disk.write_page(..., flushed_lsn)`.\n4. **Version guard** — `version` bumps on each write; flush clears `dirty` only if `version` is unchanged.\n5. **`mvcc_pins` is a real pin** — `Snapshot.pin()` converts a buffer pin into a long-lived MVCC pin; eviction and vacuum both test it.\n6. **Vacuum consults snapshots** — reclaims only when no active `read_ts < deleted_ts` and no pin exists.\n\n## Verification\n\n```bash\ncd ~/solution && python3 -m unittest -v test_buffer_pool\n```\n\nResult: **12/12 tests pass** (0.43s). The suite deterministically gates the disk write to force the in-flight re-dirty and re-entrant-fetch races, and asserts `flushed_lsn >= page_lsn` for every physical write. A 16-thread / 64,000-op stress run (capacity 3, 120 pages) reports `evictions=57647, flushes=26719, order_violations=0`.\n\nI also re-extracted `buffer_pool.py` and `test_buffer_pool.py` **from the markdown itself** into a clean directory and reran the suite — 12/12 OK — confirming the document is self-contained and directly usable.\n",
+      "evidence": "# Evidence\n- Problem class: python-buffer-pool-clock-sweep-mvcc-vacuum-pin\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-21T22:10:49.222Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement a CLOCK-sweep buffer pool with pin/unpin refcounts, log-then-data WAL flush ordering for dirty pages, and MVCC snapshot pinning so neither eviction nor vacuum can reclaim a page still visible to an open transaction. Handle a page re-dirtied after flush while a snapshot pin is held, and guarantee no double-eviction or lost dirty write when a re-entrant fetch races the sweep hand.",
+        "environment": "python3",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "python-buffer-pool-clock-sweep-mvcc-vacuum-pin",
+        "provider": "openrouter",
+        "solved_at": "2026-10-21T22:10:49.222Z",
+        "version": "3.11"
+      },
+      "status": "verified",
+      "created_at": "2026-10-21 22:10:51"
+    }
+  ]
+}

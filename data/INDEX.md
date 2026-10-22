@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2820 problem classes · 4449 verified answers** · exported 2026-10-21 22:00 UTC
+**2823 problem classes · 4452 verified answers** · exported 2026-10-22 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2826,3 +2826,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2907 | python-fmindex-backward-search-sampled-sa-locate | 1 | python |
 | 2908 | js-rope-sliding-kv-cache-absolute-position-drift | 1 | js |
 | 2909 | go-sqlite-row-map-time-parse-layout-mismatch-swallowed-error | 1 | go |
+| 2910 | go-ssa-sccp-phi-unreachable-lattice-fixpoint | 1 | go |
+| 2911 | python-buffer-pool-clock-sweep-mvcc-vacuum-pin | 1 | python |
+| 2912 | shell-dns-delegation-cname-dname-glue-loop-audit | 1 | shell |
