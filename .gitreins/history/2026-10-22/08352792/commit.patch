@@ -1,0 +1,210 @@
+commit aa8d3501f8256633f7555dff627c5542450948b2
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Wed Oct 21 22:56:19 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Wed Oct 21 23:03:13 2026 -0500
+
+    fix(api): document /metrics + import 409 codes in OpenAPI spec and README — spec surface now matches mux. Addresses REVIEW-OB-015, REVIEW-OB-017, REVIEW-OB-018.
+    
+    REVIEW-OB-015: GET /metrics was registered on the mux (internal/api/server.go:118) but absent from pkg/api/openapi.yaml, which served 15 path keys. Added the /metrics path (operationId getMetrics, tags [stats], matching /health and /openapi.json) with both real response arms — 200 MetricsSnapshot and 404 Error for metrics_disabled when Observer is nil — plus a MetricsSnapshot component schema copied field-for-field from internal/metrics Snapshot/SolveRecord/HostSnapshot JSON tags. Note: Snapshot() does NOT include a recent slice (metrics.go comment: the bounded recent list is not part of the snapshot); only last_solve, last_host and last_skip_reason are omitempty, and the schema description says so. TestOpenAPISpec_AllEndpointsDocumented required-list extended with /metrics.
+    
+    REVIEW-OB-017: README architecture table said the HTTP server surface is 15 endpoints, a hand-written count that drifts with every route. Dropped it in favor of a pointer to /openapi.json as the authoritative endpoint list; the /metrics row in the README endpoints table (line 170) is untouched.
+    
+    REVIEW-OB-018: handleImport emits HTTP 409 with import_dest_not_empty (destination holds a non-empty answer set for this class) and source_repo_mismatch (existing shared clone origin differs from source_repo), but neither the docs nor the spec documented 409. docs/api-reference.md import section now documents both codes with trigger conditions and resolution; pkg/api/openapi.yaml gained a 409 arm on /api/v1/import with the same Error schema, and TestOpenAPISpec_ErrorResponsesDocumented now pins the exact set 200/400/409/500/501, keeping docs == spec.
+    
+    Verified before: 15 spec paths, import codes undocumented, README said 15 endpoints. Verified after: spec serves 16 paths with /metrics + MetricsSnapshot; live probe on a scratch instance (port 18711, fresh /tmp DB) returned 200 from /metrics with a shape matching the new schema; all three target test packages pass with -count=1.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ README.md                       |   2 +-
+ docs/api-reference.md           |   2 +-
+ pkg/api/error_responses_test.go |   4 +-
+ pkg/api/handlers_test.go        |   1 +
+ pkg/api/openapi.yaml            | 100 ++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 105 insertions(+), 4 deletions(-)
+
+diff --git a/README.md b/README.md
+index cef34418..1ea61ecd 100644
+--- a/README.md
++++ b/README.md
+@@ -50,7 +50,7 @@ A system that converts idle compute cycles into pre-verified answers for AI agen
+ | Component | Package | Role |
+ |-----------|---------|------|
+ | `cmd/off-by-one` | `main` | Main binary — wires all components, handles signals |
+-| `internal/api` | HTTP server + handlers | REST API on port 8766 (configurable), 15 endpoints |
++| `internal/api` | HTTP server + handlers | REST API on port 8766 (configurable) — see /openapi.json for the authoritative endpoint list |
+ | `internal/ingest` | Queue + submission | Priority queue with deduplication, Muster polling |
+ | `internal/sandbox` | Bubblewrap executor | Isolated solve environment with timeout |
+ | `internal/solver` | Pi Agent integration | Spawns pi-agent inside sandbox, parses output |
+diff --git a/docs/api-reference.md b/docs/api-reference.md
+index c608c82f..881d976c 100644
+--- a/docs/api-reference.md
++++ b/docs/api-reference.md
+@@ -553,7 +553,7 @@ Import answers from a git repository.
+ }
+ ```
+ 
+-**Status codes:** `200`, `400` (missing required fields), `501` (import not configured), `500` (import failed).
++**Status codes:** `200`, `400` (missing required fields), `409` (conflict — `import_dest_not_empty`: the target clone directory already contains a non-empty answer set for this class; resolve by changing `conflict_strategy` or clearing the destination. `source_repo_mismatch`: the existing shared local clone points at a different origin URL than `source_repo` — re-point or remove the stale clone), `501` (import not configured), `500` (import failed).
+ 
+ **Example**
+ 
+diff --git a/pkg/api/error_responses_test.go b/pkg/api/error_responses_test.go
+index e03c3e3c..ee9bfc71 100644
+--- a/pkg/api/error_responses_test.go
++++ b/pkg/api/error_responses_test.go
+@@ -18,7 +18,7 @@ const errorSchemaRef = "#/components/schemas/Error"
+ // endpoints that can fail on a default (unconfigured) install:
+ //
+ //	POST /api/v1/export  — 200, 400 (invalid request), 501 (not configured), 500 (failed)
+-//	POST /api/v1/import  — 200, 400 (invalid request), 501 (not configured), 500 (failed)
++//	POST /api/v1/import  — 200, 400 (invalid request), 409 (conflict: import_dest_not_empty or source_repo_mismatch), 501 (not configured), 500 (failed)
+ //	GET  /api/v1/problems — 200, 500 (internal error)
+ //
+ // Before OB-GAP-082 every one of these operations declared ONLY '200', so an
+@@ -39,7 +39,7 @@ func TestOpenAPISpec_ErrorResponsesDocumented(t *testing.T) {
+ 		want   []string
+ 	}{
+ 		{"/api/v1/export", "post", []string{"200", "400", "500", "501"}},
+-		{"/api/v1/import", "post", []string{"200", "400", "500", "501"}},
++		{"/api/v1/import", "post", []string{"200", "400", "409", "500", "501"}},
+ 		{"/api/v1/problems", "get", []string{"200", "500"}},
+ 	}
+ 
+diff --git a/pkg/api/handlers_test.go b/pkg/api/handlers_test.go
+index 797660ec..a709e7b6 100644
+--- a/pkg/api/handlers_test.go
++++ b/pkg/api/handlers_test.go
+@@ -41,6 +41,7 @@ func TestOpenAPISpec_AllEndpointsDocumented(t *testing.T) {
+ 		"/api/v1/stats",
+ 		"/openapi.json",
+ 		"/health",
++		"/metrics",
+ 	}
+ 	for _, p := range required {
+ 		if _, ok := paths[p]; !ok {
+diff --git a/pkg/api/openapi.yaml b/pkg/api/openapi.yaml
+index 03ef7fa5..f7784907 100644
+--- a/pkg/api/openapi.yaml
++++ b/pkg/api/openapi.yaml
+@@ -391,6 +391,12 @@ paths:
+             application/json:
+               schema:
+                 $ref: '#/components/schemas/Error'
++        '409':
++          description: Import conflict — import_dest_not_empty (destination already holds a non-empty answer set for this class) or source_repo_mismatch (existing shared clone points at a different origin URL)
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/Error'
+         '501':
+           description: Import not configured — the server was started without an import directory
+           content:
+@@ -461,6 +467,29 @@ paths:
+                   uptime:
+                     type: string
+ 
++  /metrics:
++    get:
++      operationId: getMetrics
++      tags: [stats]
++      summary: Runtime metrics snapshot
++      description: |
++        Per-solve and host-pressure observability counters for the cron
++        solve loop. Returns 404 with error code metrics_disabled when the
++        server was started without a metrics observer.
++      responses:
++        '200':
++          description: Metrics snapshot
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/MetricsSnapshot'
++        '404':
++          description: Metrics observer not configured (metrics_disabled)
++          content:
++            application/json:
++              schema:
++                $ref: '#/components/schemas/Error'
++
+ components:
+   schemas:
+     SubmitProblemRequest:
+@@ -876,6 +905,77 @@ components:
+             rather than all-time history); empty until the first solve
+             completes. The queue's estimated_time fields are derived from it.
+ 
++    MetricsSnapshot:
++      type: object
++      description: |
++        Aggregate metrics view served at GET /metrics (internal/metrics
++        Observer.Snapshot). Counters are process-lifetime; the last_solve,
++        last_host and last_skip_reason fields are omitted until the first
++        solve, gate reading or skip respectively. The bounded recent-solve
++        list is served separately and is not part of this snapshot.
++      properties:
++        solve_count:
++          type: integer
++          description: Total solves recorded since process start.
++        skipped_host_pressure:
++          type: integer
++          description: Cron/feeder runs skipped because the host was under pressure (load or memory gate tripped).
++        over_budget:
++          type: integer
++          description: Solves whose peak RSS exceeded the alert threshold.
++        rejected:
++          type: integer
++          description: Solves the harness refused after a clean solver exit because observed peak RSS exceeded the reject threshold (DF-OFF-BY-ONE-31).
++        peak_rss_bytes_max:
++          type: integer
++          description: Largest peak RSS observed across solves; 0 before the first solve.
++        alert_threshold_bytes:
++          type: integer
++          description: Live over-budget threshold in bytes.
++        last_solve:
++          type: object
++          description: Most recent solve record; omitted when no solve has run.
++          properties:
++            submission_id:
++              type: string
++            problem_class:
++              type: string
++            model:
++              type: string
++            peak_rss_bytes:
++              type: integer
++            wall_time_ms:
++              type: integer
++            test_runs:
++              type: integer
++            killed:
++              type: boolean
++            success:
++              type: boolean
++            rejected:
++              type: boolean
++            over_budget:
++              type: boolean
++            alert_threshold_bytes:
++              type: integer
++        last_host:
++          type: object
++          description: Latest host-pressure gate reading (skip or healthy check); omitted before the first reading.
++          properties:
++            load1:
++              type: number
++            mem_used_fraction:
++              type: number
++            mem_total_bytes:
++              type: integer
++            mem_available_bytes:
++              type: integer
++            reason:
++              type: string
++        last_skip_reason:
++          type: string
++          description: Reason string of the latest skip (load, memory, load+memory); omitted when nothing ever skipped.
++
+     Error:
+       type: object
+       properties:

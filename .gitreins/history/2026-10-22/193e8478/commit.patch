@@ -1,0 +1,130 @@
+commit d2ff8d774168a6d4518390e77f372bf23640e8ae
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Wed Oct 21 18:52:31 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Wed Oct 21 18:52:31 2026 -0500
+
+    fix(api): expose version in /health response for SPA chip. Addresses REVIEW-OB-021.
+    
+    The SPA status chip (web/js/app.js) reads j.version from /health, but the
+    endpoint only returned status+uptime, so web/index.html shipped the static
+    "v0.0.0" fallback forever. Add Server.Version, set it from main's
+    ldflags-injected version variable after construction (same idiom as
+    ExportLocalDir/Observer; keeps api.New signature stable for the muster
+    e2e_test.go caller), and emit it in the handleHealth JSON map.
+    
+    New test TestHealthReportsVersion (server_test.go) pins the contract:
+    known version string round-trips, status stays "ok", uptime present.
+    
+    Verified: go build ./... OK, go vet ./... OK, full suite
+    ./... -count=1 -short -parallel 4 green (16 pkgs), and a scratch binary
+    stamped -X main.version=0.2.1-review021 serves
+    {"status":"ok","uptime":"4s","version":"0.2.1-review021"} on /health.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ cmd/off-by-one/main.go      |  4 ++++
+ internal/api/server.go      | 17 +++++++++++++----
+ internal/api/server_test.go | 42 ++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 59 insertions(+), 4 deletions(-)
+
+diff --git a/cmd/off-by-one/main.go b/cmd/off-by-one/main.go
+index fd930ca4..70d63c66 100644
+--- a/cmd/off-by-one/main.go
++++ b/cmd/off-by-one/main.go
+@@ -228,6 +228,10 @@ func main() {
+ 	// --- 5. API server -------------------------------------------------
+ 	specBytes := openapiBytes
+ 	apiServer := apihttp.New(store, queue, specBytes)
++	// Version feeds the /health "version" field (REVIEW-OB-021): the SPA
++	// status chip reads j.version from /health and must not ship the
++	// static v0.0.0 fallback.
++	apiServer.Version = version
+ 	apiServer.ExportLocalDir = *cfg.exportDir
+ 	apiServer.ImportLocalDir = *cfg.importDir
+ 	apiServer.ReadOnly = *cfg.readOnly
+diff --git a/internal/api/server.go b/internal/api/server.go
+index 0f647614..c3f788b6 100644
+--- a/internal/api/server.go
++++ b/internal/api/server.go
+@@ -69,6 +69,13 @@ type Server struct {
+ 
+ 	// StartedAt is set in New and used by /health to report uptime.
+ 	StartedAt time.Time
++
++	// Version is the binary version reported by /health. The web SPA
++	// version chip (web/js/app.js) reads this field to replace the
++	// static fallback in web/index.html. Empty when unset (e.g. in
++	// tests) — set after construction from main's ldflags-injected
++	// version variable.
++	Version string
+ }
+ 
+ // New builds a Server. The OpenAPI spec is optional — when nil the
+@@ -276,12 +283,14 @@ func (s *Server) handleOpenAPI(w http.ResponseWriter, r *http.Request) {
+ 	_, _ = w.Write(s.OpenAPISpec)
+ }
+ 
+-// handleHealth returns a minimal status object with uptime. Used by
+-// docker/k8s liveness probes.
++// handleHealth returns a minimal status object with uptime and the
++// binary version. Used by docker/k8s liveness probes and the web UI
++// version chip.
+ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+ 	writeJSON(w, http.StatusOK, map[string]any{
+-		"status": "ok",
+-		"uptime": time.Since(s.StartedAt).Truncate(time.Second).String(),
++		"status":  "ok",
++		"uptime":  time.Since(s.StartedAt).Truncate(time.Second).String(),
++		"version": s.Version,
+ 	})
+ }
+ 
+diff --git a/internal/api/server_test.go b/internal/api/server_test.go
+new file mode 100644
+index 00000000..155588fd
+--- /dev/null
++++ b/internal/api/server_test.go
+@@ -0,0 +1,42 @@
++package api
++
++import (
++	"encoding/json"
++	"net/http"
++	"testing"
++	"time"
++)
++
++// TestHealthReportsVersion pins the /health version contract the SPA
++// version chip depends on (REVIEW-OB-021): web/js/app.js reads
++// j.version from /health and overwrites the static v0.0.0 fallback in
++// web/index.html. Without this field the chip ships a stale version
++// forever. handleHealth only touches StartedAt + Version, so a bare
++// Server (no store/queue) is enough here.
++func TestHealthReportsVersion(t *testing.T) {
++	s := &Server{
++		Version:   "9.9.9-test",
++		StartedAt: time.Now().Add(-90 * time.Second),
++	}
++
++	rr := do(t, s, "GET", "/health", nil)
++	if rr.Code != http.StatusOK {
++		t.Fatalf("status = %d, want 200", rr.Code)
++	}
++
++	var body map[string]any
++	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
++		t.Fatalf("decode: %v", err)
++	}
++
++	if body["status"] != "ok" {
++		t.Errorf("status field = %v, want ok", body["status"])
++	}
++	if got, want := body["version"], "9.9.9-test"; got != want {
++		t.Errorf("version field = %v, want %q", got, want)
++	}
++	uptime, ok := body["uptime"].(string)
++	if !ok || uptime == "" {
++		t.Errorf("uptime field = %v, want a non-empty duration string", body["uptime"])
++	}
++}
