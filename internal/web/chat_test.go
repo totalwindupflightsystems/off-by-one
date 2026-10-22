@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -38,6 +39,21 @@ func (m *mockAgent) Run(ctx context.Context, userMessage string, outCh chan<- Ch
 	return m.err
 }
 
+// testWaitBudget is the wall-clock budget for a single WebSocket frame read in
+// this file. It is deliberately generous: every frame these tests wait for
+// arrives in milliseconds, so the budget exists only to bound a broken handler,
+// never to time the happy path. Do NOT tighten it toward the ~0.5s a passing
+// run needs — the suite runs on hosts that are simultaneously building,
+// testing, and serving other work, and a starved host can stall this process
+// for seconds (DF-OFF-BY-ONE-56: a tier-1 gate lost the agent frame under a 5s
+// budget while the same tree was green on two other runs).
+const testWaitBudget = 15 * time.Second
+
+// stallSignature is the substring the WebSocket client returns when its read
+// context expires before the frame arrives. On a loaded host this is what a
+// scheduling stall looks like (DF-OFF-BY-ONE-56), as opposed to a handler bug.
+const stallSignature = "context deadline exceeded"
+
 // dialWS connects to the test server and returns the WebSocket conn.
 func dialWS(t *testing.T, url string) *websocket.Conn {
 	t.Helper()
@@ -49,20 +65,38 @@ func dialWS(t *testing.T, url string) *websocket.Conn {
 	return c
 }
 
-// readMsg reads one JSON ChatMessage from the WebSocket.
-func readMsg(t *testing.T, c *websocket.Conn) ChatMessage {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+// readMsgErr reads one JSON ChatMessage from the WebSocket within
+// testWaitBudget and returns the error instead of failing the test, so a
+// caller can classify a host stall separately from a handler defect.
+func readMsgErr(c *websocket.Conn) (ChatMessage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), testWaitBudget)
 	defer cancel()
 	_, data, err := c.Read(ctx)
 	if err != nil {
-		t.Fatalf("websocket read: %v", err)
+		return ChatMessage{}, fmt.Errorf("websocket read: %w", err)
 	}
 	var msg ChatMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
-		t.Fatalf("unmarshal message: %v (raw=%s)", err, string(data))
+		return ChatMessage{}, fmt.Errorf("unmarshal message: %v (raw=%s)", err, string(data))
+	}
+	return msg, nil
+}
+
+// readMsg reads one JSON ChatMessage from the WebSocket, failing the test when
+// the read budget is exhausted or the frame is unreadable.
+func readMsg(t *testing.T, c *websocket.Conn) ChatMessage {
+	t.Helper()
+	msg, err := readMsgErr(c)
+	if err != nil {
+		t.Fatalf("%v", err)
 	}
 	return msg
+}
+
+// isStall reports whether err is the read-deadline signature (host stall)
+// rather than a closed connection, a protocol error, or an unexpected frame.
+func isStall(err error) bool {
+	return err != nil && strings.Contains(err.Error(), stallSignature)
 }
 
 // TestChatHandler_OfflineResponse asserts that when no runner is set,
@@ -491,6 +525,15 @@ func TestChat_StatusFrameBeforeAgentFrame(t *testing.T) {
 // progress frames arrive while the agent is silent, and that NO status
 // frame arrives after the first agent frame (the ticker is stopped at
 // the first agent output, not left running into the next turn).
+//
+// Load tolerance (DF-OFF-BY-ONE-56): every wait here is bounded by
+// testWaitBudget rather than a hand-picked few-second timeout, and the
+// agent-frame wait is retried ONCE — on a fresh connection, and only when
+// the failure is the read-deadline signature of a stalled host. A handler
+// defect (error frame, closed connection, bad JSON) still fails on the
+// first attempt, so the retry cannot mask a regression.
+//
+// ch:trace row=DF-OFF-BY-ONE-56 spec=internal/web/chat_test.go#TestChat_PeriodicStatusUntilAgentFrame test=same evidence=commit
 func TestChat_PeriodicStatusUntilAgentFrame(t *testing.T) {
 	agent := &mockAgent{
 		responses: []ChatMessage{{Type: "agent", Message: "finally"}},
@@ -503,35 +546,63 @@ func TestChat_PeriodicStatusUntilAgentFrame(t *testing.T) {
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 
-	c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
-	defer func() { _ = c.Close(websocket.StatusNormalClosure, "done") }()
+	// runFirstTurn drives the delayed turn on a FRESH connection and
+	// returns the frames collected up to the first agent frame. A fresh
+	// connection per attempt is required: once a read context expires the
+	// client library tears the socket down, so a retry cannot reuse it.
+	runFirstTurn := func(t *testing.T) (sawStatus bool, agentMsg ChatMessage, err error) {
+		t.Helper()
+		c := dialWS(t, strings.Replace(srv.URL, "http://", "ws://", 1))
+		defer func() { _ = c.CloseNow() }()
 
-	_ = readMsg(t, c) // greeting
-
-	userData, _ := json.Marshal(ChatMessage{Type: "user", Message: "long question"})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := c.Write(ctx, websocket.MessageText, userData); err != nil {
-		t.Fatalf("write: %v", err)
+		if _, err := readMsgErr(c); err != nil { // greeting
+			return false, ChatMessage{}, err
+		}
+		userData, _ := json.Marshal(ChatMessage{Type: "user", Message: "long question"})
+		writeCtx, writeCancel := context.WithTimeout(context.Background(), testWaitBudget)
+		defer writeCancel()
+		if err := c.Write(writeCtx, websocket.MessageText, userData); err != nil {
+			return false, ChatMessage{}, fmt.Errorf("write: %w", err)
+		}
+		// Collect frames until the agent frame; require at least one
+		// status frame in between (the immediate one counts).
+		for {
+			m, err := readMsgErr(c)
+			if err != nil {
+				return sawStatus, ChatMessage{}, err
+			}
+			switch m.Type {
+			case "status":
+				sawStatus = true
+			case "agent":
+				return sawStatus, m, nil
+			case "error":
+				// A product-level error frame is a defect, never a stall.
+				return sawStatus, ChatMessage{}, fmt.Errorf("unexpected error frame: %q", m.Message)
+			}
+		}
 	}
 
-	// Collect frames until the agent frame; require at least one status
-	// frame in between (the immediate one counts).
-	sawStatus := false
-	var agentMsg ChatMessage
-	for {
-		m := readMsg(t, c)
-		if m.Type == "status" {
-			sawStatus = true
-			continue
-		}
-		if m.Type == "agent" {
-			agentMsg = m
+	// Bounded stall tolerance: one retry, deadline signature only.
+	const maxTurnAttempts = 2
+	var (
+		sawStatus bool
+		agentMsg  ChatMessage
+		turnErr   error
+	)
+	for attempt := 1; attempt <= maxTurnAttempts; attempt++ {
+		sawStatus, agentMsg, turnErr = runFirstTurn(t)
+		if turnErr == nil {
 			break
 		}
-		if m.Type == "error" {
-			t.Fatalf("unexpected error frame: %q", m.Message)
+		if !isStall(turnErr) {
+			t.Fatalf("turn 1 (attempt %d): %v", attempt, turnErr)
 		}
+		if attempt == maxTurnAttempts {
+			t.Fatalf("turn 1: agent frame not delivered in %d attempts with a %s read budget each — the handler is not producing frames: %v",
+				maxTurnAttempts, testWaitBudget, turnErr)
+		}
+		t.Logf("turn 1 attempt %d stalled (%v) — retrying once on a fresh connection", attempt, turnErr)
 	}
 	if !sawStatus {
 		t.Fatal("no status frame before the agent frame")
@@ -557,7 +628,9 @@ func TestChat_PeriodicStatusUntilAgentFrame(t *testing.T) {
 
 	_ = readMsg(t, c2) // greeting
 	userData1, _ := json.Marshal(ChatMessage{Type: "user", Message: "long question"})
-	if err := c2.Write(ctx, websocket.MessageText, userData1); err != nil {
+	writeCtx2, writeCancel2 := context.WithTimeout(context.Background(), testWaitBudget)
+	defer writeCancel2()
+	if err := c2.Write(writeCtx2, websocket.MessageText, userData1); err != nil {
 		t.Fatalf("write 1: %v", err)
 	}
 	// Turn 1 (delayed): drain statuses until the agent frame.
@@ -572,7 +645,7 @@ func TestChat_PeriodicStatusUntilAgentFrame(t *testing.T) {
 	}
 	// Turn 2 (instant): exactly one status (immediate) then the answer.
 	userData2, _ := json.Marshal(ChatMessage{Type: "user", Message: "quick question"})
-	if err := c2.Write(ctx, websocket.MessageText, userData2); err != nil {
+	if err := c2.Write(writeCtx2, websocket.MessageText, userData2); err != nil {
 		t.Fatalf("write 2: %v", err)
 	}
 	first := readMsg(t, c2)
