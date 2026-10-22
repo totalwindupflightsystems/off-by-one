@@ -479,7 +479,20 @@ func (s *Server) handleDiscover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "problem_class is required")
 		return
 	}
-	slug := ingest.SanitizeForID(req.ProblemClass)
+	// Resolve the class before discovery so a numeric-id problem_class
+	// reaches the same path as a title (REVIEW-OB-020). Discovery itself is
+	// title-keyed, so it is always driven by the resolved title — which is
+	// exactly the sanitized slug on the slug arm, leaving that path unchanged.
+	pc, err := s.resolveClass(r.Context(), req.ProblemClass)
+	if err != nil {
+		if errors.Is(err, graph.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "problem class not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
+		return
+	}
+	slug := pc.Title
 	includeRelated := true
 	if req.IncludeRelated != nil {
 		includeRelated = *req.IncludeRelated
@@ -587,10 +600,11 @@ func (s *Server) handleListProblems(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetProblemClass returns a single problem class detail.
+//
+// The {class} segment may be the class title or its numeric id
+// (REVIEW-OB-020); resolveClass handles both.
 func (s *Server) handleGetProblemClass(w http.ResponseWriter, r *http.Request) {
-	class := r.PathValue("class")
-	slug := ingest.SanitizeForID(class)
-	pc, err := s.Store.GetProblemClassByTitle(r.Context(), slug)
+	pc, err := s.resolveClass(r.Context(), r.PathValue("class"))
 	if err != nil {
 		if errors.Is(err, graph.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "problem class not found")
@@ -617,9 +631,7 @@ func (s *Server) handleGetProblemClass(w http.ResponseWriter, r *http.Request) {
 
 // handleListAnswers returns answers for a problem class.
 func (s *Server) handleListAnswers(w http.ResponseWriter, r *http.Request) {
-	class := r.PathValue("class")
-	slug := ingest.SanitizeForID(class)
-	pc, err := s.Store.GetProblemClassByTitle(r.Context(), slug)
+	pc, err := s.resolveClass(r.Context(), r.PathValue("class"))
 	if err != nil {
 		if errors.Is(err, graph.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "problem class not found")
@@ -644,7 +656,7 @@ func (s *Server) handleListAnswers(w http.ResponseWriter, r *http.Request) {
 		if len(out.Answers) >= limit {
 			break
 		}
-		out.Answers = append(out.Answers, *answerToWire(&a, slug))
+		out.Answers = append(out.Answers, *answerToWire(&a, pc.Title))
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -658,7 +670,6 @@ func (s *Server) handleGetAnswer(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid_request", "id must be an integer")
 		return
 	}
-	slug := ingest.SanitizeForID(class)
 	a, err := s.Store.GetAnswerNode(r.Context(), id)
 	if err != nil {
 		if errors.Is(err, graph.ErrNotFound) {
@@ -669,24 +680,28 @@ func (s *Server) handleGetAnswer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Verify the answer belongs to the requested class — prevents
-	// a 200 for a cross-class lookup.
-	pc, err := s.Store.GetProblemClass(r.Context(), a.ClassID)
+	// a 200 for a cross-class lookup. The class segment may be a title
+	// or a numeric id (REVIEW-OB-020), so it is resolved through the
+	// same helper as the other read routes and compared by ID.
+	pc, err := s.resolveClass(r.Context(), class)
 	if err != nil {
-		writeError(w, http.StatusNotFound, "not_found", "answer not found")
+		if errors.Is(err, graph.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found", "answer not found in this class")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "internal_error", err.Error())
 		return
 	}
-	if pc.Title != slug {
+	if pc.ID != a.ClassID {
 		writeError(w, http.StatusNotFound, "not_found", "answer not found in this class")
 		return
 	}
-	writeJSON(w, http.StatusOK, answerToWire(a, slug))
+	writeJSON(w, http.StatusOK, answerToWire(a, pc.Title))
 }
 
 // handleGetRelated returns the related problem classes (graph edges).
 func (s *Server) handleGetRelated(w http.ResponseWriter, r *http.Request) {
-	class := r.PathValue("class")
-	slug := ingest.SanitizeForID(class)
-	pc, err := s.Store.GetProblemClassByTitle(r.Context(), slug)
+	pc, err := s.resolveClass(r.Context(), r.PathValue("class"))
 	if err != nil {
 		if errors.Is(err, graph.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "not_found", "problem class not found")

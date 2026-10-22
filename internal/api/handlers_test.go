@@ -1123,6 +1123,161 @@ func TestGetProblemClass_NotFound(t *testing.T) {
 	}
 }
 
+// --- Numeric-id addressing (REVIEW-OB-020) --------------------------------
+//
+// Read payloads publish the numeric class id ("id":2816) as the class
+// identity, so an agent that echoes an id back must be able to address the
+// class with it. Before this row every read route resolved ONLY the
+// sanitized title via Store.GetProblemClassByTitle and 404'd a numeric id.
+// The slug arm must keep behaving exactly as before (title 200, unknown
+// title 404) — that is the regression half of these tests.
+//
+// ch:trace row=REVIEW-OB-020 spec=internal/graph/store.go#GetProblemClass test=internal/api/handlers_test.go::numeric-id-fallback evidence=commit
+
+// TestGetProblemClass_NumericIDFallback: GET /api/v1/problems/{id} returns
+// the same detail payload as GET /api/v1/problems/{title} — not a 404.
+func TestGetProblemClass_NumericIDFallback(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	classID, _ := seedClass(t, store, "docker-perms", "permissions", "docker", "go", "1.0", "use --user", graph.AnswerVerified)
+
+	bySlug := do(t, s, "GET", "/api/v1/problems/docker-perms", nil)
+	if bySlug.Code != http.StatusOK {
+		t.Fatalf("slug route: status = %d, want 200", bySlug.Code)
+	}
+	byID := do(t, s, "GET", "/api/v1/problems/"+intToString(classID), nil)
+	if byID.Code != http.StatusOK {
+		t.Fatalf("numeric route: status = %d, want 200, body = %s", byID.Code, byID.Body.String())
+	}
+	if got, want := byID.Body.String(), bySlug.Body.String(); got != want {
+		t.Errorf("numeric payload != slug payload\n numeric: %s\n slug:    %s", got, want)
+	}
+}
+
+// TestNumericIDFallback_AllReadRoutes: every read route that takes a {class}
+// segment resolves a numeric id to the same payload its slug form returns —
+// detail, the answers list, one answer by id, and related.
+func TestNumericIDFallback_AllReadRoutes(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	classA, answerA := seedClass(t, store, "class-a", "a", "docker", "go", "1.0", "solA", graph.AnswerVerified)
+	classB, _ := seedClass(t, store, "class-b", "b", "docker", "go", "1.0", "solB", graph.AnswerVerified)
+	if _, err := store.CreateEdge(context.Background(), classA, classB, graph.EdgeSameRootCause, 0.8); err != nil {
+		t.Fatalf("create edge: %v", err)
+	}
+	id := intToString(classA)
+	cases := []struct {
+		name    string
+		slugURL string
+		idURL   string
+	}{
+		{"detail", "/api/v1/problems/class-a", "/api/v1/problems/" + id},
+		{"answers", "/api/v1/problems/class-a/answers", "/api/v1/problems/" + id + "/answers"},
+		{"answer-by-id", "/api/v1/problems/class-a/answers/" + intToString(answerA), "/api/v1/problems/" + id + "/answers/" + intToString(answerA)},
+		{"related", "/api/v1/problems/class-a/related", "/api/v1/problems/" + id + "/related"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bySlug := do(t, s, "GET", tc.slugURL, nil)
+			if bySlug.Code != http.StatusOK {
+				t.Fatalf("slug route %s: status = %d, want 200", tc.slugURL, bySlug.Code)
+			}
+			byID := do(t, s, "GET", tc.idURL, nil)
+			if byID.Code != http.StatusOK {
+				t.Fatalf("numeric route %s: status = %d, want 200, body = %s", tc.idURL, byID.Code, byID.Body.String())
+			}
+			if got, want := byID.Body.String(), bySlug.Body.String(); got != want {
+				t.Errorf("numeric payload != slug payload\n numeric: %s\n slug:    %s", got, want)
+			}
+		})
+	}
+}
+
+// TestDiscover_NumericIDFallback: a discover request whose problem_class is
+// the numeric id resolves the class and produces the same response as the
+// slug request. This is the arm that mattered live — the 404 was
+// {"error":"not_found"} for {"problem_class":"2816"}.
+func TestDiscover_NumericIDFallback(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	classID, _ := seedClass(t, store, "docker-perms", "permissions", "docker", "go", "1.0", "use --user", graph.AnswerVerified)
+
+	bySlug := do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{
+		ProblemClass: "docker-perms",
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "1.0",
+	})
+	if bySlug.Code != http.StatusOK {
+		t.Fatalf("slug discover: status = %d, want 200, body = %s", bySlug.Code, bySlug.Body.String())
+	}
+	byID := do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{
+		ProblemClass: intToString(classID),
+		Environment:  "docker",
+		Language:     "go",
+		Version:      "1.0",
+	})
+	if byID.Code != http.StatusOK {
+		t.Fatalf("numeric discover: status = %d, want 200, body = %s", byID.Code, byID.Body.String())
+	}
+	var resp discoverResponse
+	if err := json.Unmarshal(byID.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.Found {
+		t.Error("found = false, want true")
+	}
+	if resp.Answer == nil {
+		t.Fatal("answer is nil, want the class answer")
+	}
+	if resp.Answer.ProblemClass != "docker-perms" {
+		t.Errorf("answer.problem_class = %q, want docker-perms", resp.Answer.ProblemClass)
+	}
+	if got, want := byID.Body.String(), bySlug.Body.String(); got != want {
+		t.Errorf("numeric discover payload != slug payload\n numeric: %s\n slug:    %s", got, want)
+	}
+}
+
+// TestNumericIDFallback_UnknownID404s: an all-digits segment that matches no
+// class is still a not_found 404 (the id arm must not turn a miss into a 500).
+func TestNumericIDFallback_UnknownID404s(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	rr := do(t, s, "GET", "/api/v1/problems/999999999", nil)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404, body = %s", rr.Code, rr.Body.String())
+	}
+	var errBody map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &errBody); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if errBody["error"] != "not_found" {
+		t.Errorf("error = %v, want not_found", errBody["error"])
+	}
+	rr = do(t, s, "POST", "/api/v1/problems/discover", discoverRequest{ProblemClass: "999999999"})
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("discover numeric miss: status = %d, want 404, body = %s", rr.Code, rr.Body.String())
+	}
+}
+
+// TestGetProblemClass_AllDigitsTitleWinsOverID pins the resolution order:
+// the title arm runs first, so a class whose title is literally all digits
+// stays addressable by that title instead of being reinterpreted as an id.
+func TestGetProblemClass_AllDigitsTitleWinsOverID(t *testing.T) {
+	s, store, _ := newTestServer(t)
+	classID, _ := seedClass(t, store, "12345", "numeric title", "docker", "go", "1.0", "sol", graph.AnswerVerified)
+	if classID == 12345 {
+		t.Fatalf("unexpected class id 12345; the title/id arms would not be distinguishable")
+	}
+	rr := do(t, s, "GET", "/api/v1/problems/12345", nil)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (all-digits title must resolve by title), body = %s", rr.Code, rr.Body.String())
+	}
+	var pc problemClassWire
+	if err := json.Unmarshal(rr.Body.Bytes(), &pc); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if pc.ID != classID || pc.Title != "12345" {
+		t.Errorf("got id=%d title=%q, want id=%d title=12345", pc.ID, pc.Title, classID)
+	}
+}
+
 // The detail endpoint must report the same derived status as the list
 // endpoint for the same class: ci_passed > verified > pending > failed,
 // 'pending' when the class has no answers (OB-GAP-024).
