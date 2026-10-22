@@ -1,0 +1,158 @@
+commit 8a98052fa9d499e5394f35cd1bca031339216e25
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Thu Oct 22 01:58:05 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Thu Oct 22 01:58:05 2026 -0500
+
+    fix(api): mark no-op re-exports with action=noop in the export response. Addresses REVIEW-OB-016.
+    
+    A re-export of already-pushed answers returned 200 with
+    {"commit_sha":"","files_changed":3} — indistinguishable from a real
+    export. The engine's stageAndCommit early-returns via
+    recoverStrandedCommit when rendered files match HEAD, leaving
+    ExportResult.CommitSHA empty on the only success path that pushed
+    nothing (every path that pushed — fresh commit or recovered stranded
+    commit — sets the SHA).
+    
+    Additive fix, handler-level only:
+    - exportResponse gains "action" ("exported" when CommitSHA != "",
+      "noop" otherwise); commit_sha/files_changed keep their shape and
+      the noop path still carries commit_sha "".
+    - OpenAPI ExportResponse documents the new enum [exported, noop];
+      pkg/api count-guard synced 7 -> 8 single-line enums.
+    - TestExportSuccess extended: first export asserts action=exported,
+      immediate re-export to the same bare remote asserts 200 + noop +
+      empty commit_sha.
+    
+    Dry-run note: the export engine has Engine.DryRun but the HTTP
+    handler never exposes it — exportRequest carries no dry-run field —
+    so there is no second empty-SHA path to label; the finding is
+    recorded here per task instructions. Errors are untouched; the
+    marker exists only on the 200 path.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ internal/api/handlers.go      | 21 ++++++++++++++++++++-
+ internal/api/handlers_test.go | 27 +++++++++++++++++++++++++++
+ pkg/api/openapi.yaml          |  4 ++++
+ pkg/api/yaml_test.go          |  6 +++---
+ 4 files changed, 54 insertions(+), 4 deletions(-)
+
+diff --git a/internal/api/handlers.go b/internal/api/handlers.go
+index ae0ae2f8..50f34416 100644
+--- a/internal/api/handlers.go
++++ b/internal/api/handlers.go
+@@ -216,7 +216,14 @@ type exportResponse struct {
+ 	CommitSHA string `json:"commit_sha"`
+ 	// PRURL is reserved for future pull-request creation. Nothing assigns
+ 	// it today, so omitempty keeps it out of every response.
+-	PRURL        string `json:"pr_url,omitempty"`
++	PRURL string `json:"pr_url,omitempty"`
++	// Action tells consumers what the export actually did (REVIEW-OB-016):
++	// "exported" when this call committed and pushed new content (CommitSHA
++	// non-empty), "noop" when the rendered answers were already identical
++	// to the target (success, but nothing new committed or pushed —
++	// CommitSHA is empty). Without it a 200 with commit_sha "" was
++	// indistinguishable from a real export.
++	Action       string `json:"action"`
+ 	FilesChanged int    `json:"files_changed"`
+ }
+ 
+@@ -1107,8 +1114,20 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+ 		return
+ 	}
+ 
++	// Action distinguishes a real export from an idempotent re-export
++	// (REVIEW-OB-016): the engine leaves CommitSHA empty exactly when the
++	// rendered files were already identical to HEAD and nothing was
++	// committed or pushed — without the marker that success was
++	// indistinguishable from a real export. Any success that set a SHA
++	// (fresh commit, or a recovered stranded commit that was pushed now)
++	// is "exported".
++	action := "noop"
++	if result.CommitSHA != "" {
++		action = "exported"
++	}
+ 	writeJSON(w, http.StatusOK, exportResponse{
+ 		CommitSHA:    result.CommitSHA,
++		Action:       action,
+ 		FilesChanged: len(result.FilesWritten),
+ 	})
+ }
+diff --git a/internal/api/handlers_test.go b/internal/api/handlers_test.go
+index 70c31a33..5908c673 100644
+--- a/internal/api/handlers_test.go
++++ b/internal/api/handlers_test.go
+@@ -2715,6 +2715,33 @@ func TestExportSuccess(t *testing.T) {
+ 		t.Errorf("remote commit subject = %q, want %q (commit_message was dropped)", got, wantMsg)
+ 	}
+ 
++	// REVIEW-OB-016: re-exporting the same answers to the same remote is
++	// a successful no-op — it must answer 200 with action "noop" (and the
++	// empty commit_sha it has always carried), while the first export
++	// above must carry action "exported" with its real SHA. Without the
++	// action marker the two 200 responses were indistinguishable.
++	if body.Action != "exported" {
++		t.Errorf("first export action = %q, want \"exported\"", body.Action)
++	}
++	rresp = do(t, s, "POST", "/api/v1/export", exportRequest{
++		TargetRepo:    remote,
++		AnswerIDs:     []int64{answerID},
++		CommitMessage: wantMsg,
++	})
++	if rresp.Code != http.StatusOK {
++		t.Fatalf("re-export status = %d, want 200; body: %s", rresp.Code, rresp.Body.String())
++	}
++	var rebody exportResponse
++	if err := json.Unmarshal(rresp.Body.Bytes(), &rebody); err != nil {
++		t.Fatalf("decode re-export response: %v", err)
++	}
++	if rebody.Action != "noop" {
++		t.Errorf("re-export action = %q, want \"noop\"; body: %s", rebody.Action, rresp.Body.String())
++	}
++	if rebody.CommitSHA != "" {
++		t.Errorf("re-export commit_sha = %q, want \"\" (noop must stay additive, no new commit)", rebody.CommitSHA)
++	}
++
+ 	// Unknown answer_id is a client error (4xx), not a 500 export_failed.
+ 	rresp = do(t, s, "POST", "/api/v1/export", exportRequest{
+ 		TargetRepo: remote,
+diff --git a/pkg/api/openapi.yaml b/pkg/api/openapi.yaml
+index f7784907..bf59ac96 100644
+--- a/pkg/api/openapi.yaml
++++ b/pkg/api/openapi.yaml
+@@ -807,6 +807,10 @@ components:
+       properties:
+         commit_sha:
+           type: string
++        action:
++          type: string
++          enum: [exported, noop]
++          description: What this export call actually did. "exported" means new content was committed and pushed to the target (commit_sha is non-empty) — this includes a re-export that recovered and pushed a previously stranded unpushed commit. "noop" means the request succeeded but the rendered answers were already identical to what the target holds, so nothing was committed or pushed (commit_sha is then empty and files_changed still counts the re-rendered files). Consumers must read action, not commit_sha emptiness, to distinguish a real export from an idempotent re-export.
+         pr_url:
+           type: string
+           description: Reserved for future pull-request creation and never populated by the current implementation. There is no pull-request creation code path, so no export response ever carries a PR URL; the field is kept in the schema only for backward compatibility and is always omitted.
+diff --git a/pkg/api/yaml_test.go b/pkg/api/yaml_test.go
+index 4a9b8325..819a9338 100644
+--- a/pkg/api/yaml_test.go
++++ b/pkg/api/yaml_test.go
+@@ -806,7 +806,7 @@ func TestOpenAPISpec_ParametersCarryContinuationKeys(t *testing.T) {
+ // TestOpenAPISpec_EverySourceEnumReachesJSON derives the expected enum arrays
+ // from the embedded source YAML (independent of the parser under test) and
+ // requires every one of them to appear as a non-empty JSON array in the served
+-// document. Two of the seven source `enum:` lines used to be dropped because
++// document. Two of the source `enum:` lines used to be dropped because
+ // they live inside a sequence-item inline mapping (a parameter's `schema:`).
+ func TestOpenAPISpec_EverySourceEnumReachesJSON(t *testing.T) {
+ 	source := string(YAMLBytes())
+@@ -823,8 +823,8 @@ func TestOpenAPISpec_EverySourceEnumReachesJSON(t *testing.T) {
+ 		}
+ 		want = append(want, arr)
+ 	}
+-	if len(want) != 7 {
+-		t.Fatalf("source openapi.yaml declares %d single-line enum arrays, want 7 (update this test with the spec)", len(want))
++	if len(want) != 8 {
++		t.Fatalf("source openapi.yaml declares %d single-line enum arrays, want 8 (update this test with the spec)", len(want))
+ 	}
+ 
+ 	raw, err := JSONBytes()
