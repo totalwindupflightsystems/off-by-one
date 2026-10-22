@@ -806,7 +806,7 @@ func TestOpenAPISpec_ParametersCarryContinuationKeys(t *testing.T) {
 // TestOpenAPISpec_EverySourceEnumReachesJSON derives the expected enum arrays
 // from the embedded source YAML (independent of the parser under test) and
 // requires every one of them to appear as a non-empty JSON array in the served
-// document. Two of the seven source `enum:` lines used to be dropped because
+// document. Two of the source `enum:` lines used to be dropped because
 // they live inside a sequence-item inline mapping (a parameter's `schema:`).
 func TestOpenAPISpec_EverySourceEnumReachesJSON(t *testing.T) {
 	source := string(YAMLBytes())
@@ -823,8 +823,8 @@ func TestOpenAPISpec_EverySourceEnumReachesJSON(t *testing.T) {
 		}
 		want = append(want, arr)
 	}
-	if len(want) != 7 {
-		t.Fatalf("source openapi.yaml declares %d single-line enum arrays, want 7 (update this test with the spec)", len(want))
+	if len(want) != 8 {
+		t.Fatalf("source openapi.yaml declares %d single-line enum arrays, want 8 (update this test with the spec)", len(want))
 	}
 
 	raw, err := JSONBytes()

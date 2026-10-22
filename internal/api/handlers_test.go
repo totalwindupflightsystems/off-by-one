@@ -2715,6 +2715,33 @@ func TestExportSuccess(t *testing.T) {
 		t.Errorf("remote commit subject = %q, want %q (commit_message was dropped)", got, wantMsg)
 	}
 
+	// REVIEW-OB-016: re-exporting the same answers to the same remote is
+	// a successful no-op — it must answer 200 with action "noop" (and the
+	// empty commit_sha it has always carried), while the first export
+	// above must carry action "exported" with its real SHA. Without the
+	// action marker the two 200 responses were indistinguishable.
+	if body.Action != "exported" {
+		t.Errorf("first export action = %q, want \"exported\"", body.Action)
+	}
+	rresp = do(t, s, "POST", "/api/v1/export", exportRequest{
+		TargetRepo:    remote,
+		AnswerIDs:     []int64{answerID},
+		CommitMessage: wantMsg,
+	})
+	if rresp.Code != http.StatusOK {
+		t.Fatalf("re-export status = %d, want 200; body: %s", rresp.Code, rresp.Body.String())
+	}
+	var rebody exportResponse
+	if err := json.Unmarshal(rresp.Body.Bytes(), &rebody); err != nil {
+		t.Fatalf("decode re-export response: %v", err)
+	}
+	if rebody.Action != "noop" {
+		t.Errorf("re-export action = %q, want \"noop\"; body: %s", rebody.Action, rresp.Body.String())
+	}
+	if rebody.CommitSHA != "" {
+		t.Errorf("re-export commit_sha = %q, want \"\" (noop must stay additive, no new commit)", rebody.CommitSHA)
+	}
+
 	// Unknown answer_id is a client error (4xx), not a 500 export_failed.
 	rresp = do(t, s, "POST", "/api/v1/export", exportRequest{
 		TargetRepo: remote,

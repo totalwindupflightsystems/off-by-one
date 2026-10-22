@@ -216,7 +216,14 @@ type exportResponse struct {
 	CommitSHA string `json:"commit_sha"`
 	// PRURL is reserved for future pull-request creation. Nothing assigns
 	// it today, so omitempty keeps it out of every response.
-	PRURL        string `json:"pr_url,omitempty"`
+	PRURL string `json:"pr_url,omitempty"`
+	// Action tells consumers what the export actually did (REVIEW-OB-016):
+	// "exported" when this call committed and pushed new content (CommitSHA
+	// non-empty), "noop" when the rendered answers were already identical
+	// to the target (success, but nothing new committed or pushed —
+	// CommitSHA is empty). Without it a 200 with commit_sha "" was
+	// indistinguishable from a real export.
+	Action       string `json:"action"`
 	FilesChanged int    `json:"files_changed"`
 }
 
@@ -1107,8 +1114,20 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Action distinguishes a real export from an idempotent re-export
+	// (REVIEW-OB-016): the engine leaves CommitSHA empty exactly when the
+	// rendered files were already identical to HEAD and nothing was
+	// committed or pushed — without the marker that success was
+	// indistinguishable from a real export. Any success that set a SHA
+	// (fresh commit, or a recovered stranded commit that was pushed now)
+	// is "exported".
+	action := "noop"
+	if result.CommitSHA != "" {
+		action = "exported"
+	}
 	writeJSON(w, http.StatusOK, exportResponse{
 		CommitSHA:    result.CommitSHA,
+		Action:       action,
 		FilesChanged: len(result.FilesWritten),
 	})
 }
