@@ -11,13 +11,14 @@ tagging). v0.1.0 was the first cut with that tooling; v0.1.1 is the first cut
 to ship with a GitHub Release object and artifacts (the release gate: a tag
 without a Release object is not a release).
 
-**v0.2.0 version-prep complete (2026-10-07):** the `## [v0.2.0]` section below
-is written and `cmd/off-by-one/main.go` carries the 0.2.0-dev version string.
-Remaining gate before `make release TAG=v0.2.0`: owner authorization only —
-no open P0/P1 board blockers (DF-OFF-BY-ONE-29/30/31/32 all closed with live
-deploy evidence).
+**v0.2.0 version-prep complete (2026-10-07); swept 2026-10-23 (RELEASE-OB-013):**
+the `## [v0.2.0]` section below covers the whole v0.1.1..HEAD range (prep-era
++ post-prep) and `cmd/off-by-one/main.go` carries the 0.2.0-dev string — the
+ldflags build injects the tag on release. All four readiness criteria held
+(CI green per-job on HEAD, changelog written, no open P0/P1 blockers, stamps
+consistent); cut under the standing release authority (minor: 13+5 feat).
 
-## [v0.2.0] - 2026-10-07
+## [v0.2.0] - 2026-10-23
 
 ### Resource safety: the solver can no longer take the host down
 
@@ -75,6 +76,30 @@ deploy evidence).
   static mirror); community-node bootstrap documented as first-class flow
   (DF-OFF-BY-ONE-25)
 
+### Post-prep hardening (2026-10-07..10-22)
+
+- Trailing JSON documents are rejected by readJSON (REVIEW-OB-022)
+- Numeric-id problem classes resolve via GetProblemClass fallback (REVIEW-OB-020)
+- Discovery misses recorded on the unknown-class 404 arm + discovery_hits/misses
+  counters on /metrics (REVIEW-OB-019)
+- No-op re-exports marked action=noop in the export response (REVIEW-OB-016)
+- /metrics and import-409 codes documented in OpenAPI + README — spec surface
+  matches mux (REVIEW-OB-015/017/018)
+- Version exposed in /health for the SPA status chip (REVIEW-OB-021)
+- Taxonomy truncation explicit and pageable (DF-OFF-BY-ONE-53)
+- Queued and answered deduplication distinguished (DF-OFF-BY-ONE-37-R2)
+- Required tools surfaced resolved/missing in submit + queue objects
+  (DF-OFF-BY-ONE-41)
+- Corpus environment values exposed in the Submit form (DF-OFF-BY-ONE-54)
+- Running-unit flag contract enforced (DF-OFF-BY-ONE-29-R2)
+- Deployed-copy freshness enforced in ob1-distribute (OB-DIST-003); distribute
+  fails loud on silent corpus no-op (OB-DIST-001)
+- Deploy-gate tick-closeout caller wired (DF-OFF-BY-ONE-52)
+- Host-pressure gate for deferred solves (DF-OFF-BY-ONE-45)
+- Solver names the configured memory limit that killed a solve in failure_reason
+- CI: markdown install made PEP 668-portable (QA-OFF-BY-ONE-28)
+- answer-corpus data syncs continued through the cycle
+
 ## [v0.1.1] - 2026-09-22
 
 ### Operational hardening (no API or behavior changes)
@@ -85,10 +110,7 @@ deploy evidence).
 - Deploy: off-by-one systemd unit vendored in-repo with doc pointers and a
   drift guard (OB-GAP-089)
 - Docs: gitreins guard recipe corrected in README/CONTRIBUTING (the deleted
-  gitreins-poc venv path replaced by the pipx shim); AGENTS.md replacement
-  text parked in docs/agents-harness-guard.md pending approval
-- Hygiene: churning classes untracked (.gitreins/logs/, board *.pre-*
-  snapshots) so `git status` stays clean
+  gitreins-poc venv path replaced by the pipx shim)
 - Release surface: GitHub Release objects published for v0.1.0 (backfilled)
   and v0.1.1; answer-corpus data syncs continued through the cycle
 
