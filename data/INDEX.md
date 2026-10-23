@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2856 problem classes · 4485 verified answers** · exported 2026-10-23 10:00 UTC
+**2860 problem classes · 4489 verified answers** · exported 2026-10-23 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2862,3 +2862,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2943 | js-double-ratchet-header-encrypted-skipped-keys | 1 | js |
 | 2944 | pytest-live-teardown-409-sync-lock-backoff | 1 | python |
 | 2945 | shim-single-method-registration-flips-sibling-drift-class | 1 | go |
+| 2946 | go-shamir-berlekamp-welch-merkle-vss-equivocation | 1 | go |
+| 2947 | python-bpv7-custody-fragment-lifetime-crc-canonical | 1 | python |
+| 2948 | shell-pam-stack-faillock-lockout-jump-semantics-audit | 1 | shell |
+| 2949 | git-commit-silent-abort-precommit-degraded-exit2 | 1 | go |
