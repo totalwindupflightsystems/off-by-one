@@ -1181,13 +1181,19 @@ finding on this artifact is a product finding, not a stale-deploy finding.
    notes say is fixed. **Lesson: a release-install block is the one snippet that must never hardcode a
    version; resolve it from the latest tag or guard it against drift.**
 
-### Perf — the numbers, and why there is no PERF row
+### Perf — the number that was hiding in "install takes a minute"
 
-Seed is the only multi-second step (58.97 s wall, 6.49 s user + 1.45 s sys: the wall is the link scan
-plus cold page cache, and the per-class scan is already OB-GAP-073). Cold start to first `/health`:
-14 ms. First discover after restart: 1.8 ms. Warm discover: 7.0 ms ± 0.8 ms incl. curl (n=20). The
-taxonomy page is 10.2 MB / 117 ms for 1000 classes — that is DF-53's payload-shape issue, not a
-latency defect. Nothing here is slow enough for a user to feel, so no PERF row was filed.
+Seed is the only multi-second step, and its cost is **disk sync, not work**: the same released binary
+and corpus seeded to `/dev/shm` in **3.83 s** vs **58.97 s** on ext4 (15.4×), and
+`internal/seed/seed.go` contains no `Begin`/`Commit`/`tx.` (grep: zero hits) — the loader autocommits
+every statement, so the install pays ~9k fsyncs for ~3k inserts. Filed as **`PERF-OFF-BY-ONE-1`** by
+the sibling delivery of this same tick; reproduced here before crediting it. The lesson that matters
+for the next run: "the remainder must be the link scan" was a guess — `strace -c` and one
+tmpfs-vs-ext4 A/B settle it in two minutes.
+
+Everything else is comfortably fast: cold start to first `/health` 14 ms, first discover after restart
+1.8 ms, warm discover 7.0 ms ± 0.8 ms incl. curl (n=20). The taxonomy page is 10.2 MB / 117 ms for
+1000 classes — DF-53's payload-shape issue, not a latency defect. No further PERF row is justified.
 
 ### Host state (put it beside every number)
 

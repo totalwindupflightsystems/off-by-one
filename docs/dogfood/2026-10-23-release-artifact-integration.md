@@ -88,16 +88,60 @@ Measured on the released binary, scratch HOME/state dir, host at loadavg 8.26.
 |---|---|---|
 | download + verify | `curl` ×2 + `sha256sum -c` | 0.40 s + 0.28 s |
 | corpus clone | `git clone --depth 1` | 5.67 s |
-| **seed** (headline install op) | `off-by-one-v0.2.0-linux-amd64 seed` | **58.97 s** wall (user 6.49 s, sys 1.45 s — I/O + link scan, not CPU) |
+| **seed** (headline install op) | `off-by-one-v0.2.0-linux-amd64 seed` | **58.97 s** on ext4 (user 6.49 s, sys 1.45 s) vs **3.83 s** to `/dev/shm` — **15.4×**, see below |
 | cold start → first `/health` | start + poll | **14 ms** |
 | first `discover` after cold start | `curl POST /api/v1/problems/discover` | **1.8 ms** |
 | **warm `discover`** | `hyperfine --warmup 3 --runs 20` | **7.0 ms ± 0.8 ms** (min 5.5, max 8.8; includes curl process start) |
 | taxonomy page | `GET /api/v1/taxonomy` | 116.7 ms / 10.2 MB (1000 classes) |
 
-No PERF row: the only multi-second step is `seed` (a one-shot install operation
-whose 6.5 s of that is CPU; the remainder is the per-class link scan already
-tracked as OB-GAP-073), and discover sits at 1.8 ms server-side against the
-README's quoted ~9 ms. A win nobody can feel is not a finding.
+One PERF row was filed — **not by this delivery**: the sibling delivery of this same tick
+(`dogfood-off-by-one-2026-10-23-1243b`) profiled the seed step with strace and filed
+`PERF-OFF-BY-ONE-1` (per-statement fsync, no transaction). I reproduced its core number
+independently before crediting it: the SAME released binary and corpus seeded to `/dev/shm` in
+**3.83 s** against this run's 58.97 s on ext4 (15.4×), and `internal/seed/seed.go` contains no
+`Begin`/`Commit`/`tx.` at all (grep returns zero) — the loader autocommits every statement, so the
+install step pays ~9k fsyncs. My first reading of the number ("I/O + link scan") was wrong: the wall
+time is the autocommit path, not the link scan. A real user waits ~1 minute on real disk; that is a
+perceptible cost, so it belongs in a PERF row and does.
+Discover/submit/cold-start stay in the single-digit-millisecond range; no row is justified there.
+
+## Install leg (fresh machine)
+
+Two arms, both on `bunker-mvp`, both at HEAD `aae20cb5`/`ea5b963a`:
+
+**A. Fleet battery** (`bunker-qa.sh launch/collect`, agent `d677d23c`, QA HEAD `ea5b963a`,
+20 cells harvested from the agent and committed to
+`docs/dogfood/evidence/2026-10-23-battery-off-by-one.jsonl`):
+
+| cell | verdict |
+|---|---|
+| repo-head | OK (pull ff-only) |
+| toolchain-bootstrap ×8 | OK — go 1.27.3 (floor 1.26.9), gcc/g++ wrappers, make 4.3, compose plugin, buildx v0.38.1, node v22.15.0 |
+| fresh-install | OK (documented build path, module downloads clean) |
+| ci-pass | OK — native suite PASS |
+| ci-act | **UNVERIFIED** — `act` rc=1, truncated log (hosted CI is authoritative) |
+| upgrade | OK — v0.1.1 tree → HEAD reinstall clean |
+| chaos-errorpath | OK (clean error on missing config, rc=2) |
+| chaos-resource / chaos-corruption | INFO — OOM under a 3 GiB cap (expected); truncated-db path selected by the harness |
+| docker-deploy / chaos-shutdown | N/A — no compose file |
+| ui-probe | INFO — "go-native start command is not a long-running server"; the harness cannot see this repo's embedded SPA (same class as QA-OFF-BY-ONE-20-R2) |
+| chaos-disconnect | **UNVERIFIED** — `disc.log` 0 bytes (QA-OFF-BY-ONE-5-R2's vacuous cell) |
+
+Two harness notes, neither a product defect: `collect` reported "still running" off a stale sentinel for
+10+ minutes after the driver had exited (the 20 cells were pulled directly with `bunker exec`), and the
+first `bunker destroy` was refused for live `sshd`/`dbus-daemon` under the agent uid — the destroy
+succeeded after killing the session dbus, and the agent is gone from `bunker list` with its local SSH key
+removed.
+
+**B. Independent verbatim arm** (same fresh agent): `git clone --depth 1` → `CLONE_HEAD=aae20cb5` →
+`make build` 10.29 s (**warm** — the battery's fresh-install cell had filled the Go caches; cold is 72–84 s
+on earlier runs) → `--version` = `off-by-one aae20cb` → `seed` **37.84 s**, `files=2856 / answers 2955
+created + 1530 skipped / edges 12872` → serve on `:18901` → `/health {"status":"ok","uptime":"0s",
+"version":"aae20cb"}` → `discover` `found:true` in **7.2 ms** → `stats` 2856/2955/2955 with
+`solver_available:false` (no pi/bwrap on a bare agent — the documented keyless degradation).
+
+Verdict: **install leg PASS**, with the act/chaos-disconnect cells honestly UNVERIFIED and the ui-probe
+harness blind spot unchanged.
 
 ## Deliberately not re-driven
 
