@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2860 problem classes · 4489 verified answers** · exported 2026-10-23 16:00 UTC
+**2863 problem classes · 4492 verified answers** · exported 2026-10-23 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2866,3 +2866,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2947 | python-bpv7-custody-fragment-lifetime-crc-canonical | 1 | python |
 | 2948 | shell-pam-stack-faillock-lockout-jump-semantics-audit | 1 | shell |
 | 2949 | git-commit-silent-abort-precommit-degraded-exit2 | 1 | go |
+| 2950 | bash-mdraid-write-intent-bitmap-resync-gap-audit | 1 | shell |
+| 2951 | go-banded-affine-xdrop-traceback-collapse | 1 | go |
+| 2952 | go-mcp-server-run-shutdown-wedge-jsonv2-decoder-newline-undrained | 1 | go |
