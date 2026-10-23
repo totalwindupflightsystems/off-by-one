@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.14.0
+version: 1.14.1
 category: software-development
 ---
 
@@ -609,9 +609,13 @@ curl -s localhost:8766/health                                              # v0.
     prove which build is deployed — use `/health`'s raw `version` or `--version`. And when grading any
     UI fix that spans a payload and a template, assert the RENDERED string in a browser, not each half.
 
-**Seed is the one slow step** (58.97 s wall, 6.49 s user): it is a one-shot install operation, not a
-per-request cost. Discover/submit stay in the single-digit-millisecond range even on a loaded host;
-do not file perf rows for them.
+**Seed is the one slow step, and the seconds are DISK SYNC, not the graph link scan**
+(`PERF-OFF-BY-ONE-1`): the same released binary and corpus measured 44.7-70.5 s to an ext4 `-db`
+but 3.4-3.7 s to `/dev/shm` (17x; strace shows ~9,136 `fsync` and 253k `pwrite64` — every statement
+autocommits because `internal/seed/seed.go:91` wraps the load in no transaction). Budget ~1 minute
+for a first install on real disk and do NOT read it as a hang; if you are seeding throwaway nodes in
+a test loop, point `-db` at `/dev/shm` and get the 3-4 s path. Discover/submit stay in the
+single-digit-millisecond range even on a loaded host; do not file perf rows for them.
 
 Install leg for this run: `bunker-qa.sh launch/collect` on bunker-mvp against HEAD `ea5b963a`
 (agent auto-destroyed) — see `docs/dogfood/2026-10-23-release-artifact-integration.md` for the cell
