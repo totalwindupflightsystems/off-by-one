@@ -1,0 +1,28 @@
+{
+  "class_id": 2938,
+  "title": "oom-kills-low-pressure-memcg-benign",
+  "description": "oom-kills-low-pressure-memcg-benign",
+  "created_at": "2026-10-22 23:42:29",
+  "answers": [
+    {
+      "answer_id": 4670,
+      "language": "text",
+      "environment": "linux",
+      "version": "",
+      "solution": "Solution written to `~/solution.md` (and mirrored at `/workspace/solution.md`).\n\n## Summary\n\n**Verdict: verified-benign.** The alert fires because `node_vmstat_oom_kill` is a *host-wide* counter that also increments for cgroup-scoped kills, and the rule never checks the kernel's `constraint=` class. `bunker`'s own `cgroup_test.go memory.max` probe exhausts `/bunker-cgroup-test` hourly; the kernel logs `constraint=CONSTRAINT_MEMCG`, the victim is a small `python3`, host `MemAvailable` stays ~83%, and there are zero `CONSTRAINT_NONE` kills. So the rule's right arm (`MemAvailable/MemTotal >= 0.15`) is satisfied every time.\n\nTwo independent defects documented:\n1. **Alert scoping** — the rule reads a metric that can't distinguish memcg from host OOM.\n2. **Board drain** — re-fires append duplicate ids; `validate` errors and `update` refuses as ambiguous.\n\n## What the doc contains\n- **Exact evidence table** from the incident.\n- **Immediate closure runbook** — evidence capture, `boardctl sweep-status --decide --apply`, the row-targeting pitfall (`update` refuses duplicate ids; reproduced locally), then `update --status complete --evidence-run-id ...`.\n- **Structural fix 1 (recommended)** — a constraint-labelled textfile metric (`oom_kill_by_constraint.sh` + systemd timer) dropped into the Alloy `textfile` path already configured in `/etc/fleet-monitoring/config.alloy`, plus a corrected rule that alerts only on `CONSTRAINT_NONE`, plus a `promtool test rules` fixture proving memcg kills don't fire and host kills do.\n- **Interim fix 2** — Alertmanager route-to-null / inhibition.\n- **Fleet fixes 3–4** — stop the self-test polluting the prod signal; make the drain idempotent by fingerprint.\n- **Verification section** — host census, PromQL, Alertmanager `/api/v2/alerts`, `promtool`, textfile, and board checks with pass criteria.\n\nI validated locally: the runner script syntax and classification logic (counts only `oom-kill:` lines → `NONE=1, MEMCG=2, other=0`), and the full `boardctl` duplicate-id/ambiguous-update/sweep behavior.\n",
+      "evidence": "# Evidence\n- Problem class: oom-kills-low-pressure-memcg-benign\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-22T23:42:29.051Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "SYMPTOM: Prometheus alert OOMKillsLowPressure (delta(node_vmstat_oom_kill[15m]) > 0 AND MemAvailable/MemTotal >= 0.15) fires repeatedly (roughly hourly) on a fleet host even though the host has plenty of memory. Distracting but appears benign.\n\nROOT CAUSE: dmesg -T | grep oom-kill on the host shows every kill in the window carries constraint=CONSTRAINT_MEMCG, oom_memcg=/bunker-cgroup-test (or similar test memcg), victim is a small python3/dd process (~261MB anon-rss, oom_score_adj=500). This is the bunker agent's own internal cgroup_test.go memory.max probe running its continuous test loop — a deliberate memcg exhaustion test, NOT host memory exhaustion. Host-level (CONSTRAINT_NONE) oom-kill lines are absent; MemAvailable stays far above 15 percent.\n\nVERIFICATION PROCEDURE (works for any host): (1) ssh to the host; (2) dmesg -T | grep oom-kill — check the constraint= field: CONSTRAINT_MEMCG with a known test cgroup = benign test-harness class; (3) awk for MemTotal/MemAvailable in /proc/meminfo to confirm host pressure is low; (4) confirm via central Prometheus that the alert expression's delta[15m] is 0 once the test window closes, and check ALERTS{} / Alertmanager /api/v2/alerts for what is actually firing.\n\nRESOLUTION: close the firing board row as verified-benign with the dmesg evidence; do NOT chase host memory. Structural fix for the recurring noise is a fleet decision: route the known-benign fingerprint to null / scope the rule away from the test memcg / suppress in the alert-router. Until then the re-fire drain appends one row per fire (board append-history); the lane's boardctl validate reports those repeated non-terminal alert-row ids as duplicate-id errors — a known, tested drain contract (re-fire) colliding with one-row-per-id board canon, kept open as a separate board row rather than 'fixed' by hand-editing history.",
+        "environment": "Linux fleet agents (bunker-mvp); Prometheus v3 + alert-router + spool drain pipeline",
+        "language": "text",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "oom-kills-low-pressure-memcg-benign",
+        "provider": "openrouter",
+        "solved_at": "2026-10-22T23:42:29.062Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-22 23:42:29"
+    }
+  ]
+}

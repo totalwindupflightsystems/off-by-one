@@ -1,0 +1,28 @@
+{
+  "class_id": 2934,
+  "title": "go-raft-pre-vote-joint-quorum-leader-lease",
+  "description": "go-raft-pre-vote-joint-quorum-leader-lease",
+  "created_at": "2026-10-22 22:07:47",
+  "answers": [
+    {
+      "answer_id": 4666,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "The solution is complete. Here's a summary of what I built and the diagnosis.\n\n## Deliverable\n\n`~/raftsim/SOLUTION.md` (1,767 lines) — a self-contained markdown report with title, root-cause analysis, the full exact fix (all Go source embedded), and a verification section.\n\nWorking implementation at `~/raftsim/`:\n\n```\ngo.mod\ncmd/sim/main.go          # CLI: -seed -ticks -drop -max-delay -check\nraftsim/raft.go          # deterministic simulation + protocol\nraftsim/invariants.go    # event-log audit\nraftsim/raft_test.go     # behaviour, joint-quorum, determinism, audit tests\n```\n\n## Root causes identified (two were real bugs hit while building)\n\n1. **PreVote term handling** — `RequestPreVote` must be dispatched *before* the generic \"higher term ⇒ step down\" path, and it must never mutate the receiver's term/log. The candidate carries `proposedTerm = Term+1` and only adopts it after a pre-vote quorum.\n2. **PreVoteResp term comparison bug** — the responder replies with its *own current* term, but I initially compared it to `proposedTerm`, so *every grant was discarded and no candidate ever formed*. Fixed to compare against the candidate's unchanged `n.Term`.\n3. **Leader-stickiness sentinel bug** — `lastLeaderContact` initialised to `0` made every voter compute \"leader is active\" at tick 10 and refuse all PreVotes. Fixed to `-1<<30`.\n4. **Joint consensus** — commit quorum must be the union rule: while *any* config entry is uncommitted, `commitMembership()` returns the joint config. This makes the joint entry itself and the final `C_new` entry both commit under **both** majorities.\n5. **Lease** — expired in `applyCommitted` *before* logging `apply_joint_config`; `hasLeaseQuorum` is false whenever `Config.Joint()`, so no lease is granted before `C_new` commits. Also fixed the lease never being renewed (it flapped every `leaseDuration`); it now refreshes silently while a quorum of fresh acks exists.\n6. **Determinism** — sorted node slices instead of map ranges, private seeded RNG consumed only in `send`, pure `electionTimeout(node,term)`, and `(DeliverAt, seq)` queue ordering.\n\n## Verification\n\n- `go build ./... && go vet ./... && go test -race ./...` → all pass.\n- Seed 1 (no drops): `final_commit_index=4`, leader `n0` term 1, zero violations. The log shows both `commit index=3` (joint) and `commit index=4` (final) computed with `{\"old\":[0,1,2,3,4],\"new\":[0,1,2]}`, with `lease_expired{reason:\"joint_committed\"}` at the same tick as `apply_joint_config`, and the next `lease_granted` at the same tick as `apply_final_config`.\n- Rejoin: `n4` is isolated until tick 200, campaigns, and every `prevote_decision` denies it (`up_to_date:false`, `leader_active:true`); it never leads and the term stays 1.\n- `TestDeterminism` confirms byte-identical event logs per seed; a sweep of 201 seeds at 25% drops (and 40% drops) produced zero invariant violations.\n",
+      "evidence": "# Evidence\n- Problem class: go-raft-pre-vote-joint-quorum-leader-lease\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-22T22:07:47.302Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement a deterministic, single-goroutine simulation of a Raft cluster that must support (a) PreVote: a follower that has lost contact with a leader requests pre-votes tagged with a proposed next term and never advances its own term or log while gathering them, so a partitioned node that rejoins cannot force a term bump; and (b) a C_old,new joint-consensus membership change from 5 voters to 3 where every commit requires a majority of BOTH configurations, with the leader's lease expiring the instant the joint config is committed and no leader lease being granted before the final C_new config is committed. Emit an event log (tick, from, to, term, type, payload) auditable against these invariants: no two leaders in the same term under the joint quorum rule, no vote granted to a candidate whose log is not at least as up-to-date, lease never valid across a config change, and a rejoin after a long partition never displaces a stable leader. Return the event log as JSON plus a final commit index that a reference harness can diff exactly; the harness will inject message reordering and drop patterns by seed.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-raft-pre-vote-joint-quorum-leader-lease",
+        "provider": "openrouter",
+        "solved_at": "2026-10-22T22:07:47.312Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-10-22 22:07:47"
+    }
+  ]
+}

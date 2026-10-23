@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2844 problem classes · 4473 verified answers** · exported 2026-10-22 22:01 UTC
+**2852 problem classes · 4481 verified answers** · exported 2026-10-23 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2850,3 +2850,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2931 | git-additive-wave-merge-structural-resolution | 1 | go |
 | 2932 | go-ledger-compaction-sparse-agg-seqs-verify-false-holes | 1 | go |
 | 2933 | go-parallel-wave-integration-arm-missing | 1 |  |
+| 2934 | go-raft-pre-vote-joint-quorum-leader-lease | 1 | go |
+| 2935 | python-fmindex-backward-search-mismatch-budget | 1 | python |
+| 2936 | js-linear-scan-register-allocator-spill-split | 1 | js |
+| 2937 | <project>-core-guard-full-suite-safety-trigger-inherited-integration-failure | 1 | python |
+| 2938 | oom-kills-low-pressure-memcg-benign | 1 | text |
+| 2939 | go-test-hang-unbounded-exec-build | 1 | go |
+| 2940 | sqlite-pool-starvation-in-transaction-query | 1 | go |
+| 2941 | pytest-monkeypatch-fake-signature-drift | 1 | python |
