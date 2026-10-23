@@ -219,15 +219,32 @@ func (s *Store) ApplyExtra(sql string) error {
 	return nil
 }
 
+// queryer is the statement executor a graph read or write runs on: the
+// pooled *sql.DB for a standalone call, or the *sql.Tx of a batched write
+// pass (Tx in batch.go — the seed loader's single-transaction corpus
+// import, PERF-OFF-BY-ONE-1). It is the read-capable superset of
+// edgeExecer (below), which the linker's batch path uses. Sharing one
+// function body between the standalone and batched paths keeps the SQL,
+// the validation and the error mapping from drifting apart.
+type queryer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // CreateProblemClass inserts a new problem class. The (title) column has a
 // UNIQUE constraint, so calling with a duplicate title returns ErrDuplicate.
 //
 // Returns the new ID.
 func (s *Store) CreateProblemClass(ctx context.Context, title, description string) (int64, error) {
+	return createProblemClass(ctx, s.db, title, description)
+}
+
+func createProblemClass(ctx context.Context, q queryer, title, description string) (int64, error) {
 	if title == "" {
 		return 0, errors.New("title must not be empty")
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := q.ExecContext(ctx,
 		`INSERT INTO problem_classes (title, description) VALUES (?, ?)`,
 		title, description)
 	if err != nil {
@@ -256,7 +273,11 @@ func isUniqueViolation(err error) bool {
 // GetProblemClass fetches a single problem class by ID. Returns
 // ErrNotFound if no row matches.
 func (s *Store) GetProblemClass(ctx context.Context, id int64) (*ProblemClass, error) {
-	row := s.db.QueryRowContext(ctx,
+	return getProblemClass(ctx, s.db, id)
+}
+
+func getProblemClass(ctx context.Context, q queryer, id int64) (*ProblemClass, error) {
+	row := q.QueryRowContext(ctx,
 		`SELECT id, title, description, created_at FROM problem_classes WHERE id = ?`, id)
 	return scanProblemClass(row)
 }
@@ -264,7 +285,11 @@ func (s *Store) GetProblemClass(ctx context.Context, id int64) (*ProblemClass, e
 // GetProblemClassByTitle is the lookup the discovery engine and the web UI
 // autocomplete use — titles are slugified identifiers and unique.
 func (s *Store) GetProblemClassByTitle(ctx context.Context, title string) (*ProblemClass, error) {
-	row := s.db.QueryRowContext(ctx,
+	return getProblemClassByTitle(ctx, s.db, title)
+}
+
+func getProblemClassByTitle(ctx context.Context, q queryer, title string) (*ProblemClass, error) {
+	row := q.QueryRowContext(ctx,
 		`SELECT id, title, description, created_at FROM problem_classes WHERE title = ?`, title)
 	return scanProblemClass(row)
 }
@@ -273,16 +298,20 @@ func (s *Store) GetProblemClassByTitle(ctx context.Context, title string) (*Prob
 // creating it if not. Returns the class and a boolean indicating whether
 // it was just created.
 func (s *Store) UpsertProblemClass(ctx context.Context, title, description string) (*ProblemClass, bool, error) {
-	if existing, err := s.GetProblemClassByTitle(ctx, title); err == nil {
+	return upsertProblemClass(ctx, s.db, title, description)
+}
+
+func upsertProblemClass(ctx context.Context, q queryer, title, description string) (*ProblemClass, bool, error) {
+	if existing, err := getProblemClassByTitle(ctx, q, title); err == nil {
 		return existing, false, nil
 	} else if !errors.Is(err, ErrNotFound) {
 		return nil, false, err
 	}
-	id, err := s.CreateProblemClass(ctx, title, description)
+	id, err := createProblemClass(ctx, q, title, description)
 	if err != nil {
 		return nil, false, err
 	}
-	pc, err := s.GetProblemClass(ctx, id)
+	pc, err := getProblemClass(ctx, q, id)
 	if err != nil {
 		return nil, false, err
 	}
@@ -324,6 +353,10 @@ var ErrNotFound = errors.New("graph: not found")
 // The signatures column is a JSON blob — pass an empty string for
 // "no signatures" or a json.Marshal'd object.
 func (s *Store) CreateAnswerNode(ctx context.Context, classID int64, parentID int64, env, lang, version, solution, evidence, signatures string) (int64, error) {
+	return createAnswerNode(ctx, s.db, classID, parentID, env, lang, version, solution, evidence, signatures)
+}
+
+func createAnswerNode(ctx context.Context, q queryer, classID int64, parentID int64, env, lang, version, solution, evidence, signatures string) (int64, error) {
 	if classID == 0 {
 		return 0, errors.New("class_id must not be zero")
 	}
@@ -341,7 +374,7 @@ func (s *Store) CreateAnswerNode(ctx context.Context, classID int64, parentID in
 	// is the write funnel for every producer (solver, seed, import), so
 	// prose is canonicalized here and can never reach a filtered field.
 	env, version = NormalizeEnv(env), NormalizeVersion(version)
-	res, err := s.db.ExecContext(ctx,
+	res, err := q.ExecContext(ctx,
 		`INSERT INTO answer_nodes (class_id, parent_id, env, lang, version, solution, evidence, signatures, status)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		classID, parent, env, lang, version, solution, evidence, signatures, AnswerPending)
@@ -361,7 +394,11 @@ func (s *Store) GetAnswerNode(ctx context.Context, id int64) (*AnswerNode, error
 
 // ListAnswers returns all answers for a problem class, newest first.
 func (s *Store) ListAnswers(ctx context.Context, classID int64) ([]AnswerNode, error) {
-	rows, err := s.db.QueryContext(ctx,
+	return listAnswers(ctx, s.db, classID)
+}
+
+func listAnswers(ctx context.Context, q queryer, classID int64) ([]AnswerNode, error) {
+	rows, err := q.QueryContext(ctx,
 		`SELECT id, class_id, parent_id, env, lang, version, solution, evidence, signatures, status, created_at
 		 FROM answer_nodes WHERE class_id = ? ORDER BY id DESC`, classID)
 	if err != nil {
@@ -382,12 +419,16 @@ func (s *Store) ListAnswers(ctx context.Context, classID int64) ([]AnswerNode, e
 // UpdateAnswerStatus changes an answer's status. Used by the solver to
 // mark answers as verified or failed.
 func (s *Store) UpdateAnswerStatus(ctx context.Context, id int64, status string) error {
+	return updateAnswerStatus(ctx, s.db, id, status)
+}
+
+func updateAnswerStatus(ctx context.Context, q queryer, id int64, status string) error {
 	switch status {
 	case AnswerPending, AnswerVerified, AnswerFailed, AnswerCIPassed:
 	default:
 		return fmt.Errorf("invalid status %q", status)
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := q.ExecContext(ctx,
 		`UPDATE answer_nodes SET status = ? WHERE id = ?`, status, id)
 	if err != nil {
 		return fmt.Errorf("update answer status: %w", err)

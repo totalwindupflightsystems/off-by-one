@@ -81,21 +81,79 @@ const (
 // signatures, so title lexemes are the only relationship signal available,
 // and without this step /problems/<class>/related answers [] on a
 // perfectly seeded database.
+//
+// Batching (PERF-OFF-BY-ONE-1): the corpus writes run as ONE SQLite
+// transaction instead of one autocommitted statement per row. Before
+// batching, the release install seed paid an fsync per statement in WAL
+// mode — ~9,100 fsyncs, 45-70s wall on ext4 for ~4s of work (the tmpfs
+// control runs the identical code in 3.4-3.7s). The load now runs in two
+// phases:
+//
+//  1. read + decode every corpus file into memory — filesystem I/O stays
+//     OUTSIDE the write transaction, so the batch never holds the
+//     database across disk reads;
+//  2. one graph.Tx for every class upsert, answer insert and status
+//     update, committed once — one fsync for the whole corpus.
+//
+// The transaction makes the corpus load atomic: a parse/validation/write
+// failure or a cancelled context rolls the batch back and leaves the
+// database untouched (before batching, a mid-corpus failure left the
+// already-loaded prefix committed). Because the loader is idempotent,
+// re-running after an aborted seed simply imports everything again —
+// recovery semantics are unchanged. The linker still runs AFTER the
+// commit in its own batched transaction (writeSimilarEdges), exactly as
+// before: a linking failure still leaves the corpus committed, and a
+// re-run still creates 0 edges.
 func Seed(ctx context.Context, store *graph.Store, dir string) (*Stats, error) {
 	answersDir := filepath.Join(dir, "answers")
 	entries, err := os.ReadDir(answersDir)
 	if err != nil {
 		return nil, fmt.Errorf("read corpus dir %s: %w", answersDir, err)
 	}
-	stats := &Stats{}
+
+	// Phase 1 — filesystem. Read and decode every corpus file BEFORE the
+	// write transaction opens. os.ReadDir returns entries sorted by name,
+	// so the load order (and therefore row ID assignment) is identical to
+	// the pre-batch loader.
+	var files []parsedCorpusFile
 	for _, ent := range entries {
 		if ent.IsDir() || !strings.HasSuffix(ent.Name(), ".json") {
 			continue
 		}
-		if err := seedFile(ctx, store, filepath.Join(answersDir, ent.Name()), stats); err != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("load corpus: %w", err)
+		}
+		cf, err := parseCorpusFile(filepath.Join(answersDir, ent.Name()))
+		if err != nil {
 			return nil, fmt.Errorf("%s: %w", ent.Name(), err)
 		}
+		files = append(files, parsedCorpusFile{name: ent.Name(), cf: cf})
 	}
+
+	stats := &Stats{FilesLoaded: len(files)}
+
+	// Phase 2 — one transaction for every corpus write. The deferred
+	// rollback fires on any error path (write failure, cancelled context)
+	// and is a no-op after a successful commit.
+	tx, err := store.BeginTx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin seed batch: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	for _, f := range files {
+		if err := seedFile(ctx, tx, f.cf, stats); err != nil {
+			return nil, fmt.Errorf("%s: %w", f.name, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit seed batch: %w", err)
+	}
+	committed = true
 
 	// Link the classes into the lateral graph once every file is loaded.
 	// Linking happens after the loop (not per file) so a class can pair with
@@ -109,22 +167,34 @@ func Seed(ctx context.Context, store *graph.Store, dir string) (*Stats, error) {
 	return stats, nil
 }
 
-// seedFile loads one corpus file and merges it into the store.
-func seedFile(ctx context.Context, store *graph.Store, path string, stats *Stats) error {
+// parsedCorpusFile is one corpus file read and decoded during phase 1,
+// before the write transaction opens.
+type parsedCorpusFile struct {
+	name string
+	cf   *CorpusFile
+}
+
+// parseCorpusFile reads and validates one corpus file. It performs no
+// store I/O, so it can run outside the write transaction.
+func parseCorpusFile(path string) (*CorpusFile, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return fmt.Errorf("read: %w", err)
+		return nil, fmt.Errorf("read: %w", err)
 	}
 	var cf CorpusFile
 	if err := json.Unmarshal(data, &cf); err != nil {
-		return fmt.Errorf("parse: %w", err)
+		return nil, fmt.Errorf("parse: %w", err)
 	}
 	if cf.Title == "" {
-		return errors.New("corpus file has empty title")
+		return nil, errors.New("corpus file has empty title")
 	}
-	stats.FilesLoaded++
+	return &cf, nil
+}
 
-	class, created, err := store.UpsertProblemClass(ctx, cf.Title, cf.Description)
+// seedFile merges one parsed corpus file into the store through the
+// batch transaction.
+func seedFile(ctx context.Context, tx *graph.Tx, cf *CorpusFile, stats *Stats) error {
+	class, created, err := tx.UpsertProblemClass(ctx, cf.Title, cf.Description)
 	if err != nil {
 		return fmt.Errorf("upsert problem class: %w", err)
 	}
@@ -137,7 +207,7 @@ func seedFile(ctx context.Context, store *graph.Store, path string, stats *Stats
 	// Dedup key is the full (env, lang, version, solution) tuple. The
 	// corpus has no stable answer IDs across databases (answer_id is
 	// export-scoped), so content identity is what makes re-runs safe.
-	existing, err := store.ListAnswers(ctx, class.ID)
+	existing, err := tx.ListAnswers(ctx, class.ID)
 	if err != nil {
 		return fmt.Errorf("list existing answers: %w", err)
 	}
@@ -161,13 +231,13 @@ func seedFile(ctx context.Context, store *graph.Store, path string, stats *Stats
 		if err != nil {
 			return fmt.Errorf("answer %d signatures: %w", ans.AnswerID, err)
 		}
-		id, err := store.CreateAnswerNode(ctx, class.ID, 0,
+		id, err := tx.CreateAnswerNode(ctx, class.ID, 0,
 			ans.Environment, ans.Language, ans.Version,
 			ans.Solution, ans.Evidence, sigs)
 		if err != nil {
 			return fmt.Errorf("create answer node: %w", err)
 		}
-		if err := store.UpdateAnswerStatus(ctx, id, corpusAnswerStatus(ans)); err != nil {
+		if err := tx.UpdateAnswerStatus(ctx, id, corpusAnswerStatus(ans)); err != nil {
 			return fmt.Errorf("set answer status: %w", err)
 		}
 		seen[key] = true
