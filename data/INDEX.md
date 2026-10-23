@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2852 problem classes · 4481 verified answers** · exported 2026-10-23 04:00 UTC
+**2856 problem classes · 4485 verified answers** · exported 2026-10-23 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2858,3 +2858,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2939 | go-test-hang-unbounded-exec-build | 1 | go |
 | 2940 | sqlite-pool-starvation-in-transaction-query | 1 | go |
 | 2941 | pytest-monkeypatch-fake-signature-drift | 1 | python |
+| 2942 | bash-rfc6724-source-address-selection-audit | 1 | shell |
+| 2943 | js-double-ratchet-header-encrypted-skipped-keys | 1 | js |
+| 2944 | pytest-live-teardown-409-sync-lock-backoff | 1 | python |
+| 2945 | shim-single-method-registration-flips-sibling-drift-class | 1 | go |
