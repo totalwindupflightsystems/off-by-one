@@ -1122,3 +1122,75 @@ curl -s -X POST :8766/api/v1/problems/submit -H 'Content-Type: application/json'
 - **Load the box's real load into the report.** Every number in this run was measured at
   loadavg 11–20; seeding took 68.7 s where an idle host takes 23–36 s. A measurement without the
   host state beside it is not a benchmark.
+
+## §21 — 2026-10-23: the RELEASED artifact — what the download button actually installs (DF-OFF-BY-ONE-57…61)
+
+**Why this section exists.** Twenty runs installed from a source checkout. Nobody had driven the
+**delivery chain**: the two files a stranger gets from GitHub Releases. That gap hides a whole
+defect class — code that is correct at HEAD, documented correctly at HEAD, and *shipped wrong* because
+the doc's install snippet pins an old tag or the artifact predates the contract it advertises.
+
+### Resolve the three identities before grading anything
+
+```bash
+gh release view v0.2.0 --repo totalwindupflightsystems/off-by-one --json tagName,publishedAt,assets
+git rev-parse v0.2.0^{commit}                 # tag commit  eabb6741
+git log -1 --format='%H %s'                   # checkout HEAD ea5b963a (2 commits ahead, CI/board only)
+sha256sum -c --ignore-missing SHA256SUMS      # the asset the user actually gets
+curl -s localhost:8766/health                 # the version the RUNNING binary reports
+```
+
+When the tag lags HEAD, check whether the lagging commits can even change behavior (`git diff
+v0.2.0..HEAD --name-only`) before blaming deployment drift. Here: `.github/` + board only — so a
+finding on this artifact is a product finding, not a stale-deploy finding.
+
+### What the release artifact gets right
+
+- `SHA256SUMS` verifies both the raw binary and the tarball; `--version` reports `off-by-one v0.2.0`.
+- The tarball holds **only** the binary. The corpus is NOT embedded (`data/answers/` has no
+  `go:embed`), which is why the documented recipe still clones. That is disclosed in the README text,
+  but the tarball itself carries no README — a user who grabs the `.tar.gz` alone has nothing telling
+  them the binary cannot seed. (Not filed: the raw binary is the asset the README tells you to take.)
+- `seed` from a depth-1 clone: 2856 classes / 2955 answers / 12,872 edges, idempotent, 58.97 s.
+- Everything downstream (discover, submit, dedup, queue, taxonomy, SPA, Explore drill-down) behaves
+  as HEAD does — including the DF-37-R2, DF-42 and DF-53 fixes, verified on the artifact itself.
+
+### The four things the artifact exposes
+
+1. **README dedup prose is one release behind the wire** (DF-57). `README.md:218-232` promises the 409
+   always carries the existing `submission_id` plus a queue `position`. The answered arm returns
+   `submission_id:""`, `position:0`, `reason:"answered"`, `next_action:"POST /api/v1/problems/discover"`.
+   `docs/api-reference.md:88-102` and `docs/integration.md:368-376` were corrected by 33ad3dd4 — the
+   README, the first doc a user reads, was not. **Lesson: when a contract change lands, grep every doc
+   that states the old contract, not just the reference page.**
+2. **`seed` throws away the corpus's own chronology** (DF-58). `CorpusFile.CreatedAt` and
+   `CorpusAnswer.CreatedAt` are parsed (seed.go:35,43) and never written: the inserts are
+   `problem_classes (title, description)` and `answer_nodes (class_id, …)` (store.go:231,345), so both
+   fall back to `DEFAULT (datetime('now'))`. A fresh 2856-class node carries **60** distinct timestamps,
+   all inside the seed run's 59 seconds, while the corpus says class 112 is `2026-07-25 01:10:08` with a
+   second answer on `2026-10-01 07:20:47`. **Lesson: a field the loader parses but never persists is a
+   silent provenance loss — census `count(distinct <ts>)` after any seed to see it.**
+3. **The chip doubles the prefix** (DF-59). `web/js/app.js:175` does `'v' + j.version` and `/health`
+   already returns `"v0.2.0"` → the header renders `vv0.2.0`. REVIEW-OB-021 wired the chip to `/health`;
+   the composition was never driven in a browser, so the row closed green while the UI is visibly wrong.
+   **Lesson: a fix that spans a server payload and a client template must be graded on the RENDERED
+   string, not on either half.**
+4. **The install snippet installs the past** (DF-60). The README recipe opens `V=v0.1.1`. Driven
+   literally: that binary's `/health` has no `version` field (chip stays `v0.0.0`) and its answered-arm
+   409 has no `reason`/`next_action` — the pre-33ad3dd4 contract, i.e. exactly the defect the release
+   notes say is fixed. **Lesson: a release-install block is the one snippet that must never hardcode a
+   version; resolve it from the latest tag or guard it against drift.**
+
+### Perf — the numbers, and why there is no PERF row
+
+Seed is the only multi-second step (58.97 s wall, 6.49 s user + 1.45 s sys: the wall is the link scan
+plus cold page cache, and the per-class scan is already OB-GAP-073). Cold start to first `/health`:
+14 ms. First discover after restart: 1.8 ms. Warm discover: 7.0 ms ± 0.8 ms incl. curl (n=20). The
+taxonomy page is 10.2 MB / 117 ms for 1000 classes — that is DF-53's payload-shape issue, not a
+latency defect. Nothing here is slow enough for a user to feel, so no PERF row was filed.
+
+### Host state (put it beside every number)
+
+Measured at loadavg 8.26 on a 16-core host; the fresh-box battery ran while a sibling agent's Go test
+suite held the bunker host at loadavg 18.79 (`ps` showed `…/bunker-53097b60/qa-tmp-*/…/*.test`), so the
+battery's wall time is host contention, not a product signal.

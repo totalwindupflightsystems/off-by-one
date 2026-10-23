@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.13.0
+version: 1.14.0
 category: software-development
 ---
 
@@ -543,7 +543,9 @@ hands you something to poll. Three pitfalls, in the order they bite:
     deleted inode (it only inspects the file on disk). `gate-deploy` has no machine-side caller, so a
     tick can claim "rebuild+redeploy" having only rebuilt (`DF-OFF-BY-ONE-52`).
 42. **A dedup 409 hands back an EMPTY `submission_id` when the hit is a verified ANSWER, not a queue
-    entry (`DF-OFF-BY-ONE-37-R2`, P2).** Test with the corpus tuple, not with a fresh class:
+    entry — that is the CONTRACT now, not a bug (`DF-OFF-BY-ONE-37-R2` closed by design 33ad3dd4;
+    README prose still lags it, `DF-OFF-BY-ONE-57`).** Test with the corpus tuple, not with a fresh
+    class:
     ```bash
     curl -s -X POST :8766/api/v1/problems/submit -H 'Content-Type: application/json' \
       -d '{"problem_class":"<class-with-a-verified-answer>","environment":"docker","language":"go",
@@ -575,3 +577,42 @@ native suite PASS, upgrade v0.1.0→HEAD OK, chaos-resource PASS, chaos-errorpat
 FALSE N/A ("no web UI detected") for a repo whose SPA this run drove in a browser — filed as
 `QA-OFF-BY-ONE-20-R2`. Full trail: `docs/dogfood/2026-10-20-deploy-truth-integration.md`,
 `docs/dogfood/diagnostics.md` §20.
+
+## Field-tested 2026-10-23 (dogfood tick #20): how to tell WHICH artifact you are using
+
+The released **v0.2.0** binary installs, seeds and serves exactly as documented (download+verify 0.7 s,
+clone 5.7 s, seed 59 s, cold start 14 ms, warm discover 7.0 ms ± 0.8 ms). The new hazard is not the
+engine — it is that three different artifacts claim to be "off-by-one" and only one of them has the
+contract the docs describe. Resolve identity first:
+
+```bash
+gh release view --json tagName,publishedAt -q '.tagName+" "+.publishedAt'   # what is SHIPPED
+git rev-parse v0.2.0^{commit}; git log -1 --format=%H                      # what is TAGGED vs CHECKED OUT
+curl -s localhost:8766/health                                              # v0.2.0 ⇒ post-REVIEW-OB-021 binary
+./off-by-one-v0.2.0-linux-amd64 --version                                  # the artifact's own stamp
+```
+
+44. **The README's release recipe pins `V=v0.1.1`, so the documented command installs a two-release-old
+    binary (`DF-OFF-BY-ONE-60`, P3).** Copying the block verbatim downloads v0.1.1, whose `/health` has
+    **no** `version` field (the SPA chip stays `v0.0.0`) and whose answered-arm dedup 409 carries **no**
+    `reason`/`next_action` — the pre-33ad3dd4 contract, i.e. the failure the v0.2.0 notes say is fixed.
+    Always override `V=` with the tag you actually want and confirm it with `--version` / `/health`.
+45. **`seed` stamps the corpus with the seed run's clock, not the corpus's own dates
+    (`DF-OFF-BY-ONE-58`, P3).** `created_at` is parsed (seed.go:35,43) and never inserted, so every row
+    takes `DEFAULT (datetime('now'))`. On a fresh 2856-class node all timestamps fall inside the seed's
+    59 seconds; the corpus's real dates survive only in `data/answers/*.json`. Consequences when you
+    work with the graph: "newest answers" is meaningless, `created_at` on `/api/v1/problems` is the
+    install date, and a re-seed changes nothing (rows are skipped). Read dates from the corpus files,
+    never from the served JSON.
+46. **The SPA header chip renders `vv0.2.0` (`DF-OFF-BY-ONE-59`, P3).** `web/js/app.js:175` prepends `'v'`
+    to a `/health` version that already carries it. Harmless to function, but do not use the chip to
+    prove which build is deployed — use `/health`'s raw `version` or `--version`. And when grading any
+    UI fix that spans a payload and a template, assert the RENDERED string in a browser, not each half.
+
+**Seed is the one slow step** (58.97 s wall, 6.49 s user): it is a one-shot install operation, not a
+per-request cost. Discover/submit stay in the single-digit-millisecond range even on a loaded host;
+do not file perf rows for them.
+
+Install leg for this run: `bunker-qa.sh launch/collect` on bunker-mvp against HEAD `ea5b963a`
+(agent auto-destroyed) — see `docs/dogfood/2026-10-23-release-artifact-integration.md` for the cell
+verdicts, and `docs/dogfood/diagnostics.md` §21 for the delivery-chain reasoning.
