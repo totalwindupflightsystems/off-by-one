@@ -1,0 +1,715 @@
+commit dc96707f68908bba837a893f9d377578010e2786
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Fri Oct 23 20:15:21 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Fri Oct 23 20:15:21 2026 -0500
+
+    fix: seed preserves corpus created_at timestamps
+    
+    The seed loader re-stamped every imported row with the seed run's wall
+    clock via the SQLite DEFAULT (datetime('now')), discarding the corpus's
+    own created_at values. New classes and answers now store the corpus
+    timestamp; rows that already exist are never rewritten, so a re-run
+    leaves every stored created_at byte-identical.
+    
+    - internal/graph: createProblemClass/createAnswerNode and their upsert
+      wrapper take a createdAt parameter, inserted via
+      COALESCE(NULLIF(?, ''), datetime('now')) so an empty value degrades to
+      the schema default — one statement for both arms, no drift between
+      the standalone and batched (Tx) paths. The existing public signatures
+      are unchanged (174 call sites); the timestamped entry points are the
+      additive CreateProblemClassAt / UpsertProblemClassAt /
+      CreateAnswerNodeAt variants on Store and Tx.
+    - internal/seed: seedFile passes cf.CreatedAt / ans.CreatedAt through
+      the new Tx variants. Answer dedup identity is now
+      (env, lang, version, solution, created_at): the corpus holds re-solve
+      snapshots that share the content tuple and differ only in when they
+      were written, and collapsing them dropped the newer snapshot (e.g.
+      serde-json-validator-jsonschema's two answers). A corpus answer with
+      no created_at still dedups on the plain content tuple, so legacy
+      files stay idempotent against default-stamped rows.
+    - Tests: TestSeedPreservesCorpusCreatedAt pins corpus stamps on classes
+      and answers, the snapshot-pair shape, the default-stamp fallback, and
+      re-run byte-stability; TestCreatedAtExplicitVsDefault pins the
+      store-level arms including upsert-never-rewrites; the
+      across-databases determinism dump now includes created_at for
+      problem_classes and answer_nodes (loader output, not wall clock).
+    
+    Verified: go build ./...; go vet; go test ./... -count=1 (all ok);
+    fresh seed of the 2863-file corpus → 2863 distinct class timestamps,
+    serde-json-validator-jsonschema class stamped 2026-07-25 01:10:08 with
+    answers 2026-07-25 01:10:08 and 2026-10-01 07:20:47 in id order;
+    re-run creates 0 rows and leaves all query outputs byte-identical.
+    
+    Addresses DF-OFF-BY-ONE-58.
+---
+ internal/graph/batch.go          |  22 ++++-
+ internal/graph/store.go          |  58 +++++++++---
+ internal/graph/store_test.go     |  88 ++++++++++++++++++
+ internal/seed/seed.go            |  58 +++++++++---
+ internal/seed/seed_batch_test.go |  16 ++--
+ internal/seed/seed_test.go       | 196 ++++++++++++++++++++++++++++++++++++++-
+ 6 files changed, 396 insertions(+), 42 deletions(-)
+
+diff --git a/internal/graph/batch.go b/internal/graph/batch.go
+index b4aef56c..ebb1ce70 100644
+--- a/internal/graph/batch.go
++++ b/internal/graph/batch.go
+@@ -71,9 +71,16 @@ func (t *Tx) Rollback() error {
+ }
+ 
+ // UpsertProblemClass is the Store.UpsertProblemClass body running inside
+-// the batch: find by title, create when missing.
++// the batch: find by title, create when missing. A created class takes the
++// created_at column default.
+ func (t *Tx) UpsertProblemClass(ctx context.Context, title, description string) (*ProblemClass, bool, error) {
+-	return upsertProblemClass(ctx, t.tx, title, description)
++	return upsertProblemClass(ctx, t.tx, title, description, "")
++}
++
++// UpsertProblemClassAt is the Store.UpsertProblemClassAt body running inside
++// the batch: the created_at value applies only when the class is created.
++func (t *Tx) UpsertProblemClassAt(ctx context.Context, title, description, createdAt string) (*ProblemClass, bool, error) {
++	return upsertProblemClass(ctx, t.tx, title, description, createdAt)
+ }
+ 
+ // ListAnswers is the Store.ListAnswers body running inside the batch. It
+@@ -86,8 +93,17 @@ func (t *Tx) ListAnswers(ctx context.Context, classID int64) ([]AnswerNode, erro
+ 
+ // CreateAnswerNode is the Store.CreateAnswerNode body running inside the
+ // batch, including signatures validation and env/version normalization.
++// created_at takes the column default.
+ func (t *Tx) CreateAnswerNode(ctx context.Context, classID int64, parentID int64, env, lang, version, solution, evidence, signatures string) (int64, error) {
+-	return createAnswerNode(ctx, t.tx, classID, parentID, env, lang, version, solution, evidence, signatures)
++	return createAnswerNode(ctx, t.tx, classID, parentID, env, lang, version, solution, evidence, signatures, "")
++}
++
++// CreateAnswerNodeAt is the Store.CreateAnswerNodeAt body running inside
++// the batch — same validation and normalization, with an explicit
++// created_at value for the corpus timestamp-preserving seed path
++// (DF-OFF-BY-ONE-58).
++func (t *Tx) CreateAnswerNodeAt(ctx context.Context, classID int64, parentID int64, env, lang, version, solution, evidence, signatures, createdAt string) (int64, error) {
++	return createAnswerNode(ctx, t.tx, classID, parentID, env, lang, version, solution, evidence, signatures, createdAt)
+ }
+ 
+ // UpdateAnswerStatus is the Store.UpdateAnswerStatus body running inside
+diff --git a/internal/graph/store.go b/internal/graph/store.go
+index f5dd87f7..434215c2 100644
+--- a/internal/graph/store.go
++++ b/internal/graph/store.go
+@@ -234,19 +234,33 @@ type queryer interface {
+ 
+ // CreateProblemClass inserts a new problem class. The (title) column has a
+ // UNIQUE constraint, so calling with a duplicate title returns ErrDuplicate.
++// created_at takes the column default (the insert's wall clock).
+ //
+ // Returns the new ID.
+ func (s *Store) CreateProblemClass(ctx context.Context, title, description string) (int64, error) {
+-	return createProblemClass(ctx, s.db, title, description)
++	return createProblemClass(ctx, s.db, title, description, "")
+ }
+ 
+-func createProblemClass(ctx context.Context, q queryer, title, description string) (int64, error) {
++// CreateProblemClassAt is CreateProblemClass with an explicit created_at
++// value (corpus export format "2006-01-02 15:04:05"). The seed loader uses
++// it to preserve the corpus's own timestamps instead of re-stamping every
++// row with the seed run's clock (DF-OFF-BY-ONE-58). An empty createdAt
++// falls back to the column default, exactly like CreateProblemClass.
++func (s *Store) CreateProblemClassAt(ctx context.Context, title, description, createdAt string) (int64, error) {
++	return createProblemClass(ctx, s.db, title, description, createdAt)
++}
++
++func createProblemClass(ctx context.Context, q queryer, title, description, createdAt string) (int64, error) {
+ 	if title == "" {
+ 		return 0, errors.New("title must not be empty")
+ 	}
++	// COALESCE(NULLIF(...)) keeps one statement for both arms: an empty
++	// createdAt degrades to the schema default datetime('now'), so the
++	// standalone path and the corpus-timestamp path cannot drift apart.
+ 	res, err := q.ExecContext(ctx,
+-		`INSERT INTO problem_classes (title, description) VALUES (?, ?)`,
+-		title, description)
++		`INSERT INTO problem_classes (title, description, created_at)
++		 VALUES (?, ?, COALESCE(NULLIF(?, ''), datetime('now')))`,
++		title, description, createdAt)
+ 	if err != nil {
+ 		if isUniqueViolation(err) {
+ 			return 0, ErrDuplicate
+@@ -296,18 +310,27 @@ func getProblemClassByTitle(ctx context.Context, q queryer, title string) (*Prob
+ 
+ // UpsertProblemClass finds the class by title, returning it if found, or
+ // creating it if not. Returns the class and a boolean indicating whether
+-// it was just created.
++// it was just created. A created class takes the created_at column default.
+ func (s *Store) UpsertProblemClass(ctx context.Context, title, description string) (*ProblemClass, bool, error) {
+-	return upsertProblemClass(ctx, s.db, title, description)
++	return upsertProblemClass(ctx, s.db, title, description, "")
++}
++
++// UpsertProblemClassAt is UpsertProblemClass with an explicit created_at for
++// the create arm (corpus export format, see CreateProblemClassAt). The
++// timestamp applies only when the class is created — an existing class keeps
++// its stored created_at untouched, which is what makes re-seeding a corpus
++// idempotent for timestamps (DF-OFF-BY-ONE-58).
++func (s *Store) UpsertProblemClassAt(ctx context.Context, title, description, createdAt string) (*ProblemClass, bool, error) {
++	return upsertProblemClass(ctx, s.db, title, description, createdAt)
+ }
+ 
+-func upsertProblemClass(ctx context.Context, q queryer, title, description string) (*ProblemClass, bool, error) {
++func upsertProblemClass(ctx context.Context, q queryer, title, description, createdAt string) (*ProblemClass, bool, error) {
+ 	if existing, err := getProblemClassByTitle(ctx, q, title); err == nil {
+ 		return existing, false, nil
+ 	} else if !errors.Is(err, ErrNotFound) {
+ 		return nil, false, err
+ 	}
+-	id, err := createProblemClass(ctx, q, title, description)
++	id, err := createProblemClass(ctx, q, title, description, createdAt)
+ 	if err != nil {
+ 		return nil, false, err
+ 	}
+@@ -349,14 +372,23 @@ func (s *Store) ListProblemClasses(ctx context.Context, limit, offset int) ([]Pr
+ var ErrNotFound = errors.New("graph: not found")
+ 
+ // CreateAnswerNode inserts a new answer. parentID may be 0 for no parent.
++// created_at takes the column default (the insert's wall clock).
+ //
+ // The signatures column is a JSON blob — pass an empty string for
+ // "no signatures" or a json.Marshal'd object.
+ func (s *Store) CreateAnswerNode(ctx context.Context, classID int64, parentID int64, env, lang, version, solution, evidence, signatures string) (int64, error) {
+-	return createAnswerNode(ctx, s.db, classID, parentID, env, lang, version, solution, evidence, signatures)
++	return createAnswerNode(ctx, s.db, classID, parentID, env, lang, version, solution, evidence, signatures, "")
++}
++
++// CreateAnswerNodeAt is CreateAnswerNode with an explicit created_at value
++// (corpus export format "2006-01-02 15:04:05"). The seed loader uses it to
++// preserve the corpus's own answer timestamps (DF-OFF-BY-ONE-58). An empty
++// createdAt falls back to the column default, exactly like CreateAnswerNode.
++func (s *Store) CreateAnswerNodeAt(ctx context.Context, classID int64, parentID int64, env, lang, version, solution, evidence, signatures, createdAt string) (int64, error) {
++	return createAnswerNode(ctx, s.db, classID, parentID, env, lang, version, solution, evidence, signatures, createdAt)
+ }
+ 
+-func createAnswerNode(ctx context.Context, q queryer, classID int64, parentID int64, env, lang, version, solution, evidence, signatures string) (int64, error) {
++func createAnswerNode(ctx context.Context, q queryer, classID int64, parentID int64, env, lang, version, solution, evidence, signatures, createdAt string) (int64, error) {
+ 	if classID == 0 {
+ 		return 0, errors.New("class_id must not be zero")
+ 	}
+@@ -375,9 +407,9 @@ func createAnswerNode(ctx context.Context, q queryer, classID int64, parentID in
+ 	// prose is canonicalized here and can never reach a filtered field.
+ 	env, version = NormalizeEnv(env), NormalizeVersion(version)
+ 	res, err := q.ExecContext(ctx,
+-		`INSERT INTO answer_nodes (class_id, parent_id, env, lang, version, solution, evidence, signatures, status)
+-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+-		classID, parent, env, lang, version, solution, evidence, signatures, AnswerPending)
++		`INSERT INTO answer_nodes (class_id, parent_id, env, lang, version, solution, evidence, signatures, status, created_at)
++		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now')))`,
++		classID, parent, env, lang, version, solution, evidence, signatures, AnswerPending, createdAt)
+ 	if err != nil {
+ 		return 0, fmt.Errorf("insert answer_node: %w", err)
+ 	}
+diff --git a/internal/graph/store_test.go b/internal/graph/store_test.go
+index 3da2bb77..705cba9a 100644
+--- a/internal/graph/store_test.go
++++ b/internal/graph/store_test.go
+@@ -946,3 +946,91 @@ func TestStore_ListProblemClassesWithCountsFiltered_EnvLang(t *testing.T) {
+ 		t.Errorf("status=pending&env=kubernetes: titles = %v, want [envlang-kube-python]", got)
+ 	}
+ }
++
++// TestCreatedAtExplicitVsDefault pins the DF-OFF-BY-ONE-58 write surface:
++// the ...At variants store the caller's created_at verbatim, the plain
++// variants fall back to the schema default, and upserting an existing
++// title never rewrites its stored timestamp.
++func TestCreatedAtExplicitVsDefault(t *testing.T) {
++	ctx := context.Background()
++	s := newTestStore(t)
++
++	const stamp = "2026-07-25 01:10:08"
++	const fmtLayout = "2006-01-02 15:04:05"
++
++	// Explicit class timestamp is preserved.
++	cid, err := s.CreateProblemClassAt(ctx, "explicit-class", "carries its own stamp", stamp)
++	if err != nil {
++		t.Fatalf("CreateProblemClassAt: %v", err)
++	}
++	pc, err := s.GetProblemClass(ctx, cid)
++	if err != nil {
++		t.Fatalf("GetProblemClass: %v", err)
++	}
++	if got := pc.CreatedAt.Format(fmtLayout); got != stamp {
++		t.Errorf("class created_at = %q, want %q", got, stamp)
++	}
++
++	// Explicit answer timestamp is preserved.
++	aid, err := s.CreateAnswerNodeAt(ctx, cid, 0, "docker", "go", "1.25", "solution", "evidence", "{}", stamp)
++	if err != nil {
++		t.Fatalf("CreateAnswerNodeAt: %v", err)
++	}
++	an, err := s.GetAnswerNode(ctx, aid)
++	if err != nil {
++		t.Fatalf("GetAnswerNode: %v", err)
++	}
++	if got := an.CreatedAt.Format(fmtLayout); got != stamp {
++		t.Errorf("answer created_at = %q, want %q", got, stamp)
++	}
++
++	// Empty timestamp falls back to the schema default — a real,
++	// non-zero wall-clock stamp, not the zero time.
++	cid2, err := s.CreateProblemClass(ctx, "default-class", "takes the column default")
++	if err != nil {
++		t.Fatalf("CreateProblemClass: %v", err)
++	}
++	pc2, err := s.GetProblemClass(ctx, cid2)
++	if err != nil {
++		t.Fatalf("GetProblemClass default: %v", err)
++	}
++	if pc2.CreatedAt.IsZero() {
++		t.Error("default-arm class created_at is the zero time — schema default did not fire")
++	}
++	aid2, err := s.CreateAnswerNode(ctx, cid2, 0, "docker", "go", "1.25", "solution", "evidence", "{}")
++	if err != nil {
++		t.Fatalf("CreateAnswerNode: %v", err)
++	}
++	an2, err := s.GetAnswerNode(ctx, aid2)
++	if err != nil {
++		t.Fatalf("GetAnswerNode default: %v", err)
++	}
++	if an2.CreatedAt.IsZero() {
++		t.Error("default-arm answer created_at is the zero time — schema default did not fire")
++	}
++
++	// Upsert with a new timestamp on an EXISTING title must not rewrite
++	// the stored created_at (idempotent re-seed contract).
++	pc3, created, err := s.UpsertProblemClassAt(ctx, "explicit-class", "duplicate", "2030-01-01 00:00:00")
++	if err != nil {
++		t.Fatalf("UpsertProblemClassAt existing: %v", err)
++	}
++	if created {
++		t.Fatal("UpsertProblemClassAt created a duplicate class")
++	}
++	if got := pc3.CreatedAt.Format(fmtLayout); got != stamp {
++		t.Errorf("existing class created_at = %q after re-upsert, want unchanged %q", got, stamp)
++	}
++
++	// Upsert creating a NEW class stores the given timestamp.
++	pc4, created, err := s.UpsertProblemClassAt(ctx, "upsert-created-class", "created via upsert", stamp)
++	if err != nil {
++		t.Fatalf("UpsertProblemClassAt new: %v", err)
++	}
++	if !created {
++		t.Fatal("UpsertProblemClassAt did not report creation for a new title")
++	}
++	if got := pc4.CreatedAt.Format(fmtLayout); got != stamp {
++		t.Errorf("upsert-created class created_at = %q, want %q", got, stamp)
++	}
++}
+diff --git a/internal/seed/seed.go b/internal/seed/seed.go
+index 0cb089a4..d3100ad6 100644
+--- a/internal/seed/seed.go
++++ b/internal/seed/seed.go
+@@ -5,8 +5,15 @@
+ //
+ // The loader is idempotent: problem classes are upserted by title, and
+ // an answer is created only when the class has no existing answer with
+-// the same (env, lang, version, solution) tuple. Re-running after a
+-// corpus sync therefore imports only the delta, never duplicates.
++// the same (env, lang, version, solution, created_at) tuple — answers
++// without a corpus created_at dedup on the content tuple alone, so
++// legacy files stay re-runnable. Re-running after a corpus sync
++// therefore imports only the delta, never duplicates.
++//
++// Timestamps are preserved, not re-stamped (DF-OFF-BY-ONE-58): a new
++// class or answer stores the corpus file's own created_at, and rows that
++// already exist are never touched — so a re-run leaves every stored
++// created_at byte-identical.
+ package seed
+ 
+ import (
+@@ -71,7 +78,8 @@ const (
+ // lives in its answers/ subdirectory.
+ //
+ // Idempotent: classes are upserted by title, answers are deduplicated
+-// against existing rows by (env, lang, version, solution). Each answer's
++// against existing rows by (env, lang, version, solution, created_at) —
++// see seedFile for the legacy no-timestamp fallback. Each answer's
+ // status comes from its own corpus verdict (see corpusAnswerStatus) — a
+ // signature marked failed is imported as failed, everything else keeps
+ // the export's verified status.
+@@ -192,9 +200,11 @@ func parseCorpusFile(path string) (*CorpusFile, error) {
+ }
+ 
+ // seedFile merges one parsed corpus file into the store through the
+-// batch transaction.
++// batch transaction. New classes and answers carry the corpus's own
++// created_at values (DF-OFF-BY-ONE-58); a corpus file with no created_at
++// falls back to the column default inside the store.
+ func seedFile(ctx context.Context, tx *graph.Tx, cf *CorpusFile, stats *Stats) error {
+-	class, created, err := tx.UpsertProblemClass(ctx, cf.Title, cf.Description)
++	class, created, err := tx.UpsertProblemClassAt(ctx, cf.Title, cf.Description, cf.CreatedAt)
+ 	if err != nil {
+ 		return fmt.Errorf("upsert problem class: %w", err)
+ 	}
+@@ -204,26 +214,43 @@ func seedFile(ctx context.Context, tx *graph.Tx, cf *CorpusFile, stats *Stats) e
+ 		stats.ClassesExisting++
+ 	}
+ 
+-	// Dedup key is the full (env, lang, version, solution) tuple. The
+-	// corpus has no stable answer IDs across databases (answer_id is
++	// Dedup identity is the (env, lang, version, solution) tuple PLUS
++	// created_at when the corpus carries one (DF-OFF-BY-ONE-58): the
++	// corpus holds re-solve snapshots that share the content tuple and
++	// differ only in when they were written — treating those as
++	// duplicates would drop the newer snapshot and its timestamp. A
++	// corpus answer with NO created_at falls back to the plain content
++	// tuple, so legacy files stay idempotent against rows the schema
++	// default stamped with a wall clock the corpus cannot know.
++	//
++	// The corpus has no stable answer IDs across databases (answer_id is
+ 	// export-scoped), so content identity is what makes re-runs safe.
+ 	existing, err := tx.ListAnswers(ctx, class.ID)
+ 	if err != nil {
+ 		return fmt.Errorf("list existing answers: %w", err)
+ 	}
+-	seen := make(map[string]bool, len(existing))
++	seen4 := make(map[string]bool, len(existing))
++	seen5 := make(map[string]bool, len(existing))
+ 	for _, a := range existing {
+-		seen[answerKey(a.Env, a.Lang, a.Version, a.Solution)] = true
++		k4 := answerKey(a.Env, a.Lang, a.Version, a.Solution)
++		seen4[k4] = true
++		// The stored stamp round-trips through time.Time; every writer
++		// (schema default, corpus import) uses the "2006-01-02 15:04:05"
++		// layout, so the formatted value matches the corpus string
++		// byte-for-byte.
++		seen5[k4+"\x00"+a.CreatedAt.Format("2006-01-02 15:04:05")] = true
+ 	}
+ 
+ 	for _, ans := range cf.Answers {
+-		key := answerKey(ans.Environment, ans.Language, ans.Version, ans.Solution)
+-		if seen[key] {
++		k4 := answerKey(ans.Environment, ans.Language, ans.Version, ans.Solution)
++		k5 := k4 + "\x00" + ans.CreatedAt
++		if (ans.CreatedAt == "" && seen4[k4]) || (ans.CreatedAt != "" && seen5[k5]) {
+ 			// Skip path: an already-present answer keeps the status it
+ 			// already has. This deliberately does NOT rewrite the row
+ 			// (re-seeding is idempotent) — historical rows whose status
+ 			// disagrees with their signature are reclassified by the
+-			// one-off migration, not by the seed.
++			// one-off migration, not by the seed. The stored created_at
++			// is likewise left untouched (DF-OFF-BY-ONE-58).
+ 			stats.AnswersSkipped++
+ 			continue
+ 		}
+@@ -231,16 +258,17 @@ func seedFile(ctx context.Context, tx *graph.Tx, cf *CorpusFile, stats *Stats) e
+ 		if err != nil {
+ 			return fmt.Errorf("answer %d signatures: %w", ans.AnswerID, err)
+ 		}
+-		id, err := tx.CreateAnswerNode(ctx, class.ID, 0,
++		id, err := tx.CreateAnswerNodeAt(ctx, class.ID, 0,
+ 			ans.Environment, ans.Language, ans.Version,
+-			ans.Solution, ans.Evidence, sigs)
++			ans.Solution, ans.Evidence, sigs, ans.CreatedAt)
+ 		if err != nil {
+ 			return fmt.Errorf("create answer node: %w", err)
+ 		}
+ 		if err := tx.UpdateAnswerStatus(ctx, id, corpusAnswerStatus(ans)); err != nil {
+ 			return fmt.Errorf("set answer status: %w", err)
+ 		}
+-		seen[key] = true
++		seen4[k4] = true
++		seen5[k5] = true
+ 		stats.AnswersCreated++
+ 	}
+ 	return nil
+diff --git a/internal/seed/seed_batch_test.go b/internal/seed/seed_batch_test.go
+index a3855feb..68c2014d 100644
+--- a/internal/seed/seed_batch_test.go
++++ b/internal/seed/seed_batch_test.go
+@@ -108,8 +108,11 @@ func TestSeedCancelledContextLeavesNoWrites(t *testing.T) {
+ // identical rows (IDs included, since insertion order follows the sorted
+ // filename order) in all three tables. This is the regression net for the
+ // batching change — any reordering, row drift or duplicate-handling
+-// change shows up as a diff here. created_at columns are excluded: they
+-// are wall-clock defaults, not loader output.
++// change shows up as a diff here. created_at is INCLUDED for
++// problem_classes and answer_nodes: since DF-OFF-BY-ONE-58 the loader
++// stores the corpus's own timestamps, and every fixture carries one, so
++// the stamps are loader output, not wall-clock. problem_edges.created_at
++// stays excluded — the linker still takes the column default.
+ func TestSeedDeterministicAcrossDatabases(t *testing.T) {
+ 	ctx := context.Background()
+ 	corpus := testCorpus()
+@@ -152,13 +155,14 @@ func TestSeedDeterministicAcrossDatabases(t *testing.T) {
+ }
+ 
+ // dumpGraph renders every content row of the three graph tables as
+-// canonical text lines (created_at excluded — wall-clock default, not
+-// loader output).
++// canonical text lines. Class and answer created_at is included (corpus
++// timestamps — deterministic); edge created_at is excluded (wall-clock
++// default from the linker).
+ func dumpGraph(t *testing.T, ctx context.Context, store *graph.Store) []string {
+ 	t.Helper()
+ 	queries := []string{
+-		`SELECT id, title, description FROM problem_classes ORDER BY id`,
+-		`SELECT id, class_id, COALESCE(parent_id, -1), env, lang, version, solution, evidence, signatures, status FROM answer_nodes ORDER BY id`,
++		`SELECT id, title, description, created_at FROM problem_classes ORDER BY id`,
++		`SELECT id, class_id, COALESCE(parent_id, -1), env, lang, version, solution, evidence, signatures, status, created_at FROM answer_nodes ORDER BY id`,
+ 		`SELECT source_id, target_id, relationship, weight FROM problem_edges ORDER BY source_id, target_id, relationship`,
+ 	}
+ 	var lines []string
+diff --git a/internal/seed/seed_test.go b/internal/seed/seed_test.go
+index 1d9c7454..c8b1ccd0 100644
+--- a/internal/seed/seed_test.go
++++ b/internal/seed/seed_test.go
+@@ -61,6 +61,7 @@ const corpusB = `{
+   "class_id": 2,
+   "title": "python-count-word-freq",
+   "description": "word frequency counter",
++  "created_at": "2026-07-24 22:53:01",
+   "answers": [
+     {
+       "answer_id": 21,
+@@ -70,7 +71,8 @@ const corpusB = `{
+       "solution": "# Solution B1\nUse collections.Counter.",
+       "evidence": "tested on 3.11",
+       "signatures": {"model": "m2", "result": "passed"},
+-      "status": "verified"
++      "status": "verified",
++      "created_at": "2026-07-24 22:53:02"
+     },
+     {
+       "answer_id": 22,
+@@ -80,7 +82,8 @@ const corpusB = `{
+       "solution": "# Solution B2\nCounter with type hints.",
+       "evidence": "tested on 3.12",
+       "signatures": null,
+-      "status": "verified"
++      "status": "verified",
++      "created_at": "2026-07-24 22:53:03"
+     }
+   ]
+ }`
+@@ -89,6 +92,7 @@ const corpusC = `{
+   "class_id": 3,
+   "title": "js-array-dedupe",
+   "description": "dedupe array",
++  "created_at": "2026-07-24 22:54:01",
+   "answers": [
+     {
+       "answer_id": 31,
+@@ -98,7 +102,8 @@ const corpusC = `{
+       "solution": "# Solution C\nnew Set(arr).",
+       "evidence": "node 22",
+       "signatures": {"model": "m3", "result": "passed"},
+-      "status": "verified"
++      "status": "verified",
++      "created_at": "2026-07-24 22:54:02"
+     }
+   ]
+ }`
+@@ -185,6 +190,185 @@ func TestSeedLoadsCorpus(t *testing.T) {
+ 	}
+ }
+ 
++// TestSeedPreservesCorpusCreatedAt proves DF-OFF-BY-ONE-58: the loader
++// stores the corpus's own created_at values on new rows instead of
++// re-stamping them with the seed run's wall clock, and a re-run leaves
++// every stored timestamp byte-identical (nothing overwrites an existing
++// row). A corpus file with no created_at still gets the column default.
++func TestSeedPreservesCorpusCreatedAt(t *testing.T) {
++	ctx := context.Background()
++	store := newTestStore(t)
++
++	files := testCorpus()
++	// A legacy-shaped file with no created_at anywhere — exercises the
++	// fall-back-to-default arm.
++	files["0004-no-timestamps.json"] = `{
++  "class_id": 4,
++  "title": "rust-borrow-checker-move",
++  "description": "value moved before borrow ends",
++  "answers": [
++    {
++      "answer_id": 41,
++      "language": "rust",
++      "environment": "rust1.85",
++      "version": "1.85",
++      "solution": "# Solution D\nClone before the move.",
++      "evidence": "playground run",
++      "signatures": {"model": "m4", "result": "passed"},
++      "status": "verified"
++    }
++  ]
++}`
++	// A re-solve snapshot pair: two answers with an identical (env, lang,
++	// version, solution) content tuple that differ ONLY in created_at.
++	// Both must land as separate rows — collapsing them would lose the
++	// newer snapshot (this is the serde-json-validator-jsonschema shape
++	// from the DF-OFF-BY-ONE-58 acceptance criteria).
++	files["0005-resolve-snapshots.json"] = `{
++  "class_id": 5,
++  "title": "go-map-concurrent-write",
++  "description": "fatal error: concurrent map writes",
++  "created_at": "2026-07-25 01:10:08",
++  "answers": [
++    {
++      "answer_id": 51,
++      "language": "go",
++      "environment": "go1.25",
++      "version": "1.25",
++      "solution": "# Solution E\nGuard the map with a sync.Mutex.",
++      "evidence": "race detector run",
++      "signatures": {"model": "m5", "result": "passed"},
++      "status": "verified",
++      "created_at": "2026-07-25 01:10:08"
++    },
++    {
++      "answer_id": 52,
++      "language": "go",
++      "environment": "go1.25",
++      "version": "1.25",
++      "solution": "# Solution E\nGuard the map with a sync.Mutex.",
++      "evidence": "race detector re-run",
++      "signatures": {"model": "m5", "result": "passed"},
++      "status": "verified",
++      "created_at": "2026-10-01 07:20:47"
++    }
++  ]
++}`
++	dir := writeCorpus(t, files)
++
++	if _, err := Seed(ctx, store, dir); err != nil {
++		t.Fatalf("Seed run 1: %v", err)
++	}
++
++	// want maps a class title to its corpus created_at plus each answer's
++	// created_at in insertion (id) order.
++	type wantClass struct {
++		classCreatedAt   string
++		answerCreatedAts []string
++	}
++	wants := map[string]wantClass{
++		"go-nil-pointer-deref":     {"2026-07-24 22:52:43", []string{"2026-07-24 22:52:43"}},
++		"python-count-word-freq":   {"2026-07-24 22:53:01", []string{"2026-07-24 22:53:02", "2026-07-24 22:53:03"}},
++		"js-array-dedupe":          {"2026-07-24 22:54:01", []string{"2026-07-24 22:54:02"}},
++		"go-map-concurrent-write":  {"2026-07-25 01:10:08", []string{"2026-07-25 01:10:08", "2026-10-01 07:20:47"}},
++		"rust-borrow-checker-move": {"", nil}, // default-stamped; checked separately
++	}
++
++	classStamp := func(title string) string {
++		t.Helper()
++		var ts string
++		if err := store.DB().QueryRowContext(ctx,
++			`SELECT created_at FROM problem_classes WHERE title = ?`, title).Scan(&ts); err != nil {
++			t.Fatalf("read created_at for %q: %v", title, err)
++		}
++		return ts
++	}
++	answerStamps := func(title string) []string {
++		t.Helper()
++		rows, err := store.DB().QueryContext(ctx,
++			`SELECT n.created_at FROM answer_nodes n
++			 JOIN problem_classes c ON c.id = n.class_id
++			 WHERE c.title = ? ORDER BY n.id`, title)
++		if err != nil {
++			t.Fatalf("read answer created_at for %q: %v", title, err)
++		}
++		defer func() { _ = rows.Close() }()
++		var out []string
++		for rows.Next() {
++			var ts string
++			if err := rows.Scan(&ts); err != nil {
++				t.Fatalf("scan answer created_at for %q: %v", title, err)
++			}
++			out = append(out, ts)
++		}
++		if err := rows.Err(); err != nil {
++			t.Fatalf("iterate answer created_at for %q: %v", title, err)
++		}
++		return out
++	}
++
++	snapshot := func() map[string]wantClass {
++		got := make(map[string]wantClass, len(wants))
++		for title := range wants {
++			got[title] = wantClass{classStamp(title), answerStamps(title)}
++		}
++		return got
++	}
++
++	first := snapshot()
++	for title, want := range wants {
++		got := first[title]
++		if title == "rust-borrow-checker-move" {
++			// No corpus timestamp: the schema default must have filled in
++			// a non-empty, well-formed wall-clock stamp.
++			if got.classCreatedAt == "" || len(got.answerCreatedAts) != 1 || got.answerCreatedAts[0] == "" {
++				t.Errorf("%s: default-stamped rows must be non-empty, got class=%q answers=%v",
++					title, got.classCreatedAt, got.answerCreatedAts)
++			}
++			continue
++		}
++		if got.classCreatedAt != want.classCreatedAt {
++			t.Errorf("%s class created_at = %q, want corpus value %q", title, got.classCreatedAt, want.classCreatedAt)
++		}
++		if len(got.answerCreatedAts) != len(want.answerCreatedAts) {
++			t.Fatalf("%s answers = %v, want %v", title, got.answerCreatedAts, want.answerCreatedAts)
++		}
++		for i, wantTS := range want.answerCreatedAts {
++			if got.answerCreatedAts[i] != wantTS {
++				t.Errorf("%s answer[%d] created_at = %q, want corpus value %q",
++					title, i, got.answerCreatedAts[i], wantTS)
++			}
++		}
++	}
++
++	// Re-run: the idempotent loader must leave every timestamp untouched.
++	stats, err := Seed(ctx, store, dir)
++	if err != nil {
++		t.Fatalf("Seed run 2: %v", err)
++	}
++	if stats.ClassesCreated != 0 || stats.AnswersCreated != 0 {
++		t.Errorf("re-run created content: classes=%d answers=%d, want 0/0",
++			stats.ClassesCreated, stats.AnswersCreated)
++	}
++	second := snapshot()
++	for title := range wants {
++		if second[title].classCreatedAt != first[title].classCreatedAt {
++			t.Errorf("%s class created_at changed on re-run: %q -> %q",
++				title, first[title].classCreatedAt, second[title].classCreatedAt)
++		}
++		if len(second[title].answerCreatedAts) != len(first[title].answerCreatedAts) {
++			t.Fatalf("%s answer count changed on re-run: %v -> %v",
++				title, first[title].answerCreatedAts, second[title].answerCreatedAts)
++		}
++		for i := range first[title].answerCreatedAts {
++			if second[title].answerCreatedAts[i] != first[title].answerCreatedAts[i] {
++				t.Errorf("%s answer[%d] created_at changed on re-run: %q -> %q",
++					title, i, first[title].answerCreatedAts[i], second[title].answerCreatedAts[i])
++			}
++		}
++	}
++}
++
+ // TestSeedIdempotentRerun proves a second run creates nothing new.
+ func TestSeedIdempotentRerun(t *testing.T) {
+ 	ctx := context.Background()
+@@ -494,7 +678,8 @@ func relateCorpus() map[string]string {
+       "solution": "# Solution A\nTrace the idle wait.",
+       "evidence": "reproducer attached",
+       "signatures": {"model": "m1", "result": "passed", "tests": 5},
+-      "status": "verified"
++      "status": "verified",
++      "created_at": "2026-07-24 22:52:45"
+     }
+   ]
+ }`,
+@@ -512,7 +697,8 @@ func relateCorpus() map[string]string {
+       "solution": "# Solution B\nKeep the audit cadence.",
+       "evidence": "fixture run",
+       "signatures": {"model": "m2", "result": "passed"},
+-      "status": "verified"
++      "status": "verified",
++      "created_at": "2026-07-24 22:52:46"
+     }
+   ]
+ }`,

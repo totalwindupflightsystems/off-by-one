@@ -217,10 +217,11 @@ carries two array fields that classify the submission's `required_tools` against
 
 A submission is deduplicated against the queue and the verified-answer corpus on the
 `(problem_class, environment, language, version)` tuple. Re-submitting a tuple that is already
-queued, in progress, or already answered does **not** create a second job: the API returns HTTP
-**409** with `"status": "deduplicated"` and the **existing** `submission_id` (the same id the first
-submit returned) plus that entry's queue `position`, so the caller can poll it or call `discover`
-instead of waiting on a solve that will never run:
+queued, in progress, or already answered does **not** create a second job. The API returns HTTP
+**409** with `"status": "deduplicated"`, but the response has two possible arms:
+
+- For a queued or in-progress tuple, `submission_id` identifies the existing queue entry and
+  `position` is its current queue position, so the caller can poll it:
 
 ```json
 {
@@ -231,6 +232,23 @@ instead of waiting on a solve that will never run:
   "existing_solutions": 0
 }
 ```
+
+- For a tuple that already has a verified answer, there is no queue entry to poll. The response
+  carries an empty `submission_id`, `position: 0`, `reason: "answered"`, and a pointer to discover:
+
+```json
+{
+  "submission_id": "",
+  "problem_class": "python-sdk-e2e-battery",
+  "status": "deduplicated",
+  "position": 0,
+  "existing_solutions": 24,
+  "reason": "answered",
+  "next_action": "POST /api/v1/problems/discover"
+}
+```
+
+Use `discover` for the answered arm instead of waiting on a solve that will never run:
 
 An unknown `cadence` is rejected with HTTP **400**, and the message enumerates the accepted values
 and echoes the value that was rejected:
