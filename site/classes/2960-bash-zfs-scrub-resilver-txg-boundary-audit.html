@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bash-zfs-scrub-resilver-txg-boundary-audit — Off-By-One verified answer</title>
+<meta name="description" content="The task is not &quot;diff two txg numbers&quot;. A naive analyzer fails because ZFS txg arithmetic has three independent boundary semantics that each turn the same timel">
+<meta property="og:title" content="bash-zfs-scrub-resilver-txg-boundary-audit — Off-By-One">
+<meta property="og:description" content="The task is not &quot;diff two txg numbers&quot;. A naive analyzer fails because ZFS txg arithmetic has three independent boundary semantics that each turn the same timel">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2960-bash-zfs-scrub-resilver-txg-boundary-audit.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bash-zfs-scrub-resilver-txg-boundary-audit</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>bash</span><span class='badge v'>bash</span></div><div class='desc'><p>The task is not "diff two txg numbers". A naive analyzer fails because ZFS txg arithmetic has three independent boundary semantics that each turn the same timeline into a different verdict:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2960-bash-zfs-scrub-resilver-txg-boundary-audit.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is complete and verified. All files are in <code>~/zfs-audit/</code>, with the full write-up in <code>SOLUTION.md</code>. Here is the document:</p>
+<hr />
+<h1>Offline ZFS scrub/resilver txg boundary audit</h1>
+<h2>Root-cause analysis</h2>
+<p>The task is not "diff two txg numbers". A naive analyzer fails because ZFS txg arithmetic has three independent boundary semantics that each turn the <em>same</em> timeline into a different verdict:</p>
+<ol>
+<li><strong>Scrub end txg is exclusive.</strong> A scrub recorded as <code>scrub_end: 100</code> has covered txgs <code>[scrub_start, 100)</code>, i.e. up to and including <code>99</code>. Txg <code>100</code> itself was never scanned. Treating the interval as closed (<code>&lt;= 100</code>) hides exactly one txg of dirt — and that txg is usually the one a resilver is about to rely on. This is why the canonical "scrub ends at 100" fixture must report a gap at <code>100</code>.</li>
+<li><strong>Deferred resilver frees are charged to <code>resilver_start_txg</code>, not to the flush txg.</strong> A free that is actually flushed at txg 120 during a resilver that began at txg 100 is accounted at <code>100</code>. If the analyzer uses the raw flush txg (120) as the dirty point, it reports a coverage hole that does not exist. So the dirty window for a vdev is bounded above by <code>resilver_start_txg</code>, regardless of when the free hit the log.</li>
+<li><strong>The uberblock ring holds only 128 entries.</strong> Any txg span wider than 128 is no longer fully present on disk, so it is <em>unobservable</em>, not dirty. It must be reported as <code>"wrapped": true</code> and must <strong>not</strong> be turned into a coverage hole. Flow control here matters: the wrap check must run <em>before</em> the per-txg ring-membership check and before the coverage loop.</li>
+</ol>
+<p>A second failure mode is input trust. Event streams are produced by tools and operators, so the analyzer must reject internally inconsistent bounds instead of emitting a plausible-looking verdict: <code>end &lt; start</code> on a scrub, resilver, or attach event, and a needed interval whose txgs are simply absent from the ring (a real discontinuity, as opposed to a legitimate &gt;128 wrap). The diagnostic must name the offending event (file + line + fields), and the process must exit non-zero.</p>
+<h3>Reconstructed semantics used by the implementation</h3>
+<ul>
+<li>A completed scrub pair <code>(S, E)</code> covers the half-open txg set <code>[S, E-1]</code>.</li>
+<li>A vdev's dirty-before-resilver window is <code>[A, R]</code> inclusive, where <code>A</code> is the attach txg (falling back to the first ring sighting) and <code>R</code> is <code>resilver_start_txg</code>. <code>R</code> is included because deferred frees are charged there (trap 2).</li>
+<li><code>uncovered = [A, R] \ union(coverage of all completed scrubs)</code>.</li>
+<li><code>verdict = "gap"</code> iff <code>uncovered</code> is non-empty; <code>first_uncovered_txg</code> is the first uncovered txg; <code>ranges</code> are the uncovered inclusive ranges.</li>
+<li>If <code>R - A + 1 &gt; 128</code>, the span is unobservable: <code>wrapped = true</code>, <code>verdict = "covered"</code>, <code>first_uncovered_txg = null</code>, <code>ranges = []</code>.</li>
+<li>Otherwise every txg in <code>[A, R]</code> must be present in the ring or the run aborts with exit code 2.</li>
+</ul>
+<p>Output is JSONL, one object per vdev, sorted lexicographically by <code>vdev</code>.</p>
+<h2>Fix</h2>
+<p><code>zfs_scrub_audit.sh</code> (bash 5 + jq + awk, no live <code>zpool</code>). Save it, <code>chmod +x</code>, and run <code>./zfs_scrub_audit.sh &lt;fixture-dir&gt;</code>.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+#
+# zfs_scrub_audit.sh -- offline ZFS scrub/resilver txg boundary auditor.
+#
+# Reconstructs a pool txg timeline from an offline fixture directory and, for
+# every vdev, decides whether the last completed scrub covered every block
+# dirtied before that vdev's resilver began.
+#
+# Usage: zfs_scrub_audit.sh &lt;fixture-dir&gt;
+#
+#   &lt;fixture-dir&gt;/uberblocks.jsonl  one uberblock-ring dump per line:
+#        {&quot;txg&quot;:N,&quot;timestamp&quot;:...,&quot;guid&quot;:...,&quot;ring_index&quot;:N,&quot;vdevs&quot;:[...]}
+#   &lt;fixture-dir&gt;/events.jsonl      timeline events:
+#        {&quot;type&quot;:&quot;scrub_start&quot;,&quot;txg&quot;:N}
+#        {&quot;type&quot;:&quot;scrub_end&quot;,&quot;txg&quot;:N}          # end txg is EXCLUSIVE
+#        {&quot;type&quot;:&quot;resilver_start&quot;,&quot;txg&quot;:N,&quot;vdev&quot;:&quot;PATH&quot;}
+#        {&quot;type&quot;:&quot;resilver_end&quot;,&quot;txg&quot;:N,&quot;vdev&quot;:&quot;PATH&quot;}
+#        {&quot;type&quot;:&quot;vdev_attach&quot;,&quot;txg&quot;:N,&quot;vdev&quot;:&quot;PATH&quot;,
+#         &quot;resilver_start_txg&quot;:N,&quot;resilver_end_txg&quot;:N}
+#
+# Output: JSONL sorted by vdev path, one object per vdev:
+#   {&quot;vdev&quot;:...,&quot;verdict&quot;:&quot;covered|gap&quot;,&quot;first_uncovered_txg&quot;:N|null,
+#    &quot;ranges&quot;:[[start,end],...],&quot;wrapped&quot;:bool}
+#
+# Exit codes:
+#   0  audit produced
+#   1  usage / IO error
+#   2  inconsistent txg bounds (diagnostic names the offending event)
+#
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+prog=${0##*/}
+
+die() { printf '%s: error: %s\n' &quot;$prog&quot; &quot;$*&quot; &gt;&amp;2; exit 1; }
+
+usage() {
+  printf 'usage: %s &lt;fixture-dir&gt;\n' &quot;$prog&quot; &gt;&amp;2
+  exit 1
+}
+
+# ---------------------------------------------------------------------------
+# arguments
+# ---------------------------------------------------------------------------
+[[ $# -eq 1 ]] || usage
+DIR=$1
+[[ -d &quot;$DIR&quot; ]] || die &quot;fixture directory not found: $DIR&quot;
+
+UB=$DIR/uberblocks.jsonl
+EV=$DIR/events.jsonl
+[[ -f &quot;$UB&quot; ]] || die &quot;missing uberblock dump: $UB&quot;
+[[ -f &quot;$EV&quot; ]] || die &quot;missing event log: $EV&quot;
+
+command -v jq &gt;/dev/null 2&gt;&amp;1 || die &quot;jq is required&quot;
+command -v awk &gt;/dev/null 2&gt;&amp;1 || die &quot;awk is required&quot;
+
+# Ring capacity.  The uberblock ring keeps the most recent 128 entries, so any
+# txg span wider than this cannot be fully reconstructed -- it is &quot;wrapped&quot;.
+RING_CAP=128
+
+# ---------------------------------------------------------------------------
+# Normalise events into a TSV stream:
+#   line  type  txg  vdev  start_txg  end_txg
+# input_line_number gives the physical line in events.jsonl so diagnostics can
+# name the offending event precisely.
+# ---------------------------------------------------------------------------
+EV_TSV=$(
+  jq -r -n '
+    inputs
+    | [ (input_line_number|tostring),
+        (.type // &quot;&quot;),
+        (.txg // &quot;&quot; | tostring),
+        (.vdev // .path // &quot;&quot;),
+        ((.start_txg // .resilver_start_txg // &quot;&quot;) | tostring),
+        ((.end_txg   // .resilver_end_txg   // &quot;&quot;) | tostring)
+      ] | @tsv' &quot;$EV&quot;
+)
+
+# Normalise the uberblock ring.  A vdev tree may be a flat array of paths, an
+# object, or nested; we harvest every path/name at any depth.
+UB_TSV=$(
+  jq -r '
+    [ (.txg // -1 | tostring),
+      (.ring_index // -1 | tostring),
+      ([.. | objects | (.path // .name) | strings] | unique | join(&quot;,&quot;))
+    ] | @tsv' &quot;$UB&quot;
+)
+
+# ---------------------------------------------------------------------------
+# Timeline reconstruction + boundary audit.
+# ---------------------------------------------------------------------------
+RESULT=$(
+  awk -v EV_TSV=&quot;$EV_TSV&quot; -v UB_TSV=&quot;$UB_TSV&quot; -v CAP=&quot;$RING_CAP&quot; '
+  # ---------------- pass over events ----------------
+  function ev_err(msg) { err[++nerr] = msg }
+
+  BEGIN {
+    FS = &quot;\t&quot;; OFS = &quot;\t&quot;
+    nsc = 0; nerr = 0; have_ss = 0
+    n = split(EV_TSV, lines, &quot;\n&quot;)
+    for (li = 1; li &lt;= n; li++) {
+      if (lines[li] == &quot;&quot;) continue
+      m = split(lines[li], f, &quot;\t&quot;)
+      ln = f[1]; type = f[2]; txg = f[3]; vdev = f[4]; s = f[5]; e = f[6]
+
+      if (type == &quot;scrub_start&quot;) {
+        # A new scrub_start without an intervening scrub_end means the previous
+        # scrub was interrupted/aborted; it never completed, so drop it.
+        ss = txg + 0; ss_ln = ln; have_ss = 1
+      }
+      else if (type == &quot;scrub_end&quot;) {
+        if (!have_ss) {
+          ev_err(&quot;events.jsonl:&quot; ln &quot;: scrub_end (txg=&quot; txg &quot;) has no preceding scrub_start&quot;)
+          continue
+        }
+        if ((txg + 0) &lt; ss) {
+          ev_err(&quot;events.jsonl:&quot; ln &quot;: scrub_end txg=&quot; txg &quot; &lt; scrub_start txg=&quot; ss)
+          have_ss = 0
+          continue
+        }
+        nsc++
+        cstart[nsc] = ss; cend[nsc] = txg + 0
+        have_ss = 0
+      }
+      else if (type == &quot;resilver_start&quot;) {
+        if (vdev == &quot;&quot;) { ev_err(&quot;events.jsonl:&quot; ln &quot;: resilver_start missing vdev&quot;); continue }
+        rlstart[vdev] = txg + 0; rlstart_ln[vdev] = ln
+        if (!(vdev in attach)) { attach[vdev] = txg + 0; attach_ln[vdev] = ln }
+      }
+      else if (type == &quot;resilver_end&quot;) {
+        if (vdev == &quot;&quot;) { ev_err(&quot;events.jsonl:&quot; ln &quot;: resilver_end missing vdev&quot;); continue }
+        if ((vdev in rlstart) &amp;&amp; (txg + 0) &lt; rlstart[vdev]) {
+          ev_err(&quot;events.jsonl:&quot; ln &quot;: resilver_end txg=&quot; txg &quot; &lt; resilver_start txg=&quot; rlstart[vdev] &quot; for vdev &quot; vdev)
+          continue
+        }
+        rlend[vdev] = txg + 0
+      }
+      else if (type == &quot;vdev_attach&quot;) {
+        if (vdev == &quot;&quot;) { ev_err(&quot;events.jsonl:&quot; ln &quot;: vdev_attach missing vdev&quot;); continue }
+        attach[vdev] = txg + 0; attach_ln[vdev] = ln
+        if (s != &quot;&quot;) { rlstart[vdev] = s + 0; rlstart_ln[vdev] = ln }
+        if (e != &quot;&quot;) { rlend[vdev] = e + 0 }
+        if (s != &quot;&quot; &amp;&amp; e != &quot;&quot; &amp;&amp; (e + 0) &lt; (s + 0)) {
+          ev_err(&quot;events.jsonl:&quot; ln &quot;: vdev_attach resilver_end txg=&quot; e &quot; &lt; resilver_start txg=&quot; s &quot; for vdev &quot; vdev)
+        }
+      }
+      # unknown event types are intentionally ignored
+    }
+  }
+
+  END {
+    # ---------------- pass over the uberblock ring ----------------
+    nr = split(UB_TSV, ulines, &quot;\n&quot;)
+    for (ui = 1; ui &lt;= nr; ui++) {
+      if (ulines[ui] == &quot;&quot;) continue
+      k = split(ulines[ui], uf, &quot;\t&quot;)
+      utxg = uf[1] + 0
+      ring[utxg] = 1
+      p = uf[3]
+      np = split(p, ap, &quot;,&quot;)
+      for (pi = 1; pi &lt;= np; pi++) {
+        pv = ap[pi]
+        if (pv == &quot;&quot;) continue
+        seen[pv] = 1
+        if (!(pv in firstseen) || utxg &lt; firstseen[pv]) firstseen[pv] = utxg
+      }
+    }
+
+    # ---------------- inconsistent bounds: fail before auditing ----------------
+    if (nerr &gt; 0) {
+      for (i = 1; i &lt;= nerr; i++) print &quot;ERROR: &quot; err[i] &gt; &quot;/dev/stderr&quot;
+      exit 2
+    }
+
+    # ---------------- union of vdevs ----------------
+    nv = 0
+    for (v in seen) if (!(v in vseen)) { vseen[v] = 1; vlist[++nv] = v }
+    for (v in rlstart) if (!(v in vseen)) { vseen[v] = 1; vlist[++nv] = v }
+
+    for (vi = 1; vi &lt;= nv; vi++) {
+      v = vlist[vi]
+
+      # Lower bound of the dirtied window: attach txg, else first ring sighting.
+      if (v in attach) { A = attach[v]; Aln = attach_ln[v] }
+      else if (v in firstseen) { A = firstseen[v]; Aln = &quot;&quot; }
+      else { A = 0; Aln = &quot;&quot; }
+
+      # Upper bound: resilver start.  No resilver =&gt; nothing pre-resilver to
+      # audit; report covered.
+      if (!(v in rlstart)) {
+        printf &quot;%s|covered||false|\n&quot;, v
+        continue
+      }
+      R = rlstart[v]; Rln = rlstart_ln[v]
+      span = R - A + 1
+
+      if (span &lt; 0) {
+        printf &quot;ERROR: vdev %s: attach txg %d &gt; resilver_start txg %d (event events.jsonl:%s)\n&quot;, v, A, R, Rln &gt; &quot;/dev/stderr&quot;
+        exit 2
+      }
+
+      # ---- TRAP 3: ring wrap -------------------------------------------
+      # A span wider than the 128-entry ring is unobservable.  Mark wrapped
+      # and do NOT report it as a coverage hole.
+      if (span &gt; CAP) {
+        printf &quot;%s|covered||true|\n&quot;, v
+        continue
+      }
+
+      # ---- ring presence check -----------------------------------------
+      # The dirtied interval must be fully represented in the ring, otherwise
+      # the timeline cannot be trusted.
+      missing = -1
+      for (t = A; t &lt;= R; t++) if (!(t in ring)) { missing = t; break }
+      if (missing != -1) {
+        evref = (Rln != &quot;&quot;) ? (&quot;events.jsonl:&quot; Rln &quot; (resilver_start)&quot;) : (&quot;vdev &quot; v)
+        printf &quot;ERROR: interval [%d,%d] for vdev %s absent from uberblock ring (missing txg %d); offending event %s\n&quot;, A, R, v, missing, evref &gt; &quot;/dev/stderr&quot;
+        exit 2
+      }
+
+      # ---- TRAP 1 + union of completed scrub coverage ------------------
+      # A scrub (S,E) covers [S, E-1]: the end txg is exclusive.
+      ranges = &quot;&quot;; first = &quot;&quot;; inrun = 0
+      for (t = A; t &lt;= R; t++) {
+        cov = 0
+        for (j = 1; j &lt;= nsc; j++) {
+          if (t &gt;= cstart[j] &amp;&amp; t &lt;= cend[j] - 1) { cov = 1; break }
+        }
+        if (!cov) {
+          if (!inrun) { rs = t; inrun = 1 }
+          re = t
+        } else if (inrun) {
+          ranges = ranges (ranges == &quot;&quot; ? &quot;&quot; : &quot;,&quot;) rs &quot;-&quot; re
+          if (first == &quot;&quot;) first = rs
+          inrun = 0
+        }
+      }
+      if (inrun) {
+        ranges = ranges (ranges == &quot;&quot; ? &quot;&quot; : &quot;,&quot;) rs &quot;-&quot; re
+        if (first == &quot;&quot;) first = rs
+      }
+
+      if (ranges == &quot;&quot;) printf &quot;%s|covered||false|\n&quot;, v
+      else              printf &quot;%s|gap|%d|false|%s\n&quot;, v, first, ranges
+    }
+  }
+  ' &lt;/dev/null
+) || exit $?
+
+# ---------------------------------------------------------------------------
+# Emit JSONL, sorted by vdev path.
+# ---------------------------------------------------------------------------
+if [[ -n &quot;$RESULT&quot; ]]; then
+  while IFS='|' read -r vdev verdict first wrapped ranges; do
+    [[ -n &quot;$vdev&quot; ]] || continue
+    jq -nc \
+      --arg vdev &quot;$vdev&quot; \
+      --arg verdict &quot;$verdict&quot; \
+      --arg first &quot;$first&quot; \
+      --arg wrapped &quot;$wrapped&quot; \
+      --arg ranges &quot;$ranges&quot; '
+      {
+        vdev: $vdev,
+        verdict: $verdict,
+        first_uncovered_txg: (if $first == &quot;&quot; then null else ($first | tonumber) end),
+        ranges: (if $ranges == &quot;&quot; then []
+                 else ($ranges | split(&quot;,&quot;) | map(split(&quot;-&quot;) | map(tonumber)))
+                 end),
+        wrapped: ($wrapped == &quot;true&quot;)
+      }'
+  done &lt; &lt;(printf '%s\n' &quot;$RESULT&quot; | sort -t '|' -k1,1)
+fi
+</code></pre>
+<p><code>make_fixtures.sh</code>:</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# Regenerates every fixture under ./fixtures. Used by verify.sh.
+set -euo pipefail
+base=$(cd &quot;$(dirname &quot;$0&quot;)&quot; &amp;&amp; pwd)
+root=$base/fixtures
+rm -rf &quot;$root&quot;
+mkdir -p &quot;$root&quot;
+
+# ring &lt;start&gt; &lt;end&gt; &lt;vdev-csv&gt;  -&gt; prints uberblock jsonl
+ring() {
+  local s=$1 e=$2 v=$3 i
+  for ((i=s; i&lt;=e; i++)); do
+    printf '{&quot;txg&quot;:%d,&quot;timestamp&quot;:%d,&quot;guid&quot;:&quot;g0&quot;,&quot;ring_index&quot;:%d,&quot;vdevs&quot;:[{&quot;path&quot;:&quot;%s&quot;}]}\n' \
+      &quot;$i&quot; &quot;$((1700000000+i))&quot; &quot;$((i%128))&quot; &quot;$v&quot;
+  done
+}
+
+# ---- 1. covered: scrub end (101) is past resilver start (100) ------------
+d=$root/covered; mkdir -p &quot;$d&quot;
+ring 80 110 &quot;tank/d1&quot; &gt; &quot;$d/uberblocks.jsonl&quot;
+cat &gt; &quot;$d/events.jsonl&quot; &lt;&lt;'EOF'
+{&quot;type&quot;:&quot;vdev_attach&quot;,&quot;txg&quot;:85,&quot;vdev&quot;:&quot;tank/d1&quot;,&quot;resilver_start_txg&quot;:100,&quot;resilver_end_txg&quot;:130}
+{&quot;type&quot;:&quot;scrub_start&quot;,&quot;txg&quot;:80}
+{&quot;type&quot;:&quot;scrub_end&quot;,&quot;txg&quot;:101}
+EOF
+
+# ---- 2. end_exclusive: scrub ends AT 100, so txg 100 is a hole -----------
+d=$root/end_exclusive; mkdir -p &quot;$d&quot;
+ring 80 110 &quot;tank/d2&quot; &gt; &quot;$d/uberblocks.jsonl&quot;
+cat &gt; &quot;$d/events.jsonl&quot; &lt;&lt;'EOF'
+{&quot;type&quot;:&quot;vdev_attach&quot;,&quot;txg&quot;:85,&quot;vdev&quot;:&quot;tank/d2&quot;,&quot;resilver_start_txg&quot;:100,&quot;resilver_end_txg&quot;:130}
+{&quot;type&quot;:&quot;scrub_start&quot;,&quot;txg&quot;:80}
+{&quot;type&quot;:&quot;scrub_end&quot;,&quot;txg&quot;:100}
+EOF
+
+# ---- 3. deferred_free: free flushed at 120 charged to resilver_start 100 -
+# Dirty window is [100,100]; scrub to 105 covers it =&gt; covered.
+d=$root/deferred_free; mkdir -p &quot;$d&quot;
+ring 80 130 &quot;tank/d3&quot; &gt; &quot;$d/uberblocks.jsonl&quot;
+cat &gt; &quot;$d/events.jsonl&quot; &lt;&lt;'EOF'
+{&quot;type&quot;:&quot;resilver_start&quot;,&quot;txg&quot;:100,&quot;vdev&quot;:&quot;tank/d3&quot;}
+{&quot;type&quot;:&quot;resilver_end&quot;,&quot;txg&quot;:130,&quot;vdev&quot;:&quot;tank/d3&quot;}
+{&quot;type&quot;:&quot;scrub_start&quot;,&quot;txg&quot;:80}
+{&quot;type&quot;:&quot;scrub_end&quot;,&quot;txg&quot;:105}
+{&quot;type&quot;:&quot;free_flush&quot;,&quot;txg&quot;:120,&quot;vdev&quot;:&quot;tank/d3&quot;}
+EOF
+
+# ---- 4. wrapped: span 0..500 exceeds the 128-entry ring ------------------
+d=$root/wrapped; mkdir -p &quot;$d&quot;
+ring 372 500 &quot;tank/d4&quot; &gt; &quot;$d/uberblocks.jsonl&quot;
+cat &gt; &quot;$d/events.jsonl&quot; &lt;&lt;'EOF'
+{&quot;type&quot;:&quot;vdev_attach&quot;,&quot;txg&quot;:0,&quot;vdev&quot;:&quot;tank/d4&quot;,&quot;resilver_start_txg&quot;:500,&quot;resilver_end_txg&quot;:600}
+{&quot;type&quot;:&quot;scrub_start&quot;,&quot;txg&quot;:10}
+{&quot;type&quot;:&quot;scrub_end&quot;,&quot;txg&quot;:20}
+EOF
+
+# ---- 5. plural: two uncovered ranges around a short scrub ---------------
+d=$root/plural; mkdir -p &quot;$d&quot;
+ring 80 110 &quot;tank/d5&quot; &gt; &quot;$d/uberblocks.jsonl&quot;
+cat &gt; &quot;$d/events.jsonl&quot; &lt;&lt;'EOF'
+{&quot;type&quot;:&quot;vdev_attach&quot;,&quot;txg&quot;:80,&quot;vdev&quot;:&quot;tank/d5&quot;,&quot;resilver_start_txg&quot;:100,&quot;resilver_end_txg&quot;:130}
+{&quot;type&quot;:&quot;scrub_start&quot;,&quot;txg&quot;:85}
+{&quot;type&quot;:&quot;scrub_end&quot;,&quot;txg&quot;:90}
+EOF
+
+# ---- 6. multiple vdevs, ordering check ----------------------------------
+d=$root/multivdev; mkdir -p &quot;$d&quot;
+{ ring 80 110 &quot;tank/aaa&quot;; ring 80 110 &quot;tank/zzz&quot;; } &gt; &quot;$d/uberblocks.jsonl&quot;
+cat &gt; &quot;$d/events.jsonl&quot; &lt;&lt;'EOF'
+{&quot;type&quot;:&quot;vdev_attach&quot;,&quot;txg&quot;:85,&quot;vdev&quot;:&quot;tank/zzz&quot;,&quot;resilver_start_txg&quot;:100,&quot;resilver_end_txg&quot;:130}
+{&quot;type&quot;:&quot;vdev_attach&quot;,&quot;txg&quot;:85,&quot;vdev&quot;:&quot;tank/aaa&quot;,&quot;resilver_start_txg&quot;:100,&quot;resilver_end_txg&quot;:130}
+{&quot;type&quot;:&quot;scrub_start&quot;,&quot;txg&quot;:80}
+{&quot;type&quot;:&quot;scrub_end&quot;,&quot;txg&quot;:101}
+EOF
+
+# ---- 7. error: scrub end &lt; start ----------------------------------------
+d=$root/bad_scrub; mkdir -p &quot;$d&quot;
+ring 80 110 &quot;tank/d7&quot; &gt; &quot;$d/uberblocks.jsonl&quot;
+cat &gt; &quot;$d/events.jsonl&quot; &lt;&lt;'EOF'
+{&quot;type&quot;:&quot;scrub_start&quot;,&quot;txg&quot;:100}
+{&quot;type&quot;:&quot;scrub_end&quot;,&quot;txg&quot;:90}
+EOF
+
+# ---- 8. error: resilver end &lt; start -------------------------------------
+d=$root/bad_resilver; mkdir -p &quot;$d&quot;
+ring 80 110 &quot;tank/d8&quot; &gt; &quot;$d/uberblocks.jsonl&quot;
+cat &gt; &quot;$d/events.jsonl&quot; &lt;&lt;'EOF'
+{&quot;type&quot;:&quot;resilver_start&quot;,&quot;txg&quot;:100,&quot;vdev&quot;:&quot;tank/d8&quot;}
+{&quot;type&quot;:&quot;resilver_end&quot;,&quot;txg&quot;:90,&quot;vdev&quot;:&quot;tank/d8&quot;}
+EOF
+
+# ---- 9. error: interval absent from ring --------------------------------
+d=$root/absent; mkdir -p &quot;$d&quot;
+ring 50 60 &quot;tank/d9&quot; | grep -v '&quot;txg&quot;:55' &gt; &quot;$d/uberblocks.jsonl&quot;
+cat &gt; &quot;$d/events.jsonl&quot; &lt;&lt;'EOF'
+{&quot;type&quot;:&quot;vdev_attach&quot;,&quot;txg&quot;:50,&quot;vdev&quot;:&quot;tank/d9&quot;,&quot;resilver_start_txg&quot;:60,&quot;resilver_end_txg&quot;:70}
+EOF
+
+echo &quot;fixtures written under $root&quot; &gt;&amp;2
+</code></pre>
+<h2>Verification</h2>
+<p><code>make_fixtures.sh</code> builds nine fixtures that pin every boundary:</p>
+<table>
+<thead>
+<tr>
+<th>fixture</th>
+<th>exercises</th>
+<th>expected</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>covered</code></td>
+<td>scrub end 101 &gt; resilver start 100</td>
+<td><code>covered</code></td>
+</tr>
+<tr>
+<td><code>end_exclusive</code></td>
+<td>scrub end == resilver start 100</td>
+<td><code>gap</code>, first <code>100</code>, <code>[[100,100]]</code></td>
+</tr>
+<tr>
+<td><code>deferred_free</code></td>
+<td>flush at 120, resilver start 100, scrub to 105</td>
+<td><code>covered</code></td>
+</tr>
+<tr>
+<td><code>wrapped</code></td>
+<td>span 0..500 &gt; 128</td>
+<td><code>covered</code>, <code>wrapped:true</code></td>
+</tr>
+<tr>
+<td><code>plural</code></td>
+<td>two holes around a short scrub</td>
+<td><code>gap</code>, first <code>80</code>, <code>[[80,84],[90,100]]</code></td>
+</tr>
+<tr>
+<td><code>multivdev</code></td>
+<td>two vdevs out of order</td>
+<td>sorted <code>tank/aaa</code>, <code>tank/zzz</code></td>
+</tr>
+<tr>
+<td><code>bad_scrub</code></td>
+<td><code>scrub_end 90 &lt; scrub_start 100</code></td>
+<td>exit 2, names event</td>
+</tr>
+<tr>
+<td><code>bad_resilver</code></td>
+<td><code>resilver_end 90 &lt; resilver_start 100</code></td>
+<td>exit 2, names event</td>
+</tr>
+<tr>
+<td><code>absent</code></td>
+<td>txg 55 missing from ring in <code>[50,60]</code></td>
+<td>exit 2, "absent from uberblock ring"</td>
+</tr>
+</tbody>
+</table>
+<p>Run the self-checking suite:</p>
+<pre><code class="language-bash">./verify.sh
+</code></pre>
+<p>Observed result:</p>
+<pre><code class="language-text">== regenerating fixtures ==
+== coverage / boundary cases ==
+  PASS  covered: scrub past resilver start
+  PASS  end-exclusive: scrub ending at txg 100 leaves 100 uncovered
+  PASS  deferred free charged to resilver_start (120 -&gt; 100)
+  PASS  ring wrap: span &gt;128 marked wrapped, not a hole
+  PASS  plural uncovered ranges around a short scrub
+  PASS  multi-vdev output sorted by path
+== inconsistent-bound diagnostics ==
+  PASS  scrub end &lt; start exits non-zero, names event
+  PASS  resilver end &lt; start exits non-zero, names event
+  PASS  interval absent from ring exits non-zero
+
+9 passed, 0 failed
+</code></pre>
+<p>Manual spot-checks of the three traps:</p>
+<pre><code class="language-text">$ ./zfs_scrub_audit.sh fixtures/end_exclusive
+{&quot;vdev&quot;:&quot;tank/d2&quot;,&quot;verdict&quot;:&quot;gap&quot;,&quot;first_uncovered_txg&quot;:100,&quot;ranges&quot;:[[100,100]],&quot;wrapped&quot;:false}
+
+$ ./zfs_scrub_audit.sh fixtures/deferred_free
+{&quot;vdev&quot;:&quot;tank/d3&quot;,&quot;verdict&quot;:&quot;covered&quot;,&quot;first_uncovered_txg&quot;:null,&quot;ranges&quot;:[],&quot;wrapped&quot;:false}
+
+$ ./zfs_scrub_audit.sh fixtures/wrapped
+{&quot;vdev&quot;:&quot;tank/d4&quot;,&quot;verdict&quot;:&quot;covered&quot;,&quot;first_uncovered_txg&quot;:null,&quot;ranges&quot;:[],&quot;wrapped&quot;:true}
+
+$ ./zfs_scrub_audit.sh fixtures/bad_scrub; echo &quot;rc=$?&quot;
+ERROR: events.jsonl:2: scrub_end txg=90 &lt; scrub_start txg=100
+rc=2
+</code></pre>
+<h3>Note on the <code>read</code>/IFS pitfall</h3>
+<p>The internal awk→bash handoff uses <code>|</code> as the field delimiter, not a tab. <code>read</code> treats tabs as IFS <em>whitespace</em> and collapses runs of them, which loses the empty <code>first_uncovered_txg</code> field and shifts every following column. Using a non-whitespace delimiter keeps empty fields intact. This was caught by the very first run and is why the result stream uses <code>|</code>.</p>
+<hr />
+<p><strong>Deliverables</strong> (all verified, <code>9 passed, 0 failed</code>):</p>
+<ul>
+<li><code>~/zfs-audit/zfs_scrub_audit.sh</code> — the analyzer</li>
+<li><code>~/zfs-audit/make_fixtures.sh</code> — fixture generator</li>
+<li><code>~/zfs-audit/verify.sh</code> — regression suite</li>
+<li><code>~/zfs-audit/SOLUTION.md</code> — this write-up</li>
+<li><code>~/zfs-audit/fixtures/</code> — nine generated fixtures</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: bash-zfs-scrub-resilver-txg-boundary-audit
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-24T04:21:24.363Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Write a bash 5 analyzer (jq and awk available, no live zpool required) that reconstructs a pool&#x27;s txg timeline from an offline fixture directory containing uberblocks.jsonl (one uberblock-ring dump per line: txg, timestamp, guid, ring_index, vdev tree) and events.jsonl (scrub_start, scrub_end, resilver_start, resilver_end, vdev_attach with txg bounds), then decides per vdev whether the last completed scrub covered every block dirtied before its resilver began. Emit JSONL sorted by vdev path of the form {\&quot;vdev\&quot;:...,\&quot;verdict\&quot;:\&quot;covered|gap\&quot;,\&quot;first_uncovered_txg\&quot;:N,\&quot;ranges\&quot;:[[start,end],...],\&quot;wrapped\&quot;:bool} and survive three boundary traps: scrub end_txg is exclusive so a scrub ending at txg 100 does not cover txg 100, blocks dirtied by a resilver&#x27;s deferred frees are charged to resilver_start_txg rather than the txg at which the free was flushed, and the uberblock ring holds 128 entries so a txg span wider than 128 is unobservable and must be marked wrapped instead of being reported as a coverage hole. Exit non-zero with a diagnostic naming the offending event when txg bounds are inconsistent (end &lt; start, or an interval absent from the ring).&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;bash&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;bash-zfs-scrub-resilver-txg-boundary-audit&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-24T04:21:24.363Z&quot;, &quot;version&quot;: &quot;5.2&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

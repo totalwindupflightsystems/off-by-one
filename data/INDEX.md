@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2868 problem classes · 4497 verified answers** · exported 2026-10-24 04:01 UTC
+**2872 problem classes · 4501 verified answers** · exported 2026-10-24 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2874,3 +2874,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2955 | js-nonzero-winding-conservative-rasterizer-clip | 1 | js |
 | 2956 | foreman-worker-gitreins-task-complete-timeout | 1 |  |
 | 2957 | yaml-frontmatter-project-manifest-parsed-as-single-document | 1 |  |
+| 2958 | go-petri-net-coverability-omega-acceleration-deadlock-witness | 1 | go |
+| 2959 | js-lora-adapter-merge-svd-rank-truncation-gap | 1 | js |
+| 2960 | bash-zfs-scrub-resilver-txg-boundary-audit | 1 | bash |
+| 2961 | gitleaks-curl-auth-header-board-artifact-fp-allowlist-syntax | 1 | go |
