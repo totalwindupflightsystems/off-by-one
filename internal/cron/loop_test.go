@@ -30,6 +30,9 @@ type fakeQueue struct {
 	reapTTL      time.Duration
 	reapRows     int64
 	reapErr      error
+	// peekErr scripts a PeekPending failure (e.g. ingest.ErrNotFound
+	// for the real queue's empty result, or a genuine DB error).
+	peekErr error
 }
 
 func newFakeQueue(entries ...*ingest.Entry) *fakeQueue {
@@ -96,6 +99,9 @@ func (q *fakeQueue) SetStage(ctx context.Context, id, stage string) error {
 func (q *fakeQueue) PeekPending(ctx context.Context) (*ingest.Entry, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.peekErr != nil {
+		return nil, q.peekErr
+	}
 	for _, e := range entries(q.entries) {
 		if _, ok := q.done[e.ID]; ok {
 			continue
@@ -1086,5 +1092,83 @@ func TestTickGateDeferral_RealQueuePersistence(t *testing.T) {
 	}
 	if got.GateReason != "" {
 		t.Errorf("gate_reason after solve = %q, want empty (cleared on reclaim)", got.GateReason)
+	}
+}
+
+// -----------------------------------------------------------------------------
+// DF-OFF-BY-ONE-61 — an empty pending queue is the NORMAL idle state for
+// the deferral stamp, not a peek failure. The real Queue answers an empty
+// peek with ingest.ErrNotFound ("queue: not found"); the loop must not log
+// that as an error, and a genuine peek failure must keep its error line.
+
+// TestDeferQueueHeadEmptyQueueIsNormalState drives the REAL ingest.Queue
+// with no submissions (the fresh seeded DB case) through a gated tick:
+// PeekPending returns ErrNotFound, the log must carry the normal-state
+// line and never the failure line or the raw sentinel text.
+func TestDeferQueueHeadEmptyQueueIsNormalState(t *testing.T) {
+	store, err := graph.OpenShared("cron_empty_" + t.Name() + "_" + time.Now().Format("150405.000000"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	q, err := ingest.Open(store)
+	if err != nil {
+		t.Fatalf("open queue: %v", err)
+	}
+
+	var buf strings.Builder
+	l := NewLoop(Config{
+		Queue:         q,
+		Solver:        &fakeSolver{},
+		Interval:      time.Millisecond,
+		LoadThreshold: 0.5,
+		IdleProbe:     func() (float64, error) { return 1.0, nil },
+		Logger:        newTestLogger(&buf),
+	})
+
+	if err := l.Tick(context.Background()); !errors.Is(err, ErrNoIdle) {
+		t.Fatalf("Tick err = %v, want ErrNoIdle", err)
+	}
+	log := buf.String()
+	if strings.Contains(log, "peek queue head failed") {
+		t.Errorf("empty queue logged as a peek failure: %q", log)
+	}
+	if strings.Contains(log, "queue: not found") {
+		t.Errorf("empty queue leaked the raw sentinel error: %q", log)
+	}
+	if !strings.Contains(log, "queue empty") {
+		t.Errorf("log %q missing the normal-state line for an empty queue", log)
+	}
+}
+
+// TestDeferQueueHeadPeekFailureRetained forces a genuine PeekPending
+// error (not the empty-queue sentinel): the real-failure log line must
+// be retained, and nothing is stamped.
+func TestDeferQueueHeadPeekFailureRetained(t *testing.T) {
+	q := newFakeQueue(makeEntry("a"))
+	q.peekErr = errors.New("sqlite: database is locked")
+	s := &fakeSolver{}
+	var buf strings.Builder
+	l := NewLoop(Config{
+		Queue:         q,
+		Solver:        s,
+		Interval:      time.Millisecond,
+		LoadThreshold: 0.5,
+		IdleProbe:     func() (float64, error) { return 1.0, nil },
+		Logger:        newTestLogger(&buf),
+	})
+
+	if err := l.Tick(context.Background()); !errors.Is(err, ErrNoIdle) {
+		t.Fatalf("Tick err = %v, want ErrNoIdle", err)
+	}
+	log := buf.String()
+	if !strings.Contains(log, "cron: deferral stamp: peek queue head failed: sqlite: database is locked (continuing)") {
+		t.Errorf("log %q missing the real-failure line", log)
+	}
+	q.mu.Lock()
+	_, stamped := q.deferred["a"]
+	q.mu.Unlock()
+	if stamped {
+		t.Error("entry stamped deferred despite the peek failure")
 	}
 }
