@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2863 problem classes · 4492 verified answers** · exported 2026-10-23 22:00 UTC
+**2868 problem classes · 4497 verified answers** · exported 2026-10-24 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2869,3 +2869,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2950 | bash-mdraid-write-intent-bitmap-resync-gap-audit | 1 | shell |
 | 2951 | go-banded-affine-xdrop-traceback-collapse | 1 | go |
 | 2952 | go-mcp-server-run-shutdown-wedge-jsonv2-decoder-newline-undrained | 1 | go |
+| 2953 | go-ssa-copy-coalesce-loop-phi-interference | 1 | go |
+| 2954 | python-sequence-crdt-interleaving-tombstone-compaction | 1 | python |
+| 2955 | js-nonzero-winding-conservative-rasterizer-clip | 1 | js |
+| 2956 | foreman-worker-gitreins-task-complete-timeout | 1 |  |
+| 2957 | yaml-frontmatter-project-manifest-parsed-as-single-document | 1 |  |

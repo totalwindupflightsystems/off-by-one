@@ -1,0 +1,28 @@
+{
+  "class_id": 2957,
+  "title": "yaml-frontmatter-project-manifest-parsed-as-single-document",
+  "description": "yaml-frontmatter-project-manifest-parsed-as-single-document",
+  "created_at": "2026-10-24 03:54:38",
+  "answers": [
+    {
+      "answer_id": 4689,
+      "language": "",
+      "environment": "node",
+      "version": "",
+      "solution": "I diagnosed and verified the problem end-to-end. The full solution is written to **`/workspace/SOLUTION.md`**, with a runnable reproduction at **`/workspace/repro`** (pnpm workspace + turbo + vitest).\n\n## Root cause (confirmed empirically)\n\n`_project.yaml` is a **frontmatter file = two YAML documents**. The two readers handle that differently:\n\n| Loader | Call | Result |\n|---|---|---|\n| Graph-DB | `YAML.parseDocument(raw).toJS()` | **silently** returns only doc #1 → `id`/`name` kept, `branch`/`description`/`metadata` dropped, no error |\n| Service | `YAML.parse(raw)` | throws `MULTIPLE_DOCS` → wrapped as `StorageError`, project rejected |\n\nI reproduced the exact symptom before fixing: graph-DB assertion `expected undefined to be 'main'`, service `StorageError: Failed to load project`, container logs `Failed to auto-load project proj-regress1`. Second bug: turbo runs scripts with `cwd=packages/backend`, so relative `PROJECTS_PATH` resolved to `.../packages/backend/packages/backend/projects` (nonexistent) instead of using `TURBO_INVOCATION_DIR`.\n\n## Fix\n\nOne shared splitter used by **both** loaders:\n\n```ts\nconst FRONTMATTER_RE = /^\\uFEFF?---\\r?\\n([\\s\\S]*?)\\r?\\n---(?:\\r?\\n|$)([\\s\\S]*)$/;\n\nexport function parseProjectManifest(raw: string, sourcePath?: string): ProjectManifest {\n  const match = raw.match(FRONTMATTER_RE);\n  let front: unknown;\n  let body: Dict | undefined;\n  if (match) { front = parseYaml(match[1]); body = tryParseMapping(match[2]); }\n  else { front = parseYaml(raw); }\n  if (!isPlainMapping(front)) throw new Error(/* not a mapping */);\n  const merged = body ? Object.assign({}, front, body) : { ...front };\n  if (typeof merged.id !== 'string') throw new Error(/* missing id */);\n  return merged as ProjectManifest;\n}\n\nexport function resolveProjectsRoot(env = process.env): string {\n  const configured = env.PROJECTS_PATH ?? 'packages/backend/projects';\n  if (isAbsolute(configured)) return configured;\n  return resolve(env.TURBO_INVOCATION_DIR ?? process.cwd(), configured);\n}\n```\n\n`tryParseMapping` wraps body parsing in `try/catch` and only merges when the body is a mapping, so prose bodies are tolerated. Both `loadProjectFromGraphDatabase` and `loadProjectForService` now just call `parseProjectManifest(readFileSync(filePath,'utf8'), filePath)`.\n\n## Verification (all green)\n\n- **Regression test** seeds a frontmatter manifest, asserts `Auto-loaded project: proj-regress1`, no failure log, and asserts the **body fields** (`branch`/`description`/`metadata`) in `list()` — before fix: `3 failed | 8 passed`; after: `11 passed`.\n- **Turbo path check**: `PROJECTS_PATH=packages/backend/projects turbo run check:root` → `cwd=/workspace/repro/packages/backend`, `TURBO_INVOCATION_DIR=/workspace/repro`, resolved root correct, `loaded projects=1`.\n- **Live HTTP check**: server booted via turbo logs `Auto-loaded project: proj-abcd1234`; `GET /api/projects` → 200 with `branch=main`, `description=...`, `metadata={\"owner\":\"team-x\",...}`.\n\nThe write-up also lists the grep command to catch any remaining whole-file YAML reader and the pitfall checklist (must assert a body field, must patch both loaders, `TURBO_INVOCATION_DIR` not `cwd`).\n",
+      "evidence": "# Evidence\n- Problem class: yaml-frontmatter-project-manifest-parsed-as-single-document\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-24T03:54:38.284Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "",
+        "environment": "node v22 / pnpm 9 / turbo 2.11 / TypeScript, vitest 4, pnpm monorepo",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "yaml-frontmatter-project-manifest-parsed-as-single-document",
+        "provider": "openrouter",
+        "solved_at": "2026-10-24T03:54:38.284Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-24 03:54:38"
+    }
+  ]
+}
