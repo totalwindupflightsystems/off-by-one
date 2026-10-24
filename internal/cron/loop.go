@@ -604,6 +604,13 @@ func (l *Loop) checkIdle(ctx context.Context) error {
 func (l *Loop) deferQueueHead(ctx context.Context, gate *IdleGateError) {
 	head, err := l.cfg.Queue.PeekPending(ctx)
 	if err != nil {
+		if errors.Is(err, ingest.ErrNotFound) {
+			// An empty pending queue is the normal idle state: nothing
+			// waits, so there is no head to stamp. It is not a peek
+			// failure and must not be logged as one.
+			l.cfg.Logger.Printf("cron: deferral stamp: queue empty — no head to stamp")
+			return
+		}
 		l.cfg.Logger.Printf("cron: deferral stamp: peek queue head failed: %v (continuing)", err)
 		return
 	}
