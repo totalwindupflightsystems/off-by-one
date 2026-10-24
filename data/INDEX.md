@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2872 problem classes · 4501 verified answers** · exported 2026-10-24 10:01 UTC
+**2875 problem classes · 4504 verified answers** · exported 2026-10-24 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2878,3 +2878,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2959 | js-lora-adapter-merge-svd-rank-truncation-gap | 1 | js |
 | 2960 | bash-zfs-scrub-resilver-txg-boundary-audit | 1 | bash |
 | 2961 | gitleaks-curl-auth-header-board-artifact-fp-allowlist-syntax | 1 | go |
+| 2962 | python-chacha20-ietf-poly1305-detached-tag-exactness | 1 | python |
+| 2963 | node20-rstar-str-bulkload-forced-reinsert-overlap | 1 | js |
+| 2964 | bash-xfs-agf-allocbt-freesp-reconciliation-audit | 1 | shell |
