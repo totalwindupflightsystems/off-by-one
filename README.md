@@ -415,7 +415,7 @@ or follow https://go.dev/doc/install) — the tarball recipe above needs no priv
 Prebuilt binaries are available for tagged releases (see [releases](https://github.com/totalwindupflightsystems/off-by-one/releases)). The build process is documented in the Makefile (`make release TAG=<version>`).
 
 ```bash
-V=v0.1.1
+V=v0.2.0
 base=https://github.com/totalwindupflightsystems/off-by-one/releases/download/$V
 curl -fsSLO $base/off-by-one-$V-linux-amd64
 curl -fsSLO $base/SHA256SUMS
