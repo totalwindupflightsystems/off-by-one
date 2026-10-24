@@ -172,7 +172,7 @@
   // surface a static string for now — wired in via the health endpoint.
   fetch('/health', { headers: { 'Accept': 'application/json' } })
     .then((r) => r.ok ? r.json() : null)
-    .then((j) => { if (j && j.version) elVersion.textContent = 'v' + j.version; })
+    .then((j) => { if (j && j.version) elVersion.textContent = j.version.startsWith('v') ? j.version : 'v' + j.version; })
     .catch(() => { /* status bar works without version */ });
 
   refreshStatus();
