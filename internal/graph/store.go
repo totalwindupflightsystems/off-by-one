@@ -234,19 +234,33 @@ type queryer interface {
 
 // CreateProblemClass inserts a new problem class. The (title) column has a
 // UNIQUE constraint, so calling with a duplicate title returns ErrDuplicate.
+// created_at takes the column default (the insert's wall clock).
 //
 // Returns the new ID.
 func (s *Store) CreateProblemClass(ctx context.Context, title, description string) (int64, error) {
-	return createProblemClass(ctx, s.db, title, description)
+	return createProblemClass(ctx, s.db, title, description, "")
 }
 
-func createProblemClass(ctx context.Context, q queryer, title, description string) (int64, error) {
+// CreateProblemClassAt is CreateProblemClass with an explicit created_at
+// value (corpus export format "2006-01-02 15:04:05"). The seed loader uses
+// it to preserve the corpus's own timestamps instead of re-stamping every
+// row with the seed run's clock (DF-OFF-BY-ONE-58). An empty createdAt
+// falls back to the column default, exactly like CreateProblemClass.
+func (s *Store) CreateProblemClassAt(ctx context.Context, title, description, createdAt string) (int64, error) {
+	return createProblemClass(ctx, s.db, title, description, createdAt)
+}
+
+func createProblemClass(ctx context.Context, q queryer, title, description, createdAt string) (int64, error) {
 	if title == "" {
 		return 0, errors.New("title must not be empty")
 	}
+	// COALESCE(NULLIF(...)) keeps one statement for both arms: an empty
+	// createdAt degrades to the schema default datetime('now'), so the
+	// standalone path and the corpus-timestamp path cannot drift apart.
 	res, err := q.ExecContext(ctx,
-		`INSERT INTO problem_classes (title, description) VALUES (?, ?)`,
-		title, description)
+		`INSERT INTO problem_classes (title, description, created_at)
+		 VALUES (?, ?, COALESCE(NULLIF(?, ''), datetime('now')))`,
+		title, description, createdAt)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return 0, ErrDuplicate
@@ -296,18 +310,27 @@ func getProblemClassByTitle(ctx context.Context, q queryer, title string) (*Prob
 
 // UpsertProblemClass finds the class by title, returning it if found, or
 // creating it if not. Returns the class and a boolean indicating whether
-// it was just created.
+// it was just created. A created class takes the created_at column default.
 func (s *Store) UpsertProblemClass(ctx context.Context, title, description string) (*ProblemClass, bool, error) {
-	return upsertProblemClass(ctx, s.db, title, description)
+	return upsertProblemClass(ctx, s.db, title, description, "")
 }
 
-func upsertProblemClass(ctx context.Context, q queryer, title, description string) (*ProblemClass, bool, error) {
+// UpsertProblemClassAt is UpsertProblemClass with an explicit created_at for
+// the create arm (corpus export format, see CreateProblemClassAt). The
+// timestamp applies only when the class is created — an existing class keeps
+// its stored created_at untouched, which is what makes re-seeding a corpus
+// idempotent for timestamps (DF-OFF-BY-ONE-58).
+func (s *Store) UpsertProblemClassAt(ctx context.Context, title, description, createdAt string) (*ProblemClass, bool, error) {
+	return upsertProblemClass(ctx, s.db, title, description, createdAt)
+}
+
+func upsertProblemClass(ctx context.Context, q queryer, title, description, createdAt string) (*ProblemClass, bool, error) {
 	if existing, err := getProblemClassByTitle(ctx, q, title); err == nil {
 		return existing, false, nil
 	} else if !errors.Is(err, ErrNotFound) {
 		return nil, false, err
 	}
-	id, err := createProblemClass(ctx, q, title, description)
+	id, err := createProblemClass(ctx, q, title, description, createdAt)
 	if err != nil {
 		return nil, false, err
 	}
@@ -349,14 +372,23 @@ func (s *Store) ListProblemClasses(ctx context.Context, limit, offset int) ([]Pr
 var ErrNotFound = errors.New("graph: not found")
 
 // CreateAnswerNode inserts a new answer. parentID may be 0 for no parent.
+// created_at takes the column default (the insert's wall clock).
 //
 // The signatures column is a JSON blob — pass an empty string for
 // "no signatures" or a json.Marshal'd object.
 func (s *Store) CreateAnswerNode(ctx context.Context, classID int64, parentID int64, env, lang, version, solution, evidence, signatures string) (int64, error) {
-	return createAnswerNode(ctx, s.db, classID, parentID, env, lang, version, solution, evidence, signatures)
+	return createAnswerNode(ctx, s.db, classID, parentID, env, lang, version, solution, evidence, signatures, "")
 }
 
-func createAnswerNode(ctx context.Context, q queryer, classID int64, parentID int64, env, lang, version, solution, evidence, signatures string) (int64, error) {
+// CreateAnswerNodeAt is CreateAnswerNode with an explicit created_at value
+// (corpus export format "2006-01-02 15:04:05"). The seed loader uses it to
+// preserve the corpus's own answer timestamps (DF-OFF-BY-ONE-58). An empty
+// createdAt falls back to the column default, exactly like CreateAnswerNode.
+func (s *Store) CreateAnswerNodeAt(ctx context.Context, classID int64, parentID int64, env, lang, version, solution, evidence, signatures, createdAt string) (int64, error) {
+	return createAnswerNode(ctx, s.db, classID, parentID, env, lang, version, solution, evidence, signatures, createdAt)
+}
+
+func createAnswerNode(ctx context.Context, q queryer, classID int64, parentID int64, env, lang, version, solution, evidence, signatures, createdAt string) (int64, error) {
 	if classID == 0 {
 		return 0, errors.New("class_id must not be zero")
 	}
@@ -375,9 +407,9 @@ func createAnswerNode(ctx context.Context, q queryer, classID int64, parentID in
 	// prose is canonicalized here and can never reach a filtered field.
 	env, version = NormalizeEnv(env), NormalizeVersion(version)
 	res, err := q.ExecContext(ctx,
-		`INSERT INTO answer_nodes (class_id, parent_id, env, lang, version, solution, evidence, signatures, status)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		classID, parent, env, lang, version, solution, evidence, signatures, AnswerPending)
+		`INSERT INTO answer_nodes (class_id, parent_id, env, lang, version, solution, evidence, signatures, status, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(NULLIF(?, ''), datetime('now')))`,
+		classID, parent, env, lang, version, solution, evidence, signatures, AnswerPending, createdAt)
 	if err != nil {
 		return 0, fmt.Errorf("insert answer_node: %w", err)
 	}

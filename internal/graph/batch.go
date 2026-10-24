@@ -71,9 +71,16 @@ func (t *Tx) Rollback() error {
 }
 
 // UpsertProblemClass is the Store.UpsertProblemClass body running inside
-// the batch: find by title, create when missing.
+// the batch: find by title, create when missing. A created class takes the
+// created_at column default.
 func (t *Tx) UpsertProblemClass(ctx context.Context, title, description string) (*ProblemClass, bool, error) {
-	return upsertProblemClass(ctx, t.tx, title, description)
+	return upsertProblemClass(ctx, t.tx, title, description, "")
+}
+
+// UpsertProblemClassAt is the Store.UpsertProblemClassAt body running inside
+// the batch: the created_at value applies only when the class is created.
+func (t *Tx) UpsertProblemClassAt(ctx context.Context, title, description, createdAt string) (*ProblemClass, bool, error) {
+	return upsertProblemClass(ctx, t.tx, title, description, createdAt)
 }
 
 // ListAnswers is the Store.ListAnswers body running inside the batch. It
@@ -86,8 +93,17 @@ func (t *Tx) ListAnswers(ctx context.Context, classID int64) ([]AnswerNode, erro
 
 // CreateAnswerNode is the Store.CreateAnswerNode body running inside the
 // batch, including signatures validation and env/version normalization.
+// created_at takes the column default.
 func (t *Tx) CreateAnswerNode(ctx context.Context, classID int64, parentID int64, env, lang, version, solution, evidence, signatures string) (int64, error) {
-	return createAnswerNode(ctx, t.tx, classID, parentID, env, lang, version, solution, evidence, signatures)
+	return createAnswerNode(ctx, t.tx, classID, parentID, env, lang, version, solution, evidence, signatures, "")
+}
+
+// CreateAnswerNodeAt is the Store.CreateAnswerNodeAt body running inside
+// the batch — same validation and normalization, with an explicit
+// created_at value for the corpus timestamp-preserving seed path
+// (DF-OFF-BY-ONE-58).
+func (t *Tx) CreateAnswerNodeAt(ctx context.Context, classID int64, parentID int64, env, lang, version, solution, evidence, signatures, createdAt string) (int64, error) {
+	return createAnswerNode(ctx, t.tx, classID, parentID, env, lang, version, solution, evidence, signatures, createdAt)
 }
 
 // UpdateAnswerStatus is the Store.UpdateAnswerStatus body running inside

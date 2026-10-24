@@ -5,8 +5,15 @@
 //
 // The loader is idempotent: problem classes are upserted by title, and
 // an answer is created only when the class has no existing answer with
-// the same (env, lang, version, solution) tuple. Re-running after a
-// corpus sync therefore imports only the delta, never duplicates.
+// the same (env, lang, version, solution, created_at) tuple — answers
+// without a corpus created_at dedup on the content tuple alone, so
+// legacy files stay re-runnable. Re-running after a corpus sync
+// therefore imports only the delta, never duplicates.
+//
+// Timestamps are preserved, not re-stamped (DF-OFF-BY-ONE-58): a new
+// class or answer stores the corpus file's own created_at, and rows that
+// already exist are never touched — so a re-run leaves every stored
+// created_at byte-identical.
 package seed
 
 import (
@@ -71,7 +78,8 @@ const (
 // lives in its answers/ subdirectory.
 //
 // Idempotent: classes are upserted by title, answers are deduplicated
-// against existing rows by (env, lang, version, solution). Each answer's
+// against existing rows by (env, lang, version, solution, created_at) —
+// see seedFile for the legacy no-timestamp fallback. Each answer's
 // status comes from its own corpus verdict (see corpusAnswerStatus) — a
 // signature marked failed is imported as failed, everything else keeps
 // the export's verified status.
@@ -192,9 +200,11 @@ func parseCorpusFile(path string) (*CorpusFile, error) {
 }
 
 // seedFile merges one parsed corpus file into the store through the
-// batch transaction.
+// batch transaction. New classes and answers carry the corpus's own
+// created_at values (DF-OFF-BY-ONE-58); a corpus file with no created_at
+// falls back to the column default inside the store.
 func seedFile(ctx context.Context, tx *graph.Tx, cf *CorpusFile, stats *Stats) error {
-	class, created, err := tx.UpsertProblemClass(ctx, cf.Title, cf.Description)
+	class, created, err := tx.UpsertProblemClassAt(ctx, cf.Title, cf.Description, cf.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("upsert problem class: %w", err)
 	}
@@ -204,26 +214,43 @@ func seedFile(ctx context.Context, tx *graph.Tx, cf *CorpusFile, stats *Stats) e
 		stats.ClassesExisting++
 	}
 
-	// Dedup key is the full (env, lang, version, solution) tuple. The
-	// corpus has no stable answer IDs across databases (answer_id is
+	// Dedup identity is the (env, lang, version, solution) tuple PLUS
+	// created_at when the corpus carries one (DF-OFF-BY-ONE-58): the
+	// corpus holds re-solve snapshots that share the content tuple and
+	// differ only in when they were written — treating those as
+	// duplicates would drop the newer snapshot and its timestamp. A
+	// corpus answer with NO created_at falls back to the plain content
+	// tuple, so legacy files stay idempotent against rows the schema
+	// default stamped with a wall clock the corpus cannot know.
+	//
+	// The corpus has no stable answer IDs across databases (answer_id is
 	// export-scoped), so content identity is what makes re-runs safe.
 	existing, err := tx.ListAnswers(ctx, class.ID)
 	if err != nil {
 		return fmt.Errorf("list existing answers: %w", err)
 	}
-	seen := make(map[string]bool, len(existing))
+	seen4 := make(map[string]bool, len(existing))
+	seen5 := make(map[string]bool, len(existing))
 	for _, a := range existing {
-		seen[answerKey(a.Env, a.Lang, a.Version, a.Solution)] = true
+		k4 := answerKey(a.Env, a.Lang, a.Version, a.Solution)
+		seen4[k4] = true
+		// The stored stamp round-trips through time.Time; every writer
+		// (schema default, corpus import) uses the "2006-01-02 15:04:05"
+		// layout, so the formatted value matches the corpus string
+		// byte-for-byte.
+		seen5[k4+"\x00"+a.CreatedAt.Format("2006-01-02 15:04:05")] = true
 	}
 
 	for _, ans := range cf.Answers {
-		key := answerKey(ans.Environment, ans.Language, ans.Version, ans.Solution)
-		if seen[key] {
+		k4 := answerKey(ans.Environment, ans.Language, ans.Version, ans.Solution)
+		k5 := k4 + "\x00" + ans.CreatedAt
+		if (ans.CreatedAt == "" && seen4[k4]) || (ans.CreatedAt != "" && seen5[k5]) {
 			// Skip path: an already-present answer keeps the status it
 			// already has. This deliberately does NOT rewrite the row
 			// (re-seeding is idempotent) — historical rows whose status
 			// disagrees with their signature are reclassified by the
-			// one-off migration, not by the seed.
+			// one-off migration, not by the seed. The stored created_at
+			// is likewise left untouched (DF-OFF-BY-ONE-58).
 			stats.AnswersSkipped++
 			continue
 		}
@@ -231,16 +258,17 @@ func seedFile(ctx context.Context, tx *graph.Tx, cf *CorpusFile, stats *Stats) e
 		if err != nil {
 			return fmt.Errorf("answer %d signatures: %w", ans.AnswerID, err)
 		}
-		id, err := tx.CreateAnswerNode(ctx, class.ID, 0,
+		id, err := tx.CreateAnswerNodeAt(ctx, class.ID, 0,
 			ans.Environment, ans.Language, ans.Version,
-			ans.Solution, ans.Evidence, sigs)
+			ans.Solution, ans.Evidence, sigs, ans.CreatedAt)
 		if err != nil {
 			return fmt.Errorf("create answer node: %w", err)
 		}
 		if err := tx.UpdateAnswerStatus(ctx, id, corpusAnswerStatus(ans)); err != nil {
 			return fmt.Errorf("set answer status: %w", err)
 		}
-		seen[key] = true
+		seen4[k4] = true
+		seen5[k5] = true
 		stats.AnswersCreated++
 	}
 	return nil

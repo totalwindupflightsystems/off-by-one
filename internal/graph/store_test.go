@@ -946,3 +946,91 @@ func TestStore_ListProblemClassesWithCountsFiltered_EnvLang(t *testing.T) {
 		t.Errorf("status=pending&env=kubernetes: titles = %v, want [envlang-kube-python]", got)
 	}
 }
+
+// TestCreatedAtExplicitVsDefault pins the DF-OFF-BY-ONE-58 write surface:
+// the ...At variants store the caller's created_at verbatim, the plain
+// variants fall back to the schema default, and upserting an existing
+// title never rewrites its stored timestamp.
+func TestCreatedAtExplicitVsDefault(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+
+	const stamp = "2026-07-25 01:10:08"
+	const fmtLayout = "2006-01-02 15:04:05"
+
+	// Explicit class timestamp is preserved.
+	cid, err := s.CreateProblemClassAt(ctx, "explicit-class", "carries its own stamp", stamp)
+	if err != nil {
+		t.Fatalf("CreateProblemClassAt: %v", err)
+	}
+	pc, err := s.GetProblemClass(ctx, cid)
+	if err != nil {
+		t.Fatalf("GetProblemClass: %v", err)
+	}
+	if got := pc.CreatedAt.Format(fmtLayout); got != stamp {
+		t.Errorf("class created_at = %q, want %q", got, stamp)
+	}
+
+	// Explicit answer timestamp is preserved.
+	aid, err := s.CreateAnswerNodeAt(ctx, cid, 0, "docker", "go", "1.25", "solution", "evidence", "{}", stamp)
+	if err != nil {
+		t.Fatalf("CreateAnswerNodeAt: %v", err)
+	}
+	an, err := s.GetAnswerNode(ctx, aid)
+	if err != nil {
+		t.Fatalf("GetAnswerNode: %v", err)
+	}
+	if got := an.CreatedAt.Format(fmtLayout); got != stamp {
+		t.Errorf("answer created_at = %q, want %q", got, stamp)
+	}
+
+	// Empty timestamp falls back to the schema default — a real,
+	// non-zero wall-clock stamp, not the zero time.
+	cid2, err := s.CreateProblemClass(ctx, "default-class", "takes the column default")
+	if err != nil {
+		t.Fatalf("CreateProblemClass: %v", err)
+	}
+	pc2, err := s.GetProblemClass(ctx, cid2)
+	if err != nil {
+		t.Fatalf("GetProblemClass default: %v", err)
+	}
+	if pc2.CreatedAt.IsZero() {
+		t.Error("default-arm class created_at is the zero time — schema default did not fire")
+	}
+	aid2, err := s.CreateAnswerNode(ctx, cid2, 0, "docker", "go", "1.25", "solution", "evidence", "{}")
+	if err != nil {
+		t.Fatalf("CreateAnswerNode: %v", err)
+	}
+	an2, err := s.GetAnswerNode(ctx, aid2)
+	if err != nil {
+		t.Fatalf("GetAnswerNode default: %v", err)
+	}
+	if an2.CreatedAt.IsZero() {
+		t.Error("default-arm answer created_at is the zero time — schema default did not fire")
+	}
+
+	// Upsert with a new timestamp on an EXISTING title must not rewrite
+	// the stored created_at (idempotent re-seed contract).
+	pc3, created, err := s.UpsertProblemClassAt(ctx, "explicit-class", "duplicate", "2030-01-01 00:00:00")
+	if err != nil {
+		t.Fatalf("UpsertProblemClassAt existing: %v", err)
+	}
+	if created {
+		t.Fatal("UpsertProblemClassAt created a duplicate class")
+	}
+	if got := pc3.CreatedAt.Format(fmtLayout); got != stamp {
+		t.Errorf("existing class created_at = %q after re-upsert, want unchanged %q", got, stamp)
+	}
+
+	// Upsert creating a NEW class stores the given timestamp.
+	pc4, created, err := s.UpsertProblemClassAt(ctx, "upsert-created-class", "created via upsert", stamp)
+	if err != nil {
+		t.Fatalf("UpsertProblemClassAt new: %v", err)
+	}
+	if !created {
+		t.Fatal("UpsertProblemClassAt did not report creation for a new title")
+	}
+	if got := pc4.CreatedAt.Format(fmtLayout); got != stamp {
+		t.Errorf("upsert-created class created_at = %q, want %q", got, stamp)
+	}
+}

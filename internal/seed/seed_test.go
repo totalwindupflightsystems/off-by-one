@@ -61,6 +61,7 @@ const corpusB = `{
   "class_id": 2,
   "title": "python-count-word-freq",
   "description": "word frequency counter",
+  "created_at": "2026-07-24 22:53:01",
   "answers": [
     {
       "answer_id": 21,
@@ -70,7 +71,8 @@ const corpusB = `{
       "solution": "# Solution B1\nUse collections.Counter.",
       "evidence": "tested on 3.11",
       "signatures": {"model": "m2", "result": "passed"},
-      "status": "verified"
+      "status": "verified",
+      "created_at": "2026-07-24 22:53:02"
     },
     {
       "answer_id": 22,
@@ -80,7 +82,8 @@ const corpusB = `{
       "solution": "# Solution B2\nCounter with type hints.",
       "evidence": "tested on 3.12",
       "signatures": null,
-      "status": "verified"
+      "status": "verified",
+      "created_at": "2026-07-24 22:53:03"
     }
   ]
 }`
@@ -89,6 +92,7 @@ const corpusC = `{
   "class_id": 3,
   "title": "js-array-dedupe",
   "description": "dedupe array",
+  "created_at": "2026-07-24 22:54:01",
   "answers": [
     {
       "answer_id": 31,
@@ -98,7 +102,8 @@ const corpusC = `{
       "solution": "# Solution C\nnew Set(arr).",
       "evidence": "node 22",
       "signatures": {"model": "m3", "result": "passed"},
-      "status": "verified"
+      "status": "verified",
+      "created_at": "2026-07-24 22:54:02"
     }
   ]
 }`
@@ -182,6 +187,185 @@ func TestSeedLoadsCorpus(t *testing.T) {
 	}
 	if res.Exact == nil {
 		t.Fatal("Discovery: no exact answer for seeded class")
+	}
+}
+
+// TestSeedPreservesCorpusCreatedAt proves DF-OFF-BY-ONE-58: the loader
+// stores the corpus's own created_at values on new rows instead of
+// re-stamping them with the seed run's wall clock, and a re-run leaves
+// every stored timestamp byte-identical (nothing overwrites an existing
+// row). A corpus file with no created_at still gets the column default.
+func TestSeedPreservesCorpusCreatedAt(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+
+	files := testCorpus()
+	// A legacy-shaped file with no created_at anywhere — exercises the
+	// fall-back-to-default arm.
+	files["0004-no-timestamps.json"] = `{
+  "class_id": 4,
+  "title": "rust-borrow-checker-move",
+  "description": "value moved before borrow ends",
+  "answers": [
+    {
+      "answer_id": 41,
+      "language": "rust",
+      "environment": "rust1.85",
+      "version": "1.85",
+      "solution": "# Solution D\nClone before the move.",
+      "evidence": "playground run",
+      "signatures": {"model": "m4", "result": "passed"},
+      "status": "verified"
+    }
+  ]
+}`
+	// A re-solve snapshot pair: two answers with an identical (env, lang,
+	// version, solution) content tuple that differ ONLY in created_at.
+	// Both must land as separate rows — collapsing them would lose the
+	// newer snapshot (this is the serde-json-validator-jsonschema shape
+	// from the DF-OFF-BY-ONE-58 acceptance criteria).
+	files["0005-resolve-snapshots.json"] = `{
+  "class_id": 5,
+  "title": "go-map-concurrent-write",
+  "description": "fatal error: concurrent map writes",
+  "created_at": "2026-07-25 01:10:08",
+  "answers": [
+    {
+      "answer_id": 51,
+      "language": "go",
+      "environment": "go1.25",
+      "version": "1.25",
+      "solution": "# Solution E\nGuard the map with a sync.Mutex.",
+      "evidence": "race detector run",
+      "signatures": {"model": "m5", "result": "passed"},
+      "status": "verified",
+      "created_at": "2026-07-25 01:10:08"
+    },
+    {
+      "answer_id": 52,
+      "language": "go",
+      "environment": "go1.25",
+      "version": "1.25",
+      "solution": "# Solution E\nGuard the map with a sync.Mutex.",
+      "evidence": "race detector re-run",
+      "signatures": {"model": "m5", "result": "passed"},
+      "status": "verified",
+      "created_at": "2026-10-01 07:20:47"
+    }
+  ]
+}`
+	dir := writeCorpus(t, files)
+
+	if _, err := Seed(ctx, store, dir); err != nil {
+		t.Fatalf("Seed run 1: %v", err)
+	}
+
+	// want maps a class title to its corpus created_at plus each answer's
+	// created_at in insertion (id) order.
+	type wantClass struct {
+		classCreatedAt   string
+		answerCreatedAts []string
+	}
+	wants := map[string]wantClass{
+		"go-nil-pointer-deref":     {"2026-07-24 22:52:43", []string{"2026-07-24 22:52:43"}},
+		"python-count-word-freq":   {"2026-07-24 22:53:01", []string{"2026-07-24 22:53:02", "2026-07-24 22:53:03"}},
+		"js-array-dedupe":          {"2026-07-24 22:54:01", []string{"2026-07-24 22:54:02"}},
+		"go-map-concurrent-write":  {"2026-07-25 01:10:08", []string{"2026-07-25 01:10:08", "2026-10-01 07:20:47"}},
+		"rust-borrow-checker-move": {"", nil}, // default-stamped; checked separately
+	}
+
+	classStamp := func(title string) string {
+		t.Helper()
+		var ts string
+		if err := store.DB().QueryRowContext(ctx,
+			`SELECT created_at FROM problem_classes WHERE title = ?`, title).Scan(&ts); err != nil {
+			t.Fatalf("read created_at for %q: %v", title, err)
+		}
+		return ts
+	}
+	answerStamps := func(title string) []string {
+		t.Helper()
+		rows, err := store.DB().QueryContext(ctx,
+			`SELECT n.created_at FROM answer_nodes n
+			 JOIN problem_classes c ON c.id = n.class_id
+			 WHERE c.title = ? ORDER BY n.id`, title)
+		if err != nil {
+			t.Fatalf("read answer created_at for %q: %v", title, err)
+		}
+		defer func() { _ = rows.Close() }()
+		var out []string
+		for rows.Next() {
+			var ts string
+			if err := rows.Scan(&ts); err != nil {
+				t.Fatalf("scan answer created_at for %q: %v", title, err)
+			}
+			out = append(out, ts)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("iterate answer created_at for %q: %v", title, err)
+		}
+		return out
+	}
+
+	snapshot := func() map[string]wantClass {
+		got := make(map[string]wantClass, len(wants))
+		for title := range wants {
+			got[title] = wantClass{classStamp(title), answerStamps(title)}
+		}
+		return got
+	}
+
+	first := snapshot()
+	for title, want := range wants {
+		got := first[title]
+		if title == "rust-borrow-checker-move" {
+			// No corpus timestamp: the schema default must have filled in
+			// a non-empty, well-formed wall-clock stamp.
+			if got.classCreatedAt == "" || len(got.answerCreatedAts) != 1 || got.answerCreatedAts[0] == "" {
+				t.Errorf("%s: default-stamped rows must be non-empty, got class=%q answers=%v",
+					title, got.classCreatedAt, got.answerCreatedAts)
+			}
+			continue
+		}
+		if got.classCreatedAt != want.classCreatedAt {
+			t.Errorf("%s class created_at = %q, want corpus value %q", title, got.classCreatedAt, want.classCreatedAt)
+		}
+		if len(got.answerCreatedAts) != len(want.answerCreatedAts) {
+			t.Fatalf("%s answers = %v, want %v", title, got.answerCreatedAts, want.answerCreatedAts)
+		}
+		for i, wantTS := range want.answerCreatedAts {
+			if got.answerCreatedAts[i] != wantTS {
+				t.Errorf("%s answer[%d] created_at = %q, want corpus value %q",
+					title, i, got.answerCreatedAts[i], wantTS)
+			}
+		}
+	}
+
+	// Re-run: the idempotent loader must leave every timestamp untouched.
+	stats, err := Seed(ctx, store, dir)
+	if err != nil {
+		t.Fatalf("Seed run 2: %v", err)
+	}
+	if stats.ClassesCreated != 0 || stats.AnswersCreated != 0 {
+		t.Errorf("re-run created content: classes=%d answers=%d, want 0/0",
+			stats.ClassesCreated, stats.AnswersCreated)
+	}
+	second := snapshot()
+	for title := range wants {
+		if second[title].classCreatedAt != first[title].classCreatedAt {
+			t.Errorf("%s class created_at changed on re-run: %q -> %q",
+				title, first[title].classCreatedAt, second[title].classCreatedAt)
+		}
+		if len(second[title].answerCreatedAts) != len(first[title].answerCreatedAts) {
+			t.Fatalf("%s answer count changed on re-run: %v -> %v",
+				title, first[title].answerCreatedAts, second[title].answerCreatedAts)
+		}
+		for i := range first[title].answerCreatedAts {
+			if second[title].answerCreatedAts[i] != first[title].answerCreatedAts[i] {
+				t.Errorf("%s answer[%d] created_at changed on re-run: %q -> %q",
+					title, i, first[title].answerCreatedAts[i], second[title].answerCreatedAts[i])
+			}
+		}
 	}
 }
 
@@ -494,7 +678,8 @@ func relateCorpus() map[string]string {
       "solution": "# Solution A\nTrace the idle wait.",
       "evidence": "reproducer attached",
       "signatures": {"model": "m1", "result": "passed", "tests": 5},
-      "status": "verified"
+      "status": "verified",
+      "created_at": "2026-07-24 22:52:45"
     }
   ]
 }`,
@@ -512,7 +697,8 @@ func relateCorpus() map[string]string {
       "solution": "# Solution B\nKeep the audit cadence.",
       "evidence": "fixture run",
       "signatures": {"model": "m2", "result": "passed"},
-      "status": "verified"
+      "status": "verified",
+      "created_at": "2026-07-24 22:52:46"
     }
   ]
 }`,

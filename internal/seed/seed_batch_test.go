@@ -108,8 +108,11 @@ func TestSeedCancelledContextLeavesNoWrites(t *testing.T) {
 // identical rows (IDs included, since insertion order follows the sorted
 // filename order) in all three tables. This is the regression net for the
 // batching change — any reordering, row drift or duplicate-handling
-// change shows up as a diff here. created_at columns are excluded: they
-// are wall-clock defaults, not loader output.
+// change shows up as a diff here. created_at is INCLUDED for
+// problem_classes and answer_nodes: since DF-OFF-BY-ONE-58 the loader
+// stores the corpus's own timestamps, and every fixture carries one, so
+// the stamps are loader output, not wall-clock. problem_edges.created_at
+// stays excluded — the linker still takes the column default.
 func TestSeedDeterministicAcrossDatabases(t *testing.T) {
 	ctx := context.Background()
 	corpus := testCorpus()
@@ -152,13 +155,14 @@ func TestSeedDeterministicAcrossDatabases(t *testing.T) {
 }
 
 // dumpGraph renders every content row of the three graph tables as
-// canonical text lines (created_at excluded — wall-clock default, not
-// loader output).
+// canonical text lines. Class and answer created_at is included (corpus
+// timestamps — deterministic); edge created_at is excluded (wall-clock
+// default from the linker).
 func dumpGraph(t *testing.T, ctx context.Context, store *graph.Store) []string {
 	t.Helper()
 	queries := []string{
-		`SELECT id, title, description FROM problem_classes ORDER BY id`,
-		`SELECT id, class_id, COALESCE(parent_id, -1), env, lang, version, solution, evidence, signatures, status FROM answer_nodes ORDER BY id`,
+		`SELECT id, title, description, created_at FROM problem_classes ORDER BY id`,
+		`SELECT id, class_id, COALESCE(parent_id, -1), env, lang, version, solution, evidence, signatures, status, created_at FROM answer_nodes ORDER BY id`,
 		`SELECT source_id, target_id, relationship, weight FROM problem_edges ORDER BY source_id, target_id, relationship`,
 	}
 	var lines []string
