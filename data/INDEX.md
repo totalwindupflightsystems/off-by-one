@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2884 problem classes · 4513 verified answers** · exported 2026-10-25 04:00 UTC
+**2886 problem classes · 4515 verified answers** · exported 2026-10-25 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2890,3 +2890,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2971 | node20-btree-suffix-truncation-minimal-separator-split | 1 | js |
 | 2972 | bash-tcp-zero-window-persist-timer-backoff-audit | 1 | shell |
 | 2973 | go-test-package-timeout-within-package | 1 | go |
+| 2974 | js-20261025-cdcl-vivification-implied-literal-reconstruction | 1 | js |
+| 2975 | go-20261025-dynamic-rlbwt-insertion-rank-select-exactness | 1 | go |
