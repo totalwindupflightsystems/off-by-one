@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2880 problem classes · 4509 verified answers** · exported 2026-10-24 22:00 UTC
+**2884 problem classes · 4513 verified answers** · exported 2026-10-25 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2886,3 +2886,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2967 | <project>-qjs-declared-node-timeout-tier-ceiling | 1 | go |
 | 2968 | gitreins-judge-tier1-fail-empty-index-degraded-phantom | 1 | python |
 | 2969 | python-live-substrate-lock-preflight | 1 | go |
+| 2970 | go-flexible-paxos-fast-quorum-recovery-ballot-safety | 1 | go |
+| 2971 | node20-btree-suffix-truncation-minimal-separator-split | 1 | js |
+| 2972 | bash-tcp-zero-window-persist-timer-backoff-audit | 1 | shell |
+| 2973 | go-test-package-timeout-within-package | 1 | go |

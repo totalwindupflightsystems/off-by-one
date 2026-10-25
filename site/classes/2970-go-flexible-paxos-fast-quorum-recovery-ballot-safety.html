@@ -1,0 +1,946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-flexible-paxos-fast-quorum-recovery-ballot-safety — Off-By-One verified answer</title>
+<meta name="description" content="The complete verified solution is also available at /workspace/SOLUTION.md, with source in /workspace/flexpaxos.">
+<meta property="og:title" content="go-flexible-paxos-fast-quorum-recovery-ballot-safety — Off-By-One">
+<meta property="og:description" content="The complete verified solution is also available at /workspace/SOLUTION.md, with source in /workspace/flexpaxos.">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/2970-go-flexible-paxos-fast-quorum-recovery-ballot-safety.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-flexible-paxos-fast-quorum-recovery-ballot-safety</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>The complete verified solution is also available at /workspace/SOLUTION.md, with source in /workspace/flexpaxos.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/2970-go-flexible-paxos-fast-quorum-recovery-ballot-safety.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Flexible Paxos: safe independent Q1/Q2 quorums and crash recovery</h1>
+<p>The complete verified solution is also available at <code>/workspace/SOLUTION.md</code>, with source in <code>/workspace/flexpaxos</code>.</p>
+<h2>Root-cause analysis</h2>
+<p>A normal Paxos implementation hard-codes “majority” in two places: it accepts a phase-1 quorum if <code>len(promises) &gt;= N/2+1</code>, and a phase-2 quorum if <code>len(accepted) &gt;= N/2+1</code>. That is wrong for Flexible Paxos.</p>
+<ul>
+<li>The safety invariant is <strong>intersection</strong>, not majority: every phase-1 quorum <code>Q1</code> must intersect every phase-2 quorum <code>Q2</code>. If the quorums are “any subset of the configured sizes”, this is equivalent to <code>|Q1| + |Q2| &gt; N</code>.</li>
+<li>A fixed majority check is <strong>unsound</strong> when the configured <code>Q1</code> or <code>Q2</code> is smaller than a majority. Example: <code>N=5, Q1=1, Q2=5</code> is safe (the single Q1 member is in every Q2), but a hard-coded majority would reject the legal Q1.</li>
+<li>A fixed majority check is also <strong>needlessly rejecting</strong> when the configured quorum is larger than a majority. Example: <code>N=5, Q1=4, Q2=2</code> is legal, but a hard-coded Q2 majority check rejects a valid Q2 of two acceptors.</li>
+<li>Recovery after a proposer crash must not simply reuse its old value. Phase 1 must collect the accepted state from a <code>Q1</code>; because every <code>Q1</code> intersects the <code>Q2</code> that may have committed, at least one promise carries the committed value (or a newer accepted value). The proposer must choose the value with the <strong>highest accepted ballot</strong> among the promises before entering phase 2.</li>
+<li>Stale/reordered messages are handled by making ballots totally ordered and by including the ballot (and log index) in every reply. An acceptor rejects an accept below its promise; a proposer discards replies for any ballot other than its current attempt. Duplicate phase-1 requests are idempotent.</li>
+<li>Ballots must never be reused, even across a process crash. <code>BallotGen</code> must be restored from durable state (or from the maximum ballot observed/persisted) before issuing a new ballot. Reusing a ballot with a different value can break safety because two Q2 quorums need not intersect.</li>
+</ul>
+<p>The fix is therefore:</p>
+<ol>
+<li>Validate <code>N</code>, <code>Q1</code>, <code>Q2</code> and reject <code>Q1+Q2 &lt;= N</code> in the config loader.</li>
+<li>Persist the acceptor’s <code>promised</code>, <code>acceptedBallot</code>, <code>acceptedValue</code>, and recovery ballot.</li>
+<li>Count only the configured <code>Q1</code>/<code>Q2</code> sizes.</li>
+<li>On phase 1, recover the highest accepted value from the promises.</li>
+<li>Fence all stale traffic with the ballot and never reuse a ballot.</li>
+</ol>
+<h2>Exact fix</h2>
+<p>Create the module and files below:</p>
+<pre><code class="language-bash">mkdir -p flexpaxos
+cd flexpaxos
+go mod init example.com/flexpaxos
+</code></pre>
+<h3><code>ballot.go</code></h3>
+<pre><code class="language-go">package flexpaxos
+
+import &quot;sync&quot;
+
+// Ballot is a totally ordered Paxos ballot. Round is the primary ordering key;
+// ID breaks ties between proposers if a deployment gives each proposer its own
+// counter. The harness uses one global generator so Round alone is unique.
+type Ballot struct {
+    Round uint64
+    ID    uint64
+}
+
+func (b Ballot) Compare(o Ballot) int {
+    if b.Round &lt; o.Round {
+        return -1
+    }
+    if b.Round &gt; o.Round {
+        return 1
+    }
+    if b.ID &lt; o.ID {
+        return -1
+    }
+    if b.ID &gt; o.ID {
+        return 1
+    }
+    return 0
+}
+
+func maxBallot(a, b Ballot) Ballot {
+    if a.Compare(b) &gt;= 0 {
+        return a
+    }
+    return b
+}
+
+// BallotGen issues ballots strictly greater than a supplied floor. A real
+// deployment must persist last (or recover it from durable acceptor promises)
+// before issuing ballots after a process restart.
+type BallotGen struct {
+    mu   sync.Mutex
+    last uint64
+}
+
+// NewBallotGen restores a generator from durable state. Pass the greatest
+// ballot known to have been issued before a restart. A fresh cluster may use
+// NewBallotGen(0).
+func NewBallotGen(last uint64) *BallotGen { return &amp;BallotGen{last: last} }
+
+// Last returns the greatest round issued/observed so far. Persist this value
+// before acknowledging a proposal if the same process may restart.
+func (g *BallotGen) Last() uint64 {
+    g.mu.Lock()
+    defer g.mu.Unlock()
+    return g.last
+}
+
+func (g *BallotGen) Next(after Ballot) Ballot {
+    g.mu.Lock()
+    defer g.mu.Unlock()
+    if after.Round &gt; g.last {
+        g.last = after.Round
+    }
+    g.last++
+    return Ballot{Round: g.last, ID: 0}
+}
+</code></pre>
+<h3><code>config.go</code></h3>
+<pre><code class="language-go">package flexpaxos
+
+import (
+    &quot;bytes&quot;
+    &quot;encoding/json&quot;
+    &quot;fmt&quot;
+    &quot;io&quot;
+    &quot;os&quot;
+)
+
+// Config describes N acceptors and the sizes of the phase-1 and phase-2
+// quorums. Legal configurations satisfy |Q1|+|Q2| &gt; N. That inequality is
+// exactly what guarantees every possible Q1 intersects every possible Q2.
+type Config struct {
+    N  int `json:&quot;n&quot;`
+    Q1 int `json:&quot;q1&quot;`
+    Q2 int `json:&quot;q2&quot;`
+}
+
+func (c Config) Validate() error {
+    if c.N &lt;= 0 {
+        return fmt.Errorf(&quot;bad config: n must be &gt; 0, got %d&quot;, c.N)
+    }
+    if c.Q1 &lt; 1 || c.Q1 &gt; c.N {
+        return fmt.Errorf(&quot;bad config: q1 must be in [1,%d], got %d&quot;, c.N, c.Q1)
+    }
+    if c.Q2 &lt; 1 || c.Q2 &gt; c.N {
+        return fmt.Errorf(&quot;bad config: q2 must be in [1,%d], got %d&quot;, c.N, c.Q2)
+    }
+    if c.Q1+c.Q2 &lt;= c.N {
+        return fmt.Errorf(&quot;unsafe flexible quorum: need q1+q2 &gt; n, got %d+%d &lt;= %d&quot;, c.Q1, c.Q2, c.N)
+    }
+    return nil
+}
+
+// LoadConfig reads a strict JSON config and rejects any unsafe quorum
+// configuration at the boundary, before a replica can be started.
+func LoadConfig(path string) (Config, error) {
+    b, err := os.ReadFile(path)
+    if err != nil {
+        return Config{}, err
+    }
+    var c Config
+    dec := json.NewDecoder(bytes.NewReader(b))
+    dec.DisallowUnknownFields()
+    if err := dec.Decode(&amp;c); err != nil {
+        return Config{}, fmt.Errorf(&quot;parse config: %w&quot;, err)
+    }
+    if err := dec.Decode(&amp;struct{}{}); err != io.EOF {
+        return Config{}, fmt.Errorf(&quot;parse config: trailing data after JSON object&quot;)
+    }
+    if err := c.Validate(); err != nil {
+        return Config{}, err
+    }
+    return c, nil
+}
+</code></pre>
+<h3><code>acceptor.go</code></h3>
+<pre><code class="language-go">package flexpaxos
+
+import &quot;sync&quot;
+
+// Value is the replicated value. A separate bool records whether an acceptor
+// has ever accepted a value, so the empty string is a legal value.
+type Value string
+
+// PrepareReply is the durable information an acceptor returns in phase 1.
+type PrepareReply struct {
+    From           int
+    Ballot         Ballot
+    OK             bool
+    Promised       Ballot
+    AcceptedBallot Ballot
+    AcceptedValue  Value
+    HasAccepted    bool
+}
+
+// AcceptReply confirms a phase-2 write.
+type AcceptReply struct {
+    From     int
+    Ballot   Ballot
+    OK       bool
+    Promised Ballot
+}
+
+// Acceptor is a persistent Flexible Paxos acceptor. promised, acceptedBallot,
+// acceptedValue and recoveryBallot are the state that must survive a crash.
+// recoveryBallot is the highest ballot for which this acceptor has joined a
+// recovery (phase-1) round; it is diagnostic/lease state, while safety comes
+// from promised + acceptedBallot/value.
+type Acceptor struct {
+    ID int
+
+    mu             sync.Mutex
+    promised       Ballot
+    hasPromised    bool
+    acceptedBallot Ballot
+    acceptedValue  Value
+    hasAccepted    bool
+    recoveryBallot Ballot
+    hasRecovery    bool
+}
+
+func NewAcceptor(id int) *Acceptor { return &amp;Acceptor{ID: id} }
+
+// Prepare promises not to accept any ballot below b and reports the value (if
+// any) already accepted by this acceptor. Equal ballots are idempotent, which
+// lets a retried prepare be safe under duplicate/reordered messages.
+func (a *Acceptor) Prepare(b Ballot) PrepareReply {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+
+    if a.hasPromised &amp;&amp; b.Compare(a.promised) &lt; 0 {
+        return PrepareReply{From: a.ID, Ballot: b, OK: false, Promised: a.promised}
+    }
+    a.promised = maxBallot(a.promised, b)
+    a.hasPromised = true
+    a.recoveryBallot = maxBallot(a.recoveryBallot, b)
+    a.hasRecovery = true
+    return PrepareReply{
+        From:           a.ID,
+        Ballot:         b,
+        OK:             true,
+        Promised:       a.promised,
+        AcceptedBallot: a.acceptedBallot,
+        AcceptedValue:  a.acceptedValue,
+        HasAccepted:    a.hasAccepted,
+    }
+}
+
+// Accept accepts b/value only if no higher ballot has been promised. Accepting
+// a second, different value at the same ballot is refused (proposer bug or
+// Byzantine input); a correct proposer retries with a strictly newer ballot.
+func (a *Acceptor) Accept(b Ballot, v Value) AcceptReply {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+
+    if a.hasPromised &amp;&amp; b.Compare(a.promised) &lt; 0 {
+        return AcceptReply{From: a.ID, Ballot: b, OK: false, Promised: a.promised}
+    }
+    if a.hasAccepted &amp;&amp; b.Compare(a.acceptedBallot) == 0 &amp;&amp; v != a.acceptedValue {
+        return AcceptReply{From: a.ID, Ballot: b, OK: false, Promised: a.promised}
+    }
+    a.promised = maxBallot(a.promised, b)
+    a.hasPromised = true
+    a.acceptedBallot = b
+    a.acceptedValue = v
+    a.hasAccepted = true
+    return AcceptReply{From: a.ID, Ballot: b, OK: true, Promised: a.promised}
+}
+
+// Snapshot is for diagnostics and assertions; it is not used by the protocol.
+func (a *Acceptor) Snapshot() (promised Ballot, acceptedBallot Ballot, acceptedValue Value, hasAccepted bool, recovery Ballot) {
+    a.mu.Lock()
+    defer a.mu.Unlock()
+    return a.promised, a.acceptedBallot, a.acceptedValue, a.hasAccepted, a.recoveryBallot
+}
+</code></pre>
+<h3><code>proposer.go</code></h3>
+<pre><code class="language-go">package flexpaxos
+
+// MsgType is the wire type used by the deterministic harness.
+type MsgType uint8
+
+const (
+    MsgPrepare MsgType = iota
+    MsgPromise
+    MsgAccept
+    MsgAccepted
+)
+
+// Message is both a request and a response. For MsgPrepare/MsgAccept, From is
+// the proposer ID and To is the acceptor ID. For replies it is the reverse.
+type Message struct {
+    Type           MsgType
+    From, To       int
+    Index          int
+    Ballot         Ballot
+    Value          Value
+    OK             bool
+    Promised       Ballot
+    AcceptedBallot Ballot
+    AcceptedValue  Value
+    HasAccepted    bool
+}
+
+type phase uint8
+
+const (
+    phaseIdle phase = iota
+    phasePreparing
+    phaseAccepting
+    phaseCommitted
+    phaseAborted
+)
+
+// Proposer implements the Flexible Paxos proposer. A new attempt always uses a
+// strictly larger ballot. Phase 1 waits for Q1 promises, selects the accepted
+// value with the highest accepted ballot among those promises (falling back to
+// the proposal value), and only then sends phase 2. A commit is declared when
+// Q2 distinct acceptors confirm the same ballot.
+type Proposer struct {
+    ID      int
+    Config  Config
+    Ballots *BallotGen
+
+    index       int
+    initial     Value
+    ballot      Ballot
+    phase       phase
+    promises    map[int]PrepareReply
+    accepts     map[int]struct{}
+    chosen      Value
+    committed   bool
+    commitValue Value
+    attempts    int
+    maxAttempts int
+}
+
+func NewProposer(id int, cfg Config, ballots *BallotGen) *Proposer {
+    return &amp;Proposer{
+        ID:          id,
+        Config:      cfg,
+        Ballots:     ballots,
+        maxAttempts: 16,
+    }
+}
+
+func (p *Proposer) Committed() (Value, bool) { return p.commitValue, p.committed }
+func (p *Proposer) Ballot() Ballot           { return p.ballot }
+func (p *Proposer) Phase() phase             { return p.phase }
+
+// Start begins a fresh proposal for one log index.
+func (p *Proposer) Start(index int, value Value) []Message {
+    p.index = index
+    p.initial = value
+    p.attempts = 0
+    p.committed = false
+    p.commitValue = &quot;&quot;
+    p.phase = phaseIdle
+    return p.newAttempt(Ballot{})
+}
+
+func (p *Proposer) newAttempt(after Ballot) []Message {
+    if p.attempts &gt;= p.maxAttempts {
+        p.phase = phaseAborted
+        return nil
+    }
+    p.attempts++
+    p.ballot = p.Ballots.Next(after)
+    p.phase = phasePreparing
+    p.promises = make(map[int]PrepareReply)
+    p.accepts = make(map[int]struct{})
+    p.chosen = p.initial
+    msgs := make([]Message, 0, p.Config.N)
+    for i := 0; i &lt; p.Config.N; i++ {
+        msgs = append(msgs, Message{
+            Type: MsgPrepare, From: p.ID, To: i, Index: p.index, Ballot: p.ballot,
+        })
+    }
+    return msgs
+}
+
+// Handle consumes one reply. Replies from an older ballot or from a previous
+// attempt are ignored, so duplicated/reordered/stale traffic cannot corrupt
+// the current attempt.
+func (p *Proposer) Handle(m Message) []Message {
+    if m.Index != p.index || m.Ballot.Compare(p.ballot) != 0 {
+        return nil
+    }
+    switch p.phase {
+    case phasePreparing:
+        if m.Type != MsgPromise {
+            return nil
+        }
+        if !m.OK {
+            if m.Promised.Compare(p.ballot) &gt; 0 {
+                return p.newAttempt(maxBallot(p.ballot, m.Promised))
+            }
+            return nil
+        }
+        if _, seen := p.promises[m.From]; seen {
+            return nil
+        }
+        p.promises[m.From] = PrepareReply{
+            From: m.From, Ballot: m.Ballot, OK: true, Promised: m.Promised,
+            AcceptedBallot: m.AcceptedBallot, AcceptedValue: m.AcceptedValue,
+            HasAccepted: m.HasAccepted,
+        }
+        if len(p.promises) &lt; p.Config.Q1 {
+            return nil
+        }
+
+        // Recovery rule: take the value accepted at the highest ballot in Q1.
+        p.chosen = p.initial
+        var bestBallot Ballot
+        found := false
+        for _, r := range p.promises {
+            if !r.HasAccepted {
+                continue
+            }
+            if !found || r.AcceptedBallot.Compare(bestBallot) &gt; 0 {
+                found = true
+                bestBallot = r.AcceptedBallot
+                p.chosen = r.AcceptedValue
+            }
+        }
+
+        p.phase = phaseAccepting
+        msgs := make([]Message, 0, p.Config.N)
+        for i := 0; i &lt; p.Config.N; i++ {
+            msgs = append(msgs, Message{
+                Type: MsgAccept, From: p.ID, To: i, Index: p.index,
+                Ballot: p.ballot, Value: p.chosen,
+            })
+        }
+        return msgs
+
+    case phaseAccepting:
+        if m.Type != MsgAccepted {
+            return nil
+        }
+        if !m.OK {
+            if m.Promised.Compare(p.ballot) &gt; 0 {
+                return p.newAttempt(maxBallot(p.ballot, m.Promised))
+            }
+            return nil
+        }
+        if _, seen := p.accepts[m.From]; seen {
+            return nil
+        }
+        p.accepts[m.From] = struct{}{}
+        if len(p.accepts) &gt;= p.Config.Q2 {
+            p.committed = true
+            p.commitValue = p.chosen
+            p.phase = phaseCommitted
+        }
+    }
+    return nil
+}
+</code></pre>
+<h3><code>harness.go</code></h3>
+<pre><code class="language-go">package flexpaxos
+
+import &quot;fmt&quot;
+
+// This file is a deterministic, in-process message-reorder harness. It is not
+// part of the wire protocol. It schedules every request/reply at a logical
+// time chosen from a seeded PRNG, so a seed reproduces an exact interleaving.
+
+type rng64 struct{ state uint64 }
+
+func newRNG(seed uint64) *rng64 {
+    if seed == 0 {
+        seed = 0x9e3779b97f4a7c15
+    }
+    return &amp;rng64{state: seed}
+}
+func (r *rng64) next() uint64 {
+    x := r.state
+    x ^= x &lt;&lt; 13
+    x ^= x &gt;&gt; 7
+    x ^= x &lt;&lt; 17
+    r.state = x
+    return x
+}
+func (r *rng64) Intn(n int) int {
+    if n &lt;= 0 {
+        return 0
+    }
+    return int(r.next() % uint64(n))
+}
+
+type event struct {
+    due int64
+    seq int64
+    msg Message
+}
+
+// Harness owns acceptors, proposers, and a logical-time priority queue.
+type Harness struct {
+    Config    Config
+    acceptors []*Acceptor
+    proposers map[int]*Proposer
+    ballots   *BallotGen
+    rng       *rng64
+    events    []event
+    seq       int64
+    clock     int64
+    delayMax  int
+
+    committed  map[int]Value
+    violations []string
+    delivered  int
+}
+
+func NewHarness(cfg Config, seed uint64) (*Harness, error) {
+    if err := cfg.Validate(); err != nil {
+        return nil, err
+    }
+    h := &amp;Harness{
+        Config:    cfg,
+        proposers: make(map[int]*Proposer),
+        ballots:   NewBallotGen(0),
+        rng:       newRNG(seed),
+        delayMax:  24,
+        committed: make(map[int]Value),
+    }
+    h.acceptors = make([]*Acceptor, cfg.N)
+    for i := range h.acceptors {
+        h.acceptors[i] = NewAcceptor(i)
+    }
+    return h, nil
+}
+
+func (h *Harness) Acceptor(id int) *Acceptor { return h.acceptors[id] }
+
+func (h *Harness) AddProposer(id int) *Proposer {
+    p := NewProposer(id, h.Config, h.ballots)
+    h.proposers[id] = p
+    return p
+}
+
+func (h *Harness) Start(index int, id int, value Value) {
+    p := h.proposers[id]
+    if p == nil {
+        p = h.AddProposer(id)
+    }
+    h.enqueueAll(p.Start(index, value))
+}
+
+func (h *Harness) Crash(id int) { delete(h.proposers, id) }
+
+func (h *Harness) Pending() bool { return len(h.events) &gt; 0 }
+
+func (h *Harness) enqueueAll(msgs []Message) {
+    for _, m := range msgs {
+        h.enqueue(m)
+    }
+}
+
+func (h *Harness) enqueue(m Message) {
+    // Strictly positive random delay; a larger delayMax forces deeper reorder.
+    due := h.clock + int64(1+h.rng.Intn(h.delayMax+1))
+    h.seq++
+    h.events = append(h.events, event{due: due, seq: h.seq, msg: m})
+}
+
+func (h *Harness) pop() (event, bool) {
+    if len(h.events) == 0 {
+        return event{}, false
+    }
+    best := 0
+    for i := 1; i &lt; len(h.events); i++ {
+        if h.events[i].due &lt; h.events[best].due ||
+            (h.events[i].due == h.events[best].due &amp;&amp; h.events[i].seq &lt; h.events[best].seq) {
+            best = i
+        }
+    }
+    e := h.events[best]
+    h.events = append(h.events[:best], h.events[best+1:]...)
+    return e, true
+}
+
+// Step delivers exactly one network event and schedules any replies.
+func (h *Harness) Step() bool {
+    e, ok := h.pop()
+    if !ok {
+        return false
+    }
+    if e.due &gt; h.clock {
+        h.clock = e.due
+    }
+    h.delivered++
+    m := e.msg
+    switch m.Type {
+    case MsgPrepare:
+        r := h.acceptors[m.To].Prepare(m.Ballot)
+        h.enqueue(Message{
+            Type: MsgPromise, From: m.To, To: m.From, Index: m.Index, Ballot: m.Ballot,
+            OK: r.OK, Promised: r.Promised, AcceptedBallot: r.AcceptedBallot,
+            AcceptedValue: r.AcceptedValue, HasAccepted: r.HasAccepted,
+        })
+    case MsgAccept:
+        r := h.acceptors[m.To].Accept(m.Ballot, m.Value)
+        h.enqueue(Message{
+            Type: MsgAccepted, From: m.To, To: m.From, Index: m.Index,
+            Ballot: m.Ballot, OK: r.OK, Promised: r.Promised,
+        })
+    case MsgPromise, MsgAccepted:
+        p := h.proposers[m.To]
+        if p == nil {
+            return true // crashed proposer: its replies are lost
+        }
+        wasCommitted := p.committed
+        replies := p.Handle(m)
+        if !wasCommitted &amp;&amp; p.committed {
+            h.recordCommit(p.index, p.commitValue)
+        }
+        h.enqueueAll(replies)
+    }
+    return true
+}
+
+func (h *Harness) recordCommit(index int, value Value) {
+    if old, ok := h.committed[index]; ok {
+        if old != value {
+            h.violations = append(h.violations, fmt.Sprintf(
+                &quot;divergent commit index=%d old=%q new=%q clock=%d&quot;, index, old, value, h.clock))
+        }
+        return
+    }
+    h.committed[index] = value
+}
+
+// RunUntil delivers events until pred is true (or the queue empties/max steps
+// is reached). It returns whether pred became true.
+func (h *Harness) RunUntil(maxSteps int, pred func() bool) bool {
+    for steps := 0; steps &lt; maxSteps; steps++ {
+        if pred() {
+            return true
+        }
+        if !h.Step() {
+            return pred()
+        }
+    }
+    return pred()
+}
+
+func (h *Harness) Run(maxSteps int) {
+    h.RunUntil(maxSteps, func() bool { return false })
+}
+
+func (h *Harness) Committed(index int) (Value, bool) {
+    v, ok := h.committed[index]
+    return v, ok
+}
+
+func (h *Harness) Violations() []string { return append([]string(nil), h.violations...) }
+
+func (h *Harness) Check() error {
+    if len(h.violations) &gt; 0 {
+        return fmt.Errorf(&quot;safety violation: %s&quot;, h.violations[0])
+    }
+    return nil
+}
+
+// CountAccepted returns how many acceptors durably accepted value at a ballot.
+func (h *Harness) CountAccepted(value Value) int {
+    n := 0
+    for _, a := range h.acceptors {
+        _, _, av, ok, _ := a.Snapshot()
+        if ok &amp;&amp; av == value {
+            n++
+        }
+    }
+    return n
+}
+</code></pre>
+<h3>Test suite (<code>flexpaxos_test.go</code>)</h3>
+<pre><code class="language-go">package flexpaxos
+
+import (
+    &quot;fmt&quot;
+    &quot;os&quot;
+    &quot;path/filepath&quot;
+    &quot;testing&quot;
+)
+
+func legalConfigs(maxN int) []Config {
+    var out []Config
+    for n := 2; n &lt;= maxN; n++ {
+        for q1 := 1; q1 &lt;= n; q1++ {
+            for q2 := 1; q2 &lt;= n; q2++ {
+                c := Config{N: n, Q1: q1, Q2: q2}
+                if c.Validate() == nil {
+                    out = append(out, c)
+                }
+            }
+        }
+    }
+    return out
+}
+
+func TestConfigValidation(t *testing.T) {
+    for _, c := range legalConfigs(8) {
+        if err := c.Validate(); err != nil {
+            t.Fatalf(&quot;legal config %+v rejected: %v&quot;, c, err)
+        }
+    }
+    for _, c := range []Config{
+        {N: 3, Q1: 1, Q2: 2}, // 1+2 &lt;= 3: unsound
+        {N: 5, Q1: 2, Q2: 3}, // exactly half: unsound
+        {N: 4, Q1: 0, Q2: 4},
+        {N: 4, Q1: 5, Q2: 1},
+        {N: 0, Q1: 1, Q2: 1},
+    } {
+        if err := c.Validate(); err == nil {
+            t.Fatalf(&quot;unsafe config %+v accepted&quot;, c)
+        }
+    }
+}
+
+func TestLoadConfigBoundary(t *testing.T) {
+    dir := t.TempDir()
+    write := func(name, body string) string {
+        p := filepath.Join(dir, name)
+        if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+            t.Fatal(err)
+        }
+        return p
+    }
+    if _, err := LoadConfig(write(&quot;ok.json&quot;, `{&quot;n&quot;:5,&quot;q1&quot;:2,&quot;q2&quot;:4}`)); err != nil {
+        t.Fatalf(&quot;legal config rejected: %v&quot;, err)
+    }
+    if _, err := LoadConfig(write(&quot;bad.json&quot;, `{&quot;n&quot;:5,&quot;q1&quot;:2,&quot;q2&quot;:3}`)); err == nil {
+        t.Fatal(&quot;unsafe config q1+q2==n was accepted&quot;)
+    }
+    if _, err := LoadConfig(write(&quot;unknown.json&quot;, `{&quot;n&quot;:5,&quot;q1&quot;:2,&quot;q2&quot;:4,&quot;mode&quot;:&quot;fast&quot;}`)); err == nil {
+        t.Fatal(&quot;unknown field was accepted&quot;)
+    }
+}
+
+// Enumerate all possible quorum subsets for small N and check the loader's
+// inequality really is equivalent to every Q1 intersecting every Q2.
+func TestEveryLegalQuorumPairIntersects(t *testing.T) {
+    for _, c := range legalConfigs(7) {
+        for q1 := 0; q1 &lt; (1 &lt;&lt; c.N); q1++ {
+            if popcount(q1) != c.Q1 {
+                continue
+            }
+            for q2 := 0; q2 &lt; (1 &lt;&lt; c.N); q2++ {
+                if popcount(q2) != c.Q2 {
+                    continue
+                }
+                if q1&amp;q2 == 0 {
+                    t.Fatalf(&quot;config %+v has disjoint quorums %07b and %07b&quot;, c, q1, q2)
+                }
+            }
+        }
+    }
+}
+
+func popcount(x int) int {
+    n := 0
+    for x != 0 {
+        n += x &amp; 1
+        x &gt;&gt;= 1
+    }
+    return n
+}
+
+// Two (or three) proposers race with different values while every message is
+// independently delayed. The invariant checked is the Paxos safety property:
+// no two proposers may commit different values at the same log index.
+func TestSafetyAllLegalQuorumsUnderReordering(t *testing.T) {
+    for _, cfg := range legalConfigs(6) {
+        cfg := cfg
+        t.Run(fmt.Sprintf(&quot;n%d-q1%d-q2%d&quot;, cfg.N, cfg.Q1, cfg.Q2), func(t *testing.T) {
+            for seed := uint64(0); seed &lt; 40; seed++ {
+                h, err := NewHarness(cfg, seed*0x9e3779b97f4a7c15+1)
+                if err != nil {
+                    t.Fatal(err)
+                }
+                nProps := 2 + int(seed%2)
+                for id := 0; id &lt; nProps; id++ {
+                    h.AddProposer(id)
+                    h.Start(0, id, Value(fmt.Sprintf(&quot;p%d&quot;, id)))
+                }
+
+                // At one deterministic point, crash a proposer that may have
+                // accepted a value but not yet learned that it committed, then
+                // start a recovery proposer with a conflicting value.
+                crashAt := 20 + int(seed%40)
+                crashed := int(seed) % nProps
+                didCrash := false
+                for step := 0; step &lt; 3000 &amp;&amp; h.Pending(); step++ {
+                    h.Step()
+                    if !didCrash &amp;&amp; step == crashAt {
+                        h.Crash(crashed)
+                        h.AddProposer(1000 + int(seed))
+                        h.Start(0, 1000+int(seed), Value(fmt.Sprintf(&quot;recovered-%d&quot;, seed)))
+                        didCrash = true
+                    }
+                }
+                if err := h.Check(); err != nil {
+                    t.Fatalf(&quot;seed %d: %v&quot;, seed, err)
+                }
+                if _, ok := h.Committed(0); !ok {
+                    t.Fatalf(&quot;seed %d: no proposer committed (config %+v)&quot;, seed, cfg)
+                }
+            }
+        })
+    }
+}
+
+// A proposer is crashed immediately after phase 1 sends its accepts. Its value
+// can therefore already be chosen by a Q2, but the crashed proposer never
+// observed Q2 replies. The recovery proposer must learn that value using only
+// Q1 promises and must not commit its own conflicting value.
+func TestRecoveryUsesOnlyPhase1Quorum(t *testing.T) {
+    for _, cfg := range legalConfigs(6) {
+        cfg := cfg
+        t.Run(fmt.Sprintf(&quot;n%d-q1%d-q2%d&quot;, cfg.N, cfg.Q1, cfg.Q2), func(t *testing.T) {
+            for seed := uint64(0); seed &lt; 20; seed++ {
+                h, err := NewHarness(cfg, seed+1)
+                if err != nil {
+                    t.Fatal(err)
+                }
+                h.AddProposer(1)
+                h.Start(0, 1, &quot;old&quot;)
+                ok := h.RunUntil(2000, func() bool {
+                    p := h.proposers[1]
+                    return p != nil &amp;&amp; p.Phase() == phaseAccepting
+                })
+                if !ok {
+                    t.Fatalf(&quot;seed %d: old proposer never reached phase 2&quot;, seed)
+                }
+
+                // Drop all replies to proposer 1, but let its phase-2 requests
+                // reach the acceptors. This creates an accepted value whose
+                // proposer does not know it may be committed.
+                h.Crash(1)
+                h.Run(2000)
+                if got := h.CountAccepted(&quot;old&quot;); got &lt; cfg.Q2 {
+                    t.Fatalf(&quot;seed %d: only %d acceptors accepted old value, need Q2=%d&quot;, seed, got, cfg.Q2)
+                }
+                if _, ok := h.Committed(0); ok {
+                    t.Fatalf(&quot;seed %d: crashed proposer observed commit unexpectedly&quot;, seed)
+                }
+
+                h.AddProposer(2)
+                h.Start(0, 2, &quot;new&quot;)
+                h.Run(3000)
+                if err := h.Check(); err != nil {
+                    t.Fatalf(&quot;seed %d: %v&quot;, seed, err)
+                }
+                got, ok := h.Committed(0)
+                if !ok {
+                    t.Fatalf(&quot;seed %d: recovery proposer did not commit&quot;, seed)
+                }
+                if got != &quot;old&quot; {
+                    t.Fatalf(&quot;seed %d: recovery committed %q, want recovered value %q&quot;, seed, got, &quot;old&quot;)
+                }
+                v, cok := h.proposers[2].Committed()
+                if !cok || v != &quot;old&quot; {
+                    t.Fatalf(&quot;seed %d: recovery proposer state = (%q,%v), want (old,true)&quot;, seed, v, cok)
+                }
+            }
+        })
+    }
+}
+
+func TestStaleAcceptIsRejected(t *testing.T) {
+    a := NewAcceptor(0)
+    b1 := Ballot{Round: 1}
+    b2 := Ballot{Round: 2}
+
+    if r := a.Prepare(b1); !r.OK {
+        t.Fatal(&quot;first prepare rejected&quot;)
+    }
+    if r := a.Accept(b1, &quot;v1&quot;); !r.OK {
+        t.Fatal(&quot;first accept rejected&quot;)
+    }
+    if r := a.Prepare(b2); !r.OK {
+        t.Fatal(&quot;higher prepare rejected&quot;)
+    }
+    if r := a.Accept(b1, &quot;v1&quot;); r.OK {
+        t.Fatal(&quot;stale accept at lower ballot was accepted&quot;)
+    } else if r.Promised.Compare(b2) != 0 {
+        t.Fatalf(&quot;reject did not advertise promised ballot: %+v&quot;, r)
+    }
+    // Equal-ballot duplicate prepare remains idempotent and reports the value.
+    if r := a.Prepare(b2); !r.OK || r.HasAccepted != true || r.AcceptedValue != &quot;v1&quot; {
+        t.Fatalf(&quot;duplicate prepare did not return durable accepted state: %+v&quot;, r)
+    }
+}
+</code></pre>
+<h2>Verification</h2>
+<p>Run the checks from the module directory:</p>
+<pre><code class="language-bash">cd flexpaxos
+go vet ./...
+go test ./... -count=1 -race -timeout=180s
+</code></pre>
+<p>Verified output:</p>
+<pre><code class="language-text">ok      example.com/flexpaxos   2.831s
+</code></pre>
+<p>The test suite covers:</p>
+<ul>
+<li><code>TestConfigValidation</code> and <code>TestLoadConfigBoundary</code>: legal configurations pass; <code>Q1+Q2 &lt;= N</code>, out-of-range quorums, unknown JSON fields, and trailing JSON are rejected.</li>
+<li><code>TestEveryLegalQuorumPairIntersects</code>: exhaustively enumerates every quorum subset for <code>N &lt;= 7</code> and proves there is no disjoint <code>Q1</code>/<code>Q2</code> pair for any config accepted by the loader.</li>
+<li><code>TestSafetyAllLegalQuorumsUnderReordering</code>: for every legal config with <code>N &lt;= 6</code>, 40 seeded schedules run two or three proposers with different values, independent random message delays, one proposer crash, and a conflicting recovery proposer. The harness records every commit and fails on the first time two different values are committed at index 0.</li>
+<li><code>TestRecoveryUsesOnlyPhase1Quorum</code>: crashes a proposer after it has sent phase-2 accepts but before it observes any phase-2 reply, so the value may already be chosen without the proposer knowing. A recovery proposer with a conflicting value must learn the old value from Q1 promises and commit it.</li>
+<li><code>TestStaleAcceptIsRejected</code>: an accept below the promised ballot is rejected; an idempotent duplicate prepare returns the durable accepted state.</li>
+</ul>
+<p>Operational note: in a real process, persist the acceptor state and the <code>BallotGen.last</code> value (or initialize the generator from the maximum ballot found on disk) before acknowledging messages. Leases may optimize the fast path, but a lease must never allow bypassing the ballot promise fence; otherwise an expired/stale leader can violate the same intersection argument.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-flexible-paxos-fast-quorum-recovery-ballot-safety
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-24T22:04:53.771Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a Flexible Paxos replica: phase-1 quorum Q1 and phase-2 quorum Q2 are configured independently and safety holds only if every Q1 intersects every Q2 (|Q1|+|Q2| &gt; N), so a fixed full-majority check is simultaneously unsound for some configs and needlessly rejecting for others. Build the acceptor state machine (promised ballot, accepted ballot/value, recovery ballot) plus a proposer that recovers a possibly-committed value after a crash using only Q1 responses, tolerating stale and reordered messages, ballot/lease conflicts, and two proposers with interleaved ballots that each believe they hold a Q2 majority. Ship a deterministic message-reorder harness proving no two proposers commit different values at the same log index for any legal quorum configuration, and make the config loader reject any Q1+Q2 &lt;= N.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-flexible-paxos-fast-quorum-recovery-ballot-safety&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-24T22:04:53.774Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
