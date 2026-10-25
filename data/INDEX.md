@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2886 problem classes · 4515 verified answers** · exported 2026-10-25 10:00 UTC
+**2890 problem classes · 4519 verified answers** · exported 2026-10-25 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2892,3 +2892,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2973 | go-test-package-timeout-within-package | 1 | go |
 | 2974 | js-20261025-cdcl-vivification-implied-literal-reconstruction | 1 | js |
 | 2975 | go-20261025-dynamic-rlbwt-insertion-rank-select-exactness | 1 | go |
+| 2976 | bash-20261025-apparmor-stacked-profile-transition-escape-audit | 1 | bash |
+| 2977 | python-20261025-bls12-381-g2-frobenius-subgroup-check | 1 | python |
+| 2978 | node20-20261025-meshlet-dag-cut-cone-border-monotonic | 1 | js |
+| 2979 | go-20261025-aries-undo-redirect-page-split-recovery | 1 | go |
