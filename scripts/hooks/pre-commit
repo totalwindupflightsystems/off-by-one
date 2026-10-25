@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Repo-local pre-commit hook — tracked source of truth (DF-OFF-BY-ONE-55).
+# Installed into the repo's hooks directory by scripts/install-hooks.sh.
+#
+# Two gates run on every commit; BOTH statuses propagate — a failure of
+# either rejects the commit:
+#
+#   1. GitReins guard (tier 1) — skipped cleanly when the repo carries no
+#      .gitreins/config.yaml. The guard body runs in a subshell so a bare
+#      `exit` inside it cannot skip board-lint; its status is captured and
+#      re-exited after board-lint.
+#
+#   2. board-lint — FAIL-CLOSED validation of the JSONL board under
+#      .coding-hermes/board: duplicate task ids and dangling depends_on
+#      reject the commit, and the validator output names the offending id.
+#      A missing board dir, a missing boardctl binary, a missing timeout(1),
+#      or a validator timeout (rc 124) SKIP the gate: board-lint must never
+#      wedge commits on tooling problems, only on board-validation failures.
+#
+# This file is tracked so a fresh clone can install the enforcing hook via
+# `make install-hooks` (scripts/install-hooks.sh); the copy under
+# .git/hooks is generated, never edited by hand.
+
+gitreins_guard_status=0
+(
+# GitReins pre-commit guard — tier-1 checks on the staged change.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+if [ ! -f "$REPO_ROOT/.gitreins/config.yaml" ]; then
+    exit 0
+fi
+
+cd "$REPO_ROOT"
+gitreins guard
+exit $?
+) || gitreins_guard_status=$?
+
+# >>> boardctl board-lint managed block (source: scripts/hooks/pre-commit) >>>
+boardctl_timeout=30
+boardctl_lint_mode="fail"
+boardctl_lint_status=0
+boardctl_lint_main() {
+	# board-lint: reject commits that break the JSONL board
+	# (duplicate ids; dangling depends_on via --fail-on dangling-dep).
+	board_root="$(git rev-parse --show-toplevel)"
+	if [ ! -d "$board_root/.coding-hermes/board" ]; then
+		return 0
+	fi
+	if command -v boardctl >/dev/null 2>&1; then
+		lint_bin="$(command -v boardctl)"
+	else
+		echo "board-lint: skipped (boardctl binary not found)" >&2
+		return 0
+	fi
+	if ! command -v timeout >/dev/null 2>&1; then
+		echo "board-lint: skipped (timeout(1) unavailable)" >&2
+		return 0
+	fi
+	lint_out="$(timeout "$boardctl_timeout" "$lint_bin" validate -C "$board_root" --fail-on dangling-dep 2>&1)"
+	lint_rc=$?
+	case "$lint_rc" in
+		0)
+			return 0
+			;;
+		124)
+			echo "board-lint: skipped (timeout)" >&2
+			return 0
+			;;
+		2)
+			echo "board-lint: skipped (no board found under $board_root)" >&2
+			return 0
+			;;
+		*)
+			# mode=fail: a validation error (e.g. duplicate task id —
+			# the validator output below names it) rejects the commit.
+			echo "board-lint: commit rejected (boardctl validate failed, mode=$boardctl_lint_mode)" >&2
+			echo "$lint_out" >&2
+			return 1
+			;;
+	esac
+}
+# <<< boardctl board-lint managed block <<<
+boardctl_lint_main || boardctl_lint_status=$?
+if [ "$boardctl_lint_status" -ne 0 ]; then
+	exit "$boardctl_lint_status"
+fi
+exit "$gitreins_guard_status"

@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test tick-closeout tick-closeout-selftest connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest check-distribute-deploy deploy-distribute check-distribute-deploy-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test tick-closeout tick-closeout-selftest connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest check-distribute-deploy deploy-distribute check-distribute-deploy-selftest install-hooks install-hooks-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -306,6 +306,23 @@ deploy-distribute:
 # leak check.
 check-distribute-deploy-selftest:
 	bash scripts/tests/ob1-distribute-deploy-check-test.sh
+
+# DF-OFF-BY-ONE-55: install the tracked repo-local pre-commit hook
+# (scripts/hooks/pre-commit: gitreins guard + FAIL-CLOSED board-lint) into
+# the hooks dir git actually consults. A global/system core.hooksPath makes
+# git ignore $GIT_DIR/hooks entirely, so the installer also sets a REPO-LOCAL
+# core.hooksPath override when a foreign one is in effect (only .git/config
+# is written; global/user config and foreign hook dirs are never touched).
+install-hooks:
+	bash scripts/install-hooks.sh
+
+# Regression self-test for the hook install + fail-closed board-lint
+# (DF-OFF-BY-ONE-55): a throwaway local clone proves git resolves pre-commit
+# to the clone's own .git/hooks (never the machine-global hooksPath), a
+# duplicate board-id commit is rejected with the id named and HEAD unmoved,
+# and a valid board-row commit still passes. No network, no credentials.
+install-hooks-selftest:
+	bash scripts/tests/install-hooks-selftest.sh
 
 lint:
 	go vet ./...

@@ -29,6 +29,22 @@ lane is interpreter-pinned in `.gitreins/config.yaml`.
 | lint | WARN |
 | tests | BLOCK |
 
+## Git hooks
+
+After cloning, run:
+
+```bash
+make install-hooks
+```
+
+This installs the tracked pre-commit hook (`scripts/hooks/pre-commit` —
+GitReins guard plus fail-closed board-lint: duplicate board ids and dangling
+`depends_on` reject the commit) into the hooks directory git actually
+consults. If a global/system `core.hooksPath` would otherwise shadow the
+repo-local hook, the installer sets a repo-local `core.hooksPath` override
+(it only writes this repo's `.git/config`; global/user config is never
+touched). Re-run any time; the installer is idempotent.
+
 ## Architecture
 
 See [AGENTS.md](AGENTS.md) for the full architecture overview.
