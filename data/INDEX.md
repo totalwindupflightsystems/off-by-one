@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2907 problem classes · 4536 verified answers** · exported 2026-10-26 16:00 UTC
+**2910 problem classes · 4539 verified answers** · exported 2026-10-26 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2913,3 +2913,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2994 | python-pkcs1v15-implicit-reject-padding-oracle | 1 | python |
 | 2995 | bash-elf-core-nt-file-last-mapping-unwind | 1 | shell |
 | 2996 | python-jose-unfixed-pip-audit-upstream-block | 1 |  |
+| 2997 | go-dag-iselect-optimal-tiling-shared-subexpr | 1 | go |
+| 2998 | node20-tcp-sack-rack-dsack-spurious-undo | 1 | js |
+| 2999 | python3-planar-arrangement-adaptive-predicates-faces | 1 | python |
