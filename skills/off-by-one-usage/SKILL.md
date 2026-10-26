@@ -5,7 +5,7 @@ description: >-
   discover cached answers, submit problems, poll the queue, browse the corpus,
   run a scratch instance, and the pitfalls that waste time. Load this skill
   before doing anything with the off-by-one repo or its API.
-version: 1.14.1
+version: 1.15.0
 category: software-development
 ---
 
@@ -608,14 +608,10 @@ curl -s localhost:8766/health                                              # v0.
     to a `/health` version that already carries it. Harmless to function, but do not use the chip to
     prove which build is deployed — use `/health`'s raw `version` or `--version`. And when grading any
     UI fix that spans a payload and a template, assert the RENDERED string in a browser, not each half.
+47. **The generic fresh-install battery is not product evidence for this Go repo at HEAD `27898c45`.** Its `fresh-install` cell reports `install rc=0 but no artifact found (toolsd not in PATH...)` even though the repo's documented product command is `make build` and the correct artifact is `./off-by-one`; its `ui-probe` also collided with the shared default port `8766`, and its `chaos-corruption` arm launched `oby-memcap` instead of the daemon. Treat the battery as partial/harness evidence, not as a product install failure. The same agent's native suite passed, and a direct product build/seed/serve/discover arm is the authoritative fresh-machine proof.
+48. **Seed is now transactional and fast at current HEAD.** After `27605bb0`, a direct `./off-by-one seed -db <fresh-ext4-db>` measured 4.91s cold and 0.54s idempotent warm for 2,900 files / 4,529 answers / 13,080 edges; the transaction is opened at `internal/seed/seed.go:146` and committed at `:161`. The old `PERF-OFF-BY-ONE-1` fsync finding is fixed in code; keep its historical evidence, but do not budget the old 45–70s seed wait for current HEAD.
 
-**Seed is the one slow step, and the seconds are DISK SYNC, not the graph link scan**
-(`PERF-OFF-BY-ONE-1`): the same released binary and corpus measured 44.7-70.5 s to an ext4 `-db`
-but 3.4-3.7 s to `/dev/shm` (17x; strace shows ~9,136 `fsync` and 253k `pwrite64` — every statement
-autocommits because `internal/seed/seed.go:91` wraps the load in no transaction). Budget ~1 minute
-for a first install on real disk and do NOT read it as a hang; if you are seeding throwaway nodes in
-a test loop, point `-db` at `/dev/shm` and get the 3-4 s path. Discover/submit stay in the
-single-digit-millisecond range even on a loaded host; do not file perf rows for them.
+**Historical seed performance note:** `PERF-OFF-BY-ONE-1` measured the released v0.2.0 loader at 44.7-70.5 s on ext4 versus 3.4-3.7 s on `/dev/shm`, caused by per-statement fsync. That finding was addressed by the transactional loader in `27605bb0`; current HEAD measures 4.91 s cold and 0.54 s idempotent warm on the same class of ext4 scratch path. Discover/submit remain in the single-digit-millisecond range; no current performance row is justified.
 
 Install leg for this run: `bunker-qa.sh launch/collect` on bunker-mvp against HEAD `ea5b963a`
 (agent auto-destroyed) — see `docs/dogfood/2026-10-23-release-artifact-integration.md` for the cell
