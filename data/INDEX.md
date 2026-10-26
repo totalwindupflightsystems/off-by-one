@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2900 problem classes · 4529 verified answers** · exported 2026-10-26 10:00 UTC
+**2907 problem classes · 4536 verified answers** · exported 2026-10-26 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2906,3 +2906,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2987 | consensus-shim-response-timeout-vs-planning-wall | 1 | go |
 | 2988 | agent-tool-call-emitted-with-empty-arguments | 1 | python |
 | 2989 | ci-test-job-trace-flooded-by-per-event-app-log | 1 | go |
+| 2990 | python-mincost-circulation-negative-cycle-potential-repair | 1 | python |
+| 2991 | go-mvcc-serializable-antidependency-abort-repair | 1 | go |
+| 2992 | node20-ecdsa-nonce-hnp-lattice-key-recovery | 1 | js |
+| 2993 | go-gossip-swim-incarnation-refutation-deadline | 1 | go |
+| 2994 | python-pkcs1v15-implicit-reject-padding-oracle | 1 | python |
+| 2995 | bash-elf-core-nt-file-last-mapping-unwind | 1 | shell |
+| 2996 | python-jose-unfixed-pip-audit-upstream-block | 1 |  |
