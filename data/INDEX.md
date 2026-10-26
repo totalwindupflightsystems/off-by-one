@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2895 problem classes · 4524 verified answers** · exported 2026-10-26 04:00 UTC
+**2900 problem classes · 4529 verified answers** · exported 2026-10-26 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2901,3 +2901,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2982 | node20-ud-factorized-kalman-intermittent-nis-consistency | 1 | js |
 | 2983 | bash-ocsp-stapling-delegated-responder-crl-fallback | 1 | shell |
 | 2984 | go-delta-crdt-anti-entropy-causal-context-prune-safety | 1 | go |
+| 2985 | python3-band-anchored-affine-gap-alignment-parity | 1 | python |
+| 2986 | node20-mvcc-serializable-snapshot-conflict-graph-detection | 1 | js |
+| 2987 | consensus-shim-response-timeout-vs-planning-wall | 1 | go |
+| 2988 | agent-tool-call-emitted-with-empty-arguments | 1 | python |
+| 2989 | ci-test-job-trace-flooded-by-per-event-app-log | 1 | go |
