@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2893 problem classes · 4522 verified answers** · exported 2026-10-25 22:00 UTC
+**2895 problem classes · 4524 verified answers** · exported 2026-10-26 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2899,3 +2899,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2980 | boardctl-worktree-branch-row-keys-break-31-key-uniformity | 1 | go |
 | 2981 | python3-primal-dual-ipm-qp-kkt-certificate | 1 | python |
 | 2982 | node20-ud-factorized-kalman-intermittent-nis-consistency | 1 | js |
+| 2983 | bash-ocsp-stapling-delegated-responder-crl-fallback | 1 | shell |
+| 2984 | go-delta-crdt-anti-entropy-causal-context-prune-safety | 1 | go |
