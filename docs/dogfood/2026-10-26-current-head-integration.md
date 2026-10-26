@@ -44,3 +44,4 @@ witness: live:local-build+scratch-api+bunker-qa
 verdict: PROMISING-BUT-ROUGH
 install: PARTIAL battery; collected agent 268bbe39, fresh-install cell not attributable
 performance: current seed 4.91s cold / 0.54s warm; no new PERF row
+commit: 3703b64f
