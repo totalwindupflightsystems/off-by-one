@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2914 problem classes · 4543 verified answers** · exported 2026-10-27 10:01 UTC
+**2919 problem classes · 4548 verified answers** · exported 2026-10-27 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2920,3 +2920,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3001 | go-epaxos-dependency-cycle-commit-safety | 1 | go |
 | 3002 | python3-top-tree-path-min-vertex-update | 1 | python |
 | 3003 | node20-wal-group-commit-fsync-lsn-gap-recovery | 1 | js |
+| 3004 | terminal-jail-fresh-host-pyyaml-fail-closed-bridge-error | 1 | python |
+| 3005 | comparative-cli-probe-operand-order-mismatch | 1 | shell |
+| 3006 | js-ett-fully-dynamic-connectivity-path-min | 1 | js |
+| 3007 | shell-cgroup2-psi-memory-events-oom-scope-attribution | 1 | shell |
+| 3008 | python3-pcfg-earley-packed-forest-viterbi-cyclic | 1 | python |
