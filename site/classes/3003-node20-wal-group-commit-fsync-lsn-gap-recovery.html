@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>node20-wal-group-commit-fsync-lsn-gap-recovery — Off-By-One verified answer</title>
+<meta name="description" content="Done. The verified solution is written to **`~/wal-solution/SOLUTION.md`** (self-contained, with all code inline), alongside the working modules and test. ## Ro">
+<meta property="og:title" content="node20-wal-group-commit-fsync-lsn-gap-recovery — Off-By-One">
+<meta property="og:description" content="Done. The verified solution is written to **`~/wal-solution/SOLUTION.md`** (self-contained, with all code inline), alongside the working modules and test. ## Ro">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3003-node20-wal-group-commit-fsync-lsn-gap-recovery.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>node20-wal-group-commit-fsync-lsn-gap-recovery</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>js</span><span class='badge v'>node20</span></div><div class='desc'><p>node20-wal-group-commit-fsync-lsn-gap-recovery</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3003-node20-wal-group-commit-fsync-lsn-gap-recovery.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>Done. The verified solution is written to <strong><code>~/wal-solution/SOLUTION.md</code></strong> (self-contained, with all code inline), alongside the working modules and test.</p>
+<h2>Root cause (four coupled hazards)</h2>
+<ol>
+<li><strong>Completion-boundary race</strong> — resolving waiters using the LSN at <code>fsync</code> <em>completion</em> marks records durable that the in-flight fsync never covered. The fix is to snapshot the boundary <strong>before</strong> calling <code>fsync</code> and only advance to that.</li>
+<li><strong>Directionality</strong> — a later fsync does cover earlier LSNs, but never the reverse. Solved with a monotonic <code>durableLsn</code> and <code>w.lsn &lt;= durableLsn</code>.</li>
+<li><strong>Torn tail</strong> — a write torn while the CRC is landing leaves a plausible length prefix + partial CRC. Storing the CRC <strong>last</strong>, covering everything before it, makes torn writes fail validation.</li>
+<li><strong>Recovery truncation trap</strong> — after a crash you can't tell "never fsynced" from "covered by a later group's fsync." Naively truncating to a remembered commit point destroys records a later fsync made durable. Correct rule: trust <em>any complete, CRC-valid</em> record, truncate only the first proven-torn one, and report the max LSN of the surviving prefix (LSN gaps are not corruption).</li>
+</ol>
+<h2>Deliverable</h2>
+<ul>
+<li><code>wal.js</code> — group-commit writer (<code>setImmediate</code> batch coalescing, single in-flight fsync, monotonic <code>durableLsn</code>, serialized writes) + <code>recover</code>.</li>
+<li><code>record.js</code> / <code>crc32.js</code> — record framing with CRC-last layout and a scanner that classifies complete / partial / corrupt.</li>
+<li><code>storage.js</code> — real <code>FileStorage</code> plus <code>FaultyStorage</code> that <strong>persists a deterministic prefix inside <code>fsync</code> and then throws</strong> (fault injection in the wrapper, not post-hoc truncation).</li>
+<li><code>test.js</code> — 8 tests.</li>
+</ul>
+<h2>Verification (actual run, exit 0)</h2>
+<pre><code>ok  group commit: 100 concurrent appends =&gt; 1 fsync, all resolve in order
+ok  waiter resolves only after the fsync covering its LSN returns
+ok  fault injection at every offset: resolved =&gt; byte-identical on disk
+ok  fsync never ran: nothing durable, nothing resolved, empty recovery
+ok  torn tail with valid length prefix + partial CRC is truncated
+ok  recovery tolerates LSN gaps (does not stop at a gap)
+ok  fault at fsync #2: complete unacknowledged records preserved, torn one dropped
+ok  real file: round trip, durability, recovery truncates torn tail
+
+8 passed, 0 failed
+</code></pre>
+<p>The fault loops sweep <strong>every byte offset</strong> (109 values) for two different faulted fsyncs and assert, for each resolved caller, that its record is present and byte-identical in the recovered image — proving no caller was told "durable" while its bytes were absent — while also confirming recovery <em>keeps</em> complete records persisted by a failed/later fsync.</p>
+<p>Note: the sandbox reports Node <code>v22.23.2</code>; the code uses only Node 20-compatible APIs (<code>fs.promises</code>, <code>BigInt</code>, <code>setImmediate</code>) and runs unchanged on Node 20.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: node20-wal-group-commit-fsync-lsn-gap-recovery
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-27T08:11:15.890Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a write-ahead log with group commit: concurrent transactions append records and queue on a shared segment, a single leader calls fsync once per batch, and each waiter may only resolve after the fsync that covers its own record LSN has returned, with a later batch&#x27;s fsync allowed to satisfy an earlier LSN but never vice versa. Recovery must handle a torn tail where the last record has a plausible length prefix and a partial CRC, and must distinguish a segment whose fsync never ran from one covered by a later group&#x27;s fsync, truncating only the proven-torn suffix and reporting the maximum durable LSN. Deliverable: the writer, the recovery routine, and a fault-injection test that aborts fsync at deterministic offsets to prove no caller was told &#x27;durable&#x27; while its bytes were absent from disk, using fault points injected inside the fsync wrapper rather than by truncating files after the fact.&quot;, &quot;environment&quot;: &quot;node20&quot;, &quot;language&quot;: &quot;js&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;node20-wal-group-commit-fsync-lsn-gap-recovery&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-27T08:11:15.897Z&quot;, &quot;version&quot;: &quot;20&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

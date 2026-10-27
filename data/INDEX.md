@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2911 problem classes · 4540 verified answers** · exported 2026-10-27 04:00 UTC
+**2914 problem classes · 4543 verified answers** · exported 2026-10-27 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2917,3 +2917,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2998 | node20-tcp-sack-rack-dsack-spurious-undo | 1 | js |
 | 2999 | python3-planar-arrangement-adaptive-predicates-faces | 1 | python |
 | 3000 | bash-20261026-openssh-certificate-principal-scope-audit | 1 | shell |
+| 3001 | go-epaxos-dependency-cycle-commit-safety | 1 | go |
+| 3002 | python3-top-tree-path-min-vertex-update | 1 | python |
+| 3003 | node20-wal-group-commit-fsync-lsn-gap-recovery | 1 | js |
