@@ -29,6 +29,11 @@
 #              GREEN     artifact rebuilt from HEAD        -> PASS
 #              DRIFT     fresh artifact, pre-fix unit flags (DF-OFF-BY-ONE-29-R2)
 #                                                          -> FAIL naming the drift
+#   STALE — OB-GAP-095 regression: a listener from ANOTHER scratch clone whose
+#            binary was deleted mid-run (/proc/<pid>/exe ends in " (deleted)")
+#            must be REJECTED by the harness's identity check, and the harness's
+#            own instance must still come up GREEN on its own dynamically-owned
+#            loopback port while the stale listener squats elsewhere.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
@@ -40,7 +45,9 @@ SCRATCH_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ob1-deploytest-XXXXXX")"
 STUB_BIN="$SCRATCH_ROOT/bin"
 REV="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 SCRATCH_PID=""
-trap 'rm -f "$OUT"; [ -n "$SCRATCH_PID" ] && kill "$SCRATCH_PID" 2>/dev/null; rm -rf "$SCRATCH_ROOT"' EXIT
+SCRATCH_PORT=""
+STALE_PID=""
+trap 'rm -f "$OUT"; [ -n "$SCRATCH_PID" ] && kill "$SCRATCH_PID" 2>/dev/null; [ -n "$STALE_PID" ] && kill "$STALE_PID" 2>/dev/null; rm -rf "$SCRATCH_ROOT"' EXIT
 
 cd "$REPO_ROOT"
 
@@ -78,18 +85,83 @@ install_stub_systemctl() {
 install_stub_systemctl
 
 # --- throwaway instance (the /proc leg needs a real running process) ----------
-start_scratch_instance() {
-	local repo="$1" pid i
-	( cd "$repo" && env -u DEEPSEEK_API_KEY OFF_BY_ONE_DB="$SCRATCH_ROOT/scratch.db" \
-		OFF_BY_ONE_PORT=18997 ./off-by-one --skip-sandbox -load-threshold -1 \
-		>"$SCRATCH_ROOT/instance.log" 2>&1 & )
-	for i in 1 2 3 4 5 6 7 8 9 10; do
-		pid="$(ss -tlnp 2>/dev/null | sed -n 's/.*:18997 .*pid=\([0-9]*\).*/\1/p' | head -1)"
-		if [ -n "$pid" ]; then
-			SCRATCH_PID="$pid"
+#
+# OB-GAP-095: the pre-fix harness bound the FIXED port 18997 and adopted the
+# FIRST ss hit as its process. A stale listener leaked from another scratch
+# clone (executable already deleted, so /proc/<pid>/exe ends in " (deleted)")
+# was adopted instead, and the GREEN gate failed against a process the harness
+# never started. The harness now (1) picks a uniquely-owned free loopback port
+# per invocation, (2) captures the exact PID of the process IT spawned, and
+# (3) proves — before any gate invocation — that the observed listener is that
+# PID and that the PID executes the current scratch clone's artifact. The first
+# ss result is never trusted.
+
+# pick_free_port: ask the kernel for a free loopback port (bind :0), print it.
+# The close→rebind window is covered by start_scratch_instance's bind retry.
+pick_free_port() {
+	local p tries=0
+	if command -v python3 >/dev/null 2>&1; then
+		python3 -c 'import socket,sys; s=socket.socket(); s.bind(("127.0.0.1",0)); sys.stdout.write(str(s.getsockname()[1])); s.close()'
+		return 0
+	fi
+	# Fallback without python3: probe random high ports against ss.
+	while [ "$tries" -lt 50 ]; do
+		p=$(( (RANDOM % 20000) + 30000 ))
+		if ! ss -tln 2>/dev/null | grep -q ":$p "; then
+			echo "$p"
 			return 0
 		fi
-		sleep 1
+		tries=$((tries + 1))
+	done
+	return 1
+}
+
+# assert_scratch_identity PID REPO PORT — deterministic, process-owned proof
+# that the listener on PORT belongs to the process THIS harness started:
+#   1. /proc/<pid> exists (the process is alive);
+#   2. /proc/<pid>/exe resolves EXACTLY to REPO/off-by-one — never a foreign
+#      path and never a " (deleted)" stale binary;
+#   3. ss shows the listener on PORT owned by THIS pid — never the first hit.
+assert_scratch_identity() {
+	local pid="$1" repo="$2" port="$3" exe
+	[ -n "$pid" ] && [ -d "/proc/$pid" ] || return 1
+	exe="$(readlink "/proc/$pid/exe" 2>/dev/null)" || return 1
+	# Exact match rejects both foreign clones and " (deleted)" suffixes.
+	[ "$exe" = "$repo/off-by-one" ] || return 1
+	ss -tlnp 2>/dev/null | grep -E "(^|[[:space:]])(127\.0\.0\.1|\[::1\]|\*|\[::\]):$port[[:space:]]" | grep -q "pid=$pid,"
+}
+
+start_scratch_instance() {
+	local repo="$1" pid port attempt i state
+	for attempt in 1 2 3; do
+		port="$(pick_free_port)" || return 1
+		# exec inside the subshell: $! IS the daemon's PID, so the trap can
+		# only ever kill the exact process this invocation started.
+		( cd "$repo" && exec env -u DEEPSEEK_API_KEY OFF_BY_ONE_DB="$SCRATCH_ROOT/scratch.db" \
+			OFF_BY_ONE_PORT="$port" ./off-by-one --skip-sandbox -load-threshold -1 \
+			>"$SCRATCH_ROOT/instance.log" 2>&1 ) &
+		pid=$!
+		state=""
+		for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+			state="$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null || true)"
+			if [ -z "$state" ] || [ "$state" = "Z" ]; then
+				break # died before listening (lost the close→rebind race) — new port
+			fi
+			if assert_scratch_identity "$pid" "$repo" "$port"; then
+				SCRATCH_PID="$pid"
+				SCRATCH_PORT="$port"
+				return 0
+			fi
+			sleep 1
+		done
+		# Clean up exactly this attempt's process before retrying/failing.
+		kill "$pid" 2>/dev/null || true
+		wait "$pid" 2>/dev/null || true
+		# Alive but unprovable identity is a hard failure, not a port retry.
+		if [ -n "$state" ] && [ "$state" != "Z" ]; then
+			echo "start_scratch_instance: pid $pid alive but failed identity on port $port" >&2
+			return 1
+		fi
 	done
 	return 1
 }
@@ -430,10 +502,66 @@ else
 	if [ "$rebuild_rc" -ne 0 ]; then
 		fail "could not rebuild the scratch artifact from HEAD; output:"
 		sed 's/^/    /' "$OUT"
+	else
+		# STALE (OB-GAP-095 regression arm): pre-seed the incident shape — a
+		# listener from ANOTHER scratch clone, then delete its binary so
+		# /proc/<pid>/exe ends in " (deleted)". The harness must reject that
+		# identity and must still bring its own instance up GREEN on its own
+		# dynamically-owned port while the stale listener squats elsewhere.
+		echo "--- STALE: foreign/deleted listener identity rejection (OB-GAP-095) ---"
+		stale_dir="$SCRATCH_ROOT/stale-clone"
+		mkdir -p "$stale_dir"
+		cp "$SCRATCH_REPO/off-by-one" "$stale_dir/off-by-one"
+		stale_port="$(pick_free_port)"
+		( cd "$stale_dir" && exec env -u DEEPSEEK_API_KEY OFF_BY_ONE_DB="$stale_dir/stale.db" \
+			OFF_BY_ONE_PORT="$stale_port" ./off-by-one --skip-sandbox -load-threshold -1 \
+			>"$stale_dir/stale.log" 2>&1 ) &
+		STALE_PID=$!
+		stale_up=0
+		for _ in 1 2 3 4 5 6 7 8 9 10; do
+			if ss -tlnp 2>/dev/null | grep -q ":$stale_port .*pid=$STALE_PID,"; then
+				stale_up=1
+				break
+			fi
+			sleep 1
+		done
+		if [ "$stale_up" -ne 1 ]; then
+			fail "STALE: could not pre-seed the stale listener (pid $STALE_PID, port $stale_port); log:"
+			sed 's/^/    /' "$stale_dir/stale.log" 2>/dev/null || true
+		else
+			# Arm 1: a FOREIGN listener (another clone's artifact) must be
+			# rejected even when the harness asks about its real port.
+			if assert_scratch_identity "$STALE_PID" "$SCRATCH_REPO" "$stale_port"; then
+				fail "STALE: identity check accepted a FOREIGN listener (pid $STALE_PID executing $stale_dir/off-by-one, not $SCRATCH_REPO/off-by-one)"
+			else
+				pass "STALE: identity check rejects a listener from another scratch clone (pid $STALE_PID, port $stale_port)"
+			fi
+			# Arm 2: delete the stale binary — /proc/<pid>/exe now reads
+			# "<path> (deleted)", the exact 2026-10-27 false-failure shape.
+			rm -f "$stale_dir/off-by-one"
+			deleted_exe="$(readlink "/proc/$STALE_PID/exe" 2>/dev/null || true)"
+			case "$deleted_exe" in
+			*" (deleted)") ;;
+			*) fail "STALE: setup broken — deleted binary still resolves to '$deleted_exe'" ;;
+			esac
+			if assert_scratch_identity "$STALE_PID" "$stale_dir" "$stale_port"; then
+				fail "STALE: identity check accepted a deleted-binary process ($deleted_exe)"
+			else
+				pass "STALE: identity check rejects a ' (deleted)' executable ($deleted_exe)"
+			fi
+		fi
+	fi
+
+	if [ "$rebuild_rc" -ne 0 ]; then
+		: # already reported above
 	elif ! start_scratch_instance "$SCRATCH_REPO"; then
-		echo "SKIP: GREEN case — the throwaway instance did not come up (port 18997 busy?); output:"
+		echo "SKIP: GREEN case — the throwaway instance did not come up (see log); output:"
 		sed 's/^/    /' "$SCRATCH_ROOT/instance.log"
 	else
+		pass "GREEN pre-gate: listener on 127.0.0.1:$SCRATCH_PORT is pid $SCRATCH_PID executing $SCRATCH_REPO/off-by-one (identity proven before gate-deploy)"
+		if [ -n "$STALE_PID" ] && [ "$stale_up" = 1 ]; then
+			pass "GREEN coexists with the stale listener (pid $STALE_PID on :$stale_port) — no fixed-port collision, no foreign adoption"
+		fi
 		green_argv="$(sed -n 's/^ExecStart=[^[:space:]]*[[:space:]]*//p' "$SCRATCH_REPO/deploy/off-by-one.service" | head -1)"
 		set +e
 		( cd "$SCRATCH_REPO" && OB1_UNIT_SOURCE="$SCRATCH_REPO" \
@@ -468,6 +596,19 @@ else
 			fail "gate should be RED on pre-fix unit flags; rc=$drift_rc; output:"
 			sed 's/^/    /' "$OUT"
 		fi
+	fi
+
+	# STALE cleanup: kill EXACTLY the pre-seeded stale process by PID (never
+	# pkill/pgrep -f, which self-match), and prove it is gone.
+	if [ -n "$STALE_PID" ]; then
+		kill "$STALE_PID" 2>/dev/null || true
+		wait "$STALE_PID" 2>/dev/null || true
+		if kill -0 "$STALE_PID" 2>/dev/null; then
+			fail "STALE: stale listener pid $STALE_PID survived its kill"
+		elif [ "${stale_up:-0}" = 1 ]; then
+			pass "STALE: stale listener pid $STALE_PID cleaned up exactly (kill -0 fails)"
+		fi
+		STALE_PID=""
 	fi
 fi
 
