@@ -392,7 +392,6 @@ ln -s "$(pwd)/scripts/pi-agent" ~/.local/bin/pi-agent   # or: cp scripts/pi-agen
 - Go **1.26.9+** — required to build (`make build`). `go.mod` declares `go 1.26.9` and CI runs the 1.26 matrix, so use a 1.26.9+ toolchain; the recipe below installs 1.26.9 directly.
 - Bubblewrap (`bwrap`) — optional, tests skip gracefully when absent
 - Pi Agent (`pi-agent`) — optional, solver tests mock the executor
-- Docker (for Muster integration tests)
 
 **No sudo? Bootstrap Go from the official tarball** (a plain user account cannot
 `apt install`, and `make build` fails with `go: command not found` until Go is on
