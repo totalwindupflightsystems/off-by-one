@@ -22,7 +22,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"syscall"
+	"unsafe"
 )
 
 // MemCapEnvVar carries the per-solve memory cap (in MiB) to the
@@ -38,7 +40,8 @@ const memCapBinaryName = "oby-memcap"
 // calling process to mb MiB, pinned (Cur == Max) so the limit cannot be
 // raised again by the sandboxed workload. TestObyMemcapExec_ChildInheritsCap
 // proves the full chain: the cmd/oby-memcap wrapper calls this function and
-// syscall.Exec's the real command, which inherits the pin; mb <= 0 is
+// execve(2)s the real command (via RawExecve, which performs no post-cap
+// heap allocation), which inherits the pin; mb <= 0 is
 // rejected so the unlimited case never reaches the kernel with a bogus value.
 //
 // Callers must apply this immediately before an exec — lowering the
@@ -53,6 +56,36 @@ func ApplyMemLimitMB(mb int) error {
 		return fmt.Errorf("sandbox: setrlimit RLIMIT_AS=%d MiB: %w", mb, err)
 	}
 	return nil
+}
+
+// RawExecve replaces the current process image via a raw execve(2)
+// syscall. Unlike syscall.Exec it performs NO Go heap allocation: the
+// caller must have pre-built the C vectors with
+// syscall.BytePtrFromString / syscall.SlicePtrFromStrings BEFORE any
+// memory cap was applied. Between ApplyMemLimitMB and RawExecve no Go
+// runtime work is permitted at all: the first post-setrlimit heap grow
+// that needs a fresh address-space reservation dies with
+// "fatal error: runtime: out of memory" (INT-CI-006, run 40569450107:
+// on the Go 1.26.9 CI runner, syscall.Exec's internal
+// SlicePtrFromStrings conversion of argv/envp required exactly such a
+// reservation under the 64 MiB RLIMIT_AS and the wrapper died at
+// cmd/oby-memcap/main.go's exec call before the child ever started).
+//
+// execve only returns on failure; the returned Errno is a plain
+// uintptr-backed value so even the error path allocates nothing.
+// argv and envp must be NULL-terminated vectors as produced by
+// syscall.SlicePtrFromStrings (len >= 1 always).
+func RawExecve(path *byte, argv, envp []*byte) syscall.Errno {
+	_, _, errno := syscall.RawSyscall(syscall.SYS_EXECVE,
+		uintptr(unsafe.Pointer(path)),
+		uintptr(unsafe.Pointer(&argv[0])),
+		uintptr(unsafe.Pointer(&envp[0])))
+	// Keep the vectors alive until the syscall has consumed them; on
+	// success the process image is replaced and this never runs.
+	runtime.KeepAlive(path)
+	runtime.KeepAlive(argv)
+	runtime.KeepAlive(envp)
+	return errno
 }
 
 // memCapCommand computes the binary path, argv, and extra env entries

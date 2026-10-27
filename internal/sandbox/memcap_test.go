@@ -146,7 +146,7 @@ func TestMemCapHelperProcess(t *testing.T) {
 	case "inherited-check":
 		// Child arm of TestObyMemcapExec_ChildInheritsCap: the parent
 		// execs the REAL cmd/oby-memcap wrapper (which pinned RLIMIT_AS
-		// from OBY_MEM_LIMIT_MB and syscall.Exec'd this process), so this
+		// from OBY_MEM_LIMIT_MB and execve(2)'d this process), so this
 		// arm must observe the cap WITHOUT applying it itself. Asserts
 		// both the value (Cur == Max == mb<<20) and the enforcement (a
 		// 256 MiB mmap is refused with ENOMEM).
@@ -165,6 +165,64 @@ func TestMemCapHelperProcess(t *testing.T) {
 			os.Exit(1)
 		}
 		fmt.Println("INHERITED-OK")
+		os.Exit(0)
+	case "rawexecve-success":
+		// Success arm of TestRawExecve_SuccessReplacesImage: pre-build
+		// the vectors and exec /bin/echo with NO cap. Proves the
+		// path/argv marshalling hands the arguments to the exec'd
+		// image intact (an empty/offset argv would print the wrong
+		// line, failing the parent's Contains check).
+		if _, err := os.Stat("/bin/echo"); err != nil {
+			fmt.Fprintf(os.Stderr, "/bin/echo: %v\n", err)
+			os.Exit(2)
+		}
+		pathPtr, err := syscall.BytePtrFromString("/bin/echo")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "BytePtrFromString: %v\n", err)
+			os.Exit(2)
+		}
+		argvPtr, err := syscall.SlicePtrFromStrings([]string{"/bin/echo", "RAWEXECVE-OK", "arg with spaces"})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "SlicePtrFromStrings argv: %v\n", err)
+			os.Exit(2)
+		}
+		envpPtr, err := syscall.SlicePtrFromStrings(nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "SlicePtrFromStrings envp: %v\n", err)
+			os.Exit(2)
+		}
+		if errno := RawExecve(pathPtr, argvPtr, envpPtr); errno != 0 {
+			fmt.Fprintf(os.Stderr, "RawExecve(/bin/echo): %v\n", errno)
+			os.Exit(1)
+		}
+		fmt.Fprintln(os.Stderr, "RawExecve returned success without replacing the image")
+		os.Exit(1)
+	case "rawexecve-error":
+		// Control arm of TestRawExecve_ErrorReturnsENOENT: a real
+		// execve(2) on an absent path must answer ENOENT, and the
+		// process must SURVIVE to report it — proving RawExecve issues
+		// the syscall (not a vacuous stub returning 0) and that the
+		// error path allocates nothing the caller cannot do without.
+		pathPtr, err := syscall.BytePtrFromString("/nonexistent/oby-memcap-no-such-binary")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "BytePtrFromString: %v\n", err)
+			os.Exit(2)
+		}
+		argvPtr, err := syscall.SlicePtrFromStrings([]string{"/nonexistent/oby-memcap-no-such-binary"})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "SlicePtrFromStrings argv: %v\n", err)
+			os.Exit(2)
+		}
+		envpPtr, err := syscall.SlicePtrFromStrings(nil)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "SlicePtrFromStrings envp: %v\n", err)
+			os.Exit(2)
+		}
+		if errno := RawExecve(pathPtr, argvPtr, envpPtr); errno != syscall.ENOENT {
+			fmt.Fprintf(os.Stderr, "RawExecve(absent path) = %v, want ENOENT (%v)\n", errno, syscall.ENOENT)
+			os.Exit(1)
+		}
+		fmt.Println("RAWEXECVE-ENOENT")
 		os.Exit(0)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown OBY_TEST_MEMCAP_MODE %q\n", os.Getenv("OBY_TEST_MEMCAP_MODE"))
@@ -325,9 +383,37 @@ func TestExecutorCreate_MemCapDefaultsAndResolution(t *testing.T) {
 	}
 }
 
+// TestRawExecve_SuccessReplacesImage and TestRawExecve_ErrorReturnsENOENT
+// are the unit-level controls for the execve(2) helper the cmd/oby-memcap
+// wrapper uses under the cap (INT-CI-006). TestObyMemcapExec_ChildInheritsCap
+// proves the wrapper chain end-to-end; these pin RawExecve itself: the
+// success arm proves path/argv marshalling reaches the exec'd image intact,
+// the error arm proves a real syscall is issued (the kernel answers ENOENT
+// for an absent path) and that the errno return path runs without dying.
+func TestRawExecve_SuccessReplacesImage(t *testing.T) {
+	if _, err := os.Stat("/bin/echo"); err != nil {
+		t.Skip("/bin/echo not available")
+	}
+	out, err := runMemCapHelper(t, "rawexecve-success")
+	if err != nil {
+		t.Fatalf("rawexecve-success helper failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "RAWEXECVE-OK arg with spaces") {
+		t.Fatalf("exec'd image did not receive the argv intact, output:\n%s", out)
+	}
+}
+
+func TestRawExecve_ErrorReturnsENOENT(t *testing.T) {
+	out, err := runMemCapHelper(t, "rawexecve-error")
+	if err != nil || !strings.Contains(out, "RAWEXECVE-ENOENT") {
+		t.Fatalf("rawexecve-error helper failed — want the kernel's ENOENT returned and reported: err=%v\n%s", err, out)
+	}
+}
+
 // TestObyMemcapExec_ChildInheritsCap proves the FULL exec chain with the
 // real wrapper binary: cmd/oby-memcap is built, exec'd with OBY_MEM_LIMIT_MB
-// set, and it must syscall.Exec the child, which then observes the pinned
+// set, and it must execve(2) the child (via sandbox.RawExecve, no post-cap
+// heap allocation — INT-CI-006), which then observes the pinned
 // RLIMIT_AS (Cur == Max == 64 MiB) WITHOUT applying it itself — plus the
 // cap is actually enforced (a 256 MiB mapping is refused). This is the
 // wrapper's production behaviour; the in-process roundtrip test above only

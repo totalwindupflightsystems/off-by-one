@@ -34,9 +34,7 @@ func main() {
 	// (e.g. 64 MiB in the sandbox inheritance test) the first such
 	// post-setrlimit allocation can kill the runtime with
 	// "fatal error: runtime: cannot allocate memory" before the exec is
-	// ever reached — runner-sensitive, seen on CI (INT-CI-005). Between
-	// ApplyMemLimitMB and syscall.Exec below there is only the exec
-	// error branch, so no post-cap Go heap allocation is required.
+	// ever reached — runner-sensitive, seen on CI (INT-CI-005).
 	path, err := exec.LookPath(os.Args[1])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "oby-memcap: %v\n", err)
@@ -44,6 +42,33 @@ func main() {
 	}
 	argv := os.Args[1:]
 	envp := os.Environ()
+	// Pre-build the execve(2) argument vectors BEFORE the cap too.
+	// Resolving the Go values early (above) is not sufficient:
+	// syscall.Exec converts argv/envp to C pointer arrays LAZILY, inside
+	// the call, via syscall.SlicePtrFromStrings — that mallocgc is a
+	// post-setrlimit heap allocation, and on the Go 1.26.9 CI runner it
+	// required a fresh 4 MiB address-space reservation that the 64 MiB
+	// RLIMIT_AS refused, killing the wrapper with
+	// "fatal error: runtime: out of memory" at the exec call itself
+	// (INT-CI-006, run 40569450107) before the child ever started.
+	// sandbox.RawExecve performs no heap allocation; between
+	// ApplyMemLimitMB and RawExecve there is only the exec error branch,
+	// so no post-cap Go heap allocation is required.
+	pathPtr, err := syscall.BytePtrFromString(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "oby-memcap: exec path %q: %v\n", path, err)
+		os.Exit(127)
+	}
+	argvPtr, err := syscall.SlicePtrFromStrings(argv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "oby-memcap: argv: %v\n", err)
+		os.Exit(127)
+	}
+	envpPtr, err := syscall.SlicePtrFromStrings(envp)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "oby-memcap: envp: %v\n", err)
+		os.Exit(127)
+	}
 	if raw := os.Getenv(sandbox.MemCapEnvVar); raw != "" {
 		mb, err := strconv.Atoi(raw)
 		if err != nil {
@@ -55,8 +80,8 @@ func main() {
 			os.Exit(2)
 		}
 	}
-	if err := syscall.Exec(path, argv, envp); err != nil {
-		fmt.Fprintf(os.Stderr, "oby-memcap: exec %s: %v\n", path, err)
+	if errno := sandbox.RawExecve(pathPtr, argvPtr, envpPtr); errno != 0 {
+		fmt.Fprintf(os.Stderr, "oby-memcap: exec %s: %v\n", path, errno)
 		os.Exit(127)
 	}
 }
