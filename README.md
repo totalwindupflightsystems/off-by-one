@@ -387,6 +387,8 @@ ln -s "$(pwd)/scripts/pi-agent" ~/.local/bin/pi-agent   # or: cp scripts/pi-agen
 
 ## Development
 
+The repository's traceability contract (board row → commit → guard → judge → deploy) is defined in [`docs/traceability-doctrine.md`](docs/traceability-doctrine.md).
+
 ### Prerequisites
 
 - Go **1.26.9+** — required to build (`make build`). `go.mod` declares `go 1.26.9` and CI runs the 1.26 matrix, so use a 1.26.9+ toolchain; the recipe below installs 1.26.9 directly.
