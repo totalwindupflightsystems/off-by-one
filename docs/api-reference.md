@@ -706,7 +706,15 @@ Return the metrics observer's runtime snapshot. The counters cover the current p
   "over_budget": 0,
   "rejected": 0,
   "peak_rss_bytes_max": 0,
-  "alert_threshold_bytes": 0
+  "alert_threshold_bytes": 0,
+  "last_host": {
+    "load1": 0,
+    "mem_used_fraction": 0,
+    "mem_total_bytes": 0,
+    "mem_available_bytes": 0,
+    "reason": ""
+  },
+  "last_skip_reason": ""
 }
 ```
 
@@ -722,6 +730,10 @@ Return the metrics observer's runtime snapshot. The counters cover the current p
 | `alert_threshold_bytes` | integer | Live over-budget threshold in bytes. |
 
 **Status codes:** `200`; `404` (`metrics_disabled` when no metrics observer is configured).
+
+**Observed live probe (2026-10-27)**
+
+Against the running server on `localhost:8766`, `curl -fsS -D - http://localhost:8766/metrics` returned `HTTP/1.1 200 OK` and a JSON body containing `solve_count`, `skipped_host_pressure`, `discovery_hits`, `discovery_misses`, `over_budget`, `rejected`, `peak_rss_bytes_max`, `alert_threshold_bytes`, `last_host`, and `last_skip_reason`. Counter values are runtime state and change over time; use the field contract above rather than copying a snapshot.
 
 **Disabled-observer response `404 Not Found`**
 
