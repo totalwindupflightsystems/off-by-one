@@ -450,7 +450,10 @@ Database path resolution: the `-db` flag wins, then the `OFF_BY_ONE_DB` environm
 | `OFF_BY_ONE_PI_AGENT` | No | `pi-agent` | Pi Agent binary path |
 | `OFF_BY_ONE_CRON_INTERVAL` | No | `5m` | Cron wake interval |
 | `OFF_BY_ONE_LOAD_THRESHOLD` | No | `1` | Max loadavg(1) for idle detection (negative = always idle) |
+| `OFF_BY_ONE_MEM_FRACTION` | No | `0.9` | Max `MemUsedFraction` (`1 - MemAvailable/MemTotal`) for idle detection (negative = always idle) |
 | `OFF_BY_ONE_SOLVE_TIMEOUT` | No | `30m` | Solver-level per-solve timeout (handled by solver) |
+| `OFF_BY_ONE_SOLVE_MEM_MB` | No | `0` (unlimited) | Per-solve memory cap in MiB, applied to the sandboxed command through the `oby-memcap` wrapper (`RLIMIT_AS`); `0` = unlimited |
+| `OFF_BY_ONE_SOLVE_REJECT_RSS_MB` | No | `-1` (auto) | Reject a solve whose observed peak RSS exceeds this many MiB even when it returned success; `-1` = auto (80% of `--solve-mem-mb`), `0` = disabled, `>0` = explicit threshold |
 | `OB1_BWRAP_TIMEOUT` | No | `300` | Outer bwrap subprocess cap per solve, in seconds (positive integer). Distinct from `OFF_BY_ONE_SOLVE_TIMEOUT`; invalid values fall back to 300 with a warning |
 | `OFF_BY_ONE_EXPORT_DIR` | No | — | Working dir for git export clones (empty = export disabled) |
 | `OFF_BY_ONE_IMPORT_DIR` | No | — | Working dir for git import clones (empty = import disabled) |
@@ -474,8 +477,11 @@ go run ./cmd/off-by-one --help
 | `--pi-agent` | Path to Pi Agent binary |
 | `--cron-interval` | Cron loop wake interval |
 | `--load-threshold` | Max loadavg(1) for idle detection (negative = always idle) |
+| `--mem-fraction` | Max `MemUsedFraction` (`1 - MemAvailable/MemTotal`) for idle detection (negative = always idle) |
 | `--skip-sandbox` | Skip bwrap sandbox (for dev/testing) |
 | `--solve-timeout` | Per-solve timeout cap (env `OFF_BY_ONE_SOLVE_TIMEOUT`) |
+| `--solve-mem-mb` | Per-solve memory cap in MiB, applied to the sandboxed command through the `oby-memcap` wrapper (`RLIMIT_AS`); `0` = unlimited |
+| `--solve-reject-rss-mb` | Reject a solve whose observed peak RSS exceeds this many MiB even when it returned success; `-1` = auto (80% of `--solve-mem-mb`), `0` = disabled, `>0` = explicit threshold |
 | `--readonly` | Public catalog mode |
 | `--export-dir` | Working directory for git export clones |
 | `--import-dir` | Working directory for git import clones |
