@@ -691,6 +691,55 @@ curl -s http://localhost:8766/health
 
 ---
 
+### `GET /metrics`
+
+Return the metrics observer's runtime snapshot. The counters cover the current process lifetime; restarting the server resets them. This endpoint is available only when the server has a metrics observer configured.
+
+**Response `200 OK`**
+
+```json
+{
+  "solve_count": 0,
+  "skipped_host_pressure": 0,
+  "discovery_hits": 0,
+  "discovery_misses": 0,
+  "over_budget": 0,
+  "rejected": 0,
+  "peak_rss_bytes_max": 0,
+  "alert_threshold_bytes": 0
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `solve_count` | integer | Total solves recorded since process start. |
+| `skipped_host_pressure` | integer | Cron/feeder runs skipped because the load or memory host-pressure gate tripped. |
+| `discovery_hits` | integer | `POST /api/v1/problems/discover` requests that resolved an exact answer. This request counter is distinct from the catalog-coverage `hit_rate` returned by `GET /api/v1/stats`. |
+| `discovery_misses` | integer | Discover requests that returned the `404 not_found` arm because no answer existed for the requested problem class. `400` and `500` discover responses are not counted. |
+| `over_budget` | integer | Solves whose peak RSS exceeded `alert_threshold_bytes`. |
+| `rejected` | integer | Solves the harness refused after a successful solver exit because observed peak RSS exceeded the reject threshold. |
+| `peak_rss_bytes_max` | integer | Largest peak RSS observed across solves; `0` before the first solve. |
+| `alert_threshold_bytes` | integer | Live over-budget threshold in bytes. |
+
+**Status codes:** `200`; `404` (`metrics_disabled` when no metrics observer is configured).
+
+**Disabled-observer response `404 Not Found`**
+
+```json
+{
+  "error": "metrics_disabled",
+  "message": "metrics observer not configured"
+}
+```
+
+**Example**
+
+```bash
+curl -sS http://localhost:8766/metrics
+```
+
+---
+
 ## Read-only catalog mode
 
 When the server is started with `--readonly` (or `OFF_BY_ONE_READONLY=1`), these mutating endpoints return `403 Forbidden`:
