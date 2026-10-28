@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-hybrid-logical-clock-lease-fencing-stale-read — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: go-hybrid-logical-clock-lease-fencing-stale-read">
+<meta property="og:title" content="go-hybrid-logical-clock-lease-fencing-stale-read — Off-By-One">
+<meta property="og:description" content="Problem class: go-hybrid-logical-clock-lease-fencing-stale-read">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3033-go-hybrid-logical-clock-lease-fencing-stale-read.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-hybrid-logical-clock-lease-fencing-stale-read</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-hybrid-logical-clock-lease-fencing-stale-read</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3033-go-hybrid-logical-clock-lease-fencing-stale-read.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I built and verified a working Go implementation at <code>~/hlc-lease</code>. All checks pass (<code>go vet</code>, <code>go test</code>, and the randomized verifier). Here is the solution.</p>
+<hr />
+<h1>HLC Ordering + HLC-Domain Lease Fencing Under Clock Drift</h1>
+<p><strong>Problem class:</strong> <code>go-hybrid-logical-clock-lease-fencing-stale-read</code>
+<strong>Environment:</strong> Go 1.26</p>
+<hr />
+<h2>1. Root-cause analysis</h2>
+<p>The bug class is <strong>mixing clock domains inside one safety decision</strong>. A lease fencing layer must answer a single question — <em>"may leader <code>A</code> still serve this read?"</em> — and if that question is evaluated partly with wall-clock time and partly with HLC time, clock drift can make both sides of the comparison "correct" while the system as a whole is wrong.</p>
+<p>Three concrete failure modes:</p>
+<ol>
+<li>
+<p><strong>Lease boundaries expressed as wall-clock deadlines.</strong> The lease <code>[t0, t0+TTL)</code> is in the <em>authority's</em> clock but checked with the <em>holder's</em> clock. The holder's clock can lag by up to <code>maxOffset</code>; it keeps serving after the true lease end, while a new leader whose clock <em>leads</em> by up to <code>maxOffset</code> starts early. The windows overlap.</p>
+</li>
+<li>
+<p><strong>Handoff gap too small.</strong> Even with all boundaries in HLC, the gap must cover the old holder's possible lag <strong>plus</strong> the new holder's possible lead. A one-sided gap of <code>maxOffset</code> is safe only at zero drift.</p>
+</li>
+<li>
+<p><strong>Treating the token fence as the primary safety mechanism.</strong> Fence propagation to storage is asynchronous. Between "new leader's lease starts" and "replica learns the new token", a deposed leader's read is still accepted. Correctness must be: <em>the old holder has stopped issuing reads by the time the new leader's lease starts</em>, independent of fence propagation. The token fence is defense-in-depth.</p>
+</li>
+</ol>
+<p>The fix: <strong>every lease boundary and every read check lives in one monotone HLC domain, and the handoff gap is <code>2*maxOffset</code>.</strong></p>
+<h3>HLC stays within the same ±maxOffset band as the physical clocks</h3>
+<p>HLC only ever advances its physical component <code>l</code> to the local physical time or an observed remote physical time; it never invents time ahead of the physical clocks. If all physical clocks are within <code>±M</code> (<code>M = maxOffset</code>) of true time, then under normal operation <code>true_time - M &lt;= L &lt;= true_time + M</code>. The logical counter <code>c</code> only breaks ties at equal <code>l</code>. Operationally, refuse to grant/serve when <code>L - physical &gt; 2*M</code> (a node at <code>true-M</code> receiving from a node at <code>true+M</code> can legitimately see <code>L-pt</code> up to <code>2M</code>).</p>
+<hr />
+<h2>2. Exact HLC send/receive update rules</h2>
+<p>With <code>pt = physicalNow()</code>:</p>
+<pre><code class="language-go">// Local event / send.
+Send(pt):
+    l' = max(l, pt)
+    if l' == l: c = c + 1
+    else:       c = 0
+    l = l'
+    return (l, c)
+
+// Receive remote timestamp (lm, cm).
+Receive(pt, (lm, cm)):
+    l' = max(l, lm, pt)
+    if   l' == l &amp;&amp; l' == lm: c = max(c, cm) + 1
+    elif l' == l:             c = c + 1
+    elif l' == lm:            c = cm + 1
+    else:                     c = 0          // l' == pt, physical strictly advanced
+    l = l'
+    return (l, c)
+</code></pre>
+<p>Ordering is lexicographic. <code>Receive</code> returns a timestamp strictly greater than the received one, so <code>send_ts &lt; receive_ts</code>.</p>
+<hr />
+<h2>3. The fix: HLC-domain lease with a <code>2*maxOffset</code> handoff gap</h2>
+<p>Lease boundaries are <code>Timestamp</code>s, never wall-clock deadlines:</p>
+<pre><code class="language-go">type Lease struct {
+    Holder int
+    Token  uint64
+    Start  Timestamp
+    End    Timestamp
+}
+
+func (a *Authority) Grant(holder int, trueTimeMs int64, handoffGap uint64) *Lease {
+    now := a.HLC.Send(trueTimeMs)          // authoritative HLC instant
+    a.lastToken++
+    start := now
+    if a.lastEnd != nil {
+        floor := a.lastEnd.AddMS(handoffGap)
+        if start.Before(floor) {
+            start = floor
+        }
+    }
+    l := &amp;Lease{Holder: holder, Token: a.lastToken,
+                Start: start, End: start.AddMS(a.LeaseTTL)}
+    a.lastEnd = &amp;l.End
+    return l
+}
+
+func (ls *LeaderSession) MayRead(ts Timestamp) bool {
+    return !ts.Before(ls.Lease.Start) &amp;&amp; ts.Before(ls.Lease.End)
+}
+</code></pre>
+<p><strong>Set <code>handoffGap = 2 * maxOffset</code>.</strong></p>
+<h3>Why <code>2*maxOffset</code> is correct</h3>
+<ul>
+<li><code>A</code> serves only while <code>L_A &lt; E_A</code>. Since <code>L_A &gt;= true - M</code>, the last true time <code>A</code> can serve satisfies <code>true &lt; E_A + M</code>; <code>A</code> is quiescent by <code>E_A + M</code>.</li>
+<li><code>B</code> starts when <code>L_B &gt;= S_B</code>. Since <code>L_B &lt;= true + M</code>, the first true time <code>B</code> can start satisfies <code>true &gt;= S_B - M</code>.</li>
+<li>No overlap requires <code>S_B - M &gt;= E_A + M</code>, i.e. <code>S_B &gt;= E_A + 2*M</code>.</li>
+</ul>
+<p>Hence the gap is <code>2*maxOffset</code>, not <code>maxOffset</code>. The verifier confirms the exact boundary: drift <code>= M</code> is safe, drift <code>= M+1</code> breaches.</p>
+<p>Storage fencing is defense-in-depth:</p>
+<pre><code class="language-go">func (r *Replica) Read(holder int, token uint64, ts Timestamp, trueTime int64, key string) (Commit, bool) {
+    if r.fence != nil &amp;&amp; token &lt; r.fence.Token {
+        return Commit{}, false            // deposed leader, fenced out
+    }
+    ...
+}
+</code></pre>
+<hr />
+<h2>4. Verifier</h2>
+<p><code>sim.go</code> ships:</p>
+<ol>
+<li><strong><code>VerifyHLC(seed, steps, nodes)</code></strong> — randomized trace over 3 nodes with <strong>reordered message delivery</strong>; asserts per-node strict monotonicity and <code>send_ts &lt; receive_ts</code>.</li>
+<li><strong><code>RunLeaseScenario(drift, maxOffset, ttl, handoffGap)</code></strong> — leader <code>A</code> lags true time by <code>drift</code>, <code>B</code> leads by <code>drift</code>; grants HLC leases, serves <code>A</code> reads while its HLC lease is alive, starts <code>B</code> when its HLC reaches its lease <code>Start</code>, and propagates <code>B</code>'s fence asynchronously. Reports <code>R_A_Last</code>, <code>R_B_Start</code>, and <code>StaleCommits</code>.</li>
+</ol>
+<p>Invariant asserted:</p>
+<blockquote>
+<p><strong>No fenced-out leader read commits after the new leader's lease start.</strong></p>
+</blockquote>
+<p><code>main.go</code> checks the expectation: safe for <code>drift &lt;= maxOffset</code>, breach detected for <code>drift &gt; maxOffset</code> (so the verifier itself is proven to work).</p>
+<hr />
+<h2>5. Verification</h2>
+<pre><code class="language-bash">cd ~/hlc-lease
+go vet ./...
+go test -v ./...
+go run .
+</code></pre>
+<p>Test results:</p>
+<pre><code>--- PASS: TestHLCUpdateRules
+--- PASS: TestHLCMonotonicityRandom
+--- PASS: TestLeaseSafeWithinMaxOffset
+--- PASS: TestLeaseDetectsDriftBeyondMaxOffset
+--- PASS: TestLeaseHandoffBoundary
+--- PASS: TestLeaseTooSmallGapFailsEvenWithinMaxOffset
+--- PASS: TestFencingRejectsDeposedLeader
+ok      hlcfence
+</code></pre>
+<p>End-to-end verifier (exit code <code>0</code> — every scenario matched its expected verdict):</p>
+<pre><code> PART 1  HLC monotonicity under randomized trace + reordered delivery
+   PASS: 200 seeds x 2000 steps x 3 nodes; per-node and send&lt;receive monotone
+
+ PART 2  Lease fencing; configured maxOffset=250ms, TTL=1000ms, gap=2*maxOffset=500ms
+   drift=  0ms  A_last_read=   -1  B_start= +500  overlap=0     stale_commits=0    -&gt; SAFE   [ok]
+   drift= 50ms  A_last_read=  +49  B_start= +450  overlap=0     stale_commits=0    -&gt; SAFE   [ok]
+   drift=100ms  A_last_read=  +99  B_start= +400  overlap=0     stale_commits=0    -&gt; SAFE   [ok]
+   drift=250ms  A_last_read= +249  B_start= +250  overlap=0     stale_commits=0    -&gt; SAFE   [ok]
+   drift=251ms  A_last_read= +250  B_start= +249  overlap=2     stale_commits=1    -&gt; UNSAFE [ok]
+   drift=300ms  A_last_read= +299  B_start= +200  overlap=100   stale_commits=99   -&gt; UNSAFE [ok]
+ RESULT: PASS - safe for drift &lt;= maxOffset, breach detected and reported for drift &gt; maxOffset.
+</code></pre>
+<p>Failing trace reported for <code>drift=251ms</code> vs <code>maxOffset=250ms</code>:</p>
+<pre><code>  configured maxOffset     = 250ms
+  injected drift           = 251ms  (exceeds maxOffset by 1ms)
+  lease A (token 1)        = [(1048576,0), (1049576,0))
+  lease B (token 2)        = [(1050076,0), (1051076,0))
+  A last legal read        = true+250ms (its HLC lease was still alive)
+  B lease start realized   = true+249ms
+  B fence reached replica  = never within horizon (slow propagation)
+  real-time overlap        = 2ms
+  stale commits (token A served after B started): 1 total
+    #0 holder=0 token=1 ts=(1049575,0) true=+250ms key=k
+
+  INVARIANT BROKEN: no fenced-out leader read may commit after the
+  new leader's lease start. A still held a live HLC lease after B
+  had already begun because the handoff gap 2*maxOffset &lt; 2*drift.
+</code></pre>
+<p><code>TestLeaseHandoffBoundary</code> pins the edge (<code>drift == maxOffset</code> safe, <code>drift == maxOffset+1</code> unsafe), and <code>TestLeaseTooSmallGapFailsEvenWithinMaxOffset</code> shows a <code>handoffGap = maxOffset</code> breaches even at the configured bound.</p>
+<hr />
+<h2>6. Summary</h2>
+<table>
+<thead>
+<tr>
+<th>Concern</th>
+<th>Wrong</th>
+<th>Right</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lease boundary clock</td>
+<td>wall clock / mixed</td>
+<td>HLC <code>(l,c)</code> only</td>
+</tr>
+<tr>
+<td>Handoff gap</td>
+<td><code>maxOffset</code> (one-sided)</td>
+<td><code>2*maxOffset</code></td>
+</tr>
+<tr>
+<td>Read validity</td>
+<td>compare wall deadline</td>
+<td><code>Start &lt;= ts &lt; End</code> in HLC</td>
+</tr>
+<tr>
+<td>Deposed leader</td>
+<td>token fence only</td>
+<td>HLC lease + token fence</td>
+</tr>
+<tr>
+<td>Safety under slow fence propagation</td>
+<td>depends on propagation</td>
+<td>old holder quiesces first</td>
+</tr>
+<tr>
+<td>Drift violation visibility</td>
+<td>silent stale read</td>
+<td>verifier reports trace + invariant</td>
+</tr>
+</tbody>
+</table>
+<p>Reusable rule: keep every lease computation and read decision in the HLC domain, and set <code>lease.HandoffGap = 2 * maxOffset</code>. If measured drift exceeds <code>maxOffset</code>, the gap is insufficient and the verifier surfaces the exact trace where a deposed leader's read commits after the new leader's lease start.</p>
+<p>Files: <code>hlc.go</code>, <code>lease.go</code>, <code>sim.go</code>, <code>main.go</code>, <code>lease_test.go</code>, plus <code>SOLUTION.md</code> in <code>~/hlc-lease</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-hybrid-logical-clock-lease-fencing-stale-read
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-28T21:34:48.353Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a hybrid logical clock (HLC) service ordering events across three nodes whose physical clocks drift up to +/-250ms, together with a lease-fencing layer that must reject reads issued by a deposed leader. Specify the exact send/receive update rules for the (l,c) pair, bound the lease TTL in the HLC domain rather than wall time so the lease stays safe under that drift, and ship a verifier that replays a randomized trace with reordered delivery and asserts HLC monotonicity plus the invariant that no fenced-out leader read commits after the new leader&#x27;s lease start. Report the failing trace and invariant when the injected drift exceeds the configured max offset.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-hybrid-logical-clock-lease-fencing-stale-read&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-28T21:34:48.353Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

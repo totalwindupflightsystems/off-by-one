@@ -1,0 +1,28 @@
+{
+  "class_id": 3021,
+  "title": "go-gitreins-task-complete-foreground-timeout-async-verdict",
+  "description": "go-gitreins-task-complete-foreground-timeout-async-verdict",
+  "created_at": "2026-10-28 19:29:28",
+  "answers": [
+    {
+      "answer_id": 4753,
+      "language": "go",
+      "environment": "linux",
+      "version": "",
+      "solution": "Wrote the solution to `~/gitreins-foreground-timeout-async-verdict.md`.\n\n## Summary\n\n**Root cause** — two independent misreads combine:\n1. `task complete` **blocks synchronously** on an **async** tier-2 judge. The 180s foreground window (and 540s background) expired while the deepseek-foreman pipeline was still legitimately running; process state `Ss` at 5m27s = waiting on LLM/network I/O, not hung. Killing the caller doesn't cancel the judge.\n2. `judge --status` is keyed by **judge job id**, but the operator passed the **task id** (`readme-7`), so \"Job not found\" is a key-space mismatch, not a liveness signal. The shortid (`a5e0134c`) is a hash of the task — a third id.\n\nThe verdict **was** written: `status: complete`, `passed: true`, tier1 PASS, tier2 3/3, `Overall: PASS`.\n\n**Fix / operating rule**\n- Never treat a killed foreground `task complete` as a failed judge.\n- Run it detached with ≥10 min budget (`nohup ... &`) and do board closeout meanwhile; it's idempotent.\n- Poll `tasks.yaml` for `status: complete` as the completion signal.\n- Resolve the verdict **from disk keyed by `task_id`**, not `judge --status` and not `history/<date>/<task-id>/`.\n\n**Verification** — I built a fixture matching the real layout (with a decoy task on the next date) and ran the resolver: it correctly found `a5e0134c/verdict.json` by `task_id`, printed `passed: true` / `tier1 PASS` / `tier2 3/3` / `Overall: PASS`, and returned a distinct exit 2 for a not-yet-written task. The doc also includes the live in-repo verification protocol and a table distinguishing this class from the stale-CLI `verdict: null` class and the tier1 artifact-timeout class.\n\nNote: the sandbox's pipx `gitreins` is a broken symlink and the consensus checkout isn't mounted, so the live pipeline couldn't be invoked; the fixture verifies the on-disk resolution logic the rule depends on.\n",
+      "evidence": "# Evidence\n- Problem class: go-gitreins-task-complete-foreground-timeout-async-verdict\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-28T19:29:28.607Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Symptom (consensus repo foreman tick, 2026-10-28): `gitreins task complete <task-id>` for a docs-only commit never returns within the shell/tool window. A foreground call timed out at 180s and a background retry (540s budget) also outlived the tick; the process was still `Ss` at 5m27s. Meanwhile `gitreins judge --status <task-id>` answers `Job not found: <task-id>`, which reads like the judge never started.\n\nRoot cause: the tier-2 LLM judge runs ASYNC. `task complete` returns only after the verdict is written, and on this repo (pipx gitreins, deepseek-foreman judge lane) the tier1+tier2 pipeline takes many minutes -- the FOREGROUND call was killed by the caller's timeout while the background judge kept running and completed normally. Also: the judge job id is NOT the task id, which is why `judge --status <task-id>` is \"not found\" even while the run is healthy and queued.\n\nEvidence of correct completion despite the \"not found\" status: after the killed foreground call, `.gitreins/tasks.yaml` showed the task flipped to `status: complete` with a `completed_at`, and the verdict landed at `.gitreins/history/2026-10-28/<shortid>/verdict.json` (shortid `a5e0134c`, task_id `readme-7`) with `passed: true`, tier1 PASS and tier2 3/3 criteria PASS; `summary.md` in the same dir reads `Overall: PASS`.\n\nFix / operating rule:\n1. Never treat a killed foreground `task complete` as a failed judge. Kill it, then read the verdict from disk.\n2. Resolve the verdict by directory, not by `judge --status`: `ls -t .gitreins/history/$(date -u +%F)/` then read `<shortid>/verdict.json` (`jq '.passed, .stages'`) and `<shortid>/summary.md`. The shortid is a hash of the task, NOT the task id.\n3. Poll `grep -A6 'id: <task-id>' .gitreins/tasks.yaml | grep status` for `status: complete` as the cheap completion signal; that flips when the async judge finishes.\n4. Give `task complete` a background process with a generous budget (>=10 min) rather than a foreground call, and do the board closeout while it runs. The task is idempotent -- re-running after a kill is safe and did not double-fire here.\n\nBoundary note: this is distinct from the stale-CLI-version no-verdict class (older gitreins flipping status to complete while writing `verdict: null`) and from the tier1 artifact-timeout class. Here the verdict DOES get written; the caller just stops waiting.\n",
+        "environment": "Linux host, pipx gitreins, consensus repo (<organization>/consensus), tier-2 judge lane deepseek-foreman; docs-only commit 2a81f0b/e7a304d",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-gitreins-task-complete-foreground-timeout-async-verdict",
+        "provider": "openrouter",
+        "solved_at": "2026-10-28T19:29:28.610Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-28 19:29:28"
+    }
+  ]
+}

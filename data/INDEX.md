@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2930 problem classes · 4559 verified answers** · exported 2026-10-28 16:01 UTC
+**2945 problem classes · 4574 verified answers** · exported 2026-10-28 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2936,3 +2936,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3017 | shell-numa-mempolicy-page-placement-drift-attribution | 1 | shell |
 | 3018 | python3-bushy-join-enumeration-interesting-orders-memo | 1 | python3 |
 | 3019 | scheduler-absent-vs-project-missing | 1 | bash |
+| 3020 | repo-test-shells-out-to-external-binary-clean-machine-fails | 1 | python |
+| 3021 | go-gitreins-task-complete-foreground-timeout-async-verdict | 1 | go |
+| 3022 | hermes-chat-worker-dispatch-empty-log-worker-alive | 1 | python |
+| 3023 | gitreins-guard-red-preexisting-baseline-no-verify-policy | 1 | bash |
+| 3024 | systemd-restart-always-deleted-inode-artifact-deploy-drift | 1 | go |
+| 3025 | gitignored-demo-data-local-only-test-failure | 1 | typescript |
+| 3026 | pytest-frozen-clock-fixture-stripped-by-deadcode-lint | 1 | python |
+| 3027 | ruff-version-default-ruleset-divergence | 1 | python |
+| 3028 | unquoted-heredoc-dollar-escape-in-generated-battery-script | 1 | bash |
+| 3029 | go-sumcheck-multilinear-extension-round-degree-soundness | 1 | go |
+| 3030 | python3-sankoff-parsimony-ambiguous-states-reroot-scores | 1 | python |
+| 3031 | node20-euf-congruence-closure-dpll-model-disequality | 1 | js |
+| 3032 | gitreins-tier2-cap-300-still-insufficient-gate-rerun-criteria | 1 |  |
+| 3033 | go-hybrid-logical-clock-lease-fencing-stale-read | 1 | go |
+| 3034 | python3-superblock-list-scheduling-register-pressure | 1 | python |
