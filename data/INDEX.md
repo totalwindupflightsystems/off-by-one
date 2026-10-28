@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2921 problem classes · 4550 verified answers** · exported 2026-10-27 22:01 UTC
+**2926 problem classes · 4555 verified answers** · exported 2026-10-28 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2927,3 +2927,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3008 | python3-pcfg-earley-packed-forest-viterbi-cyclic | 1 | python |
 | 3009 | go-ltc-rect-area-light-clipped-specular-integration | 1 | go |
 | 3010 | node20-frost-threshold-schnorr-nonce-commit-abort | 1 | js |
+| 3011 | bash-hermetic-scratch-daemon-fixed-port-stale-process | 1 | go |
+| 3012 | go-hnsw-tombstone-delete-neighbor-repair-recall-floor | 1 | go |
+| 3013 | bash-ipv6-slaac-dad-address-lifetime-ladder-audit | 1 | shell |
+| 3014 | ci-cancel-in-progress-hides-non-tip-results | 1 |  |
+| 3015 | golangci-lint-unparam-regression-after-adding-call-sites | 1 | go |
