@@ -347,6 +347,39 @@ pre-verified answers from a read-only catalog. `internal/api/server.go`'s
 `readOnlyAllowedPost` is the implementation of that single exemption — see
 [docs/integration.md](docs/integration.md) for the same rule.
 
+## Security posture
+
+**The HTTP API has no authentication.** No route — read or write — consults an
+`Authorization` header, a Bearer token, or an API key, and there is no auth
+middleware in the server chain. Every endpoint, including the write-capable
+`POST /api/v1/problems/submit`, `POST /api/v1/export`, `POST /api/v1/import`
+and the WebSocket chat, is answered for any client that can reach the socket.
+The access boundary is the **bind address**, nothing else.
+
+This is safe only because the default bind is **loopback-only**: the server
+listens on `127.0.0.1:8766` unless you override it, so only processes on the
+same host can connect. The default is pinned by regression tests
+(`cmd/off-by-one/main_test.go`: `TestServerHostDefaultsToLoopback`,
+`TestServerHostDefaultBindsLoopbackOnly`,
+`TestDefaultHostClassifiedLoopbackOnly`), not just by this paragraph.
+
+**Operator obligation — non-loopback exposure:** setting `--host` /
+`OFF_BY_ONE_HOST` to `0.0.0.0`, any routable address, or an explicitly empty
+value exposes **every route, writes included, with no credential check** to
+whatever network the host sits on. A non-loopback deployment **must** sit
+behind an authenticated reverse proxy (or an equivalent network control such
+as a firewall rule or mTLS mesh) — the loopback default provides no protection
+once you reconfigure it. The server warns at startup when the resolved bind is
+not loopback (`apihttp.LoopbackOnlyBind` in `internal/api/posture.go`); do not
+ignore that warning.
+
+The read-only catalog mode above is a **separate** control: it disables writes
+and chat, but it is still not authentication — the public catalog deployment
+relies on its reverse proxy and the sanitized-response pipeline, not on any
+credential check in this binary. See [SECURITY.md](SECURITY.md) for the
+reporting policy and [docs/api-reference.md](docs/api-reference.md#security-posture)
+for the same posture stated alongside the route reference.
+
 ## Solver chain (solving)
 
 Actually solving submitted problems (not just browsing pre-verified answers) requires three pieces on the host: **bubblewrap**, the upstream **Pi** coding agent, and the shipped **pi-agent wrapper**.

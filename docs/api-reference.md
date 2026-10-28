@@ -24,6 +24,7 @@ All timestamps are RFC 3339 strings. All endpoints return JSON unless otherwise 
 7. [Solve timeouts](#solve-timeouts)
 8. [Solve memory bounds](#solve-memory-bounds)
 9. [Deploying the server (deploy rotation)](#deploying-the-server-deploy-rotation)
+10. [Security posture](#security-posture)
 
 ---
 
@@ -860,4 +861,30 @@ The `check-deploy` probe can also be run directly (`make check-deploy`); the
 unit-testable stamp seam is `./scripts/check-deploy --resolve-stamp <stamp>`.
 Hermetic self-test — scratch clones, stub systemd unit, throwaway instance,
 never the live service: `make check-deploy-test`.
+
+---
+
+## Security posture
+
+**This API has no HTTP authentication.** No route documented here — read or
+write — consults an `Authorization` header, a Bearer token, or an API key, and
+the server registers no auth middleware. Any client that can reach the socket
+can call every endpoint, including `POST /api/v1/problems/submit`,
+`POST /api/v1/export` and `POST /api/v1/import`.
+
+The access boundary is the **bind address**. The default is loopback-only
+(`127.0.0.1`, port `8766`), pinned by regression tests in
+`cmd/off-by-one/main_test.go`, so a stock install is reachable only from the
+same host. Overriding it — `--host 0.0.0.0`, a routable address, or an
+explicitly empty `OFF_BY_ONE_HOST` — exposes every route on the network with
+no credential check. Such a deployment **must** sit behind an authenticated
+reverse proxy (or an equivalent network control such as a firewall rule or an
+mTLS mesh). The server logs a startup warning whenever the resolved bind is
+not loopback (`apihttp.LoopbackOnlyBind`, `internal/api/posture.go`).
+
+Client implication: there are no credentials to send — do not invent
+`Authorization` headers; they are ignored, not validated. Operator
+implication: exposure is your responsibility the moment you reconfigure the
+bind; see the [README security posture](../README.md#security-posture) for the
+full statement.
 

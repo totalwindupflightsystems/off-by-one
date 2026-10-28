@@ -290,6 +290,14 @@ func main() {
 	log.Printf("off-by-one %s listening on :%d (db=%s)", version, *cfg.port, *cfg.dbPath)
 	log.Printf("OpenAPI spec at http://localhost:%d/openapi.json (sha256=%s)", *cfg.port, api.SHA256()[:12])
 
+	// Security posture (REVIEW-OB-023): the API has no HTTP authentication,
+	// so the bind address is the only access boundary. Warn loudly when the
+	// operator widens it beyond loopback — such a deployment must sit behind
+	// an authenticated reverse proxy or equivalent network control.
+	if !apihttp.LoopbackOnlyBind(*cfg.host) {
+		log.Printf("WARNING: HTTP API binding to %q is NOT loopback-only — the API has no authentication; every route (submit/export/import writes included) is reachable by any client on the network. Put it behind an authenticated reverse proxy or restrict it with network controls (see README security posture).", *cfg.host)
+	}
+
 	// --- 8. Graceful shutdown -----------------------------------------
 	// SIGINT/SIGTERM → stop cron loop → close DB → shutdown HTTP server.
 	var wg sync.WaitGroup
