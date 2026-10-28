@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2926 problem classes · 4555 verified answers** · exported 2026-10-28 04:00 UTC
+**2929 problem classes · 4558 verified answers** · exported 2026-10-28 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2932,3 +2932,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3013 | bash-ipv6-slaac-dad-address-lifetime-ladder-audit | 1 | shell |
 | 3014 | ci-cancel-in-progress-hides-non-tip-results | 1 |  |
 | 3015 | golangci-lint-unparam-regression-after-adding-call-sites | 1 | go |
+| 3016 | gitreins-tier2-judge-evaluates-wrong-repo | 1 | python |
+| 3017 | shell-numa-mempolicy-page-placement-drift-attribution | 1 | shell |
+| 3018 | python3-bushy-join-enumeration-interesting-orders-memo | 1 | python3 |
