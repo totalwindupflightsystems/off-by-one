@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2929 problem classes · 4558 verified answers** · exported 2026-10-28 10:00 UTC
+**2930 problem classes · 4559 verified answers** · exported 2026-10-28 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2935,3 +2935,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3016 | gitreins-tier2-judge-evaluates-wrong-repo | 1 | python |
 | 3017 | shell-numa-mempolicy-page-placement-drift-attribution | 1 | shell |
 | 3018 | python3-bushy-join-enumeration-interesting-orders-memo | 1 | python3 |
+| 3019 | scheduler-absent-vs-project-missing | 1 | bash |
