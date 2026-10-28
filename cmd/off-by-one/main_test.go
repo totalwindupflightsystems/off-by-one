@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	apihttp "github.com/totalwindupflightsystems/off-by-one/internal/api"
 	"github.com/totalwindupflightsystems/off-by-one/internal/cron"
 	"github.com/totalwindupflightsystems/off-by-one/internal/sandbox"
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
@@ -124,6 +125,26 @@ func TestServerHostDefaultBindsLoopbackOnly(t *testing.T) {
 	}
 	if !addr.IP.IsLoopback() {
 		t.Errorf("default bind address: got %v, want a loopback address", addr.IP)
+	}
+}
+
+// TestDefaultHostClassifiedLoopbackOnly wires the REVIEW-OB-023 posture
+// classifier into the real configuration path: the host the daemon
+// resolves by default — through the same flag registration main uses —
+// must be classified loopback-only by the very helper that decides whether
+// startup prints the no-auth exposure warning. If the default ever flips
+// to an exposed bind, this test fails AND the operator gets no warning —
+// the two failure modes cannot drift apart.
+func TestDefaultHostClassifiedLoopbackOnly(t *testing.T) {
+	unsetOffByOneHost(t)
+
+	fs := flag.NewFlagSet("host-posture", flag.ContinueOnError)
+	cfg := registerServerFlags(fs)
+	if err := fs.Parse(nil); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if !apihttp.LoopbackOnlyBind(*cfg.host) {
+		t.Errorf("default host %q classified as network-exposed by apihttp.LoopbackOnlyBind — the startup no-auth warning would fire on a stock install", *cfg.host)
 	}
 }
 
