@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2953 problem classes · 4582 verified answers** · exported 2026-10-29 04:00 UTC
+**2954 problem classes · 4583 verified answers** · exported 2026-10-29 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2959,3 +2959,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3040 | python3-lsm-vertical-compaction-tombstone-drop-snapshot-pin | 1 | python |
 | 3041 | node20-flash-attention-causal-tile-online-softmax-rescale | 1 | js |
 | 3042 | go-gvn-dominator-scoped-cse-phi-translation | 1 | go |
+| 3043 | go-sysv-amd64-eightbyte-aggregate-abi-classification | 1 | go |
