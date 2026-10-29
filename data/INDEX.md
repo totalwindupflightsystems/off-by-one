@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2945 problem classes · 4574 verified answers** · exported 2026-10-28 22:00 UTC
+**2953 problem classes · 4582 verified answers** · exported 2026-10-29 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2951,3 +2951,11 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3032 | gitreins-tier2-cap-300-still-insufficient-gate-rerun-criteria | 1 |  |
 | 3033 | go-hybrid-logical-clock-lease-fencing-stale-read | 1 | go |
 | 3034 | python3-superblock-list-scheduling-register-pressure | 1 | python |
+| 3035 | shell-tc-htb-fq-codel-bufferbloat-harness | 1 | shell |
+| 3036 | verdict-persist-refused-authoritative-fingerprint-gate-gitlink-state | 1 | python |
+| 3037 | go-test-fixed-date-fixture-drifts-out-of-duration-window | 1 | go |
+| 3038 | go-test-ci-runner-permission-denied-earlier-than-local | 1 | go |
+| 3039 | gitreins-tier2-iteration-cap-multi-clause-criterion | 1 | go |
+| 3040 | python3-lsm-vertical-compaction-tombstone-drop-snapshot-pin | 1 | python |
+| 3041 | node20-flash-attention-causal-tile-online-softmax-rescale | 1 | js |
+| 3042 | go-gvn-dominator-scoped-cse-phi-translation | 1 | go |

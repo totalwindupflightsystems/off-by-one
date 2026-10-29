@@ -1,0 +1,28 @@
+{
+  "class_id": 3041,
+  "title": "node20-flash-attention-causal-tile-online-softmax-rescale",
+  "description": "node20-flash-attention-causal-tile-online-softmax-rescale",
+  "created_at": "2026-10-28 22:50:14",
+  "answers": [
+    {
+      "answer_id": 4773,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "Verified solution written to `~/flash_attention/SOLUTION.md` (runnable code also at `~/flash_attention/flash_attention.js`).\n\n## What it contains\n\n**Root cause**\n- Naive attention materializes `S×S = 67,108,864` scores (256 MB), needs two passes per row, and can overflow `exp` in float32 (`exp` overflows at arg ≈ 88.7).\n- The tiled/online reformulation must keep `acc` and `l` synchronized under a shared running max, never read keys past the query, and normalize exactly once.\n\n**Exact fix** — full `flash_attention.js` (inline in the markdown and extracted/executed to prove it's self-contained):\n- `Bq = Bk = 128`, `d = 64`, `S = 8192`, causal.\n- Causal control: query tile `qi` processes only key tiles `0..qi`; diagonal tile masks `kpos > qpos` to `-inf`.\n- Online softmax: `corr = exp(m_old - m_new)`, `acc *= corr`, `l *= corr`, then add the new tile; `O = acc / l` once at the end.\n- Optional `perTileNorm` flag exists solely to quantify the bug.\n\n**Verification (actual run, `S = 8192`, gain 4, seed 12345)**\n\n| metric | value |\n|---|---|\n| max abs error vs naive `O(S²)` | **4.465226083993912e-06** |\n| non-finite outputs | 0 |\n| tile iterations | 2080 |\n| **tile rescale ops** | **2016** (`64·63/2`) |\n| row rescale ops | 258048 |\n| effective rescales (`corr≠1`) | 30579 |\n| **masked key elements applied** | **520192** (`64 · 128·127/2`) |\n| total causal-excluded pairs | 33550336 |\n| division after every tile (buggy) | max abs error **1.948** |\n\nThe in-loop masked count (520,192) plus the 33,030,144 pairs in skipped whole upper tiles equals `S(S-1)/2 = 33,550,336`. A `gain=64` run reaches raw scores of 293.6 where `fround(exp(293.6)) = Infinity`, yet the pass stays finite — demonstrating the stability role of running-max subtraction.\n\n**Why one final division**: `acc` and `l` are a matched numerator/denominator pair sharing the same running max; both must be rescaled together per tile. Dividing early normalizes `acc` into a vector that no longer knows its total weight, so subsequent rescaling and accumulation are algebraically wrong — a ~10⁶× larger error, not a rounding effect.\n\nThe extracted code block from the markdown was re-run standalone (`node extracted.js verify --S 512 --gain 4`) and passed.\n",
+      "evidence": "# Evidence\n- Problem class: node20-flash-attention-causal-tile-online-softmax-rescale\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-28T22:50:14.744Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement a tiled flash-attention forward pass (S=8192, d=64, head_dim tiles of 64, key tiles of 128) with online softmax: each key tile updates the running row maximum, rescales the existing accumulator by exp(m_old - m_new), accumulates the unnormalized weights, and finally divides by the running denominator. Causal masking must be applied per query tile so no key past the query position is ever read or counted, including the diagonal tile where only the lower triangle contributes, and long-context numerical stability must hold in float32. Verify against a naive O(S^2) reference attention, report max absolute error, per-tile rescale counts, and the exact number of masked key elements, and explain why the final division must happen once after the last tile rather than per tile.",
+        "environment": "node20",
+        "language": "js",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "node20-flash-attention-causal-tile-online-softmax-rescale",
+        "provider": "openrouter",
+        "solved_at": "2026-10-28T22:50:14.744Z",
+        "version": "20"
+      },
+      "status": "verified",
+      "created_at": "2026-10-28 22:50:14"
+    }
+  ]
+}

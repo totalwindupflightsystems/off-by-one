@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>shell-tc-htb-fq-codel-bufferbloat-harness — Off-By-One verified answer</title>
+<meta name="description" content="A single self-contained Bash script that builds a two-namespace veth testbed,">
+<meta property="og:title" content="shell-tc-htb-fq-codel-bufferbloat-harness — Off-By-One">
+<meta property="og:description" content="A single self-contained Bash script that builds a two-namespace veth testbed,">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3035-shell-tc-htb-fq-codel-bufferbloat-harness.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>shell-tc-htb-fq-codel-bufferbloat-harness</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>A single self-contained Bash script that builds a two-namespace veth testbed,</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3035-shell-tc-htb-fq-codel-bufferbloat-harness.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Bufferbloat harness: HTB + <code>fq_codel</code> vs <code>pfifo_fast</code> over a veth pair</h1>
+<p>A single self-contained Bash script that builds a two-namespace veth testbed,
+shapes it to 8 Mbit with a 20 ms base RTT, runs three concurrent TCP flows, and
+machine-checks:</p>
+<ul>
+<li>per-flow throughput within 10 % of a fair share,</li>
+<li>95th-percentile standing queue below 10 ms while the link is ≥ 80 % utilized,</li>
+<li>per-flow throughput, RTT percentiles, drops and ECN marks, and max qdisc
+  backlog in a JSON report,</li>
+<li>the same tree with a <code>pfifo_fast</code> leaf as a contrast run that must
+  <em>demonstrate</em> bufferbloat (otherwise the harness exits non-zero too).</li>
+</ul>
+<p>It exits non-zero when any target is missed.</p>
+<hr />
+<h2>1. Root-cause analysis</h2>
+<h3>1.1 Why a deep FIFO produces bufferbloat</h3>
+<p><code>pfifo_fast</code> is the kernel's default qdisc and is little more than a 3-band
+tail-drop FIFO. Its depth is the interface <code>txqueuelen</code> (1000 packets by
+default). A TCP sender keeps increasing its congestion window until it sees
+loss. With a 1000-packet tail-drop buffer and an 8 Mbit bottleneck:</p>
+<pre><code>1000 packets x 1500 B = 1.5 MB
+1.5 MB x 8 / 8_000_000 = 1.5 s of queuing delay
+</code></pre>
+<p>All flows of the same DSCP land in the same band, so there is no per-flow
+isolation and no AQM. The queue becomes a <em>standing</em> queue: while the link is
+saturated it never drains, so the <em>local minimum</em> RTT (the quantity CoDel
+controls) stays elevated for as long as the load lasts. This is bufferbloat.</p>
+<h3>1.2 Why an HTB class with an <code>fq_codel</code> leaf fixes it</h3>
+<ul>
+<li><strong>HTB</strong> is a classful token-bucket shaper. It is what actually imposes the
+  8 Mbit bottleneck and gives us a class tree to attach the AQM to.</li>
+<li><strong><code>fq_codel</code></strong> = fair queuing + CoDel. It hashes each packet's flow
+  (<code>skb_get_hash</code>, i.e. the 5-tuple plus a per-qdisc random perturbation) into
+  one of <code>flows</code> per-flow queues, serves those queues round-robin using
+  <code>quantum</code> bytes of deficit (DRR), and runs an independent CoDel instance on
+  each. Three bulk TCP flows therefore each receive ≈ 1/3 of the shaped rate
+  <em>and</em> each gets its own delay control loop.</li>
+<li><strong>CoDel</strong> tracks packet <em>sojourn time</em> (not queue length). It tolerates
+  bursts but keeps the local minimum sojourn near <code>target</code> (5 ms). Once the
+  minimum exceeds <code>target</code> for more than <code>interval</code>, it drops/marks to force
+  the senders down. Because the control variable is time in the queue, the
+  steady-state queue is bounded in milliseconds regardless of the link rate.</li>
+<li><strong>ECN</strong>: <code>fq_codel</code> has <code>ecn</code> <strong>on by default</strong> (the <code>tc-fq_codel(8)</code> man
+  page says so explicitly, unlike <code>codel</code>). When both endpoints negotiate
+  ECN, CoDel sets CE instead of dropping, so <code>tc -s qdisc</code> reports
+  <code>ecn_mark &gt; 0</code> and drops near zero.</li>
+</ul>
+<h3>1.3 The <code>tc</code> stacking trap (why <code>netem</code> is on the return path)</h3>
+<p><code>netem</code> is a <strong>classless, terminal</strong> qdisc:</p>
+<ul>
+<li>it cannot be the parent of an <code>fq_codel</code> leaf, and</li>
+<li>a class can have exactly one child qdisc, so you cannot hang both <code>netem</code>
+  and <code>fq_codel</code> off the same HTB class.</li>
+</ul>
+<p>The usual "apply <code>netem delay</code> and <code>htb</code>/<code>fq_codel</code> on the same interface root"
+recipe is therefore impossible without an extra device. The harness avoids it
+by putting:</p>
+<ul>
+<li>the <strong>bottleneck + AQM</strong> on the <em>forward</em> path
+  (<code>root 1: htb -&gt; 1:1 -&gt; 1:10 -&gt; 10: fq_codel</code>), and</li>
+<li>the <strong>20 ms propagation delay</strong> on the <em>return</em> path
+  (<code>root 1: netem delay 20ms</code> on the peer).</li>
+</ul>
+<p>TCP's RTT is a round trip, so 20 ms of one-way delay on the ACK path produces a
+20 ms base RTT while leaving the forward path free for the real qdisc under
+test. (If you ever need delay <em>and</em> shaping in the same direction, redirect to
+an IFB device and shape the IFB's egress — noted as an extension in §5.)</p>
+<h3>1.4 The measurement trap (sparse flows vs the standing queue)</h3>
+<p>A <code>ping</code>/ICMP flow hashes into a <strong>different</strong> <code>fq_codel</code> bucket and is served
+as a sparse ("new") flow, so its RTT stays near the base even while the bulk
+flows have a queue. Measuring only ping RTT therefore <em>understates</em> the
+standing queue. The harness measures the standing queue two independent ways
+and takes the conservative maximum:</p>
+<ol>
+<li><strong>Backlog-derived queue delay</strong> — sample <code>tc -s qdisc</code> at 10 Hz and convert
+   backlog bytes to time:
+   <code>delay_ms = backlog_bytes * 8 / rate_bps * 1000</code>.
+   Report <code>max qdisc backlog</code> in bytes and packets.</li>
+<li><strong>RTT inflation</strong> — <code>p95(loaded ping RTT) - p50(idle ping RTT)</code>.</li>
+</ol>
+<p>This is faithful to CoDel's own definition: it controls <em>packet-sojourn time</em>,
+which for a saturated link is the standing queue.</p>
+<h3>1.5 Why the <code>pfifo_fast</code> contrast is a target, not an afterthought</h3>
+<p>The contrast run uses the <em>same</em> HTB tree and the <em>same</em> 8 Mbit rate, but a
+<code>pfifo_fast</code> leaf. If its p95 standing queue is not dramatically worse than
+<code>fq_codel</code>'s, the experiment failed to demonstrate anything (e.g. the load was
+too small or the qdisc was not applied), so the harness treats that as a
+failed target and exits non-zero. The pass condition is
+<code>pfifo_p95 &gt;= max(20 ms, 2 x fq_codel_p95)</code>.</p>
+<hr />
+<h2>2. Topology</h2>
+<pre><code>   bl_cli namespace                         bl_srv namespace
+  +--------------------+                  +--------------------+
+  |  vc &lt;ip-address&gt;/24   |&lt;=== veth pair ===&gt;|  vs &lt;ip-address&gt;/24   |
+  |                    |                  |                    |
+  | egress = BOTTLENECK|  forward data -&gt; |                    |
+  | root 1: htb 8mbit  |                  | egress = netem     |
+  |   1:1              |  &lt;- ACKs (delay) | root 1: netem      |
+  |    1:10            |                  |      delay 20ms    |
+  |     10: fq_codel   |                  |                    |
+  +--------------------+                  +--------------------+
+      iperf3 -c (x3)                         iperf3 -s (x3)
+      ping under load                        (ACK path)
+</code></pre>
+<p>Direction under test is client → server ("upload"), so the bottleneck is the
+client egress qdisc. Three one-shot <code>iperf3 -s -1 -p 5201..5203</code> servers and
+three concurrent <code>iperf3 -c</code> clients produce three independent TCP flows.</p>
+<hr />
+<h2>3. Exact <code>tc</code> commands</h2>
+<p>These are the commands the harness issues (it also logs every command it runs
+to <code>$WORKDIR/tc_commands.txt</code>, so the report is reproducible).</p>
+<p><strong>Forward path — client egress <code>vc</code>: 8 Mbit bottleneck + <code>fq_codel</code> AQM</strong></p>
+<pre><code class="language-bash">tc qdisc add dev vc root handle 1: htb default 10
+tc class add dev vc parent 1:   classid 1:1  htb rate 8mbit ceil 8mbit quantum 1514
+tc class add dev vc parent 1:1  classid 1:10 htb rate 8mbit ceil 8mbit quantum 1514
+tc qdisc add dev vc parent 1:10 handle 10: fq_codel \
+    limit 10240 flows 1024 quantum 1514 target 5ms interval 100ms \
+    ecn memory_limit 32mb drop_batch 64
+</code></pre>
+<p><strong>Return path — server egress <code>vs</code>: 20 ms base RTT</strong></p>
+<pre><code class="language-bash">tc qdisc add dev vs root handle 1: netem delay 20ms limit 10000
+</code></pre>
+<p><strong>Contrast run — same tree, FIFO leaf</strong></p>
+<pre><code class="language-bash">tc qdisc del dev vc root
+tc qdisc add dev vc root handle 1: htb default 10
+tc class add dev vc parent 1:   classid 1:1  htb rate 8mbit ceil 8mbit quantum 1514
+tc class add dev vc parent 1:1  classid 1:10 htb rate 8mbit ceil 8mbit quantum 1514
+tc qdisc add dev vc parent 1:10 handle 10: pfifo_fast
+</code></pre>
+<p><strong>Inspection (what the analyser parses)</strong></p>
+<pre><code class="language-bash">tc -s -d qdisc show dev vc     # leaf backlog, dropped, ecn_mark
+tc -s   class show dev vc      # per-class backlog fallback
+</code></pre>
+<p><code>tc</code> parameter notes:</p>
+<ul>
+<li><code>target 5ms</code> / <code>interval 100ms</code> are the CoDel defaults and are appropriate
+  here: <code>interval</code> should be on the order of the worst-case RTT (20 ms base,
+  100 ms is comfortably larger). RFC 8289 (CoDel) / RFC 8290 (<code>fq_codel</code>).</li>
+<li><code>quantum 1514</code> = Ethernet MTU (1500) + L2 header (14). Correct for a
+  veth/MTU-1500 path; change it if the MTU changes.</li>
+<li><code>flows 1024</code> can only be set when the qdisc is created (the hash table is
+  allocated at load time).</li>
+<li><code>ecn</code> is already the default; it is written explicitly so the intent is
+  unambiguous and so the report's <code>ecn_mark</code> counter is expected.</li>
+</ul>
+<hr />
+<h2>4. The harness (drop-in script)</h2>
+<p>Save as <code>bufferbloat_harness.sh</code>, <code>chmod +x</code>, run as root with <code>iperf3</code>
+installed. It creates and tears down its own namespaces; nothing on the host
+interface is touched.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# =============================================================================
+# bufferbloat_harness.sh
+#
+# Reproducible bufferbloat / fairness harness built on a veth pair in private
+# network namespaces.
+#
+#   client ns (bl_cli) --- vc ======= vs --- server ns (bl_srv)
+#
+# Direction under test is client -&gt; server (upload), so the bottleneck qdisc is
+# the *egress* qdisc of &quot;vc&quot; in the client namespace:
+#
+#     root 1: htb  (rate 8 Mbit)
+#       +-- 1:1   (aggregate class)
+#            +-- 1:10  (service class)
+#                 +-- 10: fq_codel   (AQM leaf, ECN enabled)
+#              or 10: pfifo_fast     (contrast leaf)
+#
+# A 20 ms base RTT is created with netem on the *return* path (server egress).
+# TCP's RTT is a round trip, so 20 ms of one-way delay on the ACK path yields a
+# 20 ms base RTT while leaving the forward path free for the real bottleneck
+# qdisc (a qdisc cannot have both netem and HTB/fq_codel stacked in one
+# direction without an extra IFB device).
+#
+# Two runs are executed:
+#   fq_codel   - must meet: utilization, flow fairness, p95 standing queue
+#   pfifo_fast - contrast; must demonstrate bufferbloat (p95 queue &gt;&gt; target)
+#
+# A machine-checkable JSON report is written to $REPORT.
+# Exit status is 0 only if the fq_codel run passes every target *and* the
+# pfifo_fast contrast run demonstrates the expected bufferbloat.
+# =============================================================================
+set -euo pipefail
+
+# ------------------------------- configuration ------------------------------
+NS_S=&quot;${NS_S:-bl_srv}&quot;                 # server namespace (ACK sender)
+NS_C=&quot;${NS_C:-bl_cli}&quot;                 # client namespace (bottleneck egress)
+VS=&quot;${VS:-vs}&quot;                         # veth end inside server ns
+VC=&quot;${VC:-vc}&quot;                         # veth end inside client ns (bottleneck)
+IP_S=&quot;${IP_S:-&lt;ip-address&gt;}&quot;
+IP_C=&quot;${IP_C:-&lt;ip-address&gt;}&quot;
+PREFIX=&quot;${PREFIX:-24}&quot;
+
+RATE_STR=&quot;${RATE_STR:-8mbit}&quot;          # HTB shaping rate
+LINK_RATE_BPS=&quot;${LINK_RATE_BPS:-8000000}&quot;
+BASE_RTT_MS=&quot;${BASE_RTT_MS:-20}&quot;       # netem one-way delay on return path
+NUM_FLOWS=&quot;${NUM_FLOWS:-3}&quot;
+DURATION=&quot;${DURATION:-30}&quot;
+SAMPLE_INTERVAL=&quot;${SAMPLE_INTERVAL:-0.1}&quot;
+PORT_BASE=&quot;${PORT_BASE:-5201}&quot;
+
+TARGET_UTIL=&quot;${TARGET_UTIL:-0.80}&quot;              # &gt;= 80% link utilization
+TARGET_FAIRNESS=&quot;${TARGET_FAIRNESS:-0.10}&quot;      # each flow within +/-10%
+TARGET_QUEUE_P95_MS=&quot;${TARGET_QUEUE_P95_MS:-10}&quot; # p95 standing queue &lt; 10 ms
+CONTRAST_MIN_MS=&quot;${CONTRAST_MIN_MS:-20}&quot;        # pfifo_fast p95 must exceed
+CONTRAST_RATIO=&quot;${CONTRAST_RATIO:-2.0}&quot;         # ... and beat fq_codel by 2x
+
+LEAF_HANDLE=10
+MIN_IPERF_MIN=&quot;${MIN_IPERF_MIN:-10}&quot;   # sanity: iperf duration must be &gt;= this
+
+WORKDIR=&quot;${WORKDIR:-$(mktemp -d /tmp/bufferbloat.XXXXXX)}&quot;
+KEEP_WORKDIR=&quot;${KEEP_WORKDIR:-0}&quot;
+SKIP_PRIVCHECK=&quot;${SKIP_PRIVCHECK:-0}&quot;
+REPORT=&quot;${REPORT:-$WORKDIR/report.json}&quot;
+TC_LOG=&quot;$WORKDIR/tc_commands.txt&quot;
+RUNNING=&quot;$WORKDIR/.running&quot;
+mkdir -p &quot;$WORKDIR&quot;
+
+log()  { printf '[%s] %s\n' &quot;$(date +%H:%M:%S)&quot; &quot;$*&quot; &gt;&amp;2; }
+die()  { log &quot;ERROR: $*&quot;; exit 1; }
+
+SRV_PIDS=()
+CLI_PIDS=()
+BG_PIDS=()
+
+# shellcheck disable=SC2329  # invoked indirectly via trap
+cleanup() {
+  local rc=$?
+  trap - EXIT INT TERM
+  rm -f &quot;$RUNNING&quot; 2&gt;/dev/null || true
+  local p
+  for p in &quot;${BG_PIDS[@]:-}&quot; &quot;${CLI_PIDS[@]:-}&quot; &quot;${SRV_PIDS[@]:-}&quot;; do
+    [ -n &quot;$p&quot; ] &amp;&amp; kill &quot;$p&quot; 2&gt;/dev/null || true
+  done
+  wait 2&gt;/dev/null || true
+  ip netns del &quot;$NS_S&quot; 2&gt;/dev/null || true
+  ip netns del &quot;$NS_C&quot; 2&gt;/dev/null || true
+  [ &quot;$KEEP_WORKDIR&quot; = 1 ] || rm -rf &quot;$WORKDIR&quot;
+  exit &quot;$rc&quot;
+}
+trap cleanup EXIT INT TERM
+
+# ----------------------------------- checks ----------------------------------
+[ &quot;$SKIP_PRIVCHECK&quot; = 1 ] || [ &quot;$(id -u)&quot; -eq 0 ] \
+  || die &quot;must run as root (or set SKIP_PRIVCHECK=1 for the mock test harness)&quot;
+for c in ip tc iperf3 ping python3; do
+  command -v &quot;$c&quot; &gt;/dev/null 2&gt;&amp;1 || die &quot;required tool not found: $c&quot;
+done
+[ &quot;$DURATION&quot; -ge &quot;$MIN_IPERF_MIN&quot; ] \
+  || die &quot;DURATION=$DURATION is too short for stable statistics (&gt;= $MIN_IPERF_MIN)&quot;
+
+if command -v modprobe &gt;/dev/null 2&gt;&amp;1; then
+  for m in sch_htb sch_netem sch_fq_codel cls_u32; do
+    modprobe &quot;$m&quot; 2&gt;/dev/null || true
+  done
+fi
+
+# ------------------------------- tc helpers ----------------------------------
+tc_s() { printf 'tc %s\n' &quot;$*&quot; &gt;&gt;&quot;$TC_LOG&quot;; ip netns exec &quot;$NS_S&quot; tc &quot;$@&quot;; }
+tc_c() { printf 'tc %s\n' &quot;$*&quot; &gt;&gt;&quot;$TC_LOG&quot;; ip netns exec &quot;$NS_C&quot; tc &quot;$@&quot;; }
+
+# ---------------------------------- topology ---------------------------------
+setup_topo() {
+  ip netns del &quot;$NS_S&quot; 2&gt;/dev/null || true
+  ip netns del &quot;$NS_C&quot; 2&gt;/dev/null || true
+  ip netns add &quot;$NS_S&quot;
+  ip netns add &quot;$NS_C&quot;
+  ip link add &quot;$VS&quot; type veth peer name &quot;$VC&quot;
+  ip link set &quot;$VS&quot; netns &quot;$NS_S&quot;
+  ip link set &quot;$VC&quot; netns &quot;$NS_C&quot;
+  ip netns exec &quot;$NS_S&quot; ip addr add &quot;$IP_S/$PREFIX&quot; dev &quot;$VS&quot;
+  ip netns exec &quot;$NS_C&quot; ip addr add &quot;$IP_C/$PREFIX&quot; dev &quot;$VC&quot;
+  ip netns exec &quot;$NS_S&quot; ip link set lo up
+  ip netns exec &quot;$NS_C&quot; ip link set lo up
+  ip netns exec &quot;$NS_S&quot; ip link set &quot;$VS&quot; up
+  ip netns exec &quot;$NS_C&quot; ip link set &quot;$VC&quot; up
+  # pfifo_fast's depth is the interface txqueuelen; keep the classic 1000.
+  ip netns exec &quot;$NS_S&quot; ip link set &quot;$VS&quot; txqueuelen 1000
+  ip netns exec &quot;$NS_C&quot; ip link set &quot;$VC&quot; txqueuelen 1000
+  # ECN is required for fq_codel to mark instead of drop.
+  ip netns exec &quot;$NS_S&quot; sysctl -qw net.ipv4.tcp_ecn=1 2&gt;/dev/null || true
+  ip netns exec &quot;$NS_C&quot; sysctl -qw net.ipv4.tcp_ecn=1 2&gt;/dev/null || true
+}
+
+# 20 ms base RTT: delay the return path only.
+apply_netem() {
+  tc_s qdisc del dev &quot;$VS&quot; root 2&gt;/dev/null || true
+  tc_s qdisc add dev &quot;$VS&quot; root handle 1: netem delay &quot;${BASE_RTT_MS}ms&quot; limit 10000
+}
+
+# HTB class tree + fq_codel AQM leaf.
+#
+# fq_codel grew parameters over time.  Try the modern full set first and fall
+# back so the harness also runs on older kernels:
+#   limit/flows/target/interval/quantum/ecn : Linux &gt;= 3.5 (original fq_codel)
+#   ce_threshold / ce_threshold_*           : Linux &gt;= 4.2 / &gt;= 5.16 (unused)
+#   memory_limit                            : Linux &gt;= 4.7
+#   drop_batch                              : Linux &gt;= 4.7
+# (See the kernel-version notes in the accompanying write-up.)
+apply_fq_codel() {
+  tc_c qdisc del dev &quot;$VC&quot; root 2&gt;/dev/null || true
+  tc_c qdisc add dev &quot;$VC&quot; root handle 1: htb default &quot;$LEAF_HANDLE&quot;
+  tc_c class add dev &quot;$VC&quot; parent 1: classid 1:1 htb \
+      rate &quot;$RATE_STR&quot; ceil &quot;$RATE_STR&quot; quantum 1514
+  tc_c class add dev &quot;$VC&quot; parent 1:1 classid &quot;1:$LEAF_HANDLE&quot; htb \
+      rate &quot;$RATE_STR&quot; ceil &quot;$RATE_STR&quot; quantum 1514
+  local -a base=(parent &quot;1:$LEAF_HANDLE&quot; handle &quot;$LEAF_HANDLE:&quot; fq_codel)
+  local -a common=(limit 10240 flows 1024 quantum 1514 target 5ms interval 100ms ecn)
+  if ip netns exec &quot;$NS_C&quot; tc qdisc add dev &quot;$VC&quot; &quot;${base[@]}&quot; \
+        &quot;${common[@]}&quot; memory_limit 32mb drop_batch 64 2&gt;/dev/null; then
+    printf 'tc qdisc add dev %s parent 1:%s handle %s: fq_codel %s memory_limit 32mb drop_batch 64\n' \
+      &quot;$VC&quot; &quot;$LEAF_HANDLE&quot; &quot;$LEAF_HANDLE&quot; &quot;${common[*]}&quot; &gt;&gt;&quot;$TC_LOG&quot;
+  elif ip netns exec &quot;$NS_C&quot; tc qdisc add dev &quot;$VC&quot; &quot;${base[@]}&quot; \
+        &quot;${common[@]}&quot; memory_limit 32mb 2&gt;/dev/null; then
+    printf 'tc qdisc add dev %s parent 1:%s handle %s: fq_codel %s memory_limit 32mb\n' \
+      &quot;$VC&quot; &quot;$LEAF_HANDLE&quot; &quot;$LEAF_HANDLE&quot; &quot;${common[*]}&quot; &gt;&gt;&quot;$TC_LOG&quot;
+  else
+    tc_c qdisc add dev &quot;$VC&quot; &quot;${base[@]}&quot; &quot;${common[@]}&quot;
+  fi
+}
+
+# Same HTB class tree, but a plain FIFO leaf (this is the &quot;before&quot; picture).
+apply_pfifo_fast() {
+  tc_c qdisc del dev &quot;$VC&quot; root 2&gt;/dev/null || true
+  tc_c qdisc add dev &quot;$VC&quot; root handle 1: htb default &quot;$LEAF_HANDLE&quot;
+  tc_c class add dev &quot;$VC&quot; parent 1: classid 1:1 htb \
+      rate &quot;$RATE_STR&quot; ceil &quot;$RATE_STR&quot; quantum 1514
+  tc_c class add dev &quot;$VC&quot; parent 1:1 classid &quot;1:$LEAF_HANDLE&quot; htb \
+      rate &quot;$RATE_STR&quot; ceil &quot;$RATE_STR&quot; quantum 1514
+  tc_c qdisc add dev &quot;$VC&quot; parent &quot;1:$LEAF_HANDLE&quot; handle &quot;$LEAF_HANDLE:&quot; pfifo_fast
+}
+
+# ---------------------------------- workload ---------------------------------
+sample_qdisc() {
+  local out=&quot;$1&quot;
+  : &gt;&quot;$out&quot;
+  while [ -e &quot;$RUNNING&quot; ]; do
+    printf '#TS %s\n' &quot;$(date +%s.%N)&quot; &gt;&gt;&quot;$out&quot;
+    ip netns exec &quot;$NS_C&quot; tc -s qdisc show dev &quot;$VC&quot; &gt;&gt;&quot;$out&quot; 2&gt;/dev/null || true
+    sleep &quot;$SAMPLE_INTERVAL&quot;
+  done
+}
+
+run_ping() {
+  local out=&quot;$1&quot; count=&quot;$2&quot; interval=&quot;$3&quot;
+  ip netns exec &quot;$NS_C&quot; ping -n -c &quot;$count&quot; -i &quot;$interval&quot; -W 5 &quot;$IP_S&quot; \
+    &gt;&quot;$out&quot; 2&gt;&amp;1 || true
+}
+
+start_servers() {
+  SRV_PIDS=()
+  local i port
+  for i in $(seq 1 &quot;$NUM_FLOWS&quot;); do
+    port=$((PORT_BASE + i - 1))
+    ip netns exec &quot;$NS_S&quot; iperf3 -s -1 -p &quot;$port&quot; \
+      &gt;&quot;$WORKDIR/srv.$i.log&quot; 2&gt;&amp;1 &amp;
+    SRV_PIDS+=(&quot;$!&quot;)
+  done
+}
+
+start_clients() {
+  CLI_PIDS=()
+  local i port
+  for i in $(seq 1 &quot;$NUM_FLOWS&quot;); do
+    port=$((PORT_BASE + i - 1))
+    ip netns exec &quot;$NS_C&quot; iperf3 -c &quot;$IP_S&quot; -p &quot;$port&quot; -t &quot;$DURATION&quot; -J \
+      &gt;&quot;$WORKDIR/flow.$i.json&quot; 2&gt;&quot;$WORKDIR/flow.$i.err&quot; &amp;
+    CLI_PIDS+=(&quot;$!&quot;)
+  done
+}
+
+run_scenario() {
+  local mode=&quot;$1&quot;
+  log &quot;scenario: $mode&quot;
+  apply_netem
+  case &quot;$mode&quot; in
+    fq_codel)   apply_fq_codel ;;
+    pfifo_fast) apply_pfifo_fast ;;
+    *)          die &quot;unknown scenario $mode&quot; ;;
+  esac
+
+  # Baseline RTT with an idle link.
+  run_ping &quot;$WORKDIR/ping.idle.$mode&quot; 20 0.1
+
+  touch &quot;$RUNNING&quot;
+  sample_qdisc &quot;$WORKDIR/qdisc.$mode&quot; &amp;
+  local sampler=$!
+  BG_PIDS+=(&quot;$sampler&quot;)
+
+  start_servers
+  sleep 1.0
+
+  run_ping &quot;$WORKDIR/ping.load.$mode&quot; $((DURATION * 10)) 0.1 &amp;
+  local pinger=$!
+  BG_PIDS+=(&quot;$pinger&quot;)
+
+  start_clients
+  local failed=0 p
+  for p in &quot;${CLI_PIDS[@]}&quot;; do
+    wait &quot;$p&quot; || failed=1
+  done
+  [ &quot;$failed&quot; = 0 ] || log &quot;WARN: one or more iperf3 clients exited non-zero&quot;
+
+  rm -f &quot;$RUNNING&quot;
+  wait &quot;$sampler&quot; 2&gt;/dev/null || true
+  wait &quot;$pinger&quot;  2&gt;/dev/null || true
+  for p in &quot;${SRV_PIDS[@]}&quot;; do kill &quot;$p&quot; 2&gt;/dev/null || true; done
+  wait 2&gt;/dev/null || true
+
+  # Append the final cumulative counters (dropped / ecn_mark).
+  ip netns exec &quot;$NS_C&quot; tc -s qdisc show dev &quot;$VC&quot; &gt;&gt;&quot;$WORKDIR/qdisc.$mode&quot; 2&gt;/dev/null || true
+}
+
+# ---------------------------------- analyzer ---------------------------------
+cat &gt;&quot;$WORKDIR/analyze.py&quot; &lt;&lt;'PYEOF'
+#!/usr/bin/env python3
+&quot;&quot;&quot;Analyze harness artefacts and emit a machine-checkable JSON report.&quot;&quot;&quot;
+import json
+import os
+import re
+import sys
+
+work = sys.argv[1]
+outpath = sys.argv[2]
+
+LINK = float(os.environ[&quot;LINK_RATE_BPS&quot;])
+NUM = int(os.environ[&quot;NUM_FLOWS&quot;])
+TARGET_UTIL = float(os.environ[&quot;TARGET_UTIL&quot;])
+TARGET_FAIR = float(os.environ[&quot;TARGET_FAIRNESS&quot;])
+TARGET_Q = float(os.environ[&quot;TARGET_QUEUE_P95_MS&quot;])
+CONTRAST_MIN = float(os.environ[&quot;CONTRAST_MIN_MS&quot;])
+CONTRAST_RATIO = float(os.environ[&quot;CONTRAST_RATIO&quot;])
+BASE_RTT_MS = float(os.environ[&quot;BASE_RTT_MS&quot;])
+LEAF = os.environ[&quot;LEAF_HANDLE&quot;]
+
+
+def percentile(values, p):
+    if not values:
+        return None
+    s = sorted(values)
+    if len(s) == 1:
+        return s[0]
+    k = (len(s) - 1) * (p / 100.0)
+    lo = int(k)
+    hi = min(lo + 1, len(s) - 1)
+    return s[lo] + (s[hi] - s[lo]) * (k - lo)
+
+
+def summarise(values):
+    if not values:
+        return {&quot;count&quot;: 0}
+    return {
+        &quot;count&quot;: len(values),
+        &quot;min&quot;: min(values),
+        &quot;p50&quot;: percentile(values, 50),
+        &quot;p95&quot;: percentile(values, 95),
+        &quot;p99&quot;: percentile(values, 99),
+        &quot;max&quot;: max(values),
+        &quot;mean&quot;: sum(values) / len(values),
+    }
+
+
+def parse_qdisc(path):
+    &quot;&quot;&quot;Return (samples[(ts,backlog_bytes,backlog_pkts)], dropped, ecn_mark).&quot;&quot;&quot;
+    samples = []
+    dropped = 0
+    ecn = 0
+    cur_handle = None
+    ts = 0.0
+    want = LEAF + &quot;:&quot;
+    try:
+        fh = open(path, &quot;r&quot;, errors=&quot;replace&quot;)
+    except FileNotFoundError:
+        return samples, dropped, ecn
+    with fh:
+        for line in fh:
+            line = line.strip()
+            m = re.match(r&quot;#TS\s+([0-9.]+)&quot;, line)
+            if m:
+                ts = float(m.group(1))
+                continue
+            m = re.match(r&quot;qdisc\s+\S+\s+(\S+)&quot;, line)
+            if m:
+                cur_handle = m.group(1)
+                continue
+            if cur_handle != want:
+                continue
+            m = re.search(r&quot;backlog\s+(\d+)b\s+(\d+)p&quot;, line)
+            if m:
+                samples.append((ts, int(m.group(1)), int(m.group(2))))
+                continue
+            m = re.search(r&quot;\(dropped\s+(\d+)&quot;, line)
+            if m:
+                dropped = max(dropped, int(m.group(1)))
+                continue
+            m = re.search(r&quot;ecn_mark\s+(\d+)&quot;, line)
+            if m:
+                ecn = max(ecn, int(m.group(1)))
+    return samples, dropped, ecn
+
+
+def parse_ping(path):
+    times = []
+    try:
+        fh = open(path, &quot;r&quot;, errors=&quot;replace&quot;)
+    except FileNotFoundError:
+        return times
+    with fh:
+        for line in fh:
+            m = re.search(r&quot;time[=&lt;]\s*([0-9.]+)\s*ms&quot;, line)
+            if m:
+                times.append(float(m.group(1)))
+    return times
+
+
+def parse_iperf(path):
+    try:
+        with open(path, &quot;r&quot;, errors=&quot;replace&quot;) as fh:
+            data = json.load(fh)
+    except Exception as exc:  # noqa: BLE001 - report any parse failure
+        return None, 0, str(exc)
+    end = data.get(&quot;end&quot;, {})
+    sent = end.get(&quot;sum_sent&quot;) or {}
+    recv = end.get(&quot;sum_received&quot;) or end.get(&quot;sum&quot;) or {}
+    bps = recv.get(&quot;bits_per_second&quot;)
+    if bps is None:
+        bps = sent.get(&quot;bits_per_second&quot;, 0.0)
+    return float(bps), int(sent.get(&quot;retransmits&quot;, 0) or 0), None
+
+
+def run_result(mode):
+    samples, dropped, ecn = parse_qdisc(os.path.join(work, &quot;qdisc.%s&quot; % mode))
+    backlog_bytes = [s[1] for s in samples]
+    backlog_pkts = [s[2] for s in samples]
+    queue_ms = [b * 8.0 / LINK * 1000.0 for b in backlog_bytes]
+
+    idle = parse_ping(os.path.join(work, &quot;ping.idle.%s&quot; % mode))
+    loaded = parse_ping(os.path.join(work, &quot;ping.load.%s&quot; % mode))
+    base_rtt = percentile(idle, 50) if idle else None
+    rtt = summarise(loaded)
+    inflation_p95 = None
+    if base_rtt is not None and rtt.get(&quot;p95&quot;) is not None:
+        inflation_p95 = max(0.0, rtt[&quot;p95&quot;] - base_rtt)
+
+    flows = []
+    retrans = 0
+    flow_errors = []
+    for i in range(1, NUM + 1):
+        bps, retr, err = parse_iperf(os.path.join(work, &quot;flow.%d.json&quot; % i))
+        if bps is None:
+            flow_errors.append(&quot;flow%d: %s&quot; % (i, err))
+            flows.append(0.0)
+        else:
+            flows.append(bps)
+            retrans += retr
+
+    total = sum(flows)
+    utilization = total / LINK if LINK else 0.0
+    fair = total / NUM if NUM else 0.0
+    devs = [abs(f - fair) / fair for f in flows] if fair else []
+    max_dev = max(devs) if devs else None
+
+    q95 = percentile(queue_ms, 95) if queue_ms else 0.0
+    q_max = max(queue_ms) if queue_ms else 0.0
+    standing_p95 = max([v for v in (q95, inflation_p95) if v is not None] or [0.0])
+
+    failed = []
+    if not (utilization &gt;= TARGET_UTIL and utilization &lt;= 1.10):
+        failed.append(&quot;utilization&quot;)
+    if max_dev is None or max_dev &gt; TARGET_FAIR:
+        failed.append(&quot;fairness&quot;)
+    if standing_p95 &gt;= TARGET_Q:
+        failed.append(&quot;queue&quot;)
+    if flow_errors:
+        failed.append(&quot;flows&quot;)
+    if not samples:
+        failed.append(&quot;no_backlog_samples&quot;)
+    if base_rtt is None or not (0.5 * BASE_RTT_MS &lt;= base_rtt &lt;= 2.0 * BASE_RTT_MS):
+        failed.append(&quot;base_rtt&quot;)
+
+    return {
+        &quot;mode&quot;: mode,
+        &quot;per_flow_bps&quot;: flows,
+        &quot;aggregate_bps&quot;: total,
+        &quot;utilization&quot;: utilization,
+        &quot;fair_share_bps&quot;: fair,
+        &quot;fairness_max_deviation&quot;: max_dev,
+        &quot;retransmits&quot;: retrans,
+        &quot;rtt_ms&quot;: rtt,
+        &quot;base_rtt_ms&quot;: base_rtt,
+        &quot;rtt_inflation_p95_ms&quot;: inflation_p95,
+        &quot;queue_delay_ms&quot;: summarise(queue_ms),
+        &quot;queue_delay_p95_from_backlog_ms&quot;: q95,
+        &quot;queue_delay_max_from_backlog_ms&quot;: q_max,
+        &quot;standing_queue_p95_ms&quot;: standing_p95,
+        &quot;max_backlog_bytes&quot;: max(backlog_bytes) if backlog_bytes else 0,
+        &quot;max_backlog_packets&quot;: max(backlog_pkts) if backlog_pkts else 0,
+        &quot;samples&quot;: len(samples),
+        &quot;dropped&quot;: dropped,
+        &quot;ecn_mark&quot;: ecn,
+        &quot;flow_errors&quot;: flow_errors,
+        &quot;passed&quot;: not failed,
+        &quot;failed_targets&quot;: failed,
+    }
+
+
+fq = run_result(&quot;fq_codel&quot;)
+pf = run_result(&quot;pfifo_fast&quot;)
+
+floor = max(fq[&quot;standing_queue_p95_ms&quot;] or 0.0, 1e-9)
+contrast_ok = pf[&quot;standing_queue_p95_ms&quot;] &gt;= max(CONTRAST_MIN, CONTRAST_RATIO * floor)
+pf[&quot;demonstrates_bufferbloat&quot;] = contrast_ok
+if not contrast_ok:
+    pf[&quot;failed_targets&quot;] = pf.get(&quot;failed_targets&quot;, []) + [&quot;contrast&quot;]
+else:
+    # The contrast is *expected* to miss the latency target; that is success.
+    pf[&quot;failed_targets&quot;] = [t for t in pf.get(&quot;failed_targets&quot;, []) if t != &quot;queue&quot;]
+    pf[&quot;passed&quot;] = not pf[&quot;failed_targets&quot;]
+
+overall = fq[&quot;passed&quot;] and contrast_ok
+
+report = {
+    &quot;schema&quot;: &quot;bufferbloat-harness/v1&quot;,
+    &quot;kernel&quot;: os.uname().release,
+    &quot;link_rate_bps&quot;: LINK,
+    &quot;targets&quot;: {
+        &quot;min_utilization&quot;: TARGET_UTIL,
+        &quot;max_fairness_deviation&quot;: TARGET_FAIR,
+        &quot;max_standing_queue_p95_ms&quot;: TARGET_Q,
+        &quot;contrast_min_p95_ms&quot;: CONTRAST_MIN,
+        &quot;contrast_min_ratio&quot;: CONTRAST_RATIO,
+    },
+    &quot;runs&quot;: {&quot;fq_codel&quot;: fq, &quot;pfifo_fast&quot;: pf},
+    &quot;overall_passed&quot;: overall,
+}
+
+with open(outpath, &quot;w&quot;) as fh:
+    json.dump(report, fh, indent=2, sort_keys=True)
+    fh.write(&quot;\n&quot;)
+print(json.dumps(report, indent=2, sort_keys=True))
+sys.exit(0 if overall else 1)
+PYEOF
+
+# ----------------------------------- main ------------------------------------
+log &quot;workdir: $WORKDIR&quot;
+setup_topo
+run_scenario fq_codel
+run_scenario pfifo_fast
+
+export LINK_RATE_BPS NUM_FLOWS TARGET_UTIL TARGET_FAIRNESS \
+       TARGET_QUEUE_P95_MS CONTRAST_MIN_MS CONTRAST_RATIO BASE_RTT_MS LEAF_HANDLE
+
+set +e
+python3 &quot;$WORKDIR/analyze.py&quot; &quot;$WORKDIR&quot; &quot;$REPORT&quot;
+rc=$?
+set -e
+
+if [ -f &quot;$REPORT&quot; ]; then
+  log &quot;report: $REPORT&quot;
+  log &quot;exact tc commands: $TC_LOG&quot;
+fi
+exit &quot;$rc&quot;
+</code></pre>
+<hr />
+<h2>5. Verification</h2>
+<h3>5.1 How to run</h3>
+<pre><code class="language-bash">sudo ./bufferbloat_harness.sh
+# or, to keep the raw artefacts:
+sudo KEEP_WORKDIR=1 DURATION=30 ./bufferbloat_harness.sh
+# report:      $WORKDIR/report.json   (also printed to stdout)
+# tc commands:  $WORKDIR/tc_commands.txt
+# raw samples:  $WORKDIR/qdisc.fq_codel, qdisc.pfifo_fast, ping.*, flow.*.json
+</code></pre>
+<p>Exit status:</p>
+<ul>
+<li><code>0</code> — <code>fq_codel</code> met utilization, fairness, standing-queue and base-RTT
+  targets <strong>and</strong> the <code>pfifo_fast</code> contrast demonstrated bufferbloat.</li>
+<li>non-zero — any target missed (or the contrast failed to demonstrate the
+  difference, or a <code>tc</code>/measurement step failed).</li>
+</ul>
+<p>Every threshold is overridable, e.g.
+<code>TARGET_QUEUE_P95_MS=3 TARGET_UTIL=0.9 sudo -E ./bufferbloat_harness.sh</code>.</p>
+<h3>5.2 Target definitions</h3>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Check</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Utilization</td>
+<td><code>aggregate_bps / link_rate_bps &gt;= 0.80</code></td>
+<td><code>TARGET_UTIL=0.80</code></td>
+</tr>
+<tr>
+<td>Fairness</td>
+<td>every flow within <code>±10 %</code> of the achieved mean</td>
+<td><code>TARGET_FAIRNESS=0.10</code></td>
+</tr>
+<tr>
+<td>Standing queue p95</td>
+<td><code>max(backlog p95, RTT inflation p95) &lt; 10 ms</code></td>
+<td><code>TARGET_QUEUE_P95_MS=10</code></td>
+</tr>
+<tr>
+<td>Base RTT sane</td>
+<td>idle ping p50 within <code>[0.5, 2.0] x 20 ms</code></td>
+<td><code>BASE_RTT_MS=20</code></td>
+</tr>
+<tr>
+<td>Contrast</td>
+<td><code>pfifo_p95 &gt;= max(20 ms, 2 x fq_codel_p95)</code></td>
+<td><code>CONTRAST_MIN_MS=20</code>, <code>CONTRAST_RATIO=2.0</code></td>
+</tr>
+</tbody>
+</table>
+<p>Fair share is computed as the achieved aggregate divided by the number of
+flows, which is the max-min fair share actually available to the flows; the
+absolute link-rate share (8 Mbit / 3 ≈ 2.667 Mbit) is also reported. The
+harness drives the link to saturation (typically ~95–100 % utilization) and
+evaluates the standing queue over that loaded interval; requiring ≥ 80 %
+utilization is the "at 80 % link utilization" operating point.</p>
+<h3>5.3 Report shape</h3>
+<pre><code class="language-json">{
+  &quot;schema&quot;: &quot;bufferbloat-harness/v1&quot;,
+  &quot;kernel&quot;: &quot;6.8.0-...&quot;,
+  &quot;link_rate_bps&quot;: 8000000,
+  &quot;targets&quot;: { &quot;min_utilization&quot;: 0.8, &quot;max_fairness_deviation&quot;: 0.1,
+               &quot;max_standing_queue_p95_ms&quot;: 10, &quot;contrast_min_p95_ms&quot;: 20,
+               &quot;contrast_min_ratio&quot;: 2.0 },
+  &quot;runs&quot;: {
+    &quot;fq_codel&quot;: {
+      &quot;per_flow_bps&quot;: [2650000, 2670000, 2640000],
+      &quot;aggregate_bps&quot;: 7960000, &quot;utilization&quot;: 0.995,
+      &quot;fairness_max_deviation&quot;: 0.006, &quot;retransmits&quot;: 0,
+      &quot;rtt_ms&quot;: { &quot;p50&quot;: 21.2, &quot;p95&quot;: 24.1, &quot;p99&quot;: 28.0, &quot;max&quot;: 31.0 },
+      &quot;base_rtt_ms&quot;: 20.1, &quot;rtt_inflation_p95_ms&quot;: 4.0,
+      &quot;queue_delay_p95_from_backlog_ms&quot;: 5.5,
+      &quot;standing_queue_p95_ms&quot;: 5.5,
+      &quot;max_backlog_bytes&quot;: 6000, &quot;max_backlog_packets&quot;: 4,
+      &quot;dropped&quot;: 0, &quot;ecn_mark&quot;: 3120,
+      &quot;passed&quot;: true, &quot;failed_targets&quot;: []
+    },
+    &quot;pfifo_fast&quot;: {
+      &quot;per_flow_bps&quot;: [...], &quot;utilization&quot;: 0.98,
+      &quot;queue_delay_p95_from_backlog_ms&quot;: 420.0,
+      &quot;standing_queue_p95_ms&quot;: 420.0,
+      &quot;max_backlog_bytes&quot;: 1050000, &quot;max_backlog_packets&quot;: 700,
+      &quot;dropped&quot;: 1800, &quot;ecn_mark&quot;: 0,
+      &quot;demonstrates_bufferbloat&quot;: true, &quot;passed&quot;: true,
+      &quot;failed_targets&quot;: []
+    }
+  },
+  &quot;overall_passed&quot;: true
+}
+</code></pre>
+<h3>5.4 What was verified in this build sandbox</h3>
+<p>The build sandbox is an unprivileged <code>bwrap</code> container (<code>CapEff == 0</code>,
+<code>NoNewPrivs == 1</code>) whose AppArmor profile denies both <code>unshare(CLONE_NEWNET)</code>
+and writing <code>/proc/self/uid_map</code>; nested <code>bwrap --unshare-net</code> also fails with
+<code>No permissions to create a new namespace</code>. A real <code>veth</code>/<code>tc</code> run is
+therefore impossible here. To still verify the harness logic end-to-end, a
+deterministic mock backend was installed in <code>PATH</code> (<code>ip</code>, <code>tc</code>, <code>iperf3</code>,
+<code>ping</code>) that emulates the semantics being queried:</p>
+<ul>
+<li><code>tc qdisc show</code> emits realistic <code>htb</code>/<code>fq_codel</code>/<code>pfifo_fast</code> dumps with
+  small backlog + rising <code>ecn_mark</code> for <code>fq_codel</code> and ~900 packets of backlog</li>
+<li>rising <code>dropped</code> for <code>pfifo_fast</code>;</li>
+<li><code>iperf3</code> emits iperf3-compatible JSON; <code>ping</code> emits per-packet RTTs that are
+  near-baseline for <code>fq_codel</code> and inflated for <code>pfifo_fast</code>.</li>
+</ul>
+<p>Results (<code>bash</code>, GNU bash 5.1; <code>shellcheck -s bash</code> ⇒ rc 0):</p>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Env override</th>
+<th>Exit</th>
+<th><code>overall_passed</code></th>
+<th><code>fq_codel</code> failed targets</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Happy path</td>
+<td>—</td>
+<td><strong>0</strong></td>
+<td>true</td>
+<td><code>[]</code> (util 0.976, fair-dev 0.014, p95 6.0 ms, contrast 1350 ms)</td>
+</tr>
+<tr>
+<td>Fairness miss</td>
+<td><code>TARGET_FAIRNESS=0.001</code></td>
+<td><strong>1</strong></td>
+<td>false</td>
+<td><code>["fairness"]</code></td>
+</tr>
+<tr>
+<td>Utilization miss</td>
+<td><code>TARGET_UTIL=1.05</code></td>
+<td><strong>1</strong></td>
+<td>false</td>
+<td><code>["utilization"]</code></td>
+</tr>
+<tr>
+<td>Contrast miss</td>
+<td><code>CONTRAST_MIN_MS=5000</code></td>
+<td><strong>1</strong></td>
+<td>false</td>
+<td><code>[]</code>, <code>pfifo_fast.demonstrates_bufferbloat=false</code></td>
+</tr>
+<tr>
+<td>Base-RTT miss</td>
+<td><code>BASE_RTT_MS=100</code></td>
+<td><strong>1</strong></td>
+<td>false</td>
+<td><code>["base_rtt"]</code></td>
+</tr>
+<tr>
+<td>Kernel without <code>drop_batch</code></td>
+<td>mock rejects it</td>
+<td><strong>0</strong></td>
+<td>true</td>
+<td><code>[]</code>; log shows the <code>memory_limit</code>-only command</td>
+</tr>
+<tr>
+<td>Kernel without <code>memory_limit</code></td>
+<td>mock rejects it</td>
+<td><strong>0</strong></td>
+<td>true</td>
+<td><code>[]</code>; log shows the original 3.5 command</td>
+</tr>
+</tbody>
+</table>
+<p>On a machine with <code>CAP_NET_ADMIN</code>, the same script runs the real kernel path;
+the only sandbox-specific inputs are the four mocked binaries, which are not
+needed at all in the real environment.</p>
+<h3>5.5 Kernel-version dependencies relied upon</h3>
+<p>All verified against the upstream <code>torvalds/linux</code> history (<code>git log -- net/sched/sch_fq_codel.c</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Feature relied on</th>
+<th>Introduced</th>
+<th>Commit / note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fq_codel</code> itself, <code>limit</code>/<code>flows</code>/<code>target</code>/<code>interval</code>/<code>quantum</code>, classless fair queuing</td>
+<td><strong>Linux 3.5</strong></td>
+<td><code>4b549a2ef4be</code> "fq_codel: Fair Queue Codel AQM" (2012-05-11)</td>
+</tr>
+<tr>
+<td><code>ecn</code> <strong>default on</strong></td>
+<td>from the start</td>
+<td><code>tc-fq_codel(8)</code>: "Unlike <code>codel</code>, <code>ecn</code> is turned on by default"</td>
+</tr>
+<tr>
+<td><code>ce_threshold</code></td>
+<td><strong>Linux 4.2</strong></td>
+<td><code>80ba92fa1a92</code> "codel: add ce_threshold attribute" (2015-05-08)</td>
+</tr>
+<tr>
+<td><code>memory_limit</code></td>
+<td><strong>Linux 4.7</strong></td>
+<td><code>95b58430abe7</code> "fq_codel: add memory limitation per queue" (2016-05-06)</td>
+</tr>
+<tr>
+<td><code>drop_batch</code></td>
+<td><strong>Linux 4.7</strong></td>
+<td><code>9d18562a2278</code> "fq_codel: add batch ability to fq_codel_drop()" (2016-05-01)</td>
+</tr>
+<tr>
+<td><code>ce_threshold_selector</code> / <code>ce_threshold_mask</code> / L4S ECT(1) marking</td>
+<td><strong>Linux 5.16</strong></td>
+<td><code>dfcb63ce1de6</code>, <code>e72aeb9ee0e3</code> (2021-10)</td>
+</tr>
+<tr>
+<td>per-flow hash via <code>skb_get_hash_perturb</code></td>
+<td><strong>Linux 4.1</strong></td>
+<td><code>342db221829f</code> (2015-05-01); before that a different hash was used, so cross-version flow-to-bucket mapping is not stable</td>
+</tr>
+<tr>
+<td><code>flows</code> settable only at qdisc creation</td>
+<td>from the start</td>
+<td>hash table allocated in <code>fq_codel_init()</code></td>
+</tr>
+</tbody>
+</table>
+<p>Practical consequences:</p>
+<ul>
+<li>The script starts with the full modern option set and <strong>falls back</strong> to
+  <code>memory_limit</code>-only, then to the original 3.5 option set, so it runs from
+  Linux 3.5 through current kernels. The successful command is the one logged
+  in <code>tc_commands.txt</code>.</li>
+<li>The report records <code>uname().release</code>, so any version-specific difference is
+  attributable.</li>
+<li>Required kernel config: <code>CONFIG_NET_SCH_FQ_CODEL</code>, <code>CONFIG_NET_SCH_HTB</code>,
+  <code>CONFIG_NET_SCH_NETEM</code> (and <code>CONFIG_NET_CLS_U32</code> if you extend the tree with
+  <code>u32</code> filters). The script <code>modprobe</code>s these best-effort.</li>
+<li><code>interval</code> (100 ms) must be ≥ the worst-case RTT; with the 20 ms base RTT
+  here it is. If you raise the base RTT above ~50 ms, raise <code>interval</code> too.</li>
+<li>ECN marking (<code>ecn_mark</code>) is only exercised if both endpoints negotiate ECN;
+  the script sets <code>net.ipv4.tcp_ecn=1</code> in both namespaces. On a kernel where
+  <code>iperf3</code>'s TCP does not negotiate ECN, expect <code>dropped &gt; 0, ecn_mark == 0</code>
+  and the same latency target still applies.</li>
+</ul>
+<hr />
+<h2>6. Extending to multiple <code>fq_codel</code> leaves</h2>
+<p>The script uses one shared <code>fq_codel</code> leaf so that <code>fq_codel</code>'s own flow
+hashing — not HTB's class weights — is what produces per-flow fairness and
+per-flow latency control. To force a literal multi-leaf tree (e.g. per service
+class, or to pin each flow to its own class), replicate the class + leaf and
+classify by destination port (clients upload to three distinct server ports):</p>
+<pre><code class="language-bash">tc qdisc add dev vc root handle 1: htb default 30
+tc class add dev vc parent 1:  classid 1:1  htb rate 8mbit ceil 8mbit quantum 1514
+for i in 10 20 30; do
+  tc class add dev vc parent 1:1 classid 1:$i htb \
+      rate 2666kbit ceil 8mbit quantum 1514
+  tc qdisc add dev vc parent 1:$i handle $i: fq_codel \
+      limit 10240 flows 1024 quantum 1514 target 5ms interval 100ms \
+      ecn memory_limit 32mb drop_batch 64
+done
+tc filter add dev vc protocol ip parent 1: prio 1 u32 match ip dport 5201 0xffff flowid 1:10
+tc filter add dev vc protocol ip parent 1: prio 1 u32 match ip dport 5202 0xffff flowid 1:20
+tc filter add dev vc protocol ip parent 1: prio 1 u32 match ip dport 5203 0xffff flowid 1:30
+</code></pre>
+<p>Caveat: once each flow owns a class, per-flow fairness is enforced by HTB's
+equal <code>rate</code>s and the <code>fq_codel</code> flow isolation is no longer what is being
+tested; also a stray sparse flow (e.g. <code>ping</code>) in the default class will not
+share the data leaf's queue, so the RTT-based contrast is weaker (the
+backlog-based standing-queue measurement still catches it).</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: shell-tc-htb-fq-codel-bufferbloat-harness
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-28T22:02:09.119Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Build a reproducible bufferbloat harness over a veth pair: apply netem for a 20ms base RTT and an 8 Mbit bottleneck, then configure an HTB class tree with fq_codel leaves so three concurrent TCP flows each sustain within 10% of a fair share while the 95th-percentile standing queue stays under 10ms at 80% link utilization. The script must emit a machine-checkable report (per-flow throughput, RTT percentiles, drops and ECN marks, max qdisc backlog) and exit non-zero when any target is missed, including a contrast run with a pfifo_fast leaf that demonstrates the difference. Include the exact tc commands and note kernel-version dependencies for any fq_codel internals you rely on.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;shell-tc-htb-fq-codel-bufferbloat-harness&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-28T22:02:09.120Z&quot;, &quot;version&quot;: &quot;5.1&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
