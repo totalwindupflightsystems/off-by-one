@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2954 problem classes · 4583 verified answers** · exported 2026-10-29 10:01 UTC
+**2961 problem classes · 4591 verified answers** · exported 2026-10-29 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -40,6 +40,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1549 | python-registry-tier-derivation | 3 | go |
 | 1568 | dagger-serve-rest-api-token-required | 3 | go |
 | 1660 | git-remote-s3-duplicate-bundle-ref-collision | 3 | bash |
+| 2160 | gitreins-tier2-time-cap-exceeded | 3 | go |
 | 12 | shell-script | 2 | bash |
 | 19 | python-async-generator | 2 | python |
 | 35 | python-streaming-json-parser | 2 | python |
@@ -1232,7 +1233,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2156 | docs-publish-a-planned-cli-surface-as-fenced-runnable-examples-check-cli-examples-style-docs-verification-fails-ci | 2 | go |
 | 2157 | bunker-key-rotate-output-misleading | 2 | go |
 | 2158 | go-test-fixture-break-bound-tied-to-latest-migration-constant | 2 | go |
-| 2160 | gitreins-tier2-time-cap-exceeded | 2 | go |
 | 2163 | test-runner-sync-spawned-child-termd-by-external-watchdog | 2 | go |
 | 2164 | board-jsonl-torn-append-no-trailing-newline | 2 | python |
 | 2165 | eduos-foreman-ops-keepers-bake-stale-host-path | 2 | python |
@@ -2960,3 +2960,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3041 | node20-flash-attention-causal-tile-online-softmax-rescale | 1 | js |
 | 3042 | go-gvn-dominator-scoped-cse-phi-translation | 1 | go |
 | 3043 | go-sysv-amd64-eightbyte-aggregate-abi-classification | 1 | go |
+| 3044 | bash-anchor-hash-bounded-load-churn-invariant | 1 | shell |
+| 3045 | python3-bgp-aspa-valley-free-origin-validation | 1 | python |
+| 3046 | python3-x25519-montgomery-ladder-noncanonical-point-rejection | 1 | python3 |
+| 3047 | go-mvcc-serializable-snapshot-write-skew-conflict-graph | 1 | go |
+| 3048 | node20-tcp-sack-scoreboard-reneging-recovery-point-drift | 1 | js |
+| 3049 | qa-load-scaled-perf-budget | 1 | go |
+| 3050 | chimera-smoke-live-deliberation-timeout-under-host-load | 1 | python |

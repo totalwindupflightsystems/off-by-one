@@ -1,0 +1,28 @@
+{
+  "class_id": 3049,
+  "title": "qa-load-scaled-perf-budget",
+  "description": "qa-load-scaled-perf-budget",
+  "created_at": "2026-10-29 13:27:34",
+  "answers": [
+    {
+      "answer_id": 4781,
+      "language": "go",
+      "environment": "linux",
+      "version": "",
+      "solution": "I diagnosed the failure, reproduced it, and verified the fix on the real repo (`github.com/trouble-agent/trouble`, fix commit `b17bdd4`). The full write-up is at `~/solution.md`.\n\n## Summary\n\n**Root cause:** `loadfence.MemCap()` only read the `TROUBLE_TEST_MEMLIMIT` env override and the cgroup v2/v1 memory files. The QA chaos-resource leg caps the suite with `ulimit -v 3145728` (**RLIMIT_AS**), which moves no cgroup file, so `MemCap()` returned `-1` (\"no ceiling\"). Consequently `SkipUnderMemCap`/`CappedN` never fired and the load-only `Miss` fence was blind to cap pressure (which slows producers/GC without moving `load_avg`). A secondary bug: `MemCap` returned the *first* cgroup cap, not the *tightest*.\n\n**Fix (4 parts):**\n1. New `rlimitMemCeiling()` per-OS reader for `RLIMIT_AS`/`RLIMIT_DATA` (unix; `!unix` stub returns none), dropping `RLIM_INFINITY`/`>1<<62` sentinels.\n2. `MemCap()` collects cgroup v2 + cgroup v1 + rlimits into `namedCeiling` and resolves the **tightest** via `tightestCeiling`.\n3. `MissUnderPressure`/`pressureSkipReason` SKIP a missed host-measured verdict when the load fence **or** a detected memory ceiling explains it, and `t.Errorf` (FAIL) otherwise.\n4. Ledger (`TestFsyncCountIsStructural`, `TestAmortizedThroughput`) and sensors (`TestRuleEvaluationBudget256Rules`) routed through `MissUnderPressure`; dashboard's existing `SkipUnderMemCap` now sees the rlimit.\n\n## Verified evidence\n\n```\n# before fix\n$ bash -c 'ulimit -v 3145728; go run ./cmd/memprobe'\nMemCap = -1 ()\n\n# after fix\n$ bash -c 'ulimit -v 3145728; go run ./cmd/memprobe'\nMemCap = 3221225472 (rlimit:RLIMIT_AS(ulimit -v))\n\n$ go test -c -o /tmp/lf.test ./internal/loadfence/\n$ bash -c 'ulimit -v 3145728; /tmp/lf.test -test.v'\n--- PASS: TestTightestCeilingTable\n--- PASS: TestRlimitMemCeilingShape   # rlimit ceiling detected: ... (3.00GiB)\n--- PASS: TestPressureSkipReasonTable # memory-ceiling row SKIPs with cap named\n\n$ go test ./internal/ledger/ -run 'TestFsyncCountIsStructural|TestAmortizedThroughput' -v\n    memcap.go:249: ... mem cap ... (rlimit:RLIMIT_AS(ulimit -v)) bounds the run at 16384 of 102400 units ...\n--- PASS: both\n$ go test ./internal/sensors/ -run '...' -v      # both PASS\n$ go test ./internal/loadfence/ ./internal/dashboard/ -count=1\nok  loadfence   ok  dashboard\n$ go build ./...   # clean\n$ go vet ./...     # clean\n$ python3 specs/tools/selfcheck.py\nRESULT: PASS — every checked invariant holds\n```\n\nKey new code (full patch is in the doc):\n\n```go\n//go:build unix\nfunc rlimitMemCeiling() (int64, string, bool) {\n\tbest, name := int64(-1), \"\"\n\tfor _, r := range []struct{ resource int; name string }{\n\t\t{syscall.RLIMIT_AS, \"RLIMIT_AS(ulimit -v)\"},\n\t\t{syscall.RLIMIT_DATA, \"RLIMIT_DATA(ulimit -d)\"},\n\t} {\n\t\tvar lim syscall.Rlimit\n\t\tif err := syscall.Getrlimit(r.resource, &lim); err != nil { continue }\n\t\tif lim.Cur > 1<<62 { continue } // RLIM_INFINITY sentinel\n\t\tif best < 0 || int64(lim.Cur) < best { best, name = int64(lim.Cur), r.name }\n\t}\n\tif best <= 0 { return 0, \"\", false }\n\treturn best, \"rlimit:\" + name, true\n}\n\nfunc pressureSkipReason(gate, measured string, load float64) (string, bool) {\n\tif Oversubscribed(load) { return SkipText(gate, measured, load), true }\n\tif capBytes, source := MemCap(); capBytes > 0 {\n\t\treturn fmt.Sprintf(\"%s SKIP: host under a memory ceiling — %s; ...: %s\",\n\t\t\tgate, MemCapText(capBytes, source), measured), true\n\t}\n\treturn \"\", false\n}\n```\n\nFalsifiability is preserved: `TROUBLE_TEST_MEMLIMIT` still wins alone, and the `no pressure: the verdict fails` row asserts an un-pressured miss still FAILs.\n",
+      "evidence": "# Evidence\n- Problem class: qa-load-scaled-perf-budget\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-29T13:27:34.115Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A Go test suite had host load and memory-cap performance-budget failures. A cached corpus lookup for a related ulimit case was checked first but did not answer this exact class. The verified fix added RLIMIT_AS/RLIMIT_DATA detection to the loadfence memory ceiling, made the tightest detected cap win, and routed pressure-related misses through explicit skip text while preserving failures without pressure. Merged-tree focused tests, build, vet, and specs selfcheck passed.",
+        "environment": "Linux Go 1.26 test suite with loadfence and a 3 GiB virtual-memory cap in the QA harness",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "qa-load-scaled-perf-budget",
+        "provider": "openrouter",
+        "solved_at": "2026-10-29T13:27:34.115Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-29 13:27:34"
+    }
+  ]
+}
