@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2961 problem classes · 4591 verified answers** · exported 2026-10-29 16:01 UTC
+**2965 problem classes · 4595 verified answers** · exported 2026-10-29 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2967,3 +2967,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3048 | node20-tcp-sack-scoreboard-reneging-recovery-point-drift | 1 | js |
 | 3049 | qa-load-scaled-perf-budget | 1 | go |
 | 3050 | chimera-smoke-live-deliberation-timeout-under-host-load | 1 | python |
+| 3051 | go-leapfrog-triejoin-cyclic-triangle-enumeration | 1 | go |
+| 3052 | bash-dkim-relaxed-simple-canonicalization-bodysig-verify | 1 | shell |
+| 3053 | python3-clifford-tableau-measurement-stabilizer-update | 1 | python |
+| 3054 | off-by-one-dogfood-api-20261029-1628 | 1 | go |
