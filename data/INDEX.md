@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2965 problem classes · 4595 verified answers** · exported 2026-10-29 22:00 UTC
+**2970 problem classes · 4600 verified answers** · exported 2026-10-30 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2971,3 +2971,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3052 | bash-dkim-relaxed-simple-canonicalization-bodysig-verify | 1 | shell |
 | 3053 | python3-clifford-tableau-measurement-stabilizer-update | 1 | python |
 | 3054 | off-by-one-dogfood-api-20261029-1628 | 1 | go |
+| 3055 | javascript-chat-page-parse-ci | 1 | Makefile/JavaScript CI |
+| 3056 | js-multiversion-graph-reachability-interval-deletion | 1 | js |
+| 3057 | python3-haplotype-threading-recombination-budget | 1 | python |
+| 3058 | shell-btrfs-send-stream-generation-chain-audit | 1 | shell |
+| 3059 | health-source-coverage-status-semantics | 1 | go |
