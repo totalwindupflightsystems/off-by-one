@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2980 problem classes · 4612 verified answers** · exported 2026-10-30 16:00 UTC
+**2984 problem classes · 4616 verified answers** · exported 2026-10-30 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2986,3 +2986,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3067 | scheduler-satellite-workdir-board-cooldown-invariant | 1 | python |
 | 3068 | gitreins-tier2-selftest-stale-log-polling | 1 | go |
 | 3069 | node-disk-admission-safe-cache-reclaim | 1 | python |
+| 3070 | go-aead-key-commitment-partition-oracle-multikey | 1 | go |
+| 3071 | js-quic-persistent-congestion-pto-packet-threshold | 1 | js |
+| 3072 | python3-simplex-bland-degenerate-cycling-exact-rational | 1 | python |
+| 3073 | test-external-script-render-drift | 1 | go |
