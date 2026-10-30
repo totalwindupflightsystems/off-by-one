@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2970 problem classes · 4600 verified answers** · exported 2026-10-30 04:01 UTC
+**2973 problem classes · 4603 verified answers** · exported 2026-10-30 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2976,3 +2976,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3057 | python3-haplotype-threading-recombination-budget | 1 | python |
 | 3058 | shell-btrfs-send-stream-generation-chain-audit | 1 | shell |
 | 3059 | health-source-coverage-status-semantics | 1 | go |
+| 3060 | go-lease-fenced-shard-reassignment | 1 | go |
+| 3061 | shell-btrfs-incremental-snapshot-lineage-reconcile | 1 | shell |
+| 3062 | shell-dispatch-artifact-manifest-boundary | 1 | go |
