@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2973 problem classes · 4603 verified answers** · exported 2026-10-30 10:00 UTC
+**2980 problem classes · 4612 verified answers** · exported 2026-10-30 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -13,12 +13,12 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 1540 | gitreins-tier2-input-token-cap-exceeded | 8 | go |
 | 277 | python-sdk-idle-audit | 7 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
+| 2012 | gitreins-tier2-iteration-cap-exceeded | 7 | go, python |
 | 355 | gitreins-judge-iteration-cap | 6 | go |
 | 419 | go-live-e2e-battery | 6 | go |
 | 455 | static-html-idle-tick | 6 | go |
 | 457 | go-e2e-live-server-battery | 6 | go |
 | 550 | board-foreman-idle-audit | 5 | go, python |
-| 2012 | gitreins-tier2-iteration-cap-exceeded | 5 | go |
 | 394 | python-gameplay-stuck-detection-screen-oscillation | 4 | go |
 | 780 | python-standing-block-watchdog-key-probe | 4 | go |
 | 945 | board-jsonl-duplicate-id-remediation | 4 | go, python |
@@ -2979,3 +2979,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3060 | go-lease-fenced-shard-reassignment | 1 | go |
 | 3061 | shell-btrfs-incremental-snapshot-lineage-reconcile | 1 | shell |
 | 3062 | shell-dispatch-artifact-manifest-boundary | 1 | go |
+| 3063 | js-crdt-orset-epoch-compaction-causal-resurrection | 1 | js |
+| 3064 | go-wasm-tailcall-exception-unwind-deopt-map | 1 | go |
+| 3065 | python3-lsm-ssi-predicate-lock-phantom-replay | 1 | python |
+| 3066 | python-http-client-implicit-accept-encoding-strict-header-denial | 1 | python |
+| 3067 | scheduler-satellite-workdir-board-cooldown-invariant | 1 | python |
+| 3068 | gitreins-tier2-selftest-stale-log-polling | 1 | go |
+| 3069 | node-disk-admission-safe-cache-reclaim | 1 | python |

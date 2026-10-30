@@ -1,0 +1,28 @@
+{
+  "class_id": 3065,
+  "title": "python3-lsm-ssi-predicate-lock-phantom-replay",
+  "description": "python3-lsm-ssi-predicate-lock-phantom-replay",
+  "created_at": "2026-10-30 10:20:37",
+  "answers": [
+    {
+      "answer_id": 4798,
+      "language": "python",
+      "environment": "python3",
+      "version": "3.11",
+      "solution": "Solution written and verified. Full artifact: **`~/solution/SOLUTION.md`** (self-contained), with runnable code in `ssi_solver.py` and `test_ssi_solver.py`.\n\n## Diagnosis — root causes\n\nThe failure class is a **wrong SSI decision**, not a crash. Five defects cause it:\n\n1. **Phantom gaps at page boundaries** — range reads are tracked as the physical fragments actually scanned (`[lo,p1]`, `[p2,hi]`, …); a concurrent insert landing in the gap or exactly on the boundary creates no `rw` anti-dependency, so a real cycle is missed.\n2. **Wrong anti-dependency visibility** — `R →rw W` must exist only when `W.commit_ts > R.start_ts` (and `W` isn't the version `R` read). Getting this wrong reverses cycles and silently accepts write-skew/phantoms.\n3. **Ignored bounded lock memory** — when a transaction reads more ranges than the budget, the engine must **escalate** to a full-table predicate lock. Not modelling escalation drops conflicts the real engine observes.\n4. **Retries mishandled** — an aborted attempt must contribute nothing; a retry (`retry_of`, new `start_ts`) starts clean and now sees the competitor's committed value.\n5. **Causality ignored** — decisions must happen at commit time in `commit_ts` order; an offline \"abort the smallest set\" can abort an already-committed transaction.\n\n## Exact fix\n\n`ssi_solver.py` (stdlib only) implements:\n\n- `merge_ranges()` — union of predicate fragments, merging **touching** ranges (`next.lo <= cur.hi + 1`), closing inter-page phantom holes.\n- `_add_lock()` — escalates a table to `(-inf,+inf)` and logs `ESCALATE_TO_TABLE` once the transaction's distinct range count exceeds `lock_budget`.\n- `_candidate_edges()` — builds `wr`/`ww`/`rw` over the committed set; `rw` guarded by `commit_ts > start_ts` plus predicate membership (catches phantoms).\n- `_commit()` — commits in timestamp order; aborts **iff** adding the transaction closes a cycle, keeping the committed DSG acyclic ⇒ serializable.\n- `_shortest_cycle_through()` — BFS returns the minimal cycle plus per-edge witness strings (keys, snapshots, predicates, timestamps) as the minimal conflict explanation.\n- Attempts are auto-numbered (`T`, `T#2`, …) and only committed attempts enter the version store, so retries are isolated.\n\n## Verification (8/8 pass)\n\n```console\n$ python3 test_ssi_solver.py -v\ntest_write_skew_cycle ... ok\ntest_phantom_range_cycle ... ok\ntest_phantom_adjacent_page_split ... ok          # phantom key t:20 on page 7/8 boundary\ntest_predicate_lock_escalation ... ok            # budget=2 -> ESCALATE_TO_TABLE forces abort\ntest_abort_then_retry ... ok                     # T aborts, retries at new ts, commits\ntest_initial_reader_is_clean ... ok\ntest_no_false_positives ... ok\ntest_random_traces_are_serializable ... ok        # 300 random traces, DSG re-checked acyclic\nRan 8 tests in 0.024s\nOK\n```\n\nAuto-detected dangerous cycle example (`/tmp/cyc.json`), showing the minimal explanation:\n\n```json\n{\"kind\":\"rw_antidependency_cycle\",\"tx\":\"T2\",\n \"cycle\":[\"T2 -> T1\",\"T1 -> T2\"],\n \"witness\":[\n   [\"rw: T2 predicate [(10.0, 20.0)] on t matched T1's write (t,11.0) [cts=110.0 > snap=100.0]\"],\n   [\"rw: T1 predicate [(10.0, 25.0)] on t matched T2's write (t,20.0) [cts=120.0 > snap=100.0]\"]]}\n```\n\nFiles in `~/solution`:\n- `ssi_solver.py` — the checker/CLI (`python3 ssi_solver.py trace.json [--lock-budget N]`)\n- `test_ssi_solver.py` — verification suite\n- `demo_phantom.json` — page-split phantom + retry trace\n- `SOLUTION.md` — full write-up with code, schema, usage and verification (embeds both `.py` files byte-exactly)\n",
+      "evidence": "# Evidence\n- Problem class: python3-lsm-ssi-predicate-lock-phantom-replay\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-30T10:20:37.407Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Given an MVCC transaction trace with range predicates, construct a serializable snapshot-isolation schedule by detecting dangerous read-write anti-dependency cycles, including phantoms split across adjacent index pages and transactions that abort then retry under a new timestamp. Return a minimal conflict explanation and a valid commit/abort decision sequence while respecting predicate-lock escalation and bounded lock memory.",
+        "environment": "python3",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "python3-lsm-ssi-predicate-lock-phantom-replay",
+        "provider": "openrouter",
+        "solved_at": "2026-10-30T10:20:37.407Z",
+        "version": "3.11"
+      },
+      "status": "verified",
+      "created_at": "2026-10-30 10:20:37"
+    }
+  ]
+}
