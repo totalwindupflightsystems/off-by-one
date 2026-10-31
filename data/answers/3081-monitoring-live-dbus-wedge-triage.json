@@ -1,0 +1,28 @@
+{
+  "class_id": 3081,
+  "title": "monitoring-live-dbus-wedge-triage",
+  "description": "monitoring-live-dbus-wedge-triage",
+  "created_at": "2026-10-31 09:10:54",
+  "answers": [
+    {
+      "answer_id": 4816,
+      "language": "",
+      "environment": "linux",
+      "version": "",
+      "solution": "Done. The solution is in `~/bunker-logind-wedge/RUNBOOK.md` with tested supporting scripts.\n\n## Root cause (grounded in this host)\n\n`bunker`'s own help text named the failure mode exactly:\n\n> Every agent spawn enables systemd linger for its per-agent user. A linger entry whose user no longer exists is stale: logind keeps churning on it and thousands of stale entries starve user-manager starts host-wide (**INT-CI-007/INT-HOST-001: 8024 entries for 2 live users**).\n\nChain: spawn enables linger → destroy/cancelled-spawn/failed-rollback deletes the user without removing the linger file → thousands of dangling `/var/lib/systemd/linger/bunker-*` entries → `systemd-logind`'s single D-Bus dispatch loop is saturated by GC/`user_start` churn → `busctl introspect` times out while the unit still reports `active`. The probe (`bunker_logind_up`) was correct; process-liveness (`systemctl is-active`) was the lie.\n\n## Fix\n\n- **Immediate (safe/idempotent):** `bunker linger prune` (dry-run first) then `bunker homes prune`; only restart `systemd-logind` if the bounded probe doesn't recover after ~60s. Packaged in `bunker-logind-remediate.sh`.\n- **Prevention:** remove the linger entry (via `loginctl disable-linger`) *before* `userdel` in the lifecycle — the real bug — plus a 15-min `bunker-residue-prune.timer` safety net.\n- **Monitoring:** a textfile probe exporting `bunker_logind_up` **and** `bunker_logind_active`, with the wedge alert `bunker_logind_up == 0 and on(host) bunker_logind_active == 1`, plus early-warning `bunker_linger_entries{state=\"stale\"} > 1000`.\n\n## What I actually verified here\n\n- `bunker linger prune --dir <fixture>`: scanned 4, removed exactly the 2 stale entries, kept `root`/`kara`.\n- `bunker homes --dir <fixture>`: classified stale vs. live correctly.\n- The probe end-to-end against a linger fixture emitted correct metrics (`total 3 / live 1 / stale 2`), and `BunkerLogindWedge` correctly did **not** fire when `active=0` (container has no systemd).\n- All shell scripts pass `bash -n`; alert YAML parses as valid YAML.\n\nOne caveat worth flagging: I could not exercise the live `busctl`/`systemctl` path or `promtool` because this container is not booted with systemd as PID 1. The D-Bus wedge mechanism and recovery steps are derived from the embedded tool documentation plus working fixture tests, not from a live wedged logind.\n",
+      "evidence": "# Evidence\n- Problem class: monitoring-live-dbus-wedge-triage\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-31T09:10:54.080Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Monitoring triage pattern: a Prometheus BunkerLogindWedge alert remained firing while systemd-logind was active but busctl introspect timed out; the metric bunker_logind_up stayed 0 and live host probes showed the daemon stuck processing requests. Need a reusable verification and remediation pattern for live D-Bus wedges.",
+        "environment": "Linux fleet host with Prometheus and systemd-logind",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "monitoring-live-dbus-wedge-triage",
+        "provider": "openrouter",
+        "solved_at": "2026-10-31T09:10:54.091Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-31 09:10:55"
+    }
+  ]
+}

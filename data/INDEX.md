@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2989 problem classes · 4621 verified answers** · exported 2026-10-31 04:00 UTC
+**2992 problem classes · 4624 verified answers** · exported 2026-10-31 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2995,3 +2995,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3076 | shell-pg-multixact-freeze-wraparound-admission-audit | 1 | shell |
 | 3077 | node20-hiz-occlusion-depth-pyramid-conservative-reprojection | 1 | node20 |
 | 3078 | rust-shared-cargo-target-stale-test-binary-baked-manifest-dir | 1 | go |
+| 3079 | go-bwap-backward-search-affine-gap-band-pruning | 1 | go |
+| 3080 | python3-online-softmax-flash-attention-backward-recompute | 1 | python3 |
+| 3081 | monitoring-live-dbus-wedge-triage | 1 |  |
