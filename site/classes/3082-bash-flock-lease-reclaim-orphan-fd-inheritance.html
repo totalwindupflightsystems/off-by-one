@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>bash-flock-lease-reclaim-orphan-fd-inheritance — Off-By-One verified answer</title>
+<meta name="description" content="Done. The full diagnosis + verified fix is written to **`~/SOLUTION.md`**, with the working artifacts in `~/`. ## Root causes (the real bugs to avoid) 1. **PID-">
+<meta property="og:title" content="bash-flock-lease-reclaim-orphan-fd-inheritance — Off-By-One">
+<meta property="og:description" content="Done. The full diagnosis + verified fix is written to **`~/SOLUTION.md`**, with the working artifacts in `~/`. ## Root causes (the real bugs to avoid) 1. **PID-">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3082-bash-flock-lease-reclaim-orphan-fd-inheritance.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>bash-flock-lease-reclaim-orphan-fd-inheritance</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>bash-flock-lease-reclaim-orphan-fd-inheritance</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3082-bash-flock-lease-reclaim-orphan-fd-inheritance.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>Done. The full diagnosis + verified fix is written to <strong><code>~/SOLUTION.md</code></strong>, with the working artifacts in <code>~/</code>.</p>
+<h2>Root causes (the real bugs to avoid)</h2>
+<ol>
+<li><strong>PID-only liveness is unsafe.</strong> PID recycling makes a dead holder look alive forever. Correct liveness requires <code>(starttime from /proc/&lt;pid&gt;/stat field 22, fd target path/inode)</code> together.</li>
+<li><strong>Check-then-act on a file is TOCTOU.</strong> "Read owner file, then create" lets two claimants both see "free." Mutual exclusion must be a single atomic kernel op: <code>flock(2)</code> on an fd.</li>
+<li><strong>Forks need open-file-description inheritance.</strong> <code>flock</code> attaches to the open file description, so a forked keeper inherits the lock and the kernel releases it the instant the last fd closes — reclaim in tens of ms, no reaper.</li>
+<li><strong>Reclaim means stale metadata, not a stolen lock.</strong> Once you win the <code>flock</code>, leftover metadata is provably orphaned → clean it and return <code>4</code>.</li>
+<li><strong>Busy-poll <code>sleep</code> causes a fork storm.</strong> A 200-way race starved the host; parking on <code>flock -w</code>'s kernel wait queue fixed it.</li>
+<li><strong>A racy <code>release</code> can delete a new holder's metadata</strong> (and leak its lock). Fix: only create/delete metadata while holding the <code>flock</code>.</li>
+</ol>
+<h2>Key implementation points in <code>lease.sh</code></h2>
+<ul>
+<li><code>acquire</code>: <code>exec {fd}&gt;lock; flock -n</code> / <code>flock -w 1</code>, then fork a keeper subshell that inherits <code>fd</code>; parent can exit.</li>
+<li><code>holder_is_live</code>: <code>/proc/&lt;pid&gt;</code> + starttime + <code>readlink /proc/&lt;pid&gt;/fd/&lt;fd&gt;</code> (path, else inode).</li>
+<li>Keeper publishes metadata atomically (<code>tmp</code>+<code>mv</code>) then blocks.</li>
+<li><code>release</code> verifies and kills only a genuinely live holder, then takes the <code>flock</code> itself before clearing metadata.</li>
+<li>Exit codes: <code>0</code> ok, <code>3</code> timeout, <code>4</code> stale lease reclaimed.</li>
+</ul>
+<h2>Verification (all passing)</h2>
+<ul>
+<li><code>verify_lease.sh</code>: reclaim after SIGKILL in <strong>~46 ms</strong> with <code>rc=4</code>; unrelated-PID and matching-pid+start-but-wrong-fd both classified stale; inherited-fd lock survives parent exit and releases when the last fd closes; <code>inspect</code> reports <code>"reclaimed":true</code> for orphans.</li>
+<li><code>race_lease.sh</code> (200 simultaneous claimants, atomic <code>mkdir</code> critical section independent of the lease): <strong><code>success=200 overlap=0 timeout=0</code></strong>, repeated runs.</li>
+<li><code>shellcheck lease.sh</code> clean, <code>bash -n</code> OK.</li>
+</ul>
+<p>The embedded code in <code>SOLUTION.md</code> was diffed against the actual scripts and matches byte-for-byte.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: bash-flock-lease-reclaim-orphan-fd-inheritance
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-10-31T10:15:54.046Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a directory-scoped mutual-exclusion lease manager in pure bash (no external daemons, only flock/fcntl and /proc) that survives fork storms: a lease is held on an inherited file descriptor so a forked subshell keeps the lock, yet the lease must be reclaimed within 250ms of the holder process tree dying even when the lock file itself is left behind. The script must distinguish a live holder from an orphaned lease left by a SIGKILLed shell whose pid was recycled by an unrelated process (compare fd target inode plus process start time, not just pid), and must prove that no two concurrent claimants both observe the lease as free during a 200-process start race. Ship lease.sh exposing `acquire &lt;name&gt; --timeout &lt;ms&gt;`, `release &lt;name&gt;`, and `inspect &lt;name&gt;` (JSON with holder_pid, holder_start_time, fd_target, reclaimed), exiting 3 on timeout and 4 when a stale lease had to be reclaimed.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;bash-flock-lease-reclaim-orphan-fd-inheritance&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-10-31T10:15:54.050Z&quot;, &quot;version&quot;: &quot;5.2&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

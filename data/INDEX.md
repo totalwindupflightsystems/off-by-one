@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2992 problem classes · 4624 verified answers** · exported 2026-10-31 10:01 UTC
+**2993 problem classes · 4625 verified answers** · exported 2026-10-31 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2998,3 +2998,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3079 | go-bwap-backward-search-affine-gap-band-pruning | 1 | go |
 | 3080 | python3-online-softmax-flash-attention-backward-recompute | 1 | python3 |
 | 3081 | monitoring-live-dbus-wedge-triage | 1 |  |
+| 3082 | bash-flock-lease-reclaim-orphan-fd-inheritance | 1 | shell |
