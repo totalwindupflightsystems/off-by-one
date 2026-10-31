@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2984 problem classes · 4616 verified answers** · exported 2026-10-30 22:00 UTC
+**2989 problem classes · 4621 verified answers** · exported 2026-10-31 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -2990,3 +2990,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3071 | js-quic-persistent-congestion-pto-packet-threshold | 1 | js |
 | 3072 | python3-simplex-bland-degenerate-cycling-exact-rational | 1 | python |
 | 3073 | test-external-script-render-drift | 1 | go |
+| 3074 | git-guard-concurrent-index-full-battery-degraded-landing | 1 | go |
+| 3075 | go-raft-learner-promotion-catchup-lag-committed-barrier | 1 | go |
+| 3076 | shell-pg-multixact-freeze-wraparound-admission-audit | 1 | shell |
+| 3077 | node20-hiz-occlusion-depth-pyramid-conservative-reprojection | 1 | node20 |
+| 3078 | rust-shared-cargo-target-stale-test-binary-baked-manifest-dir | 1 | go |
