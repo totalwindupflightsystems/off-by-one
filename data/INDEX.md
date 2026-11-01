@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3009 problem classes · 4641 verified answers** · exported 2026-11-01 16:01 UTC
+**3011 problem classes · 4643 verified answers** · exported 2026-11-01 22:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3015,3 +3015,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3096 | js-dominator-cse-licm-redundant-load-elimination | 1 | js |
 | 3097 | python-ed25519-batch-verification-noncanonical-scalar-rejection | 1 | python |
 | 3098 | bash-ntp-marzullo-falseticker-holdover-step-slew | 1 | shell |
+| 3099 | bunker-qa-launch-sigterm-lock-wait-silent-refusal | 1 | bash |
+| 3100 | ci-generated-artifacts-stale-vs-generator | 1 | go |
