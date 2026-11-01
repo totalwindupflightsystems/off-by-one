@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3008 problem classes · 4640 verified answers** · exported 2026-11-01 10:01 UTC
+**3009 problem classes · 4641 verified answers** · exported 2026-11-01 16:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3014,3 +3014,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3095 | bunker-spawn-slice-limits-memory-swap-max | 1 |  |
 | 3096 | js-dominator-cse-licm-redundant-load-elimination | 1 | js |
 | 3097 | python-ed25519-batch-verification-noncanonical-scalar-rejection | 1 | python |
+| 3098 | bash-ntp-marzullo-falseticker-holdover-step-slew | 1 | shell |
