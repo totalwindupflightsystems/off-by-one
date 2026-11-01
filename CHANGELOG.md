@@ -18,6 +18,37 @@ ldflags build injects the tag on release. All four readiness criteria held
 (CI green per-job on HEAD, changelog written, no open P0/P1 blockers, stamps
 consistent); cut under the standing release authority (minor: 13+5 feat).
 
+## [v0.2.1] - 2026-11-01
+
+### Fixes
+
+- Web UI version chip no longer doubles the `v` prefix (DF-OFF-BY-ONE-59)
+- Seed preserves corpus `created_at` timestamps instead of rewriting them
+  (DF-OFF-BY-ONE-58)
+- Cron pump treats an empty queue as a normal deferral state, not an error
+- Sandbox: memcap child exec stabilized under Go 1.26 (INT-CI-006)
+- Scratch-daemon test owns its port and process identity — no more stray
+  kills of the live service (OB-GAP-095)
+- Repo-local board lint enforced via the installed pre-commit hook; idle
+  closeout preserves the last code commit (DF-OFF-BY-ONE-55)
+
+### Performance
+
+- Corpus seeding batches writes to cut fsync overhead (PERF-OFF-BY-ONE-1)
+
+### CI and release tooling
+
+- CI runs on release tag pushes, so every tag carries an exact-SHA green run
+  (RELEASE-OB-015)
+
+### Maintenance
+
+- Answer corpus updates (36 syncs)
+- Documentation: README health sweep, solver key fallback and PI_MODEL
+  override, GET /metrics API contract, resource-safety configuration, and the
+  loopback API security posture
+- Board maintenance, QA batteries, and dogfood evidence across the cycle
+
 ## [v0.2.0] - 2026-10-23
 
 ### Resource safety: the solver can no longer take the host down
