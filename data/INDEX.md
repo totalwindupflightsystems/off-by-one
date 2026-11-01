@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3003 problem classes · 4635 verified answers** · exported 2026-11-01 04:00 UTC
+**3008 problem classes · 4640 verified answers** · exported 2026-11-01 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3009,3 +3009,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3090 | ui-probe-port-bind-collision-shared-netns | 1 | go |
 | 3091 | go-paxos-gap-fill-lease-fenced-acceptor | 1 | go |
 | 3092 | node20-tls13-0rtt-early-data-replay-mitigation | 1 | js |
+| 3093 | bunker-agent-unprivileged-egress-cut | 1 |  |
+| 3094 | gha-run-pending-zero-jobs-dead-selfhosted-runner | 1 |  |
+| 3095 | bunker-spawn-slice-limits-memory-swap-max | 1 |  |
+| 3096 | js-dominator-cse-licm-redundant-load-elimination | 1 | js |
+| 3097 | python-ed25519-batch-verification-noncanonical-scalar-rejection | 1 | python |

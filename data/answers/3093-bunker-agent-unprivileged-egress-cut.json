@@ -1,0 +1,28 @@
+{
+  "class_id": 3093,
+  "title": "bunker-agent-unprivileged-egress-cut",
+  "description": "bunker-agent-unprivileged-egress-cut",
+  "created_at": "2026-11-01 04:28:26",
+  "answers": [
+    {
+      "answer_id": 4828,
+      "language": "",
+      "environment": "linux",
+      "version": "",
+      "solution": "Done. The verified solution is written to **`/workspace/solution.md`**.\n\n## What I diagnosed\n\n1. **Root cause** — the agent identity is unprivileged (`uid=1001/1002`, `CapEff=0000000000000000`). `unshare -n` returns `EPERM`, `unshare -Urn` is blocked by the host's restricted unprivileged-userns policy, and there's no `CAP_NET_ADMIN` for `iptables`/`nft`. So an in-agent battery can never establish its own egress cut.\n\n2. **The real trap** — `bunker exec` and non-detached `bunker run` are plain SSH sessions in the **host** netns (`net:[4026531833]`, all 100 host links). Only system-scoped transient units created by `bunkerd` inherit `PrivateNetwork=yes`, i.e. `bunker run --detach` and the agent's `dockerd` unit.\n\n3. **Fix** — do the cut at spawn time: `bunker spawn <id> --network-mode systemd`, stage source + module cache, build offline, and run probes **and** suite together inside one `bunker run --detach` unit.\n\n## What I actually verified end-to-end\n\n- Spawned `offline1 --network-mode systemd`; `bunker info` reports the loopback-only systemd isolation.\n- Staged a tarball source tree and a pre-populated GOMODCACHE (24 MB) via `bunker exec --stdin` (byte-exact SHA-256; needed because `bunker cp`'s `scp` was blocked by a world-writable `/etc/ssh/ssh_config.d` symlink).\n- Ran one detached unit (`PrivateNetwork=yes`, `netns=net:[4026538780]`, only `lo`, no routes) that did:\n  - `GOPROXY=off GOFLAGS=-mod=mod GOMODCACHE=$HOME/gomodcache go build ./...` → `BUILD_OK`\n  - external probe → `EXTERNAL_FAIL: ... network is unreachable`\n  - loopback probe → `LOOPBACK_OK`\n  - `go test ./...` → `ok example.com/offl`\n- Negative control: same build with an empty cache fails with `module lookup disabled by GOPROXY=off`, proving staging is what makes it offline.\n- Cleaned up both test agents.\n\nThe document includes the full copy-paste runbook, the `references/network-cut-verification.md`-compliant evidence pair, the staging fallbacks (exec `--stdin` and the host-side `/run/bunker/<agent>/docker.sock`), and a checklist.\n",
+      "evidence": "# Evidence\n- Problem class: bunker-agent-unprivileged-egress-cut\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-01T04:28:26.900Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A clean JIT bunker agent cannot apply its own network cut: the agent runs as unprivileged uid with CapEff=0 (no unshare, no iptables/nft installed), so chaos-style offline batteries cannot establish the egress cut in-agent. The fleet-native cut is at spawn time: `bunker spawn <id> --network-mode systemd` creates the agent in a private network namespace (loopback only, NO outbound). Because image pulls fail in that mode, stage source AND the Go module cache into the agent (bunker cp; stdin does not forward), build offline with GOPROXY=off GOFLAGS=-mod=mod GOMODCACHE=<staged>, prove the cut with an external probe failing plus a loopback probe succeeding inside the agent, then run the suite.",
+        "environment": "Linux, bunker CLI + bunkerd fleet (bunker-las-*), Go repo",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "bunker-agent-unprivileged-egress-cut",
+        "provider": "openrouter",
+        "solved_at": "2026-11-01T04:28:26.901Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-11-01 04:28:26"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "class_id": 3095,
+  "title": "bunker-spawn-slice-limits-memory-swap-max",
+  "description": "bunker-spawn-slice-limits-memory-swap-max",
+  "created_at": "2026-11-01 05:03:10",
+  "answers": [
+    {
+      "answer_id": 4830,
+      "language": "",
+      "environment": "linux",
+      "version": "",
+      "solution": "I diagnosed the issue and produced a verified solution. Here's a summary.\n\n## Diagnosis\n\nThe failure is host-side cgroup containment, not a client or CLI problem:\n\n1. `bunkerd` applies resource limits to the agent's **user slice** (`user-<uid>.slice`). The shipped `standard`/`hardened` tiers arm **swap-bar** containment (`MemorySwapMax=0` → cgroup `memory.swap.max`).\n2. After writing the drop-in and `systemctl daemon-reload`, it runs a **landing check** that reads `/sys/fs/cgroup/user.slice/user-<uid>.slice/memory.swap.max` and requires exactly `0`. If not, spawn fails at `slice-limits` and rolls back.\n3. On the broken host, nothing sets the bar:\n   - the deployed `bunkerd 0.1.4` binary contains **zero** occurrences of `MemorySwapMax` (I verified with `strings`; all 9 `/etc/systemd/system/user-*.slice.d/50-bunker.conf` files are missing it), and\n   - the global template `/etc/systemd/system/user-.slice.d/` only sets `TasksMax`, so `user-<uid>.slice` inherits `memory.swap.max = max`.\n\nSo the check wants `0`, the cgroup says `max`, and every `standard`/`hardened` spawn fails deterministically.\n\n## Fix (in the doc)\n\n- **Immediate host-side:** a persistent `[Slice] MemorySwapMax=0` drop-in at `/etc/systemd/system/user-.slice.d/50-bunker-swap.conf` (per-UID slices inherit the `user-.slice` template — confirmed via `systemctl cat user-1000.slice`), plus `systemctl set-property --runtime` for live agent slices and `daemon-reload`.\n- **Durable:** deploy a `bunkerd` that emits `MemorySwapMax=0` in `sliceContainmentKnobs` and applies the drop-in before verifying (current `main`, `INT-CI-37`), with the 2s convergence budget.\n- **Do not** \"fix\" it with `memory_swap_max_bytes: -1` or `--preset open` (weakens a real containment).\n\n## Verification performed\n\n- Ran the project's hermetic tests against cloned `github.com/deployBunker/bunker` (`main`, `e8ffd59`):\n  - `TestGAP118_TierTableMatchesMatrix` → standard/hardened emit `MemorySwapMax=0`, open emits nothing.\n  - `TestINTCI37_SliceDropInBeforeLandingCheck` → fixture starts at `memory.swap.max=max`, reproduces the exact fingerprint under the broken verify-before-apply order, passes with the fixed order.\n  - `TestINTCI37_LandingCheckBoundedConvergence`, `TestGAP118_SwapBarNeverOnOpen` → PASS.\n- Documented on-host checks (`systemctl show ... -p MemorySwapMax`, live cgroup read), a probe-spawn procedure, and rollback/breadcrumb checks.\n\nThe full solution is written to **`/workspace/solution.md`** (copy at `~/solution.md`).\n",
+      "evidence": "# Evidence\n- Problem class: bunker-spawn-slice-limits-memory-swap-max\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-01T05:03:08.392Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "bunker spawn fails during containment setup at the slice-limits step with a convergence error because memory.swap.max is max rather than the required 0 on the target host. The agent is never created. The mechanism is host-side cgroup slice containment (systemd) expecting swap fully disabled for the agent slice; a host where the default slice carries memory.swap.max=max fails every spawn. Workaround: use a healthy server; proper fix is host-side (set memory.swap.max=0 for the agent slice / align the bunkerd containment defaults) — do not retry-spawn against the broken host.",
+        "environment": "Linux bunkerd fleet hosts",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "bunker-spawn-slice-limits-memory-swap-max",
+        "provider": "openrouter",
+        "solved_at": "2026-11-01T05:03:08.393Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-11-01 05:03:10"
+    }
+  ]
+}
