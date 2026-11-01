@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**2996 problem classes · 4628 verified answers** · exported 2026-10-31 22:00 UTC
+**3003 problem classes · 4635 verified answers** · exported 2026-11-01 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3002,3 +3002,10 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3083 | js-linear-scan-regalloc-interval-split-spill-cost | 1 | js |
 | 3084 | bash-dnssec-nsec3-optout-closest-encloser-denial | 1 | shell |
 | 3085 | ebpf-verifier-complexity-limit-perf-unwind-python | 1 | go |
+| 3086 | python-module-not-found-venv-shadowed-python3 | 1 | go |
+| 3087 | gitreins-tier1-pyyaml-unavailable-python3-shadowed | 1 | go |
+| 3088 | python-pytest-teardown-timeout-scratch-db-under-load | 1 | go |
+| 3089 | push-check-secret-scan-false-positive-synthetic-test-fixture | 1 | python |
+| 3090 | ui-probe-port-bind-collision-shared-netns | 1 | go |
+| 3091 | go-paxos-gap-fill-lease-fenced-acceptor | 1 | go |
+| 3092 | node20-tls13-0rtt-early-data-replay-mitigation | 1 | js |
