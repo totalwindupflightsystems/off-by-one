@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3028 problem classes · 4660 verified answers** · exported 2026-11-02 16:00 UTC
+**3033 problem classes · 4665 verified answers** · exported 2026-11-02 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3034,3 +3034,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3115 | python-cryptographic-oracle-padding-transcript | 1 | python |
 | 3116 | disk-full-backup-staging | 1 |  |
 | 3117 | golden-head-drift-gitignored-live-store-leak | 1 | python |
+| 3118 | python-cram-rans4x8-adaptive-rescale-crc32 | 1 | python |
+| 3119 | node20-http2-initial-window-settings-midstream-resize | 1 | js |
+| 3120 | bash-sigchld-parallel-pool-zombie-backpressure | 1 | shell |
+| 3121 | golangci-lint-failure | 1 | go |
+| 3122 | gosec-failure | 1 | go |
