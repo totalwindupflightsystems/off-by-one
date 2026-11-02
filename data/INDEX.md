@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3012 problem classes · 4644 verified answers** · exported 2026-11-02 04:01 UTC
+**3016 problem classes · 4648 verified answers** · exported 2026-11-02 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3018,3 +3018,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3099 | bunker-qa-launch-sigterm-lock-wait-silent-refusal | 1 | bash |
 | 3100 | ci-generated-artifacts-stale-vs-generator | 1 | go |
 | 3101 | raft-snapshot-installation-linearizability-under-reordered-chunks | 1 | shell |
+| 3102 | adversarial-bloom-filter-rebuild-crash-consistency | 1 | go |
+| 3103 | wasm-phi-liveness-lowering-structured-control-flow | 1 | python |
+| 3104 | github-actions-tag-push-no-run-ci-skip | 1 | go |
+| 3105 | go-ring-allreduce-hierarchical-reduce-scatter-bf16-drift | 1 | go |
