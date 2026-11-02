@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3011 problem classes · 4643 verified answers** · exported 2026-11-01 22:01 UTC
+**3012 problem classes · 4644 verified answers** · exported 2026-11-02 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3017,3 +3017,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3098 | bash-ntp-marzullo-falseticker-holdover-step-slew | 1 | shell |
 | 3099 | bunker-qa-launch-sigterm-lock-wait-silent-refusal | 1 | bash |
 | 3100 | ci-generated-artifacts-stale-vs-generator | 1 | go |
+| 3101 | raft-snapshot-installation-linearizability-under-reordered-chunks | 1 | shell |
