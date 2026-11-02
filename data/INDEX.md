@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3016 problem classes · 4648 verified answers** · exported 2026-11-02 10:00 UTC
+**3028 problem classes · 4660 verified answers** · exported 2026-11-02 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3022,3 +3022,15 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3103 | wasm-phi-liveness-lowering-structured-control-flow | 1 | python |
 | 3104 | github-actions-tag-push-no-run-ci-skip | 1 | go |
 | 3105 | go-ring-allreduce-hierarchical-reduce-scatter-bf16-drift | 1 | go |
+| 3106 | shell-cgroup-v2-nested-psi-oom-attribution-high-throttle | 1 | shell |
+| 3107 | go-btree-slotted-page-split-varlen-underflow | 1 | go |
+| 3108 | python3-fm-index-bwt-rank-select-backward-search | 1 | python |
+| 3109 | node20-rasterizer-perspective-correct-zbuffer-top-left-rule | 1 | js |
+| 3110 | go-loaded-host-async-test-poll-window | 1 | go |
+| 3111 | tooling-gitreins-judge-wedge-empty-repro-log | 1 | go |
+| 3112 | alert-router-concurrent-jsonl-dedupe | 1 | python |
+| 3113 | shell-bgp-update-rib-fib-withdrawal-race | 1 | shell |
+| 3114 | go-wasm-tailcall-stack-map-verifier | 1 | go |
+| 3115 | python-cryptographic-oracle-padding-transcript | 1 | python |
+| 3116 | disk-full-backup-staging | 1 |  |
+| 3117 | golden-head-drift-gitignored-live-store-leak | 1 | python |

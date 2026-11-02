@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>alert-router-concurrent-jsonl-dedupe — Off-By-One verified answer</title>
+<meta name="description" content="router.py performed the dedupe check and the append as two separate operations:">
+<meta property="og:title" content="alert-router-concurrent-jsonl-dedupe — Off-By-One">
+<meta property="og:description" content="router.py performed the dedupe check and the append as two separate operations:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3112-alert-router-concurrent-jsonl-dedupe.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>alert-router-concurrent-jsonl-dedupe</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>python</span><span class='badge v'>linux</span></div><div class='desc'><p>router.py performed the dedupe check and the append as two separate operations:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3112-alert-router-concurrent-jsonl-dedupe.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Fix: serialize alert-router JSONL dedupe with <code>fcntl.flock</code></h1>
+<h2>Root cause</h2>
+<p><code>router.py</code> performed the dedupe check and the append as two separate operations:</p>
+<pre><code class="language-python">ids = existing_ids(path)
+if row[&quot;id&quot;] not in ids:
+    append_rows(path, [row])
+</code></pre>
+<p>Two concurrent Alertmanager webhook threads could both call <code>existing_ids()</code>, both observe the id as absent, and then both append. The same race existed in the spool path. The refire path also appended directly, bypassing the dedupe gate and potentially replacing the original acceptance decision with a duplicate row.</p>
+<p>The lock must cover <strong>both the id read and the append</strong>, not just the append.</p>
+<h2>Exact fix</h2>
+<p>Apply the following to <code>stack/alert-router/router.py</code>.</p>
+<h3>1. Add a stable sidecar lock and an atomic append helper</h3>
+<pre><code class="language-python">import contextlib
+import fcntl
+import json
+import os
+from typing import Any, Iterable, Iterator, Mapping
+
+
+def _ensure_parent(path: str) -&gt; None:
+    parent = os.path.dirname(os.path.abspath(os.fspath(path)))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
+@contextlib.contextmanager
+def _exclusive_lock(path: str) -&gt; Iterator[None]:
+    &quot;&quot;&quot;Serialize all writers for one JSONL target using a stable sidecar lock.&quot;&quot;&quot;
+    _ensure_parent(path)
+    lock_path = os.fspath(path) + &quot;.lock&quot;
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def existing_ids(path: str) -&gt; set[str]:
+    ids: set[str] = set()
+    try:
+        with open(path, &quot;r&quot;, encoding=&quot;utf-8&quot;) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                row_id = row.get(&quot;id&quot;)
+                if row_id is not None:
+                    ids.add(row_id)
+    except FileNotFoundError:
+        pass
+    return ids
+
+
+def append_rows(path: str, rows: Iterable[Mapping[str, Any]]) -&gt; None:
+    _ensure_parent(path)
+    with open(path, &quot;a&quot;, encoding=&quot;utf-8&quot;) as fh:
+        for row in rows:
+            fh.write(json.dumps(row, sort_keys=True, separators=(&quot;,&quot;, &quot;:&quot;)) + &quot;\n&quot;)
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def append_once(path: str, row: Mapping[str, Any], *, refire: bool = False) -&gt; bool:
+    &quot;&quot;&quot;Atomically append row iff its id is absent. Returns True iff appended.&quot;&quot;&quot;
+    row_id = row.get(&quot;id&quot;)
+    if row_id is None:
+        raise ValueError(&quot;alert row must contain an 'id'&quot;)
+
+    with _exclusive_lock(path):
+        if row_id in existing_ids(path):
+            # Duplicate or refire: the first accepted row wins.
+            # Do not append and do not overwrite its acceptance decision.
+            if refire:
+                pass
+            return False
+        append_rows(path, [row])
+        return True
+</code></pre>
+<h3>2. Route every local-board and spool write through <code>append_once</code></h3>
+<p>Replace every unsafe read-then-append block, including the refire branch, with the gated helper.</p>
+<pre><code class="language-python"># BEFORE: unsafe local-board path
+ids = existing_ids(board_path)
+if row[&quot;id&quot;] not in ids:
+    append_rows(board_path, [row])
+
+# BEFORE: unsafe spool path
+ids = existing_ids(spool_path)
+if row[&quot;id&quot;] not in ids:
+    append_rows(spool_path, [row])
+
+# BEFORE: ungated refire
+if alert.get(&quot;refire&quot;):
+    append_rows(spool_path, [row])
+</code></pre>
+<pre><code class="language-python"># AFTER: both paths use the same atomic gate
+append_once(board_path, row, refire=bool(alert.get(&quot;refire&quot;)))
+append_once(spool_path, row, refire=bool(alert.get(&quot;refire&quot;)))
+</code></pre>
+<p>If the router chooses one target instead of writing both, use:</p>
+<pre><code class="language-python">target = board_path if board_available else spool_path
+append_once(target, row, refire=bool(alert.get(&quot;refire&quot;)))
+</code></pre>
+<p>The sidecar lock is <code>&lt;jsonl-path&gt;.lock</code>, so concurrent processes and threads writing the same JSONL file serialize on the same lock. Do not delete the lock file during normal operation.</p>
+<h3>3. Refire behavior</h3>
+<p>A refire now goes through the same <code>append_once()</code> gate. If the fingerprint/day id already exists, no second row is appended, so the original row and its acceptance criteria remain intact. If a refire must update non-acceptance fields, rewrite the existing row under the same <code>_exclusive_lock()</code> and copy <code>acceptance</code> from the old row; never append a duplicate.</p>
+<h2>Verification</h2>
+<p>Run from the repository root:</p>
+<pre><code class="language-bash">cd stack/alert-router
+
+python -m compileall -q .
+
+python - &lt;&lt;'PY'
+import ast
+import pathlib
+
+for path in pathlib.Path(&quot;.&quot;).rglob(&quot;*.py&quot;):
+    ast.parse(path.read_text(encoding=&quot;utf-8&quot;), filename=str(path))
+print(&quot;AST OK&quot;)
+PY
+</code></pre>
+<p>Then run the concurrency/refire battery:</p>
+<pre><code class="language-bash">cd stack/alert-router
+
+python - &lt;&lt;'PY'
+import json
+import sys
+import tempfile
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+sys.path.insert(0, &quot;.&quot;)
+import router
+
+
+def make_row(acceptance=&quot;accepted&quot;):
+    return {
+        &quot;id&quot;: &quot;fp-1:2025-01-01&quot;,
+        &quot;fingerprint&quot;: &quot;fp-1&quot;,
+        &quot;day&quot;: &quot;2025-01-01&quot;,
+        &quot;acceptance&quot;: acceptance,
+    }
+
+
+with tempfile.TemporaryDirectory() as td:
+    for name in (&quot;board.jsonl&quot;, &quot;spool.jsonl&quot;):
+        path = Path(td) / name
+        barrier = threading.Barrier(2)
+
+        def worker():
+            barrier.wait()
+            router.append_once(str(path), make_row())
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(lambda _: worker(), range(2)))
+
+        rows = [
+            json.loads(line)
+            for line in path.read_text(encoding=&quot;utf-8&quot;).splitlines()
+            if line.strip()
+        ]
+        assert len(rows) == 1, (name, rows)
+        assert rows[0][&quot;acceptance&quot;] == &quot;accepted&quot;, (name, rows)
+
+        # Refire with a different acceptance must not add a row
+        # or overwrite the original acceptance.
+        router.append_once(
+            str(path),
+            make_row(acceptance=&quot;rejected&quot;),
+            refire=True,
+        )
+        rows = [
+            json.loads(line)
+            for line in path.read_text(encoding=&quot;utf-8&quot;).splitlines()
+            if line.strip()
+        ]
+        assert len(rows) == 1, (name, rows)
+        assert rows[0][&quot;acceptance&quot;] == &quot;accepted&quot;, (name, rows)
+
+print(&quot;OK: concurrent dedupe and refire acceptance preserved&quot;)
+PY
+</code></pre>
+<p>Expected result:</p>
+<pre><code class="language-text">AST OK
+OK: concurrent dedupe and refire acceptance preserved
+</code></pre>
+<p>This verifies that two concurrent webhooks produce exactly one row in both the local-board and spool paths, and that a refire preserves the existing acceptance instead of appending an ungated duplicate.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: alert-router-concurrent-jsonl-dedupe
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-11-02T14:18:00.086Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;A monitoring alert-router writes one JSONL row per alert fingerprint and day. The original implementation performed existing_ids() followed by append_rows() without serialization, so concurrent Alertmanager webhook threads could both observe an absent id and append duplicate rows. The live monitoring host is spool-only, so the same race existed in the spool path. The fix uses fcntl.flock around the id read and append in both local-board and spool paths, and refires preserve existing acceptance criteria instead of appending an ungated duplicate. Verification: the project&#x27;s executable battery passed with two concurrent webhooks producing one row and one dedupe; a refire fixture retained its acceptance; AST parsing and compileall passed. Pytest was unavailable in the environment.&quot;, &quot;environment&quot;: &quot;Linux monitoring lane; hosted fleet-monitor stack&quot;, &quot;language&quot;: &quot;python&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;alert-router-concurrent-jsonl-dedupe&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-11-02T14:18:00.086Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

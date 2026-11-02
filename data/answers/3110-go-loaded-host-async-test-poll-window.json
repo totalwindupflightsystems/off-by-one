@@ -1,0 +1,28 @@
+{
+  "class_id": 3110,
+  "title": "go-loaded-host-async-test-poll-window",
+  "description": "go-loaded-host-async-test-poll-window",
+  "created_at": "2026-11-02 13:47:04",
+  "answers": [
+    {
+      "answer_id": 4845,
+      "language": "go",
+      "environment": "linux",
+      "version": "2d73ea310f8b000b91d2543e8472d04b70fdaac5",
+      "solution": "I diagnosed the flake, applied/verified the fix, and wrote the full solution to **`~/solution.md`**.\n\n## Root cause\n\n`TestBringUpUserManager_LingerTimeoutRetriedUntilMarkerAppears` drives the real bring-up through the `userManagerRunner` seam. The fake `loginctl enable-linger` applies the linger **asynchronously**, via a goroutine that sleeps `lingerApplyDelay = 1ms` and then writes the marker (`internal/agent/rootless_runtimedir_test.go`). Production polls for that marker with `pollLingerMarker(..., lingerEnablePollWindow, ...)`.\n\nThe test installed per-attempt windows of **20 ms** (retry case) and **80 ms** (first-window case). Under scheduler starvation the 1 ms writer goroutine can be delayed far past 20 ms. Then attempt 1 expires structurally (the fake schedules no write before attempt N), attempt 2 schedules the write but its 20 ms poll expires before the writer runs, attempt 3 is issued (no second write scheduled) and its poll expires too — so the bounded 3-attempt sequence legitimately reports `linger enable attempts: 3`. Production retry logic was correct; only the test seam's timing slack was wrong.\n\n## Exact fix (`internal/agent/rootless_runtimedir_test.go`, test-only)\n\n```diff\n-\t\t\twindow:            80 * time.Millisecond,\n+\t\t\twindow:            time.Second,\n \t\t\twantAttempts:      1,\n...\n-\t\t\twindow:            20 * time.Millisecond,\n+\t\t\twindow:            time.Second,\n \t\t\twantAttempts:      2,\n```\n\nplus an explanatory comment. Early exit still works (`pollLingerMarker` checks the marker before every wait), `wantAttempts` is unaffected (attempt 1 in the retry case expires structurally regardless of window length), attempts stay bounded at 3, the existing 5 s elapsed assertion holds, and the negative control (`..._WithoutMarkerStillFails`, 10 ms window) is untouched. Production constants in `rootless.go` are unchanged.\n\n## Verification (on this host)\n\n```\ngo build ./...   # exit 0\ngo vet ./...     # exit 0\ngo test ./internal/agent \\\n  -run 'TestBringUpUserManager_LingerTimeoutRetriedUntilMarkerAppears|TestBringUpUserManager_LingerTimeoutWithoutMarkerStillFails' \\\n  -count=20\n# ok  github.com/deployBunker/bunker/internal/agent  20.984s\n```\n\nI also confirmed the mechanism deterministically by temporarily setting the fake async delay to 120 ms (emulating jitter): the old 20 ms window fails with `linger enable attempts: 3`, while the fixed 1 s window passes with attempts: 2. The repo working tree is clean at `2d73ea310f8b000b91d2543e8472d04b70fdaac5`; the full write-up (analysis, diff, and reproduction commands) is in `~/solution.md`.\n",
+      "evidence": "# Evidence\n- Problem class: go-loaded-host-async-test-poll-window\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-02T13:47:04.921Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A Go regression test used a very short per-attempt polling window around an asynchronous fake marker write. On a loaded host, scheduler delay pushed the goroutine past every bounded poll window, producing a false failure even though the marker was scheduled to land during the applying attempt. The root cause was timing slack in the test seam, not production retry behavior. The fix widened the test-only poll windows to one second while retaining bounded attempts, early exit when the marker appears, the existing elapsed-time bound, and the negative control that still fails when no marker is ever created. Verification: the focused positive and negative tests passed 20 times; go build ./... and go vet ./... passed; the merged short suite passed.",
+        "environment": "Linux Go repository under scheduler load; asynchronous fake host marker write",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-loaded-host-async-test-poll-window",
+        "provider": "openrouter",
+        "solved_at": "2026-11-02T13:47:04.927Z",
+        "version": "2d73ea310f8b000b91d2543e8472d04b70fdaac5"
+      },
+      "status": "verified",
+      "created_at": "2026-11-02 13:47:04"
+    }
+  ]
+}

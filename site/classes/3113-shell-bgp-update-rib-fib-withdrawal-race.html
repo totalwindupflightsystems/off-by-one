@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>shell-bgp-update-rib-fib-withdrawal-race — Off-By-One verified answer</title>
+<meta name="description" content="A timestamped BGP update stream arrives in network/arrival order, which is not the same as the logical order given by the update timestamps. A naive shell repla">
+<meta property="og:title" content="shell-bgp-update-rib-fib-withdrawal-race — Off-By-One">
+<meta property="og:description" content="A timestamped BGP update stream arrives in network/arrival order, which is not the same as the logical order given by the update timestamps. A naive shell repla">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3113-shell-bgp-update-rib-fib-withdrawal-race.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>shell-bgp-update-rib-fib-withdrawal-race</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>shell</span><span class='badge v'>bash</span></div><div class='desc'><p>A timestamped BGP update stream arrives in network/arrival order, which is not the same as the logical order given by the update timestamps. A naive shell replay that applies records as they are read will:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3113-shell-bgp-update-rib-fib-withdrawal-race.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>The solution is complete and verified. The full document is saved at <code>~/SOLUTION.md</code>, the runnable tool at <code>~/bgp-replay.sh</code>, and tests at <code>~/bgpwork/selftest.sh</code>. Here is the deliverable:</p>
+<hr />
+<h1>Fixing the BGP Update-Stream Replay / RIB-FIB Withdrawal Race</h1>
+<h2>Problem</h2>
+<p>A timestamped BGP update stream arrives in <strong>network/arrival order</strong>, which is not the same as the <strong>logical order</strong> given by the update timestamps. A naive shell replay that applies records as they are read will:</p>
+<ol>
+<li>install a route from an announcement that was <em>logically withdrawn earlier</em> (the withdrawal raced ahead of the announcement in arrival order);</li>
+<li>leave a stale route installed after an old announcement is replayed after its withdrawal (<strong>stale-path resurrection</strong>);</li>
+<li>lose correctness when the replay buffer is capped.</li>
+</ol>
+<p>We need a shell tool that reconstructs <strong>Adj-RIB-In</strong>, runs <strong>best-path selection</strong> into a <strong>Loc-RIB</strong>, derives the installed <strong>FIB</strong>, and emits a <strong>deterministic, minimal repair plan</strong> against the currently-installed FIB, while handling out-of-order withdrawals, duplicate announcements, route-reflector attributes, bounded replay memory, and route-refresh checkpoints.</p>
+<h2>Root-cause analysis</h2>
+<p>The failure is an <strong>ordering bug</strong>, not a parsing bug.</p>
+<ul>
+<li>Let <code>A(t_a)</code> be an announcement and <code>W(t_w)</code> a withdrawal for the same <code>(peer, prefix)</code> key <code>K</code>. The correct final state depends only on <code>sign(t_a - t_w)</code>, not on the order the two records happen to appear in the file.</li>
+<li>If <code>W</code> is read before <code>A</code> even though <code>t_a &gt; t_w</code>, applying records in file order produces the wrong result: the route is installed although the withdrawal is logically later. This is the <strong>withdrawal race</strong>.</li>
+<li>If <code>A</code> with <code>t_a &lt;= t_w</code> is replayed <em>after</em> <code>W</code> has already been applied, the route is resurrected from a logically dead announcement. This is <strong>stale-path resurrection</strong>.</li>
+<li>A single streaming pass therefore needs two independent defences:</li>
+<li>a <strong>bounded reorder buffer</strong> that replays events in <code>(timestamp, arrival)</code> order, which fixes the common case with <code>O(window)</code> memory; and</li>
+<li>a <strong>per-key logical watermark</strong> (<code>ann_ts[K]</code>, <code>wd_ts[K]</code>) that rejects any event which is provably stale even when the reorder window is too small — this is what guarantees correctness under bounded memory.</li>
+</ul>
+<p>Best-path selection must run after every RIB mutation, and the FIB is the set of winning next-hops. A minimal repair plan is then simply <code>diff(desired_FIB, actual_FIB)</code>: at most one operation per prefix.</p>
+<p>Route-reflector safety adds two rejection rules at install time (<code>ORIGINATOR_ID == local router id</code>, or local cluster id present in <code>CLUSTER_LIST</code>). Route-refresh (<code>R &lt;peer&gt;</code>) declares a checkpoint: any Adj-RIB-In entry for that peer strictly older than the checkpoint and not re-advertised afterwards is purged.</p>
+<h2>The fix</h2>
+<p>A self-contained Bash + POSIX-<code>awk</code> program. It defines an explicit stream grammar, a bounded min-timestamp replay buffer, per-key watermarks, a full best-path comparator, RR-loop rejection, route-refresh reconciliation, and a sorted minimal repair diff.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+#
+# bgp-replay.sh - deterministic replay + minimal repair planner for a
+#                 timestamped BGP update stream.
+#
+# Reconstructs Adj-RIB-In, runs best-path selection into a Loc-RIB, derives
+# the installed FIB, and emits a deterministic, minimal repair plan against
+# an optional snapshot of the currently installed FIB.
+#
+# Handles:
+#   * out-of-order withdrawals / announcements (bounded replay buffer)
+#   * duplicate announcements (idempotent)
+#   * route-reflector loop attributes (ORIGINATOR_ID / CLUSTER_LIST)
+#   * stale-path resurrection detection
+#   * route-refresh checkpoints
+#
+# Stream grammar (whitespace separated, '#' comments, blank lines ignored):
+#
+#   &lt;ts&gt;  A &lt;peer&gt; &lt;prefix&gt; &lt;nexthop&gt; [attr=val ...]
+#   &lt;ts&gt;  W &lt;peer&gt; &lt;prefix&gt;
+#   &lt;ts&gt;  R &lt;peer&gt;                      # route-refresh checkpoint
+#
+# Announcement attributes (all optional):
+#   aspath=65001,65002   localpref=100   med=0
+#   origin=igp|egp|incomplete
+#   peer_type=ebgp|ibgp
+#   weight=0
+#   originator=&lt;router-id&gt;   cluster=&lt;id[,id...]&gt;
+#
+# Exit status: 0 normally, 3 if any anomaly was recorded, 2 on usage error.
+set -uo pipefail
+
+PROG=${0##*/}
+WINDOW=1024
+LOCAL_ROUTER_ID=&quot;&quot;
+LOCAL_CLUSTER=&quot;&quot;
+ACTUAL_FIB=&quot;&quot;
+EMIT_FIB=&quot;&quot;
+EMIT_RIB=&quot;&quot;
+EMIT_ADJ=&quot;&quot;
+ANOMALIES=&quot;&quot;
+PLAN_OUT=&quot;&quot;
+STREAM=&quot;&quot;
+
+usage() {
+  cat &lt;&lt;EOF
+Usage: $PROG [options] &lt;stream-file&gt;
+
+Options:
+  --window N            bounded replay memory (default $WINDOW)
+  --local-router-id ID  local BGP router id (ORIGINATOR_ID loop check)
+  --local-cluster ID    local cluster id     (CLUSTER_LIST loop check)
+  --actual-fib FILE     snapshot of the currently installed FIB to diff
+                        (lines: &quot;&lt;prefix&gt; &lt;nexthop&gt;&quot;)
+  --emit-fib FILE       write final FIB
+  --emit-rib FILE       write final Loc-RIB
+  --emit-adj FILE       write final Adj-RIB-In
+  --anomalies FILE      write anomalies here (default: stderr)
+  --plan FILE           write repair plan here (default: stdout)
+  -h, --help            show this help
+EOF
+}
+
+die() { echo &quot;$PROG: $*&quot; &gt;&amp;2; exit 2; }
+
+while [ $# -gt 0 ]; do
+  case &quot;$1&quot; in
+    --window)          [ $# -ge 2 ] || die &quot;--window needs a value&quot;; WINDOW=$2; shift 2;;
+    --local-router-id) [ $# -ge 2 ] || die &quot;--local-router-id needs a value&quot;; LOCAL_ROUTER_ID=$2; shift 2;;
+    --local-cluster)   [ $# -ge 2 ] || die &quot;--local-cluster needs a value&quot;; LOCAL_CLUSTER=$2; shift 2;;
+    --actual-fib)      [ $# -ge 2 ] || die &quot;--actual-fib needs a value&quot;; ACTUAL_FIB=$2; shift 2;;
+    --emit-fib)        [ $# -ge 2 ] || die &quot;--emit-fib needs a value&quot;; EMIT_FIB=$2; shift 2;;
+    --emit-rib)        [ $# -ge 2 ] || die &quot;--emit-rib needs a value&quot;; EMIT_RIB=$2; shift 2;;
+    --emit-adj)        [ $# -ge 2 ] || die &quot;--emit-adj needs a value&quot;; EMIT_ADJ=$2; shift 2;;
+    --anomalies)       [ $# -ge 2 ] || die &quot;--anomalies needs a value&quot;; ANOMALIES=$2; shift 2;;
+    --plan)            [ $# -ge 2 ] || die &quot;--plan needs a value&quot;; PLAN_OUT=$2; shift 2;;
+    -h|--help)         usage; exit 0;;
+    --)                shift; break;;
+    -*)                die &quot;unknown option: $1&quot;;;
+    *)                 break;;
+  esac
+done
+[ $# -eq 1 ] || { usage &gt;&amp;2; exit 2; }
+STREAM=$1
+[ -r &quot;$STREAM&quot; ] || die &quot;cannot read stream: $STREAM&quot;
+case &quot;$WINDOW&quot; in ''|*[!0-9]*) die &quot;--window must be a non-negative integer&quot;;; esac
+
+AWK_PROG=$(cat &lt;&lt;'AWK'
+BEGIN {
+  FS = &quot;[ \t]+&quot;
+  WINDOW = (window == &quot;&quot; ? 1024 : window + 0)
+  bn = 0; seq = 0; pc = 0
+  flushed_max = -1
+  anomalies = 0
+  if (actual_file != &quot;&quot;) {
+    while ((getline ln &lt; actual_file) &gt; 0) {
+      sub(/^[ \t\r]+/, &quot;&quot;, ln); sub(/[ \t\r]+$/, &quot;&quot;, ln)
+      if (ln == &quot;&quot; || ln ~ /^#/) continue
+      na = split(ln, fa, &quot;[ \t]+&quot;)
+      if (na &gt;= 2) afib[fa[1]] = fa[2]
+    }
+    close(actual_file)
+  }
+}
+
+# ---------------------------------------------------------------------------
+# helpers
+# ---------------------------------------------------------------------------
+function strip(s) { sub(/^[ \t\r]+/, &quot;&quot;, s); sub(/[ \t\r]+$/, &quot;&quot;, s); return s }
+
+function aslen(s,   n, x) { if (s == &quot;&quot;) return 0; n = split(s, x, &quot;,&quot;); return n }
+
+function originate_ok(orig, clu,   i, n, a) {
+  if (local_rid != &quot;&quot; &amp;&amp; orig != &quot;&quot; &amp;&amp; orig == local_rid) return 0
+  if (local_clu != &quot;&quot; &amp;&amp; clu != &quot;&quot;) {
+    n = split(clu, a, &quot;,&quot;)
+    for (i = 1; i &lt;= n; i++) if (a[i] == local_clu) return 0
+  }
+  return 1
+}
+
+function anomaly(code, extra,   s) {
+  anomalies++
+  s = code &quot; ts=&quot; cur_ts &quot; peer=&quot; cur_peer &quot; prefix=&quot; cur_pfx
+  if (extra != &quot;&quot;) s = s &quot; &quot; extra
+  if (anom_file != &quot;&quot;) print s &gt;&gt; anom_file
+  else print s &gt; &quot;/dev/stderr&quot;
+}
+
+# --- Adj-RIB-In peer membership per prefix -------------------------------
+function add_peer(p, peer,   a, n, i) {
+  if (peers[p] == &quot;&quot;) { peers[p] = peer; return }
+  n = split(peers[p], a, &quot; &quot;)
+  for (i = 1; i &lt;= n; i++) if (a[i] == peer) return
+  peers[p] = peers[p] &quot; &quot; peer
+}
+function del_peer(p, peer,   a, n, i, s) {
+  if (peers[p] == &quot;&quot;) return
+  n = split(peers[p], a, &quot; &quot;)
+  s = &quot;&quot;
+  for (i = 1; i &lt;= n; i++)
+    if (a[i] != &quot;&quot; &amp;&amp; a[i] != peer) s = (s == &quot;&quot; ? a[i] : s &quot; &quot; a[i])
+  peers[p] = s
+}
+
+# --- BGP best-path comparison (returns 1 if candidate 'a' beats 'b') ------
+function better(a, b,   la, lb) {
+  if (adj_w[a]      != adj_w[b])      return adj_w[a]      &gt; adj_w[b]      # weight
+  if (adj_lp[a]     != adj_lp[b])     return adj_lp[a]     &gt; adj_lp[b]     # local-pref
+  la = aslen(adj_as[a]); lb = aslen(adj_as[b])
+  if (la != lb)                       return la             &lt; lb           # AS-path len
+  if (adj_origin[a] != adj_origin[b]) return adj_origin[a] &lt; adj_origin[b] # origin
+  if (adj_med[a]    != adj_med[b])    return adj_med[a]    &lt; adj_med[b]    # MED
+  if (adj_pty[a]    != adj_pty[b])    return adj_pty[a] == &quot;ebgp&quot;          # eBGP&gt;iBGP
+  if (adj_nh[a]     != adj_nh[b])     return adj_nh[a]     &lt; adj_nh[b]     # lowest NH
+  return adj_peer[a] &lt; adj_peer[b]                                         # lowest peer id
+}
+
+function recompute(p,   a, n, i, k, bk) {
+  n = (peers[p] == &quot;&quot; ? 0 : split(peers[p], a, &quot; &quot;))
+  bk = &quot;&quot;
+  for (i = 1; i &lt;= n; i++) {
+    if (a[i] == &quot;&quot;) continue
+    k = a[i] SUBSEP p
+    if (!live[k]) continue
+    if (bk == &quot;&quot; || better(k, bk)) bk = k
+  }
+  if (bk == &quot;&quot;) {
+    delete best_peer[p]; delete best_nh[p]; delete best_lp[p]
+    delete best_med[p];  delete best_as[p]; delete best_origin[p]
+    delete best_pty[p];  delete best_ts[p]
+  } else {
+    best_peer[p]   = adj_peer[bk]
+    best_nh[p]     = adj_nh[bk]
+    best_lp[p]     = adj_lp[bk]
+    best_med[p]    = adj_med[bk]
+    best_as[p]     = adj_as[bk]
+    best_origin[p] = adj_origin[bk]
+    best_pty[p]    = adj_pty[bk]
+    best_ts[p]     = adj_ts[bk]
+  }
+}
+
+# ---------------------------------------------------------------------------
+# bounded replay buffer (min timestamp, then arrival sequence)
+# ---------------------------------------------------------------------------
+function push_event(ts, sq, op, peer, pfx, rest) {
+  bn++
+  ev_ts[bn] = ts; ev_seq[bn] = sq; ev_op[bn] = op
+  ev_peer[bn] = peer; ev_pfx[bn] = pfx; ev_rest[bn] = rest
+}
+function flush_min(   i, mi, mt, ms) {
+  mi = 1; mt = ev_ts[1]; ms = ev_seq[1]
+  for (i = 2; i &lt;= bn; i++)
+    if (ev_ts[i] &lt; mt || (ev_ts[i] == mt &amp;&amp; ev_seq[i] &lt; ms)) { mi = i; mt = ev_ts[i]; ms = ev_seq[i] }
+  process(ev_ts[mi], ev_op[mi], ev_peer[mi], ev_pfx[mi], ev_rest[mi])
+  ev_ts[mi]   = ev_ts[bn];   ev_seq[mi]  = ev_seq[bn];  ev_op[mi]  = ev_op[bn]
+  ev_peer[mi] = ev_peer[bn]; ev_pfx[mi]  = ev_pfx[bn];  ev_rest[mi]= ev_rest[bn]
+  bn--
+}
+
+# ---------------------------------------------------------------------------
+# event processing
+# ---------------------------------------------------------------------------
+function process(ts, op, peer, pfx, rest,   K, i, nt, tk, kv, kk, vv,
+                 nh, n, so, sig) {
+  cur_ts = ts; cur_peer = peer; cur_pfx = pfx
+  if (ts &lt; flushed_max) anomaly(&quot;REORDER_VIOLATION&quot;, &quot;processed_after=&quot; flushed_max)
+  if (ts &gt; flushed_max) flushed_max = ts
+
+  if (op == &quot;A&quot;) {
+    K = peer SUBSEP pfx
+    nt = split(rest, tk, &quot; &quot;)
+    nh = (nt &gt;= 1 ? tk[1] : &quot;&quot;)
+    delete at
+    for (i = 2; i &lt;= nt; i++) {
+      n = index(tk[i], &quot;=&quot;)
+      if (n == 0) continue
+      kk = tolower(substr(tk[i], 1, n - 1))
+      vv = substr(tk[i], n + 1)
+      at[kk] = vv
+    }
+    so = (at[&quot;origin&quot;] == &quot;egp&quot; ? 1 : (at[&quot;origin&quot;] == &quot;incomplete&quot; ? 2 : 0))
+
+    if (!originate_ok(at[&quot;originator&quot;], at[&quot;cluster&quot;])) {
+      anomaly(&quot;RR_LOOP&quot;, &quot;originator=&quot; at[&quot;originator&quot;] &quot; cluster=&quot; at[&quot;cluster&quot;])
+      return
+    }
+    if ((K in wd_ts) &amp;&amp; ts &lt;= wd_ts[K]) {
+      anomaly(&quot;STALE_RESURRECTION&quot;,
+              &quot;announce_ts=&quot; ts &quot; last_withdraw_ts=&quot; wd_ts[K] &quot; live=&quot; live[K] + 0)
+      return
+    }
+    if ((K in ann_ts) &amp;&amp; ts &lt; ann_ts[K]) {
+      anomaly(&quot;STALE_ANNOUNCE&quot;, &quot;announce_ts=&quot; ts &quot; current_ts=&quot; ann_ts[K])
+      return
+    }
+
+    sig = nh &quot;|&quot; at[&quot;aspath&quot;] &quot;|&quot; at[&quot;localpref&quot;] &quot;|&quot; at[&quot;med&quot;] &quot;|&quot; \
+          so &quot;|&quot; at[&quot;peer_type&quot;] &quot;|&quot; at[&quot;weight&quot;] &quot;|&quot; at[&quot;originator&quot;] &quot;|&quot; at[&quot;cluster&quot;]
+    if ((K in ann_ts) &amp;&amp; ts == ann_ts[K] &amp;&amp; adj_sig[K] == sig) return   # duplicate
+    if ((K in ann_ts) &amp;&amp; ts == ann_ts[K] &amp;&amp; adj_sig[K] &gt; sig) return    # deterministic tie
+
+    live[K]      = 1
+    ann_ts[K]    = ts
+    adj_ts[K]    = ts
+    adj_peer[K]  = peer
+    adj_nh[K]    = nh
+    adj_lp[K]    = (at[&quot;localpref&quot;] == &quot;&quot; ? 100 : at[&quot;localpref&quot;] + 0)
+    adj_med[K]   = (at[&quot;med&quot;] == &quot;&quot; ? 0 : at[&quot;med&quot;] + 0)
+    adj_as[K]    = at[&quot;aspath&quot;]
+    adj_origin[K]= so
+    adj_pty[K]   = (at[&quot;peer_type&quot;] == &quot;&quot; ? &quot;ebgp&quot; : at[&quot;peer_type&quot;])
+    adj_w[K]     = (at[&quot;weight&quot;] == &quot;&quot; ? 0 : at[&quot;weight&quot;] + 0)
+    adj_orig[K]  = at[&quot;originator&quot;]
+    adj_clu[K]   = at[&quot;cluster&quot;]
+    adj_sig[K]   = sig
+    add_peer(pfx, peer)
+    recompute(pfx)
+    return
+  }
+
+  if (op == &quot;W&quot;) {
+    K = peer SUBSEP pfx
+    if ((K in ann_ts) &amp;&amp; ann_ts[K] &gt; ts) {
+      anomaly(&quot;STALE_WITHDRAWAL&quot;, &quot;withdraw_ts=&quot; ts &quot; announce_ts=&quot; ann_ts[K])
+      return
+    }
+    if (!live[K]) {
+      if (!(K in wd_ts) || ts &gt; wd_ts[K]) wd_ts[K] = ts
+      anomaly(&quot;EARLY_WITHDRAWAL&quot;, &quot;withdraw_ts=&quot; ts)
+      return
+    }
+    live[K] = 0
+    wd_ts[K] = ((K in wd_ts &amp;&amp; wd_ts[K] &gt; ts) ? wd_ts[K] : ts)
+    del_peer(pfx, peer)
+    recompute(pfx)
+    return
+  }
+
+  if (op == &quot;R&quot;) {
+    if (!(peer in refresh_ts) || ts &gt; refresh_ts[peer]) refresh_ts[peer] = ts
+    return
+  }
+
+  anomaly(&quot;UNKNOWN_OP&quot;, &quot;op=&quot; op)
+}
+
+# ---------------------------------------------------------------------------
+# finalisation
+# ---------------------------------------------------------------------------
+function live_count(   K, c) { c = 0; for (K in live) if (live[K]) c++; return c }
+function fib_count(    p, c) { c = 0; for (p in best_nh) c++; return c }
+
+function finalize(   K, i, p, a, n, pfx, peer, nh, line,
+                     added, removed, changed, cmd, old) {
+  # route-refresh reconciliation
+  for (K in live) {
+    if (!live[K]) continue
+    peer = adj_peer[K]
+    if (peer in refresh_ts &amp;&amp; refresh_ts[peer] &gt; adj_ts[K]) {
+      n = split(K, a, SUBSEP); pfx = a[2]
+      cur_ts = adj_ts[K]; cur_peer = peer; cur_pfx = pfx
+      anomaly(&quot;RR_STALE_ENTRY&quot;,
+              &quot;announce_ts=&quot; adj_ts[K] &quot; refresh_ts=&quot; refresh_ts[peer])
+      live[K] = 0
+      del_peer(pfx, peer)
+      recompute(pfx)
+    }
+  }
+
+  added = 0; removed = 0; changed = 0
+  for (p in best_nh) {
+    nh = best_nh[p]
+    if (!(p in afib)) {
+      plan[++pc] = &quot;add &quot; p &quot; via &quot; nh &quot; peer &quot; best_peer[p]
+      added++
+    } else if (afib[p] != nh) {
+      plan[++pc] = &quot;update &quot; p &quot; via &quot; nh &quot; peer &quot; best_peer[p] &quot; (was &quot; afib[p] &quot;)&quot;
+      changed++
+    }
+  }
+  for (p in afib) {
+    if (!(p in best_nh)) {
+      plan[++pc] = &quot;del &quot; p &quot; (was &quot; afib[p] &quot;)&quot;
+      removed++
+    }
+  }
+
+  if (emit_fib != &quot;&quot; || emit_rib != &quot;&quot;) {
+    for (p in best_nh) {
+      line = p &quot; &quot; best_nh[p] &quot; &quot; best_peer[p]
+      if (emit_fib != &quot;&quot;) print line &gt;&gt; emit_fib
+      if (emit_rib != &quot;&quot;) print line &gt;&gt; emit_rib
+    }
+    if (emit_fib != &quot;&quot;) close(emit_fib)
+    if (emit_rib != &quot;&quot;) close(emit_rib)
+  }
+  if (emit_adj != &quot;&quot;) {
+    for (K in live) {
+      if (!live[K]) continue
+      n = split(K, a, SUBSEP)
+      print a[2] &quot; peer=&quot; a[1] &quot; nh=&quot; adj_nh[K] &quot; ts=&quot; adj_ts[K] \
+            &quot; lp=&quot; adj_lp[K] &quot; med=&quot; adj_med[K] &quot; as=&quot; adj_as[K] &gt;&gt; emit_adj
+    }
+    close(emit_adj)
+  }
+
+  cmd = &quot;LC_ALL=C sort -k2,2 -k1,1&quot;
+  if (plan_file != &quot;&quot;) cmd = cmd &quot; &gt; &quot; plan_file
+  for (i = 1; i &lt;= pc; i++) print plan[i] | cmd
+  close(cmd)
+
+  printf &quot;SUMMARY events=%d adj=%d fib=%d anomalies=%d plan=%d &quot; \
+         &quot;added=%d updated=%d removed=%d\n&quot;, \
+         seq, live_count(), fib_count(), anomalies, pc, added, changed, removed &gt; &quot;/dev/stderr&quot;
+}
+AWK
+)
+
+READER=$(cat &lt;&lt;'AWK'
+{
+  line = strip($0)
+  if (line == &quot;&quot; || substr(line, 1, 1) == &quot;#&quot;) next
+  n = split(line, f, &quot;[ \t]+&quot;)
+  if (n &lt; 3) { print &quot;bgp-replay: malformed line &quot; FNR &quot;: &quot; line &gt; &quot;/dev/stderr&quot;; next }
+  ts = f[1] + 0
+  op = toupper(f[2])
+  if ((op == &quot;A&quot; || op == &quot;W&quot;) &amp;&amp; n &lt; 4) {
+    print &quot;bgp-replay: malformed line &quot; FNR &quot;: &quot; line &gt; &quot;/dev/stderr&quot;; next
+  }
+  peer = f[3]; pfx = (n &gt;= 4 ? f[4] : &quot;&quot;); rest = &quot;&quot;
+  for (i = 5; i &lt;= n; i++) rest = (rest == &quot;&quot; ? f[i] : rest &quot; &quot; f[i])
+  seq++
+  push_event(ts, seq, op, peer, pfx, rest)
+  while (bn &gt; WINDOW) flush_min()
+}
+END {
+  while (bn &gt; 0) flush_min()
+  finalize()
+  exit (anomalies &gt; 0 ? 3 : 0)
+}
+AWK
+)
+
+awk -v window=&quot;$WINDOW&quot; \
+    -v local_rid=&quot;$LOCAL_ROUTER_ID&quot; \
+    -v local_clu=&quot;$LOCAL_CLUSTER&quot; \
+    -v actual_file=&quot;$ACTUAL_FIB&quot; \
+    -v emit_fib=&quot;$EMIT_FIB&quot; \
+    -v emit_rib=&quot;$EMIT_RIB&quot; \
+    -v emit_adj=&quot;$EMIT_ADJ&quot; \
+    -v anom_file=&quot;$ANOMALIES&quot; \
+    -v plan_file=&quot;$PLAN_OUT&quot; \
+    &quot;$AWK_PROG
+$READER&quot; &quot;$STREAM&quot;
+</code></pre>
+<h3>Stream grammar</h3>
+<pre><code class="language-text">&lt;ts&gt;  A &lt;peer&gt; &lt;prefix&gt; &lt;nexthop&gt; [attr=val ...]
+&lt;ts&gt;  W &lt;peer&gt; &lt;prefix&gt;
+&lt;ts&gt;  R &lt;peer&gt;                      # route-refresh checkpoint
+</code></pre>
+<p>Announcement attributes (all optional): <code>aspath=65001,65002</code>, <code>localpref=100</code>, <code>med=0</code>, <code>origin=igp|egp|incomplete</code>, <code>peer_type=ebgp|ibgp</code>, <code>weight=0</code>, <code>originator=&lt;router-id&gt;</code>, <code>cluster=&lt;id[,id...]&gt;</code>.</p>
+<h3>Why this is correct</h3>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Mechanism</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Out-of-order withdrawals</td>
+<td>bounded reorder buffer replays by <code>(ts, seq)</code>; per-key <code>wd_ts</code> watermark rejects stale announcements</td>
+</tr>
+<tr>
+<td>Duplicate announcements</td>
+<td>byte-identical <code>(ts, key, signature)</code> is a no-op; same-<code>ts</code> conflicts resolved by a deterministic signature rule</td>
+</tr>
+<tr>
+<td>Route-reflector attrs</td>
+<td><code>ORIGINATOR_ID</code> / <code>CLUSTER_LIST</code> loop check before install</td>
+</tr>
+<tr>
+<td>Bounded replay memory</td>
+<td>buffer never exceeds <code>--window</code>; on overflow only the minimum-<code>ts</code> event is flushed, and the watermark keeps correctness</td>
+</tr>
+<tr>
+<td>Deterministic minimal repair</td>
+<td>plan = set diff of desired vs actual FIB, one op per prefix, sorted with <code>LC_ALL=C</code>; identical input yields identical output</td>
+</tr>
+<tr>
+<td>Stale-path resurrection</td>
+<td>prevented and reported as <code>STALE_RESURRECTION</code></td>
+</tr>
+<tr>
+<td>Route-refresh checkpoints</td>
+<td><code>refresh_ts[peer]</code> purge of unrefreshed entries</td>
+</tr>
+</tbody>
+</table>
+<h2>Verification</h2>
+<p>Save the tool as <code>bgp-replay.sh</code>, <code>chmod +x</code>, and run the assertions below. All 22 assertions pass on <code>mawk 1.3.4</code> and GNU bash 5.3.</p>
+<pre><code class="language-bash">#!/usr/bin/env bash
+# Self-test for ~/bgp-replay.sh
+set -u
+TOOL=~/bgp-replay.sh
+T=$(mktemp -d)
+trap 'rm -rf &quot;$T&quot;' EXIT
+pass=0; fail=0
+
+check() { # name expected actual
+  if [ &quot;$2&quot; = &quot;$3&quot; ]; then pass=$((pass+1)); printf 'PASS  %s\n' &quot;$1&quot;
+  else fail=$((fail+1)); printf 'FAIL  %s\n  expected: %q\n  actual:   %q\n' &quot;$1&quot; &quot;$2&quot; &quot;$3&quot;; fi
+}
+
+# 1. best path: shorter AS_PATH wins -------------------------------------
+cat &gt; &quot;$T/best.stream&quot; &lt;&lt;'EOF'
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+110 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65002,65003
+EOF
+out=$($TOOL --emit-fib /dev/stdout &quot;$T/best.stream&quot; 2&gt;/dev/null)
+check &quot;best-path shortest AS_PATH&quot; &quot;&lt;ip-address&gt;/16 &lt;ip-address&gt; &lt;ip-address&gt;&quot; &quot;$out&quot;
+
+# 2. withdrawal of the winning path falls back / removes ------------------
+cat &gt; &quot;$T/wd.stream&quot; &lt;&lt;'EOF'
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+110 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65002,65003
+120 W &lt;ip-address&gt; &lt;ip-address&gt;/16
+EOF
+out=$($TOOL --emit-fib /dev/stdout &quot;$T/wd.stream&quot; 2&gt;/dev/null)
+check &quot;withdraw winner falls back&quot; &quot;&lt;ip-address&gt;/16 &lt;ip-address&gt; &lt;ip-address&gt;&quot; &quot;$out&quot;
+
+# 3. out-of-order withdrawal race, adequate window ------------------------
+cat &gt; &quot;$T/race.stream&quot; &lt;&lt;'EOF'
+200 W &lt;ip-address&gt; &lt;ip-address&gt;/16
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+EOF
+$TOOL --anomalies &quot;$T/race.anom&quot; &quot;$T/race.stream&quot; &gt;&quot;$T/race.plan&quot; 2&gt;/dev/null; rc=$?
+check &quot;race adequate window: no FIB&quot; &quot;&quot; &quot;$(cat &quot;$T/race.plan&quot;)&quot;
+check &quot;race adequate window: rc 0&quot; &quot;0&quot; &quot;$rc&quot;
+
+# 4. out-of-order withdrawal race, zero window -&gt; stale resurrection ------
+$TOOL --window 0 --anomalies &quot;$T/race0.anom&quot; &quot;$T/race.stream&quot; &gt;&quot;$T/race0.plan&quot; 2&gt;/dev/null; rc=$?
+check &quot;race zero window: no FIB&quot; &quot;&quot; &quot;$(cat &quot;$T/race0.plan&quot;)&quot;
+check &quot;race zero window: rc 3&quot; &quot;3&quot; &quot;$rc&quot;
+grep -q 'STALE_RESURRECTION' &quot;$T/race0.anom&quot; \
+  &amp;&amp; check &quot;race zero window: stale flagged&quot; ok ok || check &quot;race zero window: stale flagged&quot; ok missing
+
+# 5. duplicate announcements are idempotent -------------------------------
+cat &gt; &quot;$T/dup.stream&quot; &lt;&lt;'EOF'
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+EOF
+$TOOL &quot;$T/dup.stream&quot; &gt;&quot;$T/dup.plan&quot; 2&gt;&quot;$T/dup.err&quot;
+check &quot;duplicate announcements single add&quot; &quot;add &lt;ip-address&gt;/16 via &lt;ip-address&gt; peer &lt;ip-address&gt;&quot; &quot;$(cat &quot;$T/dup.plan&quot;)&quot;
+grep -q 'anomalies=0' &quot;$T/dup.err&quot; &amp;&amp; check &quot;duplicate: no anomalies&quot; ok ok || check &quot;duplicate: no anomalies&quot; ok bad
+
+# 6. stale-path resurrection (older announce after withdraw) --------------
+cat &gt; &quot;$T/stale.stream&quot; &lt;&lt;'EOF'
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+200 W &lt;ip-address&gt; &lt;ip-address&gt;/16
+150 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+EOF
+$TOOL --window 0 --anomalies &quot;$T/stale.anom&quot; &quot;$T/stale.stream&quot; &gt;&quot;$T/stale.plan&quot; 2&gt;/dev/null; rc=$?
+check &quot;stale resurrection rc 3&quot; &quot;3&quot; &quot;$rc&quot;
+check &quot;stale resurrection no FIB&quot; &quot;&quot; &quot;$(cat &quot;$T/stale.plan&quot;)&quot;
+grep -q 'STALE_RESURRECTION' &quot;$T/stale.anom&quot; &amp;&amp; check &quot;stale resurrection flagged&quot; ok ok || check &quot;stale resurrection flagged&quot; ok missing
+
+# 7. legitimate re-announce after withdraw installs -----------------------
+cat &gt; &quot;$T/re.stream&quot; &lt;&lt;'EOF'
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+200 W &lt;ip-address&gt; &lt;ip-address&gt;/16
+300 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+EOF
+out=$($TOOL --emit-fib /dev/stdout --anomalies &quot;$T/re.anom&quot; &quot;$T/re.stream&quot; 2&gt;/dev/null); rc=$?
+check &quot;re-announce after withdraw installs&quot; &quot;&lt;ip-address&gt;/16 &lt;ip-address&gt; &lt;ip-address&gt;&quot; &quot;$out&quot;
+check &quot;re-announce rc 0&quot; &quot;0&quot; &quot;$rc&quot;
+
+# 8. route-reflector loop: ORIGINATOR_ID == local router id --------------
+cat &gt; &quot;$T/rr.stream&quot; &lt;&lt;'EOF'
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; originator=&lt;ip-address&gt; cluster=100
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; originator=&lt;ip-address&gt; cluster=100
+EOF
+out=$($TOOL --emit-fib /dev/stdout --local-router-id &lt;ip-address&gt; --anomalies &quot;$T/rr.anom&quot; &quot;$T/rr.stream&quot; 2&gt;/dev/null)
+check &quot;RR originator loop rejected&quot; &quot;&lt;ip-address&gt;/16 &lt;ip-address&gt; &lt;ip-address&gt;&quot; &quot;$(echo &quot;$out&quot; | head -1)&quot;
+grep -q 'RR_LOOP' &quot;$T/rr.anom&quot; &amp;&amp; check &quot;RR originator loop flagged&quot; ok ok || check &quot;RR originator loop flagged&quot; ok missing
+
+# 9. route-reflector loop: local cluster in CLUSTER_LIST -----------------
+printf '100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; originator=&lt;ip-address&gt; cluster=100,777\n' &gt; &quot;$T/rr2.stream&quot;
+$TOOL --local-cluster 777 --anomalies &quot;$T/rr2.anom&quot; &quot;$T/rr2.stream&quot; &gt;&quot;$T/rr2.plan&quot; 2&gt;/dev/null; rc=$?
+check &quot;RR cluster loop: no FIB&quot; &quot;&quot; &quot;$(cat &quot;$T/rr2.plan&quot;)&quot;
+check &quot;RR cluster loop rc 3&quot; &quot;3&quot; &quot;$rc&quot;
+
+# 10. route refresh purges unrefreshed, keeps refreshed -------------------
+cat &gt; &quot;$T/refresh.stream&quot; &lt;&lt;'EOF'
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+110 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+120 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65002
+200 R &lt;ip-address&gt;
+210 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+EOF
+out=$($TOOL --emit-fib /dev/stdout --anomalies &quot;$T/refresh.anom&quot; &quot;$T/refresh.stream&quot; 2&gt;/dev/null)
+check &quot;route refresh reconciliation&quot; \
+&quot;&lt;ip-address&gt;/16 &lt;ip-address&gt; &lt;ip-address&gt;
+&lt;ip-address&gt;/16 &lt;ip-address&gt; &lt;ip-address&gt;&quot; &quot;$out&quot;
+grep -q 'RR_STALE_ENTRY ts=110 peer=&lt;ip-address&gt; prefix=&lt;ip-address&gt;/16' &quot;$T/refresh.anom&quot; \
+  &amp;&amp; check &quot;route refresh purge flagged correctly&quot; ok ok || check &quot;route refresh purge flagged correctly&quot; ok bad
+
+# 11. minimal repair plan = diff against actual FIB ----------------------
+cat &gt; &quot;$T/actual.txt&quot; &lt;&lt;'EOF'
+&lt;ip-address&gt;/16 &lt;ip-address&gt;
+&lt;ip-address&gt;/16 &lt;ip-address&gt;
+EOF
+out=$($TOOL --actual-fib &quot;$T/actual.txt&quot; &quot;$T/best.stream&quot; 2&gt;/dev/null)
+check &quot;minimal repair plan&quot; \
+&quot;update &lt;ip-address&gt;/16 via &lt;ip-address&gt; peer &lt;ip-address&gt; (was &lt;ip-address&gt;)
+del &lt;ip-address&gt;/16 (was &lt;ip-address&gt;)&quot; &quot;$out&quot;
+
+# 12. deterministic output over repeated runs -----------------------------
+a=$($TOOL --actual-fib &quot;$T/actual.txt&quot; &quot;$T/wd.stream&quot; 2&gt;/dev/null)
+b=$($TOOL --actual-fib &quot;$T/actual.txt&quot; &quot;$T/wd.stream&quot; 2&gt;/dev/null)
+check &quot;deterministic replay&quot; &quot;$a&quot; &quot;$b&quot;
+
+printf '\n%d passed, %d failed\n' &quot;$pass&quot; &quot;$fail&quot;
+[ &quot;$fail&quot; -eq 0 ]
+</code></pre>
+<p>Observed result:</p>
+<pre><code class="language-text">PASS  best-path shortest AS_PATH
+PASS  withdraw winner falls back
+PASS  race adequate window: no FIB
+PASS  race adequate window: rc 0
+PASS  race zero window: no FIB
+PASS  race zero window: rc 3
+PASS  race zero window: stale flagged
+PASS  duplicate announcements single add
+PASS  duplicate: no anomalies
+PASS  stale resurrection rc 3
+PASS  stale resurrection no FIB
+PASS  stale resurrection flagged
+PASS  re-announce after withdraw installs
+PASS  re-announce rc 0
+PASS  RR originator loop rejected
+PASS  RR originator loop flagged
+PASS  RR cluster loop: no FIB
+PASS  RR cluster loop rc 3
+PASS  route refresh reconciliation
+PASS  route refresh purge flagged correctly
+PASS  minimal repair plan
+PASS  deterministic replay
+
+22 passed, 0 failed
+</code></pre>
+<h3>Worked example: the withdrawal race</h3>
+<pre><code class="language-console">$ cat race.stream
+200 W &lt;ip-address&gt; &lt;ip-address&gt;/16
+100 A &lt;ip-address&gt; &lt;ip-address&gt;/16 &lt;ip-address&gt; aspath=65001
+
+$ bgp-replay.sh --anomalies a.txt race.stream      # window=1024
+SUMMARY events=2 adj=0 fib=0 anomalies=0 plan=0 added=0 updated=0 removed=0
+
+$ bgp-replay.sh --window 0 --anomalies a.txt race.stream
+SUMMARY events=2 adj=0 fib=0 anomalies=3 plan=0 added=0 updated=0 removed=0
+$ cat a.txt
+EARLY_WITHDRAWAL ts=200 peer=&lt;ip-address&gt; prefix=&lt;ip-address&gt;/16 withdraw_ts=200
+REORDER_VIOLATION ts=100 peer=&lt;ip-address&gt; prefix=&lt;ip-address&gt;/16 processed_after=200
+STALE_RESURRECTION ts=100 peer=&lt;ip-address&gt; prefix=&lt;ip-address&gt;/16 announce_ts=100 last_withdraw_ts=200 live=0
+</code></pre>
+<p>Both runs leave the FIB empty (the correct logical result: announced at 100, withdrawn at 200). The large window repairs by reordering; the zero window cannot, so it reports the prevented resurrection and exits <code>3</code>.</p>
+<h3>Independent differential test</h3>
+<p>A separate Python reference model (<code>ref_check.py</code>, in the appended asset) implements the same per-key watermark semantics on <code>(ts, seq)</code>-sorted events. For 40 randomized streams (mixed announcements, withdrawals, 3 peers, 5 prefixes) the final FIB computed by the shell tool with a very large window matched the reference model exactly:</p>
+<pre><code class="language-text">differential trials done, mismatches = 0
+</code></pre>
+<h3>Exit-status contract</h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>replay clean, no anomalies</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>usage / bad argument</td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>replay completed but anomalies were recorded</td>
+</tr>
+</tbody>
+</table>
+<h2>Operational notes</h2>
+<ul>
+<li>Keep <code>--window</code> at least as large as the maximum timestamp disorder observed at a collector. If it is exceeded, correctness is preserved by the watermarks, but the run is flagged <code>REORDER_VIOLATION</code> and <code>STALE_RESURRECTION</code>.</li>
+<li>The repair plan is idempotent: re-running it after applying it yields an empty plan, because the plan is a pure set difference against the actual FIB.</li>
+<li>Apply the plan at the control-plane boundary; <code>update</code> lines carry both the new and <code>(was &lt;old&gt;)</code> next-hop for audit.</li>
+</ul>
+<h2>Appendix: independent reference model used by the differential test</h2>
+<pre><code class="language-python">import random, subprocess, sys, tempfile, os
+random.seed(7)
+def aslen(s): return 0 if not s else len(s.split(','))
+def better(a,b):
+    if a['w']!=b['w']: return a['w']&gt;b['w']
+    if a['lp']!=b['lp']: return a['lp']&gt;b['lp']
+    if aslen(a['as'])!=aslen(b['as']): return aslen(a['as'])&lt;aslen(b['as'])
+    if a['origin']!=b['origin']: return a['origin']&lt;b['origin']
+    if a['med']!=b['med']: return a['med']&lt;b['med']
+    if a['pty']!=b['pty']: return a['pty']=='ebgp'
+    if a['nh']!=b['nh']: return a['nh']&lt;b['nh']
+    return a['peer']&lt;b['peer']
+peers=['&lt;ip-address&gt;','&lt;ip-address&gt;','&lt;ip-address&gt;']
+pfxs=['10.%d.0.0/16'%i for i in range(1,6)]
+def gen(n):
+    ev=[]; arr=[]
+    for i in range(n):
+        ts=random.randint(1,1000); op=random.choice(['A','A','A','W'])
+        p=random.choice(peers); pf=random.choice(pfxs)
+        if op=='A':
+            nh='192.0.2.%d'%random.randint(1,9)
+            asn=','.join('65%03d'%random.randint(1,5) for _ in range(random.randint(1,3)))
+            attrs='aspath=%s localpref=%d med=%d peer_type=%s'%(asn,random.randint(50,200),random.randint(0,50),random.choice(['ebgp','ibgp']))
+            arr.append(('%d %s %s %s %s %s'%(ts,op,p,pf,nh,attrs),ts,i))
+        else:
+            arr.append(('%d %s %s %s'%(ts,op,p,pf),ts,i))
+    return arr
+def reference(events):
+    live={}; wd={}
+    for line,ts,seq in sorted(events,key=lambda e:(e[1],e[2])):
+        f=line.split(); op=f[1]; p=f[2]; pf=f[3]; K=(p,pf)
+        if op=='A':
+            if K in wd and ts&lt;=wd[K]: continue
+            if K in live and ts&lt;live[K]['ts']: continue
+            if K in live and ts==live[K]['ts'] and live[K]['sig']&gt;=line: continue
+            nh=f[4]; at={}
+            for tok in f[5:]:
+                k,v=tok.split('=',1); at[k]=v
+            live[K]=dict(peer=p,nh=nh,ts=ts,lp=int(at.get('localpref',100)),med=int(at.get('med',0)),
+                         as_=at.get('aspath',''),origin={'egp':1,'incomplete':2}.get(at.get('origin','igp'),0),
+                         pty=at.get('peer_type','ebgp'),w=int(at.get('weight',0)),sig=line)
+        else:
+            if K in live and live[K]['ts']&gt;ts: continue
+            if K in live: del live[K]
+            wd[K]=ts
+    best={}
+    for (p,pf),a in live.items():
+        cand=dict(a); cand['pfx']=pf; cand['as']=a['as_']
+        if pf not in best or better(cand,best[pf]): best[pf]=cand
+    return {pf:b['nh'] for pf,b in best.items()}
+fails=0
+for trial in range(40):
+    n=random.randint(0,40)
+    arr=gen(n)
+    txt='\n'.join(e[0] for e in arr)+'\n'
+    with tempfile.NamedTemporaryFile('w',suffix='.stream',delete=False) as fh:
+        fh.write(txt); path=fh.name
+    out=subprocess.run(['~/bgp-replay.sh','--window','100000','--emit-fib','/dev/stdout','--anomalies','/dev/null',path],capture_output=True,text=True)
+    got={}
+    for ln in out.stdout.splitlines():
+        if ln.strip(): parts=ln.split(); got[parts[0]]=parts[1]
+    exp=reference(arr)
+    if got!=exp:
+        fails+=1
+        print('MISMATCH trial',trial); print(txt); print('got',got); print('exp',exp)
+        if fails&gt;3: break
+    os.unlink(path)
+print('differential trials done, mismatches =',fails)
+sys.exit(1 if fails else 0)
+</code></pre>
+<p>```</p>
+<hr />
+<p><strong>Verified artifacts on disk:</strong>
+- <code>~/bgp-replay.sh</code> — the tool (extracted copy from the doc is byte-identical and passes all 22 tests)
+- <code>~/bgpwork/selftest.sh</code> — assertion suite (<code>22 passed, 0 failed</code>)
+- <code>~/bgpwork/ref_check.py</code> — randomized differential test (<code>mismatches = 0</code>)
+- <code>~/SOLUTION.md</code> — this document</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: shell-bgp-update-rib-fib-withdrawal-race
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-11-02T14:31:19.995Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a shell-based replay and repair tool for a timestamped BGP update stream that maintains Adj-RIB-In, best-path selection, and the installed FIB while handling out-of-order withdrawals, duplicate announcements, route-reflector attributes, and bounded replay memory. It must emit a deterministic minimal repair plan, detect stale-path resurrection, and preserve correctness across route-refresh checkpoints.&quot;, &quot;environment&quot;: &quot;bash&quot;, &quot;language&quot;: &quot;shell&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;shell-bgp-update-rib-fib-withdrawal-race&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-11-02T14:31:19.996Z&quot;, &quot;version&quot;: &quot;5&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,0 +1,28 @@
+{
+  "class_id": 3116,
+  "title": "disk-full-backup-staging",
+  "description": "disk-full-backup-staging",
+  "created_at": "2026-11-02 15:23:43",
+  "answers": [
+    {
+      "answer_id": 4851,
+      "language": "",
+      "environment": "karahermes-mde-7840hs",
+      "version": "",
+      "solution": "## Done\n\nThe solution is written to **`/workspace/SOLUTION.md`** (title, root-cause analysis, exact fix, verification). Supporting tested artifacts are in `/workspace/fix/`.\n\n### Diagnosis\nThe nightly `~/.hermes/scripts/backup-tiered.sh` decompresses sqlite scratch into `/var/tmp/hermes-backup-staging` **on the root fs**. `tmp_<pid>.db` (~48.5 G) and `replay_/verify_<pid>.db` (~48.5 G) coexist at peak (~119 G), pushing 1.8 T root free space below the 5 % `DiskFull` line. Phase-by-phase cleanup produces the observed +45 G mid-run frees and the 60–210 G nightly oscillation. `/mnt/bulk` (3.6 T, 95 % empty) is unused. The disk-guard `SCRATCH_GLOBS` points only at the retired `/tmp/kara-backup-stage`, so SOFT reclaim reports `0B` and never clears stranded scratch.\n\n### Fix\n1. Relocate staging: `STAGING_DIR=/mnt/bulk/hermes-backup-staging`, enforced by `/usr/local/lib/hermes/hermes-staging.sh` — refuses to run if staging shares `st_dev` with `/`, pins one run PID, and cleans up on `EXIT/INT/TERM/HUP`.\n2. Idempotent patcher `/usr/local/sbin/patch-backup-tiered.sh` rewrites hard-coded paths, sources the library after `set -euo pipefail`, and installs the trap.\n3. Replace disk-guard `SCRATCH_GLOBS` with the orphan-aware, age-gated `/usr/local/lib/hermes/scratch-reclaim.sh` (deletes only when the embedded PID is dead **and** older than `STALE_MINUTES`; never touches a live run). Defer HARD escalation while a backup is live (MON-GAP-032).\n4. `/mnt/bulk` persistence + `RequiresMountsFor=/mnt/bulk` so the guard can't recreate the incident on an unmounted mountpoint.\n\n### Verification performed\n- `bash -n` + `shellcheck -S warning` clean on all three scripts, both as standalone artifacts and as extracted from the embedded heredocs in the doc.\n- Functional self-tests: guard **refuses** a same-`st_dev` staging dir, accepts bulk staging and `remaining=0` after trap cleanup, and the reclaimer **keeps live-PID and young orphans while reclaiming stale orphans**.\n- Host-side reproduction/acceptance queries (Prometheus `ALERTS`, `min_over_time` free ratio, `/proc/*/io`) are included in §3 and §5.\n\n> Note: this sandbox only contained `problem.json` (no live host files), so the scripts were validated here by functional self-tests rather than run against real backup data; §5 gives the exact commands to confirm on `karahermes-mde-7840hs`, including the `min_over_time` root-ratio check that must stay > 0.05 across a full backup window.\n",
+      "evidence": "# Evidence\n- Problem class: disk-full-backup-staging\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-02T15:23:43.244Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Host root fs (/dev/nvme0n1p2, 1.8T) oscillates across the 5% DiskFull alert threshold every night ~00:00 local: free space swings 60G-210G within hours and DiskFull/DiskWillFillIn24h re-fire daily. Suspect docker or worktrees; actually the midnight backup run. DIAGNOSIS PATH: (1) query ALERTS{alertname=DiskFull,host=<host>} on fleet-monitor:9090 for firing state; (2) node_filesystem_avail_bytes/node_filesystem_size_bytes for the ratio; (3) top write_bytes processes via /proc/*/io cumulative counters -> backup-tiered.sh dominates (113-178GB per run); (4) /var/tmp/hermes-backup-staging holds the decompressed sqlite scratch: tmp_<pid>.db (~48.5G state.db copy) AND a second replay_/verify_<pid>.db copy (~48.5G) COEXIST at peak = ~119G staged on the root fs; (5) /mnt/bulk (3.6T) sits 95% empty. FIX: relocate staging off the root fs (e.g. STAGING_DIR under /mnt/bulk) so backup cycles cannot cross the alert line; fix disk-guard SCRATCH_GLOBS which names stale /tmp/kara-backup-stage and misses /var/tmp/hermes-backup-staging (SOFT passes reclaim 0B). Do NOT kill a mid-run backup (strands staging per MON-GAP-031; each phase deletes its own scratch after use - the +45G mid-run frees are phase cleanups). The alert self-resolves when the run completes.",
+        "environment": "karahermes-mde-7840hs, Ubuntu, root fs /dev/nvme0n1p2 ext4 1.8T, monitoring lane, fleet-monitor Prometheus v3.15.0",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "disk-full-backup-staging",
+        "provider": "openrouter",
+        "solved_at": "2026-11-02T15:23:43.244Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-11-02 15:23:43"
+    }
+  ]
+}
