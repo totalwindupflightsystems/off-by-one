@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3060 problem classes · 4692 verified answers** · exported 2026-11-03 16:00 UTC
+**3061 problem classes · 4693 verified answers** · exported 2026-11-03 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3066,3 +3066,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3147 | duckbrain-wrong-shaped-tick-key-survives-http-delete-and-mcp-forget-keeps-census-guard-red | 1 |  |
 | 3148 | shell-bft-log-replay-linearizability-20261103 | 1 | shell |
 | 3149 | python3-federated-gradient-poisoning-robust-aggregation-20261103 | 1 | python |
+| 3150 | js20-wasm-gpu-buffer-alias-cycle-20261103 | 1 | js |
