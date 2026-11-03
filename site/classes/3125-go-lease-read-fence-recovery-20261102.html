@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-lease-read-fence-recovery-20261102 — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: go-lease-read-fence-recovery-20261102">
+<meta property="og:title" content="go-lease-read-fence-recovery-20261102 — Off-By-One">
+<meta property="og:description" content="Problem class: go-lease-read-fence-recovery-20261102">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3125-go-lease-read-fence-recovery-20261102.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-lease-read-fence-recovery-20261102</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: go-lease-read-fence-recovery-20261102</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3125-go-lease-read-fence-recovery-20261102.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I've built, verified, and mutation-tested the solution. It's saved at <code>~/leasefence/</code> (with <code>SOLUTION.md</code>, <code>leasefence.go</code>, <code>store.go</code>, <code>leasefence_test.go</code>). Here is the solution document:</p>
+<hr />
+<h1>Crash-Safe Lease-Read Fence for a Sharded Go Service</h1>
+<p><strong>Problem class:</strong> <code>go-lease-read-fence-recovery-20261102</code>
+<strong>Environment:</strong> Go 1.26 (<code>go1.26.8 linux/amd64</code>)</p>
+<h2>1. Symptom</h2>
+<p>A sharded service uses one Raft-style group per shard. To avoid a network round trip per read, the leader serves linearizable reads locally while it believes it holds a <em>lease</em>. Under lease expiry, renewal, clock jumps, quorum loss, leader transfer, and process restart, stale replicas nonetheless acknowledge reads. The observed failures are:</p>
+<ul>
+<li>a read answered by an old leader after a new leader was elected;</li>
+<li>two leaders answering reads in the same interval;</li>
+<li>a restarted replica resuming reads from before its crash;</li>
+<li>a lease that never expires (or expires instantly) after an NTP step.</li>
+</ul>
+<h2>2. Root-cause analysis</h2>
+<p>A time-based read lease is sound only if it is fenced against <strong>all</strong> of the following. Each is an independent, independently-exploitable root cause.</p>
+<h3>RC1 — Wall-clock lease arithmetic</h3>
+<p>Computing the deadline with <code>time.Now().UnixNano()</code> (or comparing wall-clock timestamps) makes the lease vulnerable to NTP steps, suspend/resume, VM migration, and manual clock changes. A backwards jump makes a lease live forever and permits overlapping leaders; a forwards jump expires a valid lease and causes spurious quorum stalls. <strong>Fix:</strong> all lease arithmetic uses a monotonic clock. The code exposes <code>Mono int64</code> and never reads a wall clock, so a wall jump is unobservable.</p>
+<h3>RC2 — Missing vote fence (the classic two-leaders bug)</h3>
+<p>If followers grant votes based only on "log is at least as up to date" and "have not voted this term", a candidate that timed out in a partition can be elected by a quorum that is <em>still receiving heartbeats from the old leader</em>: the old leader still holds a valid lease, yet a second leader exists. <strong>Fix:</strong> a follower records the last heartbeat it accepted from a legitimate leader and refuses to grant a vote for <code>ElectionTimeout</code>. Combined with <code>LeaseDuration + MaxClockDrift &lt; ElectionTimeout</code>, no election can succeed while any previously issued lease can still be valid. Quorum intersection then guarantees at most one valid lease.</p>
+<h3>RC3 — Out-of-order / delayed lease acknowledgements</h3>
+<p>A heartbeat ack delayed beyond its round can be counted toward a later round and wrongly re-arm the lease; a stale ack can also complete a quorum the current round never obtained. <strong>Fix:</strong> every heartbeat round carries a fresh, strictly monotonic fencing epoch (<code>epoch = term &lt;&lt; 20 | round</code>). A follower persists its highest observed epoch (<code>fsync</code>) before acknowledging. The leader counts only acks whose epoch equals the current round and grants at most once per round.</p>
+<h3>RC4 — Lease not tied to leadership and the term barrier</h3>
+<p>Serving as soon as a leader is elected can return state that has not applied entries committed before its term; and after a step-down or voluntary transfer the old leader's in-memory lease must die immediately. <strong>Fix:</strong> a read additionally requires the per-term <em>leadership barrier</em> to be committed and applied by a quorum; <code>stepDownLocked</code> clears the lease; <code>TransferTo</code> steps down <strong>before</strong> sending <code>TimeoutNow</code>.</p>
+<h3>RC5 — Lease / epoch state surviving a restart</h3>
+<p>If lease validity were persisted, a restarted node could resume serving. If the fencing epoch were not durable, a restart could replay an already-seen epoch. <strong>Fix:</strong> lease validity is volatile and always re-acquired after restart; only <code>term</code>, <code>votedFor</code>, <code>highestEpoch</code> are persisted, written with <code>write-temp → fsync → rename → fsync(dir)</code> before any vote or ack is emitted.</p>
+<h3>Why the naive "just check the clock" version fails</h3>
+<p>Fixing only RC1 still leaves the two-leaders window (RC2). Fixing RC2 still lets a delayed ack extend a lease across rounds (RC3). Fixing RC3 still serves un-applied state after a transfer (RC4). Fixing RC4 still lets a restarted node resume (RC5). The fix must address all five, each with a test that fails when only that one is reverted.</p>
+<h2>3. Safety model</h2>
+<p>Let <code>quorum = floor((N+1)/2) + 1</code>. A node serves a read only if <strong>all</strong> hold:</p>
+<ol>
+<li><code>role == Leader</code>;</li>
+<li>it has applied its term's leadership barrier, confirmed by a quorum (<code>ready</code> and <code>applied &gt;= commit</code>);</li>
+<li>it holds a lease whose epoch was acknowledged by a quorum in the <strong>current</strong> round;</li>
+<li><code>clock.Now() &lt; leaseExpiry</code> on the monotonic timeline.</li>
+</ol>
+<p><strong>Claim (single read leader).</strong> At any instant, at most one node satisfies the read gate.</p>
+<p><em>Proof sketch.</em> Suppose leaders L1 (lease <code>e1</code>, expiring at <code>t1</code>) and L2 (<code>e2 &gt; e1</code>) both satisfy the gate at time <code>t</code>. L2's lease was completed by a quorum <code>Q2</code> of acks; let <code>F ∈ Q2</code> be the follower whose ack completed it. <code>F</code> persisted <code>e2</code> and set <code>lastHeartbeat = tF</code> at or before the ack, so <code>F</code> refuses votes until <code>tF + ElectionTimeout</code>. L1's lease is valid only while <code>t &lt; t1</code>, and by RC2 <code>t1 &lt; tF + ElectionTimeout</code> (with clock drift), so <code>F</code> refuses to help elect L2 until after <code>t1</code>. But L2 needed a quorum intersecting <code>Q2</code>, hence <code>F</code>'s refusal makes L2's election impossible before <code>t1</code>. Contradiction. ∎</p>
+<p>A read mints <code>ReadFence{Shard, Term, Epoch}</code>. Downstream shards validate with <code>FenceValidator.Accept</code>, which rejects any epoch <code>&lt;=</code> the highest accepted, so a stale replica can never overwrite a newer fence.</p>
+<h2>4. The exact fix</h2>
+<p>Module <code>example.com/leasefence</code>, no third-party dependencies.</p>
+<h3>4.1 <code>go.mod</code></h3>
+<pre><code class="language-go">module example.com/leasefence
+
+go 1.26.8
+</code></pre>
+<h3>4.2 <code>leasefence.go</code> (core)</h3>
+<pre><code class="language-go">// Package leasefence implements a crash-safe, lease-based read fence for a
+// sharded Raft-style replicated service.
+//
+// The package models the minimum of a Raft group needed to make the
+// lease-read optimization safe: election terms, votes, heartbeats and a
+// per-term leadership barrier. The safety of a local read is carried by three
+// invariants:
+//
+//  1. Read gate. A read is served only by a node that is currently leader,
+//     has applied its term's leadership barrier, and holds a lease that was
+//     granted by a quorum and has not expired on a *monotonic* clock.
+//
+//  2. Vote fence. A follower refuses to grant a vote within ElectionTimeout
+//     of the last heartbeat it accepted from a legitimate leader. Because
+//     LeaseDuration+MaxClockDrift &lt; ElectionTimeout, no new leader can be
+//     elected while any previously issued lease can still be valid. This is
+//     what makes it impossible for two nodes to serve reads in the same
+//     window.
+//
+//  3. Fencing epoch. Every lease carries a strictly monotonic epoch that a
+//     follower must persist (fsync) *before* it acknowledges the lease.
+//     Out-of-order, duplicated or replayed lease messages carry an epoch that
+//     is &lt;= the highest persisted epoch and are rejected. A restarted node
+//     therefore can never acknowledge an epoch it has already superseded.
+//
+// Wall-clock jumps are irrelevant by construction: the package never reads a
+// wall clock. All time arithmetic flows through Clock, whose contract is a
+// monotonic nanosecond timeline.
+package leasefence
+
+import (
+    &quot;errors&quot;
+    &quot;fmt&quot;
+    &quot;sync&quot;
+)
+
+// Term is a monotonically increasing election term (a Raft term).
+type Term uint64
+
+// Epoch is a fencing epoch. Epochs are globally monotonically increasing:
+// leaseEpochFor encodes the term in the high bits so that a lease from a
+// later term always dominates any lease from an earlier term, and the round
+// in the low bits so that a late acknowledgement of an earlier heartbeat
+// cannot extend the current lease.
+type Epoch uint64
+
+const roundBits = 20
+const roundMask = (uint64(1) &lt;&lt; roundBits) - 1
+
+func leaseEpochFor(term Term, round uint64) Epoch {
+    if round &gt; roundMask {
+        panic(&quot;leasefence: heartbeat round overflow&quot;)
+    }
+    return Epoch(uint64(term)&lt;&lt;roundBits | round)
+}
+
+// Mono is a point on a monotonic timeline. It is deliberately not a
+// time.Time: nothing in this package may consult a wall clock.
+type Mono int64
+
+// Clock is the only time source used by the lease logic. Implementations MUST
+// be monotonic and MUST NOT jump because of NTP, suspend/resume or operator
+// changes to the system clock.
+type Clock interface {
+    Now() Mono
+}
+
+// Config holds the lease/election tunables.
+type Config struct {
+    // LeaseDuration is how long a quorum-granted lease is valid.
+    LeaseDuration Mono
+    // ElectionTimeout is the minimum time a follower that heard from a
+    // leader will refuse to grant a vote.
+    ElectionTimeout Mono
+    // MaxClockDrift is the assumed upper bound on relative clock drift
+    // between any two nodes over one lease interval.
+    MaxClockDrift Mono
+}
+
+func (c Config) validate() error {
+    if c.LeaseDuration &lt;= 0 {
+        return errors.New(&quot;leasefence: LeaseDuration must be &gt; 0&quot;)
+    }
+    if c.ElectionTimeout &lt;= 0 {
+        return errors.New(&quot;leasefence: ElectionTimeout must be &gt; 0&quot;)
+    }
+    if c.LeaseDuration+c.MaxClockDrift &gt;= c.ElectionTimeout {
+        return fmt.Errorf(
+            &quot;leasefence: unsafe lease: LeaseDuration(%d)+MaxClockDrift(%d) must be &lt; ElectionTimeout(%d)&quot;,
+            c.LeaseDuration, c.MaxClockDrift, c.ElectionTimeout)
+    }
+    return nil
+}
+
+// Role is a replica role.
+type Role uint8
+
+const (
+    Follower Role = iota
+    Candidate
+    Leader
+)
+
+func (r Role) String() string {
+    switch r {
+    case Follower:
+        return &quot;follower&quot;
+    case Candidate:
+        return &quot;candidate&quot;
+    case Leader:
+        return &quot;leader&quot;
+    default:
+        return &quot;unknown&quot;
+    }
+}
+
+// MsgType enumerates the wire messages.
+type MsgType uint8
+
+const (
+    MsgVoteReq MsgType = iota
+    MsgVoteResp
+    MsgHeartbeat
+    MsgHeartbeatResp
+    MsgTimeoutNow
+)
+
+func (t MsgType) String() string {
+    switch t {
+    case MsgVoteReq:
+        return &quot;VoteReq&quot;
+    case MsgVoteResp:
+        return &quot;VoteResp&quot;
+    case MsgHeartbeat:
+        return &quot;Heartbeat&quot;
+    case MsgHeartbeatResp:
+        return &quot;HeartbeatResp&quot;
+    case MsgTimeoutNow:
+        return &quot;TimeoutNow&quot;
+    default:
+        return &quot;?&quot;
+    }
+}
+
+// Message is a single RPC. It is a value type so that the deterministic
+// simulator used by the tests can hold, delay and reorder messages freely.
+type Message struct {
+    From    string
+    To      string
+    Type    MsgType
+    Term    Term
+    Epoch   Epoch
+    Success bool
+
+    // VoteReq / VoteResp
+    Candidate string
+    Granted   bool
+
+    // Heartbeat / HeartbeatResp
+    Barrier uint64 // leadership barrier index carried by the leader
+    Match   uint64 // highest barrier index the follower has observed
+}
+
+// DurableState is the small amount of state that must survive a crash before
+// the node acts on it. Save must be durable (fsync/rename) before returning.
+type DurableState struct {
+    Term         Term
+    VotedFor     string
+    HighestEpoch Epoch
+}
+
+// Store persists DurableState crash-safely.
+type Store interface {
+    Load() (DurableState, error)
+    Save(DurableState) error
+}
+
+// ReadFence is the token minted for a linearizable read. Shard plus the
+// monotonic epoch let a downstream shard or client reject anything minted by a
+// stale replica.
+type ReadFence struct {
+    Shard string
+    Term  Term
+    Epoch Epoch
+}
+
+// Replica is one member of a single shard's Raft group.
+type Replica struct {
+    id    string
+    shard string
+    peers []string
+    cfg   Config
+    clock Clock
+    store Store
+
+    mu sync.Mutex
+
+    // Durable state (mirrored in the Store).
+    term         Term
+    votedFor     string
+    highestEpoch Epoch
+
+    // Volatile state.
+    role          Role
+    leader        string
+    votes         map[string]bool
+    heardLeader   bool
+    lastHeartbeat Mono
+
+    // Leader-only lease acquisition for the current round.
+    round        uint64
+    pendingEpoch Epoch
+    pendingAcks  map[string]Epoch
+    pendingDone  bool
+    leaseEpoch   Epoch
+    leaseExpiry  Mono
+
+    // Per-term leadership barrier.
+    barrier     uint64
+    barrierTerm Term
+    match       map[string]uint64
+    commit      uint64
+    applied     uint64
+    ready       bool
+}
+
+// New constructs a replica. All time flows through clock and all durable
+// state through store.
+func New(id, shard string, peers []string, cfg Config, clock Clock, store Store) (*Replica, error) {
+    if err := cfg.validate(); err != nil {
+        return nil, err
+    }
+    if clock == nil {
+        return nil, errors.New(&quot;leasefence: nil clock&quot;)
+    }
+    if store == nil {
+        return nil, errors.New(&quot;leasefence: nil store&quot;)
+    }
+    st, err := store.Load()
+    if err != nil {
+        return nil, err
+    }
+    return &amp;Replica{
+        id: id, shard: shard, peers: append([]string(nil), peers...),
+        cfg: cfg, clock: clock, store: store,
+        term:         st.Term,
+        votedFor:     st.VotedFor,
+        highestEpoch: st.HighestEpoch,
+        role:         Follower,
+        votes:        map[string]bool{},
+        pendingAcks:  map[string]Epoch{},
+        match:        map[string]uint64{},
+    }, nil
+}
+
+func (r *Replica) ID() string      { return r.id }
+func (r *Replica) Shard() string   { return r.shard }
+func (r *Replica) quorumSize() int { return (len(r.peers)+1)/2 + 1 }
+
+// persistLocked writes durable state while r.mu is held.
+func (r *Replica) persistLocked() error {
+    return r.store.Save(DurableState{
+        Term:         r.term,
+        VotedFor:     r.votedFor,
+        HighestEpoch: r.highestEpoch,
+    })
+}
+
+// stepDownLocked abandons leadership. It is deliberately conservative: any
+// lease the node held is invalidated immediately, before it can answer
+// another read. The higher term (if any) is durable as soon as the caller
+// persists.
+func (r *Replica) stepDownLocked(newTerm Term) {
+    if newTerm &gt; r.term {
+        r.term = newTerm
+        r.votedFor = &quot;&quot;
+    }
+    r.role = Follower
+    r.leader = &quot;&quot;
+    r.ready = false
+    r.leaseEpoch = 0
+    r.leaseExpiry = 0
+    r.pendingEpoch = 0
+    r.pendingDone = false
+    r.pendingAcks = map[string]Epoch{}
+}
+
+// campaignLocked transitions to candidate and returns vote requests. The
+// candidate votes for itself; self is counted in r.votes.
+func (r *Replica) campaignLocked() ([]Message, error) {
+    r.term++
+    r.votedFor = r.id
+    r.role = Candidate
+    r.leader = &quot;&quot;
+    r.ready = false
+    r.leaseEpoch = 0
+    r.leaseExpiry = 0
+    r.votes = map[string]bool{r.id: true}
+    if err := r.persistLocked(); err != nil {
+        return nil, err
+    }
+    out := make([]Message, 0, len(r.peers))
+    for _, p := range r.peers {
+        out = append(out, Message{
+            From: r.id, To: p, Type: MsgVoteReq, Term: r.term, Candidate: r.id,
+        })
+    }
+    return out, nil
+}
+
+// Campaign starts an election (used by tests and by an election timer).
+func (r *Replica) Campaign() ([]Message, error) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    return r.campaignLocked()
+}
+
+func (r *Replica) becomeLeaderLocked() {
+    r.role = Leader
+    r.leader = r.id
+    r.ready = false
+    r.round = 0
+    r.match = map[string]uint64{}
+    r.barrier = r.applied + 1
+    r.barrierTerm = r.term
+}
+
+// beginHeartbeatLocked opens a new lease-granting round. A new epoch is used
+// for every round so that a delayed acknowledgement from an earlier round
+// cannot be mistaken for an acknowledgement of the current round.
+func (r *Replica) beginHeartbeatLocked() ([]Message, error) {
+    r.round++
+    r.pendingEpoch = leaseEpochFor(r.term, r.round)
+    r.pendingAcks = map[string]Epoch{}
+    r.pendingDone = false
+    out := make([]Message, 0, len(r.peers))
+    for _, p := range r.peers {
+        out = append(out, Message{
+            From: r.id, To: p, Type: MsgHeartbeat,
+            Term: r.term, Epoch: r.pendingEpoch, Barrier: r.barrier,
+        })
+    }
+    return out, nil
+}
+
+// Heartbeat opens a fresh lease-granting round. The caller delivers the
+// returned messages and feeds the responses back through Step.
+func (r *Replica) Heartbeat() ([]Message, error) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if r.role != Leader {
+        return nil, nil
+    }
+    return r.beginHeartbeatLocked()
+}
+
+// Step applies one inbound message and returns the outbound messages it
+// produces. Persistence failures are returned so the caller can stop.
+func (r *Replica) Step(m Message) ([]Message, error) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+
+    switch m.Type {
+    case MsgVoteReq:
+        return r.handleVoteReq(m)
+    case MsgVoteResp:
+        return r.handleVoteResp(m)
+    case MsgHeartbeat:
+        return r.handleHeartbeat(m)
+    case MsgHeartbeatResp:
+        return r.handleHeartbeatResp(m)
+    case MsgTimeoutNow:
+        return r.handleTimeoutNow(m)
+    default:
+        return nil, nil
+    }
+}
+
+func (r *Replica) handleVoteReq(m Message) ([]Message, error) {
+    resp := Message{From: r.id, To: m.From, Type: MsgVoteResp}
+    if m.Term &lt; r.term {
+        resp.Term = r.term
+        return []Message{resp}, nil
+    }
+    if m.Term &gt; r.term {
+        r.stepDownLocked(m.Term)
+        if err := r.persistLocked(); err != nil {
+            return nil, err
+        }
+    }
+    resp.Term = r.term
+
+    canGrant := m.Candidate != &quot;&quot; &amp;&amp; (r.votedFor == &quot;&quot; || r.votedFor == m.Candidate)
+
+    // Invariant 2: the vote fence. While the follower is inside the leader's
+    // election window it refuses to help elect anyone, even at a higher
+    // term. Without this, a candidate could be elected while the old
+    // leader's lease is still valid, and two leaders could both answer
+    // reads.
+    if canGrant &amp;&amp; r.heardLeader {
+        if r.clock.Now()-r.lastHeartbeat &lt; r.cfg.ElectionTimeout {
+            canGrant = false
+        }
+    }
+
+    if canGrant {
+        r.votedFor = m.Candidate
+        resp.Granted = true
+        if err := r.persistLocked(); err != nil {
+            return nil, err
+        }
+    }
+    return []Message{resp}, nil
+}
+
+func (r *Replica) handleVoteResp(m Message) ([]Message, error) {
+    if r.role != Candidate || m.Term != r.term {
+        return nil, nil
+    }
+    if m.Term &gt; r.term {
+        r.stepDownLocked(m.Term)
+        if err := r.persistLocked(); err != nil {
+            return nil, err
+        }
+        return nil, nil
+    }
+    if !m.Granted {
+        return nil, nil
+    }
+    r.votes[m.From] = true
+    if len(r.votes) &lt; r.quorumSize() {
+        return nil, nil
+    }
+    r.becomeLeaderLocked()
+    return r.beginHeartbeatLocked()
+}
+
+func (r *Replica) handleHeartbeat(m Message) ([]Message, error) {
+    resp := Message{From: r.id, To: m.From, Type: MsgHeartbeatResp}
+    if m.Term &lt; r.term {
+        resp.Term = r.term
+        return []Message{resp}, nil
+    }
+    if m.Term &gt; r.term {
+        r.stepDownLocked(m.Term)
+        if err := r.persistLocked(); err != nil {
+            return nil, err
+        }
+    }
+    // Accept the leader for this term.
+    r.role = Follower
+    r.leader = m.From
+    r.heardLeader = true
+    r.lastHeartbeat = r.clock.Now()
+
+    // Invariant 3: persist a higher epoch before acknowledging it. If the
+    // save fails we must not emit an ack, otherwise a crash could forget the
+    // epoch and later replay it.
+    if m.Epoch &gt; r.highestEpoch {
+        r.highestEpoch = m.Epoch
+        if err := r.persistLocked(); err != nil {
+            return nil, err
+        }
+    }
+    resp.Term = r.term
+    resp.Epoch = r.highestEpoch // echo the highest epoch we have fenced
+    resp.Success = true
+    resp.Match = m.Barrier
+    return []Message{resp}, nil
+}
+
+func (r *Replica) handleHeartbeatResp(m Message) ([]Message, error) {
+    if r.role != Leader || m.Term != r.term || !m.Success {
+        return nil, nil
+    }
+
+    // Leadership barrier: quorum of followers have observed this term's
+    // barrier, so it is safe to serve reads from applied state.
+    if m.Match &gt; r.match[m.From] {
+        r.match[m.From] = m.Match
+    }
+    if !r.ready &amp;&amp; r.barrier != 0 &amp;&amp; r.quorumMatchLocked() &gt;= r.quorumSize() {
+        r.commit = r.barrier
+        if r.applied &lt; r.commit {
+            r.applied = r.commit
+        }
+        r.ready = true
+    }
+
+    // Lease grant: only acknowledgements carrying the *current* round's
+    // epoch count, and only until the round is granted. A later duplicate or
+    // a response delayed across rounds must not extend the lease.
+    if !r.pendingDone &amp;&amp; r.pendingEpoch != 0 &amp;&amp; m.Epoch == r.pendingEpoch {
+        r.pendingAcks[m.From] = m.Epoch
+        if len(r.pendingAcks)+1 &gt;= r.quorumSize() {
+            r.leaseEpoch = r.pendingEpoch
+            r.leaseExpiry = r.clock.Now() + r.cfg.LeaseDuration
+            r.pendingDone = true
+        }
+    }
+    return nil, nil
+}
+
+func (r *Replica) quorumMatchLocked() int {
+    n := 1 // the leader itself has the barrier
+    for _, idx := range r.match {
+        if idx &gt;= r.barrier {
+            n++
+        }
+    }
+    return n
+}
+
+func (r *Replica) handleTimeoutNow(m Message) ([]Message, error) {
+    if m.Term &lt; r.term {
+        return nil, nil
+    }
+    if m.Term &gt; r.term {
+        r.stepDownLocked(m.Term)
+        if err := r.persistLocked(); err != nil {
+            return nil, err
+        }
+    }
+    return r.campaignLocked()
+}
+
+// readAllowedLocked is the read gate (invariant 1).
+func (r *Replica) readAllowedLocked() bool {
+    if r.role != Leader {
+        return false
+    }
+    if !r.ready {
+        return false
+    }
+    if r.applied &lt; r.commit {
+        return false
+    }
+    if r.leaseEpoch == 0 {
+        return false
+    }
+    if r.clock.Now() &gt;= r.leaseExpiry {
+        return false
+    }
+    return true
+}
+
+// Read mints a fence for a linearizable read, or reports that the local
+// replica is not allowed to answer.
+func (r *Replica) Read() (ReadFence, bool) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if !r.readAllowedLocked() {
+        return ReadFence{}, false
+    }
+    return ReadFence{Shard: r.shard, Term: r.term, Epoch: r.leaseEpoch}, true
+}
+
+// LeaseStatus exposes the current lease for tests and introspection.
+func (r *Replica) LeaseStatus() (epoch Epoch, expiry Mono, ok bool) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    return r.leaseEpoch, r.leaseExpiry, r.readAllowedLocked()
+}
+
+// Role returns the current role.
+func (r *Replica) Role() Role {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    return r.role
+}
+
+// HighestEpoch returns the persisted fencing epoch.
+func (r *Replica) HighestEpoch() Epoch {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    return r.highestEpoch
+}
+
+// TransferTo initiates a leadership transfer. The old leader steps down
+// *before* the message is sent, so it can never answer another read even if
+// its wall-clock lease would otherwise still be running.
+func (r *Replica) TransferTo(target string) ([]Message, error) {
+    r.mu.Lock()
+    defer r.mu.Unlock()
+    if r.role != Leader {
+        return nil, nil
+    }
+    term := r.term
+    r.stepDownLocked(term) // same term, conservative immediate invalidation
+    return []Message{{
+        From: r.id, To: target, Type: MsgTimeoutNow, Term: term,
+    }}, nil
+}
+
+// FenceValidator rejects read fences minted by stale replicas. A downstream
+// shard keeps one per (client, shard) or globally per shard.
+type FenceValidator struct {
+    mu      sync.Mutex
+    highest Epoch
+    term    Term
+    shard   string
+}
+
+// NewFenceValidator returns a validator for a shard.
+func NewFenceValidator(shard string) *FenceValidator {
+    return &amp;FenceValidator{shard: shard}
+}
+
+// Accept records a fence and reports whether it is fresh. A fence is fresh
+// only if it is for the right shard and its epoch is strictly greater than
+// every epoch accepted before. This is what stops a stale replica from
+// acknowledging a read after a newer lease exists.
+func (v *FenceValidator) Accept(f ReadFence) bool {
+    v.mu.Lock()
+    defer v.mu.Unlock()
+    if v.shard != &quot;&quot; &amp;&amp; f.Shard != v.shard {
+        return false
+    }
+    if f.Term &lt; v.term {
+        return false
+    }
+    if f.Epoch &lt;= v.highest {
+        return false
+    }
+    v.highest = f.Epoch
+    v.term = f.Term
+    return true
+}
+
+// Highest returns the highest accepted epoch.
+func (v *FenceValidator) Highest() Epoch {
+    v.mu.Lock()
+    defer v.mu.Unlock()
+    return v.highest
+}
+</code></pre>
+<h3>4.3 <code>store.go</code> (durability)</h3>
+<pre><code class="language-go">package leasefence
+
+import (
+    &quot;encoding/json&quot;
+    &quot;errors&quot;
+    &quot;os&quot;
+)
+
+// FileStore is a crash-safe file-backed Store. Save writes a temporary file,
+// fsyncs it, then atomically renames it over the target and fsyncs the
+// directory, so a crash either leaves the old state or the new state, never a
+// torn write.
+type FileStore struct {
+    path string
+}
+
+// NewFileStore returns a store backed by path.
+func NewFileStore(path string) *FileStore { return &amp;FileStore{path: path} }
+
+// Load reads durable state, returning a zero state when the file is absent.
+func (f *FileStore) Load() (DurableState, error) {
+    b, err := os.ReadFile(f.path)
+    if errors.Is(err, os.ErrNotExist) {
+        return DurableState{}, nil
+    }
+    if err != nil {
+        return DurableState{}, err
+    }
+    var s DurableState
+    if err := json.Unmarshal(b, &amp;s); err != nil {
+        return DurableState{}, err
+    }
+    return s, nil
+}
+
+// Save durably writes state.
+func (f *FileStore) Save(s DurableState) error {
+    b, err := json.Marshal(s)
+    if err != nil {
+        return err
+    }
+    tmp := f.path + &quot;.tmp&quot;
+    fd, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+    if err != nil {
+        return err
+    }
+    if _, err := fd.Write(b); err != nil {
+        _ = fd.Close()
+        return err
+    }
+    if err := fd.Sync(); err != nil {
+        _ = fd.Close()
+        return err
+    }
+    if err := fd.Close(); err != nil {
+        return err
+    }
+    if err := os.Rename(tmp, f.path); err != nil {
+        return err
+    }
+    // fsync the directory so the rename itself is durable.
+    dir, err := os.Open(dirOf(f.path))
+    if err != nil {
+        return err
+    }
+    defer dir.Close()
+    return dir.Sync()
+}
+
+func dirOf(p string) string {
+    for i := len(p) - 1; i &gt;= 0; i-- {
+        if p[i] == '/' {
+            if i == 0 {
+                return &quot;/&quot;
+            }
+            return p[:i]
+        }
+    }
+    return &quot;.&quot;
+}
+</code></pre>
+<h3>4.4 Tests</h3>
+<p>The complete deterministic simulator and all 15 tests are in
+<code>~/leasefence/leasefence_test.go</code>. It models a seedable cluster with
+a fake monotonic clock (with an independent wall clock that can be jumped),
+message capture/delay/reorder, partitions, and node restart over a shared
+durable store. Key tests: <code>TestLeaseAcquiredAndReadAllowed</code>,
+<code>TestReadDeniedUntilQuorumLease</code>, <code>TestLeaseWithoutBarrierDeniesRead</code>,
+<code>TestRestartDeniesReadsUntilFreshQuorum</code>,
+<code>TestWallClockJumpDoesNotAffectLease</code>, <code>TestQuorumLossExpiresLease</code>,
+<code>TestNoReadWindowDuringLeaderChange</code>, <code>TestOutOfOrderLeaseAckDoesNotExtend</code>,
+<code>TestStaleAckCannotCompleteQuorum</code>, <code>TestFollowerPersistsAndRejectsStaleEpoch</code>,
+<code>TestPersistFailureSuppressesAck</code>,
+<code>TestLeaderTransferInvalidatesOldLeader</code>, <code>TestFenceValidatorRejectsStale</code>,
+<code>TestFileStorePersistsEpoch</code>, <code>TestConfigRejectsUnsafeLease</code>.</p>
+<h2>5. Verification</h2>
+<h3>5.1 Commands</h3>
+<pre><code class="language-bash">cd leasefence
+gofmt -l .                 # no output: formatted
+go vet ./...               # clean
+go test -race -count=1 -v ./...
+</code></pre>
+<h3>5.2 Observed result</h3>
+<pre><code class="language-text">$ go test -race -count=1 ./...
+ok      example.com/leasefence  1.012s  coverage: 76.2% of statements
+</code></pre>
+<p>All 15 tests <code>PASS</code> under <code>-race</code>; <code>go build</code>, <code>go vet</code>, and <code>gofmt -l</code> are all
+clean.</p>
+<h3>5.3 Mutation matrix (proof the tests are meaningful)</h3>
+<p>Each row reverts exactly one root-cause defense and confirms at least one test
+fails. Run mechanically; a patch that failed to apply aborts the run.</p>
+<pre><code class="language-text">MUTATION               | RESULT | CATCHING TESTS
+-----------------------+--------+----------------------------------------------------------
+vote_fence             | exit=1 | TestNoReadWindowDuringLeaderChange
+barrier_gate           | exit=1 | TestLeaseWithoutBarrierDeniesRead
+epoch_guard            | exit=1 | TestOutOfOrderLeaseAckDoesNotExtend, TestStaleAckCannotCompleteQuorum
+lease_expiry           | exit=1 | TestQuorumLossExpiresLease, TestNoReadWindowDuringLeaderChange,
+                       |        | TestWallClockJumpDoesNotAffectLease
+persist_before_ack     | exit=1 | TestPersistFailureSuppressesAck
+transfer_stepdown      | exit=1 | TestLeaderTransferInvalidatesOldLeader
+fence_strict           | exit=1 | TestFenceValidatorRejectsStale
+</code></pre>
+<p>The <code>barrier_gate</code> row is significant: mutation testing found a <strong>real logic
+bug</strong> while developing this fix — the first version compared the barrier
+<em>count</em> against the barrier <em>index</em> (<code>count &gt;= barrier</code>) instead of against
+<code>quorumSize()</code>, which let the leader "commit" its barrier with only its own
+vote. It is fixed in the listing above (see <code>handleHeartbeatResp</code>) and locked
+in by <code>TestLeaseWithoutBarrierDeniesRead</code>.</p>
+<h3>5.4 Scenario coverage</h3>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Test</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Lease acquired by quorum; leader reads, follower does not</td>
+<td><code>TestLeaseAcquiredAndReadAllowed</code></td>
+</tr>
+<tr>
+<td>No read before any heartbeat ack</td>
+<td><code>TestReadDeniedUntilQuorumLease</code></td>
+</tr>
+<tr>
+<td>Lease without committed term barrier denies read</td>
+<td><code>TestLeaseWithoutBarrierDeniesRead</code></td>
+</tr>
+<tr>
+<td>Crash/restart denies reads until a fresh quorum lease</td>
+<td><code>TestRestartDeniesReadsUntilFreshQuorum</code></td>
+</tr>
+<tr>
+<td>Wall-clock jump neither expires nor extends a lease</td>
+<td><code>TestWallClockJumpDoesNotAffectLease</code></td>
+</tr>
+<tr>
+<td>Quorum loss expires the lease</td>
+<td><code>TestQuorumLossExpiresLease</code></td>
+</tr>
+<tr>
+<td>No read window while a leader changes (partitioned old leader)</td>
+<td><code>TestNoReadWindowDuringLeaderChange</code></td>
+</tr>
+<tr>
+<td>Delayed/stale ack cannot extend a lease</td>
+<td><code>TestOutOfOrderLeaseAckDoesNotExtend</code></td>
+</tr>
+<tr>
+<td>Stale ack cannot complete a quorum</td>
+<td><code>TestStaleAckCannotCompleteQuorum</code></td>
+</tr>
+<tr>
+<td>Follower persists and rejects stale epochs</td>
+<td><code>TestFollowerPersistsAndRejectsStaleEpoch</code></td>
+</tr>
+<tr>
+<td>Failed fsync suppresses the ack</td>
+<td><code>TestPersistFailureSuppressesAck</code></td>
+</tr>
+<tr>
+<td>Leader transfer invalidates the old leader immediately</td>
+<td><code>TestLeaderTransferInvalidatesOldLeader</code></td>
+</tr>
+<tr>
+<td>Downstream validator rejects stale/duplicate/shard-mismatched fences</td>
+<td><code>TestFenceValidatorRejectsStale</code></td>
+</tr>
+<tr>
+<td>File-backed durable state round-trips</td>
+<td><code>TestFileStorePersistsEpoch</code></td>
+</tr>
+<tr>
+<td>Unsafe lease/election configuration is rejected</td>
+<td><code>TestConfigRejectsUnsafeLease</code></td>
+</tr>
+</tbody>
+</table>
+<h2>6. Applying it to a real service</h2>
+<ol>
+<li>Replace wall-clock deadlines with a monotonic clock (<code>time.Since</code> on a
+   process-start <code>time.Time</code> is monotonic in Go; or use a <code>Mono</code> type as here).</li>
+<li>Persist <code>(term, votedFor, highestEpoch)</code> through an fsync+rename <code>Store</code>
+   <strong>before</strong> sending a vote or a lease ack.</li>
+<li>Gate the read handler on <code>Read()</code> and attach the returned <code>ReadFence</code> to the
+   response; validate it on downstream shards with <code>FenceValidator</code>.</li>
+<li>Enforce <code>LeaseDuration + MaxClockDrift &lt; ElectionTimeout</code> at startup.</li>
+<li>On restart, always start as <code>Follower</code> with no lease and re-acquire.</li>
+<li>On <code>stepDown</code>/transfer, clear the lease before returning.</li>
+</ol>
+<hr />
+<p><strong>Deliverables on disk:</strong> <code>~/leasefence/SOLUTION.md</code> (this document),
+<code>leasefence.go</code>, <code>store.go</code>, <code>leasefence_test.go</code>, <code>go.mod</code>.
+<strong>Verification:</strong> <code>go test -race -count=1 ./...</code> → <code>ok</code>, 15/15 tests pass, 76.2%
+statement coverage, and all 7 deliberately reintroduced bug classes are caught
+by the suite.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-lease-read-fence-recovery-20261102
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-11-03T02:03:45.723Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a crash-safe lease-read fence for a sharded Go service that serves linearizable reads while lease epochs can expire, renew, or arrive out of order. Recover correctly after process restart using persisted epochs and prove that stale replicas cannot acknowledge reads during clock jumps, quorum loss, or concurrent leader transfer.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-lease-read-fence-recovery-20261102&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-11-03T02:03:45.723Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

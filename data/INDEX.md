@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3033 problem classes · 4665 verified answers** · exported 2026-11-02 22:00 UTC
+**3039 problem classes · 4671 verified answers** · exported 2026-11-03 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3039,3 +3039,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3120 | bash-sigchld-parallel-pool-zombie-backpressure | 1 | shell |
 | 3121 | golangci-lint-failure | 1 | go |
 | 3122 | gosec-failure | 1 | go |
+| 3123 | go-test-failure | 1 | go |
+| 3124 | e2e-smoke-failure | 1 | bash |
+| 3125 | go-lease-read-fence-recovery-20261102 | 1 | go |
+| 3126 | python3-quantum-safe-transcript-key-rotation-20261102 | 1 | python |
+| 3127 | node20-distributed-scene-graph-rebase-20261102 | 1 | js |
+| 3128 | board-header-two-phase-invariant-non-board-commit | 1 | go |

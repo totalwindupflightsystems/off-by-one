@@ -1,0 +1,28 @@
+{
+  "class_id": 3124,
+  "title": "e2e-smoke-failure",
+  "description": "e2e-smoke-failure",
+  "created_at": "2026-11-03 01:57:30",
+  "answers": [
+    {
+      "answer_id": 4859,
+      "language": "bash",
+      "environment": "github-actions",
+      "version": "",
+      "solution": "# Fix: derive e2e smoke schema expectations from migrations\n\n## Root cause\n\n`scripts/e2e-smoke.sh` hard-coded the old schema shape:\n\n```bash\nEXPECTED_MIGS=27\nEXPECTED_TABLES=44\n```\n\nMigrations `028`–`031` added four `*.up.sql` files and a net two tables, so the database now has **31** applied migrations, **46** user tables, and **31** `schema_migrations` rows. The binary and migrations were correct; the smoke script compared current results against stale constants.\n\nThe test should derive expectations from the migration directory rather than duplicating schema history as literals.\n\n## Exact fix\n\nIn `scripts/e2e-smoke.sh`, replace the hard-coded `EXPECTED_MIGS` / `EXPECTED_TABLES` assignments and any remaining literal `27` / `44` checks with:\n\n```bash\n# --- derive schema expectations from migrations (source of truth) ---\nSCRIPT_DIR=\"$(cd -- \"$(dirname -- \"${BASH_SOURCE[0]}\")\" && pwd)\"\nREPO_ROOT=\"$(cd -- \"$SCRIPT_DIR/..\" && pwd)\"\nMIGRATIONS_DIR=\"${MIGRATIONS_DIR:-$REPO_ROOT/migrations/sqlite}\"\n\nmapfile -t MIGRATION_FILES < <(\n  find \"$MIGRATIONS_DIR\" -maxdepth 1 -type f -name '*.up.sql' -print | LC_ALL=C sort\n)\n\nif ((${#MIGRATION_FILES[@]} == 0)); then\n  echo \"e2e-smoke: no *.up.sql files found under $MIGRATIONS_DIR\" >&2\n  exit 1\nfi\n\nEXPECTED_MIGS=${#MIGRATION_FILES[@]}\n\n# Final tables = every CREATE TABLE, minus every DROP TABLE, plus the\n# migrator-owned schema_migrations table. A rebuild migration\n# (create temp + drop old + rename) contributes +1 -1 = 0 net.\nCREATE_TABLE_COUNT=\"$(\n  grep -Eih '^[[:space:]]*CREATE[[:space:]]+TABLE([[:space:]]|$)' \\\n    \"${MIGRATION_FILES[@]}\" | wc -l\n)\"\nDROP_TABLE_COUNT=\"$(\n  grep -Eih '^[[:space:]]*DROP[[:space:]]+TABLE([[:space:]]|$)' \\\n    \"${MIGRATION_FILES[@]}\" | wc -l\n)\"\nEXPECTED_TABLES=$(( CREATE_TABLE_COUNT - DROP_TABLE_COUNT + 1 ))\n\n# Backward-compatible name used by the schema_migrations check.\nEXPECTED_SCHEMA_MIGRATIONS=\"$EXPECTED_MIGS\"\n```\n\nThen ensure the checks use:\n\n- `EXPECTED_MIGS` for applied migration count\n- `EXPECTED_TABLES` for `PRAGMA` table count\n- `EXPECTED_SCHEMA_MIGRATIONS` or `EXPECTED_MIGS` for `schema_migrations` rows\n\nRemove the old literal display text such as `migrate up 27/27`.\n\nFor this repository, this derives:\n\n```text\nEXPECTED_MIGS=31\nEXPECTED_TABLES=46\nEXPECTED_SCHEMA_MIGRATIONS=31\n```\n\n## Verification\n\nCheck shell syntax and run the suite:\n\n```bash\nbash -n scripts/e2e-smoke.sh\nbash scripts/e2e-smoke.sh\n```\n\nExpected:\n\n```text\nALL LEGS PASS 18/18\n```\n\nIndependently print the derived values:\n\n```bash\ncd /path/to/Helios\nMIGS=$(find migrations/sqlite -maxdepth 1 -name '*.up.sql' | wc -l)\nCREATES=$(grep -Eih '^[[:space:]]*CREATE[[:space:]]+TABLE([[:space:]]|$)' migrations/sqlite/*.up.sql | wc -l)\nDROPS=$(grep -Eih '^[[:space:]]*DROP[[:space:]]+TABLE([[:space:]]|$)' migrations/sqlite/*.up.sql | wc -l)\nprintf 'migs=%s creates=%s drops=%s tables=%s\\n' \\\n  \"$MIGS\" \"$CREATES\" \"$DROPS\" \"$((CREATES - DROPS + 1))\"\n```\n\nExpected:\n\n```text\nmigs=31 ... tables=46\n```\n\nThe exact create/drop split depends on rebuild migrations; the invariant is:\n\n```text\ntables == creates - drops + 1\n```\n\nA synthetic 31-migration test covering a normal create, a rebuild (`create new` + `drop old` + `rename`), a permanent drop, and additional creates was validated against a real SQLite database:\n\n```text\nEXPECTED_MIGS=31 ACTUAL_MIGS=31\ncreates=30 drops=2 EXPECTED_TABLES=29 ACTUAL_TABLES=29\nSYNTHETIC CHECK PASS\n```\n\nThe create-minus-drop formula remains correct as migrations grow, including rebuild-style migrations.\n",
+      "evidence": "# Evidence\n- Problem class: e2e-smoke-failure\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-03T01:57:29.687Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Smoke script hardcoded schema expectations (27 migrations / 44 tables) which drifted when migrations 028-031 landed (31/46); the binary was correct, the script constants stale. FIX (script layer): derive expectations at runtime — EXPECTED_MIGS=$(ls migrations/sqlite/*.up.sql | wc -l); EXPECTED_TABLES = CREATE-TABLE statements minus dropped tables across *.up.sql, plus 1 for the migrator-owned schema_migrations table. The create-minus-drop arithmetic survives rebuild-style migrations (drop+create+rename nets zero). Verified: ALL LEGS PASS 18/18 locally.",
+        "environment": "github-actions ubuntu-latest, sqlite migrations",
+        "language": "bash",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "e2e-smoke-failure",
+        "provider": "openrouter",
+        "solved_at": "2026-11-03T01:57:29.687Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-11-03 01:57:30"
+    }
+  ]
+}
