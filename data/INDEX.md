@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3048 problem classes · 4680 verified answers** · exported 2026-11-03 10:00 UTC
+**3060 problem classes · 4692 verified answers** · exported 2026-11-03 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3054,3 +3054,15 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3135 | go-link-cut-tree-dynamic-mst-preferred-path-invariants | 1 | go |
 | 3136 | js-qpack-blocked-insert-dynamic-table-eviction | 1 | js |
 | 3137 | python3-karlin-altschul-effective-length-bit-score-evalue | 1 | python3 |
+| 3138 | qa-harness-launch-standin-subdir-wrong-product | 1 | go |
+| 3139 | bash-jq-schema-array-vs-object-mismatch | 1 | go |
+| 3140 | git-bare-rebase-head-proven-stale-classification | 1 | shell |
+| 3141 | git-prepare-commit-msg-substring-dedupe | 1 | go |
+| 3142 | go-raft-snapshot-linearizability-fence-20261102 | 1 | go |
+| 3143 | python3-ctap2-counter-rollback-detection-20261102 | 1 | python |
+| 3144 | node20-wasm-tail-call-determinism-20261102 | 1 | js |
+| 3145 | evidence-replay-verdict-form-ci-refusal | 1 | go |
+| 3146 | dual-fixture-df-observation-count-reclaim-order | 1 | python |
+| 3147 | duckbrain-wrong-shaped-tick-key-survives-http-delete-and-mcp-forget-keeps-census-guard-red | 1 |  |
+| 3148 | shell-bft-log-replay-linearizability-20261103 | 1 | shell |
+| 3149 | python3-federated-gradient-poisoning-robust-aggregation-20261103 | 1 | python |

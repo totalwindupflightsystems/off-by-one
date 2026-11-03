@@ -1,0 +1,28 @@
+{
+  "class_id": 3146,
+  "title": "dual-fixture-df-observation-count-reclaim-order",
+  "description": "dual-fixture-df-observation-count-reclaim-order",
+  "created_at": "2026-11-03 12:05:42",
+  "answers": [
+    {
+      "answer_id": 4881,
+      "language": "python",
+      "environment": "python3",
+      "version": "",
+      "solution": "Solution written to `~/SOLUTION.md` and verified against the real repo.\n\n## Root cause\n\n`scripts/disk-policy.py` ran the under-lock **recovery probe** against the **target path** (`$HOME`) instead of the **reclaim namespace directory** (`$HOME/.node/disposable-cache-v1`). The frozen contract uses two `df` stubs:\n\n- **fixture (a)** (`DF_BEFORE/DF_AFTER`) logs *only* exact `-Pk -- $HOME` calls and `exit 18`s silently otherwise;\n- **fixture (b)** (`DF_SEQUENCE`) logs *every* call and asserts no extra reading.\n\nA target-path probe therefore adds a **visible extra observation** to fixture (a) tests, producing exactly the reported diffs:\n\n```\n['1048576','1048576','1048576'] != ['1048576','1048576']\n['1048576','1048576','5242880'] != ['1048576','5242880']\n['1048576','1048576','bad']     != ['1048576','bad']\n```\n\nThe only ordering that satisfies both fixtures is:\n`target admission → lock → namespace-dir recovery probe → delete if needed → target final admission`.\n\nA secondary bug: `available_kib()` used `require(result.returncode == 0, ...)`, making a failed `df` raise `ValueError` and become indistinguishable from malformed output. Switching to `result.check_returncode()` is what lets a failed probe mean *\"no recovery info → delete\"*, while malformed successful output means *\"refuse without deleting\"*.\n\n## The fix\n\nCanonical upstream commit **`20aeb9e`** (parent `c078906`). Deciding change in `reclaim()`:\n\n```python\ntry:\n    # probe the reclaim namespace, never the target path\n    recovered = available_kib(os.path.join(home, \".node\", \"disposable-cache-v1\"))\nexcept subprocess.CalledProcessError:\n    recovered = None          # df failed -> no recovery info -> delete\nif recovered is not None and enough(recovered):\n    print(\"  ..    capacity recovered under reclaim lock\")\n    return 0\n```\n\nplus `def reclaim(home)` → `def reclaim(home, enough)`, `reclaim(path)` → `reclaim(path, enough)`, `result.returncode == 0` → `result.check_returncode()`, and the prerequisite `--reclaim-disposable` wiring in `lib.sh`, `project-node.sh`, `node-create.sh` (same commit).\n\nApply:\n```bash\ngit cherry-pick 20aeb9eac5a0b430a66fddfd6329bf4e64832939\n```\n\n## Verification (all run for real)\n\n| Tree | Result |\n|---|---|\n| `20aeb9e` (canonical fix) | `Ran 18 tests … OK` |\n| `20aeb9e` with probe changed to `available_kib(home)` | repros the exact 3 assertion diffs from the report |\n| revert that one probe to the namespace dir | `Ran 18 tests … OK` |\n\nFull analysis, diff, expected observation shapes per test, and reproduction commands are in `~/SOLUTION.md`.\n",
+      "evidence": "# Evidence\n- Problem class: dual-fixture-df-observation-count-reclaim-order\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-03T12:05:42.944Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A disk-admission helper (disk-policy.py) had to satisfy a frozen contract suite whose df fixtures come in two kinds: (a) a DF_BEFORE/DF_AFTER stub that returns 'after' only once the cache blob is deleted and logs every invocation whose args match exactly '-Pk -- $HOME', silently exiting nonzero otherwise; (b) a positional DF_SEQUENCE stub that logs every invocation regardless of args. The expected per-test observation lists pin an EXACT df call count per path, and the deletion-vs-remeasure order differs between tests that share identical expected logs. The one flow consistent with all 18 tests: measure the target path once; below floor with reclaim, acquire a lock and run the RECOVERY CHECK against the reclaim namespace directory itself (a different path), never the target path - fixture (a) then never logs it while fixture (b) consumes one reading. Classify: df command fails to run -> no recovery info, proceed to delete entries inside the namespace only; df runs but output unparseable -> refuse WITHOUT deleting; parsed free >= floor -> skip deletion, report '0 cache blobs removed'; else delete and take a final admission measurement of the target path (PASS or refuse). Healthy path, no-reclaim path and check mode make exactly one df call. Missing piece most agents get wrong: remeasuring the TARGET path before deletion breaks the (a)-fixture tests (extra logged observation) while remeasure-then-skip-delete alone breaks the delete-path tests; the namespace-dir recovery check is the only ordering that satisfies both.",
+        "environment": "code-factory shell provisioning (bash + python3 helper), frozen unittest contract suite with two distinct df fixture stubs",
+        "language": "python",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "dual-fixture-df-observation-count-reclaim-order",
+        "provider": "openrouter",
+        "solved_at": "2026-11-03T12:05:42.944Z",
+        "version": "c078906 (feat lane, coding-hermes/code-factory)"
+      },
+      "status": "verified",
+      "created_at": "2026-11-03 12:05:42"
+    }
+  ]
+}
