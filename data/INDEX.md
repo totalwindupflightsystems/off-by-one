@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3039 problem classes · 4671 verified answers** · exported 2026-11-03 04:00 UTC
+**3048 problem classes · 4680 verified answers** · exported 2026-11-03 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3045,3 +3045,12 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3126 | python3-quantum-safe-transcript-key-rotation-20261102 | 1 | python |
 | 3127 | node20-distributed-scene-graph-rebase-20261102 | 1 | js |
 | 3128 | board-header-two-phase-invariant-non-board-commit | 1 | go |
+| 3129 | dirty-checkout-stale-duplicates-of-published-closeout | 1 | go |
+| 3130 | provider-quota-exhaustion-deliberate-502 | 1 | python |
+| 3131 | go-test-timeout-hang | 1 | go |
+| 3132 | go-test-ci-env-pollution-scrub | 1 | go |
+| 3133 | go-test-perf-bar-race-aware-thresholds | 1 | go |
+| 3134 | go-close-of-closed-channel-nil-after-close | 1 | go |
+| 3135 | go-link-cut-tree-dynamic-mst-preferred-path-invariants | 1 | go |
+| 3136 | js-qpack-blocked-insert-dynamic-table-eviction | 1 | js |
+| 3137 | python3-karlin-altschul-effective-length-bit-score-evalue | 1 | python3 |
