@@ -1,0 +1,90 @@
+commit 1509bb0baecd992b8bde62c7c6f3711ea40decc2
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Tue Nov 3 08:30:38 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Tue Nov 3 08:30:38 2026 -0500
+
+    fix(check-deploy-test): build the not-a-repo fixture at a proven git-free path
+    
+    TMPDIR in an agent session lives inside the kara-hermes home repo, so the outside-a-checkout fixture inherited a toplevel and the leg graded the gates foreign-checkout refusal as a failure. The fixture now comes from the first candidate dir where git rev-parse --show-toplevel fails, the precondition is asserted, and the leg SKIPs with a NOTE if no git-free dir exists. ch:trace: OB-GAP-096
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ scripts/check-deploy-test.sh | 56 ++++++++++++++++++++++++++++++++++----------
+ 1 file changed, 43 insertions(+), 13 deletions(-)
+
+diff --git a/scripts/check-deploy-test.sh b/scripts/check-deploy-test.sh
+index 6fd4e05e..cf0ec110 100755
+--- a/scripts/check-deploy-test.sh
++++ b/scripts/check-deploy-test.sh
+@@ -47,7 +47,8 @@ REV="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
+ SCRATCH_PID=""
+ SCRATCH_PORT=""
+ STALE_PID=""
+-trap 'rm -f "$OUT"; [ -n "$SCRATCH_PID" ] && kill "$SCRATCH_PID" 2>/dev/null; [ -n "$STALE_PID" ] && kill "$STALE_PID" 2>/dev/null; rm -rf "$SCRATCH_ROOT"' EXIT
++NOTAREPO_ROOT=""
++trap 'rm -f "$OUT"; [ -n "$SCRATCH_PID" ] && kill "$SCRATCH_PID" 2>/dev/null; [ -n "$STALE_PID" ] && kill "$STALE_PID" 2>/dev/null; rm -rf "$SCRATCH_ROOT"; [ -n "$NOTAREPO_ROOT" ] && rm -rf "$NOTAREPO_ROOT"' EXIT
+ 
+ cd "$REPO_ROOT"
+ 
+@@ -613,19 +614,48 @@ else
+ fi
+ 
+ # NOTAREPO: outside a git checkout nothing can be proven — hard fail.
+-notarepo="$SCRATCH_ROOT/not-a-repo"
+-mkdir -p "$notarepo/scripts"
+-cp "$GATE" "$notarepo/scripts/gate-deploy"
+-chmod +x "$notarepo/scripts/gate-deploy"
+-set +e
+-( cd "$notarepo" && ./scripts/gate-deploy ) >"$OUT" 2>&1
+-notarepo_rc=$?
+-set -e
+-if [ "$notarepo_rc" -ne 0 ] && grep -q "not a git checkout" "$OUT"; then
+-	pass "gate FAILs outside a git checkout (exit $notarepo_rc)"
++# The fixture must be PROVEN git-free: $TMPDIR may itself live inside an
++# enclosing repo (agent sessions point TMPDIR into a home checkout), which
++# would make the "not a repo" directory inherit a toplevel and grade the
++# gate's correct foreign-checkout refusal as a failure. Build the fixture
++# under the first candidate dir where git cannot resolve a toplevel.
++NOTAREPO_ROOT=""
++for candidate in /tmp /var/tmp ${TMPDIR:-}; do
++	[ -n "$candidate" ] && [ -d "$candidate" ] || continue
++	if git -C "$candidate" rev-parse --show-toplevel >/dev/null 2>&1; then
++		continue
++	fi
++	NOTAREPO_ROOT="$(mktemp -d "$candidate/ob1-notarepo-XXXXXX")" && break
++done
++
++if [ -z "$NOTAREPO_ROOT" ]; then
++	inherited="$(git -C "${TMPDIR:-/tmp}" rev-parse --show-toplevel 2>/dev/null || echo unknown)"
++	echo "SKIP: NOTAREPO leg not graded — no git-free temp dir (/tmp, /var/tmp, ${TMPDIR:-<unset>} all resolve a toplevel; enclosing repo inherited: $inherited)"
+ else
+-	fail "gate should FAIL outside a git checkout; rc=$notarepo_rc; output:"
+-	sed 's/^/    /' "$OUT"
++	notarepo="$NOTAREPO_ROOT/not-a-repo"
++	mkdir -p "$notarepo/scripts"
++	cp "$GATE" "$notarepo/scripts/gate-deploy"
++	chmod +x "$notarepo/scripts/gate-deploy"
++	# Assert the precondition before grading: if the fixture resolves a
++	# toplevel it inherited an enclosing repo and the leg is invalid.
++	set +e
++	inherited="$(git -C "$notarepo" rev-parse --show-toplevel 2>/dev/null)"
++	precond_rc=$?
++	set -e
++	if [ "$precond_rc" -eq 0 ]; then
++		fail "NOTAREPO fixture is invalid: '$notarepo' inherits enclosing git repo '$inherited'"
++	else
++		set +e
++		( cd "$notarepo" && ./scripts/gate-deploy ) >"$OUT" 2>&1
++		notarepo_rc=$?
++		set -e
++		if [ "$notarepo_rc" -ne 0 ] && grep -q "not a git checkout" "$OUT"; then
++			pass "gate FAILs outside a git checkout (exit $notarepo_rc)"
++		else
++			fail "gate should FAIL outside a git checkout; rc=$notarepo_rc; output:"
++			sed 's/^/    /' "$OUT"
++		fi
++	fi
+ fi
+ 
+ echo "---"
