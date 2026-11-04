@@ -109,6 +109,13 @@ type Metrics struct {
 	SkippedIdle   atomic.Int64
 	SkippedEmpty  atomic.Int64
 
+	// durObs, when set, receives one observation per completed solve
+	// (OBS-OB-001): outcome ∈ {"succeeded","failed","rejected"} plus
+	// the solve's wall time. Installed via SetDurationObserver before
+	// Run; the pointer indirection keeps the hot path to a single
+	// atomic load + function call with no allocation.
+	durObs atomic.Pointer[func(outcome string, d time.Duration)]
+
 	mu           sync.Mutex
 	totalRuntime time.Duration
 }
@@ -139,12 +146,33 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
 	}
 }
 
+// SetDurationObserver installs fn as the per-completed-solve duration
+// sink (OBS-OB-001): exactly one call per solve, from the same record*
+// method that moves SolveAttempts/totalRuntime, labelled by outcome
+// ("succeeded" | "failed" | "rejected"). Install before Run; nil
+// disables. fn runs synchronously on the solve path, so it must be
+// cheap and non-blocking (a prometheus Histogram.Observe qualifies).
+func (m *Metrics) SetDurationObserver(fn func(outcome string, d time.Duration)) {
+	if fn == nil {
+		m.durObs.Store(nil)
+		return
+	}
+	m.durObs.Store(&fn)
+}
+
+func (m *Metrics) observeDuration(outcome string, d time.Duration) {
+	if fn := m.durObs.Load(); fn != nil {
+		(*fn)(outcome, d)
+	}
+}
+
 func (m *Metrics) recordSuccess(d time.Duration) {
 	m.SolveAttempts.Add(1)
 	m.SolveSuccess.Add(1)
 	m.mu.Lock()
 	m.totalRuntime += d
 	m.mu.Unlock()
+	m.observeDuration("succeeded", d)
 }
 
 func (m *Metrics) recordFailure(d time.Duration) {
@@ -153,6 +181,7 @@ func (m *Metrics) recordFailure(d time.Duration) {
 	m.mu.Lock()
 	m.totalRuntime += d
 	m.mu.Unlock()
+	m.observeDuration("failed", d)
 }
 
 // recordRejection counts a solve refused by the harness for approaching
@@ -167,14 +196,15 @@ func (m *Metrics) recordRejection(d time.Duration) {
 	m.mu.Lock()
 	m.totalRuntime += d
 	m.mu.Unlock()
+	m.observeDuration("rejected", d)
 }
 
 func (m *Metrics) recordIdleSkip()  { m.SkippedIdle.Add(1) }
 func (m *Metrics) recordEmptySkip() { m.SkippedEmpty.Add(1) }
 
 // MetricsSnapshot is the JSON-serialisable form returned by
-// Snapshot(). It is what /api/v1/stats (or the local metrics
-// endpoint) will eventually expose.
+// Snapshot(). It feeds obo_solves_total on GET /metrics/prom
+// (OBS-OB-001) via the PromConfig.SolveCounts source in main.
 type MetricsSnapshot struct {
 	SolveAttempts  int64   `json:"solve_attempts"`
 	SolveSuccess   int64   `json:"solve_success"`

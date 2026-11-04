@@ -239,6 +239,35 @@ func main() {
 	// Observer shared with the cron loop (created in 3b): GET /metrics
 	// reads its snapshot.
 	apiServer.Observer = observer
+	// Prometheus exposition surface (OBS-OB-001): a private registry
+	// owned by the API server. Sources are the cron loop's counters
+	// (previously computed but exposed nowhere), the queue depth (same
+	// queue.Depth /api/v1/stats uses), and the loop-running gauge
+	// reusing the same solverExec signal as SolverAvailable above.
+	// The loop's duration observer feeds obo_solve_duration_seconds
+	// once per completed solve.
+	prom := metrics.NewProm(metrics.PromConfig{
+		LoopRunning: func() bool { return solverExec != nil },
+		QueuePending: func(ctx context.Context) (int64, error) {
+			n, err := queue.Depth(ctx)
+			return int64(n), err
+		},
+		SolveCounts: func() metrics.PromSolveCounts {
+			if loop == nil {
+				return metrics.PromSolveCounts{}
+			}
+			snap := loop.Metrics().Snapshot()
+			return metrics.PromSolveCounts{
+				Success:  snap.SolveSuccess,
+				Failed:   snap.SolveFailed,
+				Rejected: snap.SolveRejected,
+			}
+		},
+	})
+	apiServer.Prom = prom
+	if loop != nil {
+		loop.Metrics().SetDurationObserver(prom.ObserveSolveDuration)
+	}
 	apiHandler := apiServer.Handler()
 
 	// --- 6. WebSocket chat handler ------------------------------------
@@ -254,12 +283,15 @@ func main() {
 
 	// --- 7. Compose HTTP handler --------------------------------------
 	// Route priority: /api/* → API server, /ws/* → WebSocket handlers,
-	// /openapi.json + /health + /metrics → explicit, everything else →
-	// web SPA. /metrics is handled by the API server (metrics.Observer)
-	// and MUST be dispatched here explicitly — the default branch serves
-	// the SPA for every unmatched path, so a route that only exists in
-	// the API mux never answers (DF-OFF-BY-ONE-32 rework: the previous
-	// attempt registered the route but the router never routed to it).
+	// /openapi.json + /health + /metrics + /metrics/prom → explicit,
+	// everything else → web SPA. /metrics is handled by the API server
+	// (metrics.Observer) and MUST be dispatched here explicitly — the
+	// default branch serves the SPA for every unmatched path, so a
+	// route that only exists in the API mux never answers
+	// (DF-OFF-BY-ONE-32 rework: the previous attempt registered the
+	// route but the router never routed to it). /metrics/prom
+	// (OBS-OB-001) is under the same constraint: the catch-all would
+	// otherwise serve it a 200 with the SPA HTML.
 	webHandler := web.Handler()
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -273,7 +305,7 @@ func main() {
 			}
 			chatHandler.ServeHTTP(w, r)
 			return
-		case r.URL.Path == "/openapi.json" || r.URL.Path == "/health" || r.URL.Path == "/metrics":
+		case r.URL.Path == "/openapi.json" || r.URL.Path == "/health" || r.URL.Path == "/metrics" || r.URL.Path == "/metrics/prom":
 			apiHandler.ServeHTTP(w, r)
 			return
 		default:

@@ -67,6 +67,16 @@ type Server struct {
 	// nil disables /metrics endpoint.
 	Observer *metrics.Observer
 
+	// Prom is the Prometheus text-exposition surface for
+	// GET /metrics/prom (OBS-OB-001): a private registry with the
+	// obo_* families. New wires obo_queue_pending from the queue by
+	// default; main replaces it with the fully wired registry (loop
+	// counters, loop-running gauge, duration histogram sink). nil is
+	// tolerated — the handler serves a shared zero-source registry,
+	// so the endpoint answers 200 with every family present even in
+	// unit tests that construct Server directly.
+	Prom *metrics.Prom
+
 	// StartedAt is set in New and used by /health to report uptime.
 	StartedAt time.Time
 
@@ -81,12 +91,25 @@ type Server struct {
 // New builds a Server. The OpenAPI spec is optional — when nil the
 // /openapi.json endpoint returns 501 Not Implemented.
 func New(store *graph.Store, queue *ingest.Queue, spec []byte) *Server {
-	return &Server{
+	s := &Server{
 		Store:       store,
 		Queue:       queue,
 		OpenAPISpec: spec,
 		StartedAt:   time.Now(),
 	}
+	if queue != nil {
+		// Default /metrics/prom wiring (OBS-OB-001): obo_queue_pending
+		// reads the same queue.Depth source /api/v1/stats uses, so the
+		// two surfaces agree. main replaces this with the fully wired
+		// Prom (cron loop counters + duration histogram).
+		s.Prom = metrics.NewProm(metrics.PromConfig{
+			QueuePending: func(ctx context.Context) (int64, error) {
+				n, err := queue.Depth(ctx)
+				return int64(n), err
+			},
+		})
+	}
+	return s
 }
 
 // Handler returns the *http.ServeMux with all routes registered.
@@ -116,6 +139,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /metrics", s.handleMetrics)
+	mux.HandleFunc("GET /metrics/prom", s.handleMetricsProm)
 
 	// In read-only (public catalog) mode, block all mutating endpoints
 	// and the AI chat WebSocket before they reach the mux.
@@ -317,6 +341,18 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	snap := s.Observer.Snapshot()
 	writeJSON(w, http.StatusOK, snap)
+}
+
+// handleMetricsProm serves the Prometheus text exposition
+// (OBS-OB-001) from the server's private registry. Unlike
+// handleMetrics it never 404s: (*metrics.Prom).Handler is
+// nil-receiver-safe and serves the shared zero-source registry, so the
+// endpoint answers 200 with every family present even when no loop or
+// queue is wired. Content-Type is text/plain; version=0.0.4, which
+// sanitizeReadOnlyJSON passes straight through (only application/json
+// is rewritten), so the public catalog deployment is safe.
+func (s *Server) handleMetricsProm(w http.ResponseWriter, r *http.Request) {
+	s.Prom.Handler().ServeHTTP(w, r)
 }
 
 // splitPath trims a leading slash and returns the path segments
