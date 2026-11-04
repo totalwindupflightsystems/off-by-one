@@ -1,0 +1,1059 @@
+commit 62b1c03b74304faf66e2e2fd2cf399f070034a30
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Wed Nov 4 00:56:17 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Wed Nov 4 00:56:17 2026 -0500
+
+    feat(metrics): Prometheus exposition at GET /metrics/prom (OBS-OB-001)
+    
+    Five Tier-1 obo_* families on a private registry via client_golang+promhttp:
+    obo_http_up, obo_cron_loop_running, obo_solves_total{outcome},
+    obo_queue_pending (same Depth /api/v1/stats serves), and
+    obo_solve_duration_seconds{outcome} fed per-completed-solve from the cron
+    loop Metrics (previously dead code) via SetDurationObserver.
+    
+    Recovered from an abandoned prior-tick worker that left the implementation
+    uncommitted; verified against the task criteria on a readonly scratch
+    instance (200 + text/plain; version=0.0.4, 5 families, obo_queue_pending
+    == queue_depth, JSON /metrics byte-compatible) before commit.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ cmd/off-by-one/main.go                  |  46 ++++++-
+ go.mod                                  |  12 +-
+ go.sum                                  |  36 ++++-
+ internal/api/metrics_prom_test.go       | 164 +++++++++++++++++++++++
+ internal/api/server.go                  |  38 +++++-
+ internal/cron/duration_observer_test.go |  71 ++++++++++
+ internal/cron/loop.go                   |  34 ++++-
+ internal/metrics/prom.go                | 227 ++++++++++++++++++++++++++++++++
+ internal/metrics/prom_test.go           | 221 +++++++++++++++++++++++++++++++
+ 9 files changed, 831 insertions(+), 18 deletions(-)
+
+diff --git a/cmd/off-by-one/main.go b/cmd/off-by-one/main.go
+index c13d43e2..ccab6de3 100644
+--- a/cmd/off-by-one/main.go
++++ b/cmd/off-by-one/main.go
+@@ -239,6 +239,35 @@ func main() {
+ 	// Observer shared with the cron loop (created in 3b): GET /metrics
+ 	// reads its snapshot.
+ 	apiServer.Observer = observer
++	// Prometheus exposition surface (OBS-OB-001): a private registry
++	// owned by the API server. Sources are the cron loop's counters
++	// (previously computed but exposed nowhere), the queue depth (same
++	// queue.Depth /api/v1/stats uses), and the loop-running gauge
++	// reusing the same solverExec signal as SolverAvailable above.
++	// The loop's duration observer feeds obo_solve_duration_seconds
++	// once per completed solve.
++	prom := metrics.NewProm(metrics.PromConfig{
++		LoopRunning: func() bool { return solverExec != nil },
++		QueuePending: func(ctx context.Context) (int64, error) {
++			n, err := queue.Depth(ctx)
++			return int64(n), err
++		},
++		SolveCounts: func() metrics.PromSolveCounts {
++			if loop == nil {
++				return metrics.PromSolveCounts{}
++			}
++			snap := loop.Metrics().Snapshot()
++			return metrics.PromSolveCounts{
++				Success:  snap.SolveSuccess,
++				Failed:   snap.SolveFailed,
++				Rejected: snap.SolveRejected,
++			}
++		},
++	})
++	apiServer.Prom = prom
++	if loop != nil {
++		loop.Metrics().SetDurationObserver(prom.ObserveSolveDuration)
++	}
+ 	apiHandler := apiServer.Handler()
+ 
+ 	// --- 6. WebSocket chat handler ------------------------------------
+@@ -254,12 +283,15 @@ func main() {
+ 
+ 	// --- 7. Compose HTTP handler --------------------------------------
+ 	// Route priority: /api/* → API server, /ws/* → WebSocket handlers,
+-	// /openapi.json + /health + /metrics → explicit, everything else →
+-	// web SPA. /metrics is handled by the API server (metrics.Observer)
+-	// and MUST be dispatched here explicitly — the default branch serves
+-	// the SPA for every unmatched path, so a route that only exists in
+-	// the API mux never answers (DF-OFF-BY-ONE-32 rework: the previous
+-	// attempt registered the route but the router never routed to it).
++	// /openapi.json + /health + /metrics + /metrics/prom → explicit,
++	// everything else → web SPA. /metrics is handled by the API server
++	// (metrics.Observer) and MUST be dispatched here explicitly — the
++	// default branch serves the SPA for every unmatched path, so a
++	// route that only exists in the API mux never answers
++	// (DF-OFF-BY-ONE-32 rework: the previous attempt registered the
++	// route but the router never routed to it). /metrics/prom
++	// (OBS-OB-001) is under the same constraint: the catch-all would
++	// otherwise serve it a 200 with the SPA HTML.
+ 	webHandler := web.Handler()
+ 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+ 		switch {
+@@ -273,7 +305,7 @@ func main() {
+ 			}
+ 			chatHandler.ServeHTTP(w, r)
+ 			return
+-		case r.URL.Path == "/openapi.json" || r.URL.Path == "/health" || r.URL.Path == "/metrics":
++		case r.URL.Path == "/openapi.json" || r.URL.Path == "/health" || r.URL.Path == "/metrics" || r.URL.Path == "/metrics/prom":
+ 			apiHandler.ServeHTTP(w, r)
+ 			return
+ 		default:
+diff --git a/go.mod b/go.mod
+index e76e4eba..efa3219e 100644
+--- a/go.mod
++++ b/go.mod
+@@ -4,16 +4,20 @@ go 1.26.9
+ 
+ require (
+ 	github.com/joho/godotenv v1.5.1
++	github.com/prometheus/client_golang v1.24.1
++	github.com/prometheus/client_model v0.6.2
++	github.com/prometheus/common v0.70.1
+ 	modernc.org/sqlite v1.57.0
+ )
+ 
+ require (
+-	github.com/google/go-cmp v0.7.0 // indirect
+-	github.com/yuin/goldmark v1.8.5 // indirect
++	github.com/beorn7/perks v1.0.1 // indirect
++	github.com/cespare/xxhash/v2 v2.3.0 // indirect
++	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
++	github.com/prometheus/procfs v0.21.1 // indirect
+ 	golang.org/x/mod v0.40.0 // indirect
+-	golang.org/x/sync v0.22.0 // indirect
+-	golang.org/x/telemetry v0.0.0-20260821201142-16c97dc83219 // indirect
+ 	golang.org/x/tools v0.49.0 // indirect
++	google.golang.org/protobuf v1.36.11 // indirect
+ )
+ 
+ require (
+diff --git a/go.sum b/go.sum
+index 10cbef1c..74be5039 100644
+--- a/go.sum
++++ b/go.sum
+@@ -1,5 +1,11 @@
++github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
++github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
++github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
++github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+ github.com/coder/websocket v1.8.15 h1:6B2JPeOGlpff2Uz6vOEH1Vzpi0iUz20A+lPVhPHtNUA=
+ github.com/coder/websocket v1.8.15/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
++github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
++github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+ github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
+ github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
+ github.com/google/go-cmp v0.7.0 h1:wk8382ETsv4JYUZwIsn6YpYiWiBsYLSJiTsyBybVuN8=
+@@ -12,24 +18,46 @@ github.com/hashicorp/golang-lru/v2 v2.0.7 h1:a+bsQ5rvGLjzHuww6tVxozPZFVghXaHOwFs
+ github.com/hashicorp/golang-lru/v2 v2.0.7/go.mod h1:QeFd9opnmA6QUJc5vARoKUSoFhyfM2/ZepoAG6RGpeM=
+ github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
+ github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
++github.com/klauspost/compress v1.19.1 h1:VsB4HPswih7mmZ8WleSFQ75c/Ui1M4trX5oAsJnhSlk=
++github.com/klauspost/compress v1.19.1/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
++github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
++github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
+ github.com/mattn/go-isatty v0.0.24 h1:tGZZoVgT/KiqK1c8ocVLeDS8BSWMRd47J3Lbz7vsReI=
+ github.com/mattn/go-isatty v0.0.24/go.mod h1:nMCL3Zebbrt45jsMDgnfIwz6ydEQApk5oEI3HqDio6A=
++github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 h1:C3w9PqII01/Oq1c1nUAm88MOHcQC9l5mIlSMApZMrHA=
++github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822/go.mod h1:+n7T8mK8HuQTcFwEeznm/DIxMOiR9yIdICNftLE1DvQ=
+ github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOFAw7w=
+ github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
++github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
++github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
++github.com/prometheus/client_golang v1.24.1 h1:JnJkREXzWxUdCuPFpIWZiPispT9xVV59uiuyR2bPlnU=
++github.com/prometheus/client_golang v1.24.1/go.mod h1:F+oSRECHg4sse5ucfYpYDeIv/hu68Zo0uoHKetWnzcE=
++github.com/prometheus/client_model v0.6.2 h1:oBsgwpGs7iVziMvrGhE53c/GrLUsZdHnqNwqPLxwZyk=
++github.com/prometheus/client_model v0.6.2/go.mod h1:y3m2F6Gdpfy6Ut/GBsUqTWZqCUvMVzSfMLjcu6wAwpE=
++github.com/prometheus/common v0.70.1 h1:1HvjP4D5oL3t8RsPlwxA9onvvStjtIHYE5XuuwOi/PY=
++github.com/prometheus/common v0.70.1/go.mod h1:VdFUQDMZK3VLkurFUVhia6uys/0suUp86TJz5qbJRhc=
++github.com/prometheus/procfs v0.21.1 h1:GljZCt+zSTS+NZq88cyQ1LjZ+RCHp3uVuabBWA5+OJI=
++github.com/prometheus/procfs v0.21.1/go.mod h1:aB55Cww9pdSJVHk0hUf0inxWyyjPogFIjmHKYgMKmtY=
+ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
+ github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
+-github.com/yuin/goldmark v1.8.5 h1:r6N5afV5qj/5S4UTch8agZHJ8UxNCMwX7WjkkJam2NA=
+-github.com/yuin/goldmark v1.8.5/go.mod h1:ip/1k0VRfGynBgxOz0yCqHrbZXhcjxyuS66Brc7iBKg=
++github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
++github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
++go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
++go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
++go.yaml.in/yaml/v2 v2.4.4 h1:tuyd0P+2Ont/d6e2rl3be67goVK4R6deVxCUX5vyPaQ=
++go.yaml.in/yaml/v2 v2.4.4/go.mod h1:gMZqIpDtDqOfM0uNfy0SkpRhvUryYH0Z6wdMYcacYXQ=
+ golang.org/x/mod v0.40.0 h1:hUv+3cXcdRHz08UmSiOob7sadHig73uo5bkXxQ/tvUs=
+ golang.org/x/mod v0.40.0/go.mod h1:0/weTWkPWGBikyTWAX3dkjVztMmBA5hM0DH6BElSupE=
+ golang.org/x/sync v0.22.0 h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek=
+ golang.org/x/sync v0.22.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
+ golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
+ golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
+-golang.org/x/telemetry v0.0.0-20260821201142-16c97dc83219 h1:r+V0jO7tzUbWCg9Bs1WgegoFOIK8PHGlFMb9bkYLObw=
+-golang.org/x/telemetry v0.0.0-20260821201142-16c97dc83219/go.mod h1:/KSYFnLndIrA1A+Rs5r6vSifQhuFz75BPNN3J/hvzN0=
+ golang.org/x/tools v0.49.0 h1:3NI7VXzL9+1WZD52Dx2ttoPwD5DWrFGpl9mFZDlmisI=
+ golang.org/x/tools v0.49.0/go.mod h1:SJNXV9DBKT0UbdttsQjbfJlAE/q+y36++zo3uL3N0Oo=
++google.golang.org/protobuf v1.36.11 h1:fV6ZwhNocDyBLK0dj+fg8ektcVegBBuEolpbTQyBNVE=
++google.golang.org/protobuf v1.36.11/go.mod h1:HTf+CrKn2C3g5S8VImy6tdcUvCska2kB7j23XfzDpco=
++gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
++gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+ modernc.org/cc/v4 v4.29.2 h1:h6+9ciCnPKutf4I03CvheAvDLX7+IHlqR6Iy6J+cgd8=
+ modernc.org/cc/v4 v4.29.2/go.mod h1:OnovgIhbbMXMu1aISnJ0wvVD1KnW+cAUJkIrAWh+kVI=
+ modernc.org/ccgo/v4 v4.35.0 h1:F+TUsmw09QxLzmi3aeYYGxjAXarmZaKgj3mKQHNaA8w=
+diff --git a/internal/api/metrics_prom_test.go b/internal/api/metrics_prom_test.go
+new file mode 100644
+index 00000000..03269221
+--- /dev/null
++++ b/internal/api/metrics_prom_test.go
+@@ -0,0 +1,164 @@
++package api
++
++import (
++	"encoding/json"
++	"strconv"
++	"strings"
++	"testing"
++
++	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
++)
++
++// promGauge scans a Prometheus text exposition for an unlabelled
++// sample line ("name value") and returns its value.
++func promGauge(t *testing.T, body, name string) float64 {
++	t.Helper()
++	for _, line := range strings.Split(body, "\n") {
++		if strings.HasPrefix(line, name+" ") {
++			v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(line, name)), 64)
++			if err != nil {
++				t.Fatalf("parse %q line %q: %v", name, line, err)
++			}
++			return v
++		}
++	}
++	t.Fatalf("no sample line for %s in exposition", name)
++	return 0
++}
++
++// TestMetricsPromEndpoint is the HTTP-level contract for OBS-OB-001.
++// The status code alone proves nothing — the SPA catch-all also
++// answers /metrics/prom with 200 (DF-OFF-BY-ONE-32 trap) — so the
++// assertions are on Content-Type and body content.
++func TestMetricsPromEndpoint(t *testing.T) {
++	srv, _, _ := newTestServer(t)
++
++	rr := do(t, srv, "GET", "/metrics/prom", nil)
++	if rr.Code != 200 {
++		t.Fatalf("status %d, want 200", rr.Code)
++	}
++	ct := rr.Header().Get("Content-Type")
++	if !strings.HasPrefix(ct, "text/plain; version=0.0.4") {
++		t.Fatalf("Content-Type %q, want prefix text/plain; version=0.0.4 (HTML here means the SPA catch-all answered, not the API)", ct)
++	}
++	body := rr.Body.String()
++	if strings.HasPrefix(body, "<!DOCTYPE") {
++		t.Fatal("body is HTML: the SPA catch-all answered /metrics/prom, not the API handler")
++	}
++	for _, want := range []string{
++		"# HELP obo_",
++		"obo_http_up",
++		"obo_cron_loop_running",
++		"obo_solves_total",
++		"obo_queue_pending",
++		"obo_solve_duration_seconds_bucket",
++	} {
++		if !strings.Contains(body, want) {
++			t.Errorf("exposition missing %q", want)
++		}
++	}
++	if v := promGauge(t, body, "obo_http_up"); v != 1 {
++		t.Errorf("obo_http_up = %v, want 1", v)
++	}
++
++	// obo_queue_pending must agree with /api/v1/stats queue_depth —
++	// both read queue.Depth over the same store.
++	statsRR := do(t, srv, "GET", "/api/v1/stats", nil)
++	if statsRR.Code != 200 {
++		t.Fatalf("/api/v1/stats: status %d", statsRR.Code)
++	}
++	var stats struct {
++		QueueDepth int `json:"queue_depth"`
++	}
++	if err := json.Unmarshal(statsRR.Body.Bytes(), &stats); err != nil {
++		t.Fatalf("decode stats: %v", err)
++	}
++	if v := promGauge(t, body, "obo_queue_pending"); v != float64(stats.QueueDepth) {
++		t.Errorf("obo_queue_pending = %v, /api/v1/stats queue_depth = %d — must agree", v, stats.QueueDepth)
++	}
++}
++
++// TestMetricsPromNilSafe covers direct Server construction (no New,
++// no queue, no Prom, no Observer): /metrics/prom must still answer
++// 200 with a parseable exposition and every family present, while the
++// JSON /metrics keeps its existing metrics_disabled 404.
++func TestMetricsPromNilSafe(t *testing.T) {
++	srv := &Server{}
++
++	rr := do(t, srv, "GET", "/metrics/prom", nil)
++	if rr.Code != 200 {
++		t.Fatalf("status %d, want 200", rr.Code)
++	}
++	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain; version=0.0.4") {
++		t.Fatalf("Content-Type %q, want text/plain; version=0.0.4", ct)
++	}
++	body := rr.Body.String()
++	for _, want := range []string{
++		"obo_http_up 1",
++		"obo_cron_loop_running 0",
++		`obo_solves_total{outcome="succeeded"} 0`,
++		"obo_queue_pending 0",
++		"obo_solve_duration_seconds_bucket",
++	} {
++		if !strings.Contains(body, want) {
++			t.Errorf("nil-safe exposition missing %q", want)
++		}
++	}
++
++	jsonRR := do(t, srv, "GET", "/metrics", nil)
++	if jsonRR.Code != 404 {
++		t.Errorf("JSON /metrics with nil Observer: status %d, want 404 metrics_disabled (unchanged behaviour)", jsonRR.Code)
++	}
++}
++
++// TestMetricsPromReadOnlyPassthrough proves sanitizeReadOnlyJSON lets
++// the text/plain exposition through untouched in read-only (public
++// catalog) mode.
++func TestMetricsPromReadOnlyPassthrough(t *testing.T) {
++	srv, _, _ := newTestServer(t)
++	srv.ReadOnly = true
++
++	rr := do(t, srv, "GET", "/metrics/prom", nil)
++	if rr.Code != 200 {
++		t.Fatalf("read-only /metrics/prom: status %d, want 200", rr.Code)
++	}
++	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain; version=0.0.4") {
++		t.Fatalf("read-only Content-Type %q — sanitizer mangled the exposition", ct)
++	}
++	if !strings.Contains(rr.Body.String(), "obo_http_up 1") {
++		t.Error("read-only exposition missing obo_http_up 1")
++	}
++}
++
++// TestMetricsJSONUnchangedAfterProm proves the JSON /metrics contract
++// is byte-shape compatible after adding the prom surface: same keys,
++// same types.
++func TestMetricsJSONUnchangedAfterProm(t *testing.T) {
++	srv, _, _ := newTestServer(t)
++	srv.Observer = metrics.New(0, nil)
++
++	rr := do(t, srv, "GET", "/metrics", nil)
++	if rr.Code != 200 {
++		t.Fatalf("JSON /metrics: status %d, want 200", rr.Code)
++	}
++	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
++		t.Fatalf("JSON /metrics Content-Type %q, want application/json", ct)
++	}
++	var snap map[string]any
++	if err := json.Unmarshal(rr.Body.Bytes(), &snap); err != nil {
++		t.Fatalf("decode JSON /metrics: %v", err)
++	}
++	v, ok := snap["skipped_host_pressure"]
++	if !ok {
++		t.Fatal("JSON /metrics missing skipped_host_pressure")
++	}
++	if _, isNum := v.(float64); !isNum {
++		t.Errorf("skipped_host_pressure = %v (%T), want a number", v, v)
++	}
++
++	// Both surfaces coexist on one server.
++	promRR := do(t, srv, "GET", "/metrics/prom", nil)
++	if promRR.Code != 200 || !strings.Contains(promRR.Body.String(), "obo_http_up") {
++		t.Errorf("/metrics/prom alongside JSON /metrics: status %d", promRR.Code)
++	}
++}
+diff --git a/internal/api/server.go b/internal/api/server.go
+index cf32c38c..3ac42ce8 100644
+--- a/internal/api/server.go
++++ b/internal/api/server.go
+@@ -67,6 +67,16 @@ type Server struct {
+ 	// nil disables /metrics endpoint.
+ 	Observer *metrics.Observer
+ 
++	// Prom is the Prometheus text-exposition surface for
++	// GET /metrics/prom (OBS-OB-001): a private registry with the
++	// obo_* families. New wires obo_queue_pending from the queue by
++	// default; main replaces it with the fully wired registry (loop
++	// counters, loop-running gauge, duration histogram sink). nil is
++	// tolerated — the handler serves a shared zero-source registry,
++	// so the endpoint answers 200 with every family present even in
++	// unit tests that construct Server directly.
++	Prom *metrics.Prom
++
+ 	// StartedAt is set in New and used by /health to report uptime.
+ 	StartedAt time.Time
+ 
+@@ -81,12 +91,25 @@ type Server struct {
+ // New builds a Server. The OpenAPI spec is optional — when nil the
+ // /openapi.json endpoint returns 501 Not Implemented.
+ func New(store *graph.Store, queue *ingest.Queue, spec []byte) *Server {
+-	return &Server{
++	s := &Server{
+ 		Store:       store,
+ 		Queue:       queue,
+ 		OpenAPISpec: spec,
+ 		StartedAt:   time.Now(),
+ 	}
++	if queue != nil {
++		// Default /metrics/prom wiring (OBS-OB-001): obo_queue_pending
++		// reads the same queue.Depth source /api/v1/stats uses, so the
++		// two surfaces agree. main replaces this with the fully wired
++		// Prom (cron loop counters + duration histogram).
++		s.Prom = metrics.NewProm(metrics.PromConfig{
++			QueuePending: func(ctx context.Context) (int64, error) {
++				n, err := queue.Depth(ctx)
++				return int64(n), err
++			},
++		})
++	}
++	return s
+ }
+ 
+ // Handler returns the *http.ServeMux with all routes registered.
+@@ -116,6 +139,7 @@ func (s *Server) Handler() http.Handler {
+ 	mux.HandleFunc("GET /openapi.json", s.handleOpenAPI)
+ 	mux.HandleFunc("GET /health", s.handleHealth)
+ 	mux.HandleFunc("GET /metrics", s.handleMetrics)
++	mux.HandleFunc("GET /metrics/prom", s.handleMetricsProm)
+ 
+ 	// In read-only (public catalog) mode, block all mutating endpoints
+ 	// and the AI chat WebSocket before they reach the mux.
+@@ -319,6 +343,18 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+ 	writeJSON(w, http.StatusOK, snap)
+ }
+ 
++// handleMetricsProm serves the Prometheus text exposition
++// (OBS-OB-001) from the server's private registry. Unlike
++// handleMetrics it never 404s: (*metrics.Prom).Handler is
++// nil-receiver-safe and serves the shared zero-source registry, so the
++// endpoint answers 200 with every family present even when no loop or
++// queue is wired. Content-Type is text/plain; version=0.0.4, which
++// sanitizeReadOnlyJSON passes straight through (only application/json
++// is rewritten), so the public catalog deployment is safe.
++func (s *Server) handleMetricsProm(w http.ResponseWriter, r *http.Request) {
++	s.Prom.Handler().ServeHTTP(w, r)
++}
++
+ // splitPath trims a leading slash and returns the path segments
+ // without empty strings (handles trailing slashes).
+ func splitPath(p string) []string {
+diff --git a/internal/cron/duration_observer_test.go b/internal/cron/duration_observer_test.go
+new file mode 100644
+index 00000000..d1d6baff
+--- /dev/null
++++ b/internal/cron/duration_observer_test.go
+@@ -0,0 +1,71 @@
++package cron
++
++import (
++	"sync"
++	"testing"
++	"time"
++)
++
++// TestMetricsDurationObserverPins the OBS-OB-001 contract: each
++// record* method emits exactly one duration observation, with the
++// outcome label matching the partition the /metrics/prom collector
++// serves (rejection → "rejected", not "failed").
++func TestMetricsDurationObserver(t *testing.T) {
++	var mu sync.Mutex
++	type obs struct {
++		outcome string
++		d       time.Duration
++	}
++	var got []obs
++	m := &Metrics{}
++	m.SetDurationObserver(func(outcome string, d time.Duration) {
++		mu.Lock()
++		got = append(got, obs{outcome, d})
++		mu.Unlock()
++	})
++
++	m.recordSuccess(100 * time.Millisecond)
++	m.recordFailure(200 * time.Millisecond)
++	m.recordRejection(300 * time.Millisecond)
++
++	mu.Lock()
++	defer mu.Unlock()
++	want := []obs{
++		{"succeeded", 100 * time.Millisecond},
++		{"failed", 200 * time.Millisecond},
++		{"rejected", 300 * time.Millisecond},
++	}
++	if len(got) != len(want) {
++		t.Fatalf("observations = %v, want %v", got, want)
++	}
++	for i := range want {
++		if got[i] != want[i] {
++			t.Errorf("observation %d = %v, want %v", i, got[i], want[i])
++		}
++	}
++
++	// The existing counter semantics are untouched: rejection moves
++	// attempts+failed+rejected.
++	snap := m.Snapshot()
++	if snap.SolveAttempts != 3 || snap.SolveSuccess != 1 || snap.SolveFailed != 2 || snap.SolveRejected != 1 {
++		t.Errorf("counters: %+v, want attempts=3 success=1 failed=2 rejected=1", snap)
++	}
++}
++
++// TestMetricsDurationObserverNilAndUnset covers the two disabled
++// states: never-installed (zero Metrics, as in most tests) and
++// explicitly cleared. Neither may panic or observe anything.
++func TestMetricsDurationObserverNilAndUnset(t *testing.T) {
++	m := &Metrics{}
++	m.recordSuccess(time.Millisecond) // unset: no-op
++
++	called := false
++	m.SetDurationObserver(func(string, time.Duration) { called = true })
++	m.SetDurationObserver(nil)
++	m.recordSuccess(time.Millisecond)
++	m.recordFailure(time.Millisecond)
++	m.recordRejection(time.Millisecond)
++	if called {
++		t.Error("observer called after SetDurationObserver(nil)")
++	}
++}
+diff --git a/internal/cron/loop.go b/internal/cron/loop.go
+index 3ede0fbd..a5c1b32e 100644
+--- a/internal/cron/loop.go
++++ b/internal/cron/loop.go
+@@ -109,6 +109,13 @@ type Metrics struct {
+ 	SkippedIdle   atomic.Int64
+ 	SkippedEmpty  atomic.Int64
+ 
++	// durObs, when set, receives one observation per completed solve
++	// (OBS-OB-001): outcome ∈ {"succeeded","failed","rejected"} plus
++	// the solve's wall time. Installed via SetDurationObserver before
++	// Run; the pointer indirection keeps the hot path to a single
++	// atomic load + function call with no allocation.
++	durObs atomic.Pointer[func(outcome string, d time.Duration)]
++
+ 	mu           sync.Mutex
+ 	totalRuntime time.Duration
+ }
+@@ -139,12 +146,33 @@ func (m *Metrics) Snapshot() MetricsSnapshot {
+ 	}
+ }
+ 
++// SetDurationObserver installs fn as the per-completed-solve duration
++// sink (OBS-OB-001): exactly one call per solve, from the same record*
++// method that moves SolveAttempts/totalRuntime, labelled by outcome
++// ("succeeded" | "failed" | "rejected"). Install before Run; nil
++// disables. fn runs synchronously on the solve path, so it must be
++// cheap and non-blocking (a prometheus Histogram.Observe qualifies).
++func (m *Metrics) SetDurationObserver(fn func(outcome string, d time.Duration)) {
++	if fn == nil {
++		m.durObs.Store(nil)
++		return
++	}
++	m.durObs.Store(&fn)
++}
++
++func (m *Metrics) observeDuration(outcome string, d time.Duration) {
++	if fn := m.durObs.Load(); fn != nil {
++		(*fn)(outcome, d)
++	}
++}
++
+ func (m *Metrics) recordSuccess(d time.Duration) {
+ 	m.SolveAttempts.Add(1)
+ 	m.SolveSuccess.Add(1)
+ 	m.mu.Lock()
+ 	m.totalRuntime += d
+ 	m.mu.Unlock()
++	m.observeDuration("succeeded", d)
+ }
+ 
+ func (m *Metrics) recordFailure(d time.Duration) {
+@@ -153,6 +181,7 @@ func (m *Metrics) recordFailure(d time.Duration) {
+ 	m.mu.Lock()
+ 	m.totalRuntime += d
+ 	m.mu.Unlock()
++	m.observeDuration("failed", d)
+ }
+ 
+ // recordRejection counts a solve refused by the harness for approaching
+@@ -167,14 +196,15 @@ func (m *Metrics) recordRejection(d time.Duration) {
+ 	m.mu.Lock()
+ 	m.totalRuntime += d
+ 	m.mu.Unlock()
++	m.observeDuration("rejected", d)
+ }
+ 
+ func (m *Metrics) recordIdleSkip()  { m.SkippedIdle.Add(1) }
+ func (m *Metrics) recordEmptySkip() { m.SkippedEmpty.Add(1) }
+ 
+ // MetricsSnapshot is the JSON-serialisable form returned by
+-// Snapshot(). It is what /api/v1/stats (or the local metrics
+-// endpoint) will eventually expose.
++// Snapshot(). It feeds obo_solves_total on GET /metrics/prom
++// (OBS-OB-001) via the PromConfig.SolveCounts source in main.
+ type MetricsSnapshot struct {
+ 	SolveAttempts  int64   `json:"solve_attempts"`
+ 	SolveSuccess   int64   `json:"solve_success"`
+diff --git a/internal/metrics/prom.go b/internal/metrics/prom.go
+new file mode 100644
+index 00000000..de22f612
+--- /dev/null
++++ b/internal/metrics/prom.go
+@@ -0,0 +1,227 @@
++// prom.go — Prometheus text-exposition surface (OBS-OB-001,
++// docs/observability-spec.md §3.1/§4.1/§4.2).
++//
++// A private prometheus.Registry (never the global default, never the
++// Go/process collectors) carrying exactly the five Tier-1 obo_*
++// families, served by promhttp at GET /metrics/prom. The existing JSON
++// GET /metrics (Observer.Snapshot) is untouched — the two surfaces
++// coexist because dogfood docs and operator runbooks already consume
++// the JSON one.
++//
++// Sources are pull-based at scrape time: the cron loop's counters
++// (internal/cron.Metrics — previously dead code, "will eventually
++// expose"), the queue depth (same query /api/v1/stats uses), and the
++// solver-availability signal. All sources are optional: a zero
++// PromConfig yields a valid exposition with every family present at
++// zero/one values, which is what a nil *Prom serves.
++package metrics
++
++import (
++	"context"
++	"net/http"
++	"time"
++
++	"github.com/prometheus/client_golang/prometheus"
++	"github.com/prometheus/client_golang/prometheus/promhttp"
++)
++
++// solveDurationBuckets are the obo_solve_duration_seconds bucket
++// boundaries (seconds). Chosen around the observed solve-time mean of
++// ~226s over 3354 completed solves (spec §3.1).
++var solveDurationBuckets = []float64{30, 60, 120, 180, 300, 600, 1200, 2400}
++
++// solveOutcomes is the fixed label vocabulary for obo_solves_total and
++// obo_solve_duration_seconds. No free-text labels (spec §3.5).
++var solveOutcomes = []string{"succeeded", "failed", "rejected"}
++
++// PromSolveCounts is the scrape-time snapshot of the cron loop's solve
++// counters, using internal/cron.Metrics semantics: Failed INCLUDES
++// Rejected (a rejected solve is a failure that also increments the
++// dedicated counter). The collector partitions them — see
++// solvesTotalCollector.Collect.
++type PromSolveCounts struct {
++	Success  int64
++	Failed   int64
++	Rejected int64
++}
++
++// PromConfig supplies the live sources for the obo_* families. Every
++// field is optional; a nil source serves the family at its zero value.
++type PromConfig struct {
++	// LoopRunning reports whether the cron loop was started (false
++	// when main took the "no solver available" branch). Wired from
++	// the same signal as api.Server.SolverAvailable.
++	LoopRunning func() bool
++	// SolveCounts returns the loop's solve counters (see
++	// PromSolveCounts for the failed/rejected overlap).
++	SolveCounts func() PromSolveCounts
++	// QueuePending returns the pending/deferred/in_progress queue
++	// depth — the same query /api/v1/stats serves as queue_depth, so
++	// the two numbers agree at any instant.
++	QueuePending func(ctx context.Context) (int64, error)
++}
++
++// Prom owns the private registry and its collectors. Construct once
++// with NewProm and serve via Handler; collectors are built at
++// construction, never per request.
++type Prom struct {
++	registry *prometheus.Registry
++	handler  http.Handler
++	duration *prometheus.HistogramVec
++}
++
++// NewProm builds the private registry with the five Tier-1 families.
++// It never fails: MustRegister panics only on a programming error
++// (duplicate/invalid descriptor), which the fixed definitions below
++// cannot produce.
++func NewProm(cfg PromConfig) *Prom {
++	reg := prometheus.NewRegistry()
++	p := &Prom{registry: reg}
++
++	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
++		Name: "obo_http_up",
++		Help: "Whether the off-by-one HTTP API process is answering (always 1 when this exposition is served).",
++	}, func() float64 { return 1 }))
++
++	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
++		Name: "obo_cron_loop_running",
++		Help: "Whether the cron solve loop was started (1) or the process took the no-solver-available branch (0).",
++	}, func() float64 {
++		if cfg.LoopRunning != nil && cfg.LoopRunning() {
++			return 1
++		}
++		return 0
++	}))
++
++	reg.MustRegister(&solvesTotalCollector{
++		src: cfg.SolveCounts,
++		desc: prometheus.NewDesc(
++			"obo_solves_total",
++			"Completed solves by outcome. Partitions the cron loop's attempt count: succeeded=SolveSuccess, rejected=SolveRejected, failed=SolveFailed-SolveRejected.",
++			[]string{"outcome"}, nil,
++		),
++	})
++
++	reg.MustRegister(&queuePendingCollector{
++		src: cfg.QueuePending,
++		desc: prometheus.NewDesc(
++			"obo_queue_pending",
++			"Queue entries pending, deferred, or in_progress — the same count /api/v1/stats serves as queue_depth.",
++			nil, nil,
++		),
++	})
++
++	p.duration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
++		Name:    "obo_solve_duration_seconds",
++		Help:    "Wall time per completed solve by outcome (buckets chosen around the ~226s observed mean).",
++		Buckets: solveDurationBuckets,
++	}, []string{"outcome"})
++	// Pre-create one child per outcome so the family (and its
++	// _bucket series) is present in the exposition even before the
++	// first solve completes after a restart.
++	for _, outcome := range solveOutcomes {
++		p.duration.WithLabelValues(outcome)
++	}
++	reg.MustRegister(p.duration)
++
++	p.handler = promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
++	return p
++}
++
++// sharedZeroProm backs Handler/Gatherer on a nil *Prom: a zero-source
++// registry, built once, so a Server with no Prom wired still answers
++// GET /metrics/prom with 200 and every family present (unit tests
++// construct Server directly).
++var sharedZeroProm = NewProm(PromConfig{})
++
++// Handler returns the promhttp exposition handler (Content-Type
++// text/plain; version=0.0.4). Nil-receiver-safe: serves the shared
++// zero-source registry.
++func (p *Prom) Handler() http.Handler {
++	if p == nil {
++		return sharedZeroProm.handler
++	}
++	return p.handler
++}
++
++// Gatherer exposes the registry for tests that parse the exposition
++// without going through HTTP. Nil-receiver-safe.
++func (p *Prom) Gatherer() prometheus.Gatherer {
++	if p == nil {
++		return sharedZeroProm.registry
++	}
++	return p.registry
++}
++
++// ObserveSolveDuration records one completed solve's wall time under
++// the given outcome label. Called once per solve from the cron loop's
++// completion sites; nil-receiver-safe so an unwired loop is a no-op.
++func (p *Prom) ObserveSolveDuration(outcome string, d time.Duration) {
++	if p == nil {
++		return
++	}
++	p.duration.WithLabelValues(outcome).Observe(d.Seconds())
++}
++
++// solvesTotalCollector emits obo_solves_total{outcome} from the cron
++// loop's counters.
++//
++// Partition semantics (OBS-OB-001): cron.Metrics counts a rejected
++// solve in BOTH SolveFailed and SolveRejected (see the SolveRejected
++// field comment in internal/cron/loop.go). Emitting failed=SolveFailed
++// and rejected=SolveRejected side by side would double-count under
++// sum(), so the series are partitioned:
++//
++//	succeeded = SolveSuccess
++//	rejected  = SolveRejected
++//	failed    = SolveFailed - SolveRejected
++//
++// and sum(obo_solves_total) == SolveAttempts exactly.
++type solvesTotalCollector struct {
++	src  func() PromSolveCounts
++	desc *prometheus.Desc
++}
++
++func (c *solvesTotalCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
++
++func (c *solvesTotalCollector) Collect(ch chan<- prometheus.Metric) {
++	var s PromSolveCounts
++	if c.src != nil {
++		s = c.src()
++	}
++	failed := s.Failed - s.Rejected
++	if failed < 0 {
++		// Defensive: an inconsistent source must not produce a
++		// negative counter value.
++		failed = 0
++	}
++	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(s.Success), "succeeded")
++	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(failed), "failed")
++	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(s.Rejected), "rejected")
++}
++
++// queuePendingCollector emits obo_queue_pending from queue.Depth. On a
++// source error the series is omitted for that scrape — a missing
++// series is honest, a fabricated 0 is not.
++type queuePendingCollector struct {
++	src  func(ctx context.Context) (int64, error)
++	desc *prometheus.Desc
++}
++
++func (c *queuePendingCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
++
++func (c *queuePendingCollector) Collect(ch chan<- prometheus.Metric) {
++	if c.src == nil {
++		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, 0)
++		return
++	}
++	// The scrape has no request context of its own; bound the read so
++	// a wedged store cannot hang the collector walk.
++	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
++	n, err := c.src(ctx)
++	cancel()
++	if err != nil {
++		return
++	}
++	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, float64(n))
++}
+diff --git a/internal/metrics/prom_test.go b/internal/metrics/prom_test.go
+new file mode 100644
+index 00000000..5017118f
+--- /dev/null
++++ b/internal/metrics/prom_test.go
+@@ -0,0 +1,221 @@
++package metrics
++
++import (
++	"context"
++	"errors"
++	"io"
++	"net/http/httptest"
++	"strings"
++	"testing"
++	"time"
++
++	dto "github.com/prometheus/client_model/go"
++	"github.com/prometheus/common/expfmt"
++	"github.com/prometheus/common/model"
++)
++
++// serveProm performs a scrape against p's handler and returns the
++// response body as text.
++func serveProm(t *testing.T, p *Prom) string {
++	t.Helper()
++	rr := httptest.NewRecorder()
++	req := httptest.NewRequest("GET", "/metrics/prom", nil)
++	p.Handler().ServeHTTP(rr, req)
++	if rr.Code != 200 {
++		t.Fatalf("GET /metrics/prom: status %d, want 200", rr.Code)
++	}
++	ct := rr.Header().Get("Content-Type")
++	if !strings.HasPrefix(ct, "text/plain; version=0.0.4") {
++		t.Fatalf("Content-Type %q, want prefix text/plain; version=0.0.4", ct)
++	}
++	body, err := io.ReadAll(rr.Result().Body)
++	if err != nil {
++		t.Fatalf("read body: %v", err)
++	}
++	return string(body)
++}
++
++// parseProm runs the full expfmt.TextParser over the exposition: any
++// malformed line is a parse error.
++func parseProm(t *testing.T, body string) map[string]*dto.MetricFamily {
++	t.Helper()
++	// The zero TextParser is unusable in prometheus/common v0.70+ (its
++	// name-validation scheme is unset and panics); LegacyValidation is
++	// the scheme promhttp emits.
++	parser := expfmt.NewTextParser(model.LegacyValidation)
++	fams, err := parser.TextToMetricFamilies(strings.NewReader(body))
++	if err != nil {
++		t.Fatalf("exposition has malformed lines: %v", err)
++	}
++	return fams
++}
++
++// sampleValue returns the value of the single (or labelled) sample of
++// a gauge/counter family, matching on the given label values.
++func sampleValue(t *testing.T, fam *dto.MetricFamily, labels map[string]string) float64 {
++	t.Helper()
++	for _, m := range fam.Metric {
++		match := true
++		got := map[string]string{}
++		for _, lp := range m.Label {
++			got[lp.GetName()] = lp.GetValue()
++		}
++		for k, v := range labels {
++			if got[k] != v {
++				match = false
++				break
++			}
++		}
++		if !match {
++			continue
++		}
++		if m.Gauge != nil {
++			return m.Gauge.GetValue()
++		}
++		if m.Counter != nil {
++			return m.Counter.GetValue()
++		}
++		t.Fatalf("family %s: matched metric has neither gauge nor counter", fam.GetName())
++	}
++	t.Fatalf("family %s: no sample with labels %v", fam.GetName(), labels)
++	return 0
++}
++
++func TestPromExpositionFamiliesAndPartition(t *testing.T) {
++	p := NewProm(PromConfig{
++		LoopRunning: func() bool { return true },
++		SolveCounts: func() PromSolveCounts {
++			// Failed includes Rejected (cron.Metrics semantics): the
++			// collector must partition to succeeded=5, failed=2,
++			// rejected=1 — sum 8 == attempts.
++			return PromSolveCounts{Success: 5, Failed: 3, Rejected: 1}
++		},
++		QueuePending: func(ctx context.Context) (int64, error) { return 7, nil },
++	})
++	p.ObserveSolveDuration("succeeded", 95*time.Second)
++
++	body := serveProm(t, p)
++	for _, want := range []string{
++		"# HELP obo_http_up",
++		"obo_http_up",
++		"obo_cron_loop_running",
++		"obo_solves_total",
++		"obo_queue_pending",
++		"obo_solve_duration_seconds_bucket",
++	} {
++		if !strings.Contains(body, want) {
++			t.Errorf("exposition missing %q", want)
++		}
++	}
++
++	fams := parseProm(t, body)
++
++	if v := sampleValue(t, fams["obo_http_up"], nil); v != 1 {
++		t.Errorf("obo_http_up = %v, want 1", v)
++	}
++	if v := sampleValue(t, fams["obo_cron_loop_running"], nil); v != 1 {
++		t.Errorf("obo_cron_loop_running = %v, want 1", v)
++	}
++	if v := sampleValue(t, fams["obo_queue_pending"], nil); v != 7 {
++		t.Errorf("obo_queue_pending = %v, want 7", v)
++	}
++
++	succ := sampleValue(t, fams["obo_solves_total"], map[string]string{"outcome": "succeeded"})
++	fail := sampleValue(t, fams["obo_solves_total"], map[string]string{"outcome": "failed"})
++	rej := sampleValue(t, fams["obo_solves_total"], map[string]string{"outcome": "rejected"})
++	if succ != 5 || fail != 2 || rej != 1 {
++		t.Errorf("partition: succeeded=%v failed=%v rejected=%v, want 5/2/1", succ, fail, rej)
++	}
++	if succ+fail+rej != 8 {
++		t.Errorf("sum(obo_solves_total) = %v, want 8 (== SolveAttempts)", succ+fail+rej)
++	}
++
++	dur := fams["obo_solve_duration_seconds"]
++	if dur == nil {
++		t.Fatal("obo_solve_duration_seconds family missing")
++	}
++	var succHist, failHist, rejHist *dto.Metric
++	for _, m := range dur.Metric {
++		for _, lp := range m.Label {
++			if lp.GetName() != "outcome" {
++				continue
++			}
++			switch lp.GetValue() {
++			case "succeeded":
++				succHist = m
++			case "failed":
++				failHist = m
++			case "rejected":
++				rejHist = m
++			}
++		}
++	}
++	if succHist == nil || failHist == nil || rejHist == nil {
++		t.Fatalf("histogram children: succeeded=%v failed=%v rejected=%v present, want all three",
++			succHist != nil, failHist != nil, rejHist != nil)
++	}
++	h := succHist.GetHistogram()
++	if h.GetSampleCount() != 1 || h.GetSampleSum() != 95 {
++		t.Errorf("succeeded histogram: count=%d sum=%v, want 1/95", h.GetSampleCount(), h.GetSampleSum())
++	}
++	// 95s lands in the le=120 bucket but not le=60.
++	var le60, le120 uint64
++	for _, b := range h.Bucket {
++		switch b.GetUpperBound() {
++		case 60:
++			le60 = b.GetCumulativeCount()
++		case 120:
++			le120 = b.GetCumulativeCount()
++		}
++	}
++	if le60 != 0 || le120 != 1 {
++		t.Errorf("buckets: le=60 count=%d (want 0), le=120 count=%d (want 1)", le60, le120)
++	}
++	if c := failHist.GetHistogram().GetSampleCount(); c != 0 {
++		t.Errorf("failed histogram count=%d, want 0 (pre-created child, no observations)", c)
++	}
++}
++
++func TestPromNilSafeZeroExposition(t *testing.T) {
++	var p *Prom // never constructed: must still serve a valid exposition
++	body := serveProm(t, p)
++	if strings.HasPrefix(body, "<!DOCTYPE") {
++		t.Fatal("exposition is HTML, not text format")
++	}
++	fams := parseProm(t, body)
++	for _, name := range []string{
++		"obo_http_up", "obo_cron_loop_running", "obo_solves_total",
++		"obo_queue_pending", "obo_solve_duration_seconds",
++	} {
++		if fams[name] == nil {
++			t.Errorf("nil-source exposition missing family %s", name)
++		}
++	}
++	if v := sampleValue(t, fams["obo_http_up"], nil); v != 1 {
++		t.Errorf("obo_http_up = %v, want 1 even on the zero registry", v)
++	}
++	if v := sampleValue(t, fams["obo_cron_loop_running"], nil); v != 0 {
++		t.Errorf("obo_cron_loop_running = %v, want 0 with no source", v)
++	}
++	for _, outcome := range []string{"succeeded", "failed", "rejected"} {
++		if v := sampleValue(t, fams["obo_solves_total"], map[string]string{"outcome": outcome}); v != 0 {
++			t.Errorf("obo_solves_total{outcome=%s} = %v, want 0", outcome, v)
++		}
++	}
++}
++
++func TestPromQueuePendingSourceErrorOmitsSeries(t *testing.T) {
++	p := NewProm(PromConfig{
++		QueuePending: func(ctx context.Context) (int64, error) { return 0, errors.New("db wedged") },
++	})
++	fams := parseProm(t, serveProm(t, p))
++	fam := fams["obo_queue_pending"]
++	if fam != nil && len(fam.Metric) != 0 {
++		t.Errorf("errored queue source emitted %d samples; want the series omitted, not a fabricated 0", len(fam.Metric))
++	}
++}
++
++func TestPromObserveNilSafe(t *testing.T) {
++	var p *Prom
++	p.ObserveSolveDuration("succeeded", time.Second) // must not panic
++}
