@@ -18,6 +18,46 @@ ldflags build injects the tag on release. All four readiness criteria held
 (CI green per-job on HEAD, changelog written, no open P0/P1 blockers, stamps
 consistent); cut under the standing release authority (minor: 13+5 feat).
 
+**v0.3.0 version-prep complete (2026-11-04, RELEASE-OB-017):** the
+`## [v0.3.0]` section below covers the v0.2.1..HEAD range (1 feat, 1 fix, 14
+corpus-sync data commits, board/gitreins bookkeeping excluded from the notes)
+and `cmd/off-by-one/main.go` carries the 0.3.0-dev string — the ldflags build
+injects the tag on release. Cut under the standing release authority (minor:
+one `feat` — R4).
+
+## [v0.3.0] - 2026-11-04
+
+### Observability: the lab can be scraped
+
+- `GET /metrics/prom` serves five Tier-1 `obo_*` Prometheus families from a
+  private registry via client_golang+promhttp: `obo_http_up`,
+  `obo_cron_loop_running`, `obo_solves_total{outcome}`, `obo_queue_pending`
+  (equal to the `queue_depth` that `/api/v1/stats` serves) and
+  `obo_solve_duration_seconds{outcome}` — the cron loop's duration observer is
+  no longer dead code (OBS-OB-001)
+- The route is explicit in the main-server router beside `/health`, `/metrics`
+  and `/openapi.json`; the JSON `/metrics` contract is unchanged
+
+### Fixes
+
+- `make check-deploy-test`: the "not-a-repo" fixture is built at a proven
+  git-free path, so the deploy-gate self-test can no longer false-green off an
+  ancestor repository (OB-GAP-096)
+
+### Tooling and release
+
+- Release artifacts for this tag are built with Go 1.26.10 to carry the
+  crypto/x509 compromised-intermediate-CA distrust fix (GO-2026-6809); go.mod
+  keeps its go 1.26.9 language floor
+- `make release TAG=v0.3.0` remains the only tag driver: clean tree, CHANGELOG
+  section, full build+test, annotated tag, then a Release object with assets
+
+### Maintenance
+
+- Answer corpus updates (14 syncs, 58 new published class pages)
+- Static distribution site regenerated with the new corpus
+- Board maintenance, QA batteries and gitreins verdicts across the cycle
+
 ## [v0.2.1] - 2026-11-01
 
 ### Fixes
