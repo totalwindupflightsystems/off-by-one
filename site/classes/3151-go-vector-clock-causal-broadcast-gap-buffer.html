@@ -1,0 +1,1134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-vector-clock-causal-broadcast-gap-buffer — Off-By-One verified answer</title>
+<meta name="description" content="A vector-clock causal layer is not enough on its own: a single permanently dropped broadcast makes every later message fail the causal predicate, so the holdbac">
+<meta property="og:title" content="go-vector-clock-causal-broadcast-gap-buffer — Off-By-One">
+<meta property="og:description" content="A vector-clock causal layer is not enough on its own: a single permanently dropped broadcast makes every later message fail the causal predicate, so the holdbac">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3151-go-vector-clock-causal-broadcast-gap-buffer.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-vector-clock-causal-broadcast-gap-buffer</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>A vector-clock causal layer is not enough on its own: a single permanently dropped broadcast makes every later message fail the causal predicate, so the holdback ("gap") queue grows without bound and the node deadlocks. Because a vector clock only proves that a predecessor was sent, it cannot prove that it is permanently lost. The fix is to add a deterministic liveness rule: once a known-sent predecessor is absent for K further live messages, declare it permanently lost, record it in a gap report, and compact the buffer by advancing the delivered clock over it. K is counted in distinct live messages, never in wall-clock time, so the run is bit-for-bit reproducible.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3151-go-vector-clock-causal-broadcast-gap-buffer.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I built and verified the implementation at <code>~/causalbc</code> (also saved as <code>~/causalbc/SOLUTION.md</code>). Here is the complete solution.</p>
+<hr />
+<h1>Causally Ordered Broadcast with a Bounded Gap Buffer</h1>
+<h2>TL;DR</h2>
+<p>A vector-clock causal layer is <em>not</em> enough on its own: a single permanently dropped broadcast makes every later message fail the causal predicate, so the holdback ("gap") queue grows without bound and the node deadlocks. Because a vector clock only proves that a predecessor <strong>was sent</strong>, it cannot prove that it is permanently lost. The fix is to add a deterministic <strong>liveness rule</strong>: once a known-sent predecessor is absent for <code>K</code> further <em>live</em> messages, declare it permanently lost, record it in a gap report, and compact the buffer by advancing the delivered clock over it. <code>K</code> is counted in distinct live messages, never in wall-clock time, so the run is bit-for-bit reproducible.</p>
+<p>The complete, runnable module is in <code>~/causalbc</code>. <code>go test ./...</code> passes all six tests, including a golden delivery order, a 200-run determinism check, a bounded-memory proof, and a causal-order invariant checker.</p>
+<hr />
+<h2>1. Problem restated</h2>
+<p>Implement a causal broadcast layer over an unreliable transport:</p>
+<ul>
+<li>each node keeps a <strong>vector clock</strong> and a <strong>holdback (gap) buffer</strong>;</li>
+<li>a message is delivered only after all of its causal predecessors are delivered;</li>
+<li>a node that stalls on <code>K</code> messages must not grow memory without bound or deadlock;</li>
+<li>given a captured trace with duplicates, reordering, late arrivals, two joins and one leave, emit the exact per-node delivery order and a gap report naming the unreachable predecessors;</li>
+<li>the layer must be deterministic, and must classify a predecessor as permanently lost within a bounded number of live messages so the buffer can be compacted.</li>
+</ul>
+<hr />
+<h2>2. Root-cause analysis</h2>
+<h3>2.1 Symptom</h3>
+<p>Node <code>C</code> receives <code>A:2</code>'s successor, <code>A:3</code>. <code>A:3</code>'s clock says <code>A:2</code> existed. <code>A:2</code> never arrives. <code>A:3</code> is therefore undeliverable forever, and every later message that transitively depends on <code>A:2</code> piles up behind it. The holdback queue becomes an unbounded leak and <code>C</code> makes no further progress.</p>
+<h3>2.2 Why the obvious design fails</h3>
+<p>A vector clock is a <strong>proof of causality, not of liveness</strong>. From <code>A:3</code>'s clock you can prove <code>A:2</code> <em>was sent</em>; nothing in the clock tells you whether <code>A:2</code> is in flight, sitting in a reorder buffer, or gone forever. The standard causal predicate</p>
+<pre><code>deliverable(m)  &lt;=&gt;  m.clock[from] == delivered[from] + 1
+                     and for all j != from: m.clock[j] &lt;= delivered[j]
+</code></pre>
+<p>is a <em>safety</em> predicate. It has no liveness escape hatch, so a single loss is a permanent stall. That is the root cause: <strong>the wait is unbounded because the condition to stop waiting was never defined.</strong></p>
+<h3>2.3 Why wall-clock timeouts are the wrong escape hatch</h3>
+<p>Introducing "wait N seconds, then give up" makes the output depend on machine speed and scheduling. The exact delivery order and the gap set would change between runs, violating the determinism requirement. Time must be measured in something intrinsic to the trace: <strong>live messages</strong>.</p>
+<h3>2.4 The classification rule and its trade-off</h3>
+<p>When a received message's clock references <code>j:k</code> and <code>j:k</code> is absent, record the current live-message counter. If <code>K</code> <em>more distinct</em> live messages arrive and <code>j:k</code> still has not, classify it as permanently lost. This is a conservative liveness heuristic: it trades the possibility of misclassifying a very-late message for guaranteed bounded memory and termination. If a message declared lost later surfaces, it is absorbed as a tombstone (the delivery order already reported cannot be changed). <code>K</code> should exceed the transport's worst-case reordering window in live messages.</p>
+<h3>2.5 Joins and leaves</h3>
+<ul>
+<li>A joining node starts with an empty clock; its first broadcast is <code>&lt;id&gt;:00000001</code>. Nothing special is required because other nodes only ever wait on predecessors that some clock names.</li>
+<li>A leaving node simply stops extending its component of the horizon. Outstanding gaps that name it are resolved by the ordinary <code>K</code>-live-message rule; no special case, no extra deadlock surface.</li>
+</ul>
+<hr />
+<h2>3. The fix</h2>
+<h3>3.1 Data kept per node</h3>
+<table>
+<thead>
+<tr>
+<th>field</th>
+<th>purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>delivered</code></td>
+<td>vector clock of delivered messages</td>
+</tr>
+<tr>
+<td><code>holdback</code></td>
+<td>received-but-blocked messages (the gap buffer)</td>
+</tr>
+<tr>
+<td><code>horizon</code></td>
+<td>component-wise max of every clock seen = frontier of <em>known-sent</em> messages</td>
+</tr>
+<tr>
+<td><code>missingSince</code></td>
+<td>gap id -&gt; live counter when first noticed</td>
+</tr>
+<tr>
+<td><code>lost</code> / <code>gapOrder</code></td>
+<td>permanently lost predecessors + the gap report</td>
+</tr>
+<tr>
+<td><code>recvSeq</code></td>
+<td>arrival rank, used only as a deterministic tie-break</td>
+</tr>
+</tbody>
+</table>
+<h3>3.2 Delivery predicate</h3>
+<pre><code class="language-text">canDeliver(m):
+  m.clock[from] == delivered[from] + 1      # next in this sender's stream
+  AND for every other j: m.clock[j] &lt;= delivered[j]
+</code></pre>
+<h3>3.3 Gap detection + compaction</h3>
+<pre><code class="language-text">classifyGaps():
+  for each node j in sorted order:
+    while delivered[j] &lt; horizon[j]:
+      k = delivered[j] + 1
+      id = &quot;j:k&quot;
+      if id in holdback:            break   # present, just blocked
+      if id never noticed:          missingSince[id] = live; break
+      if live - missingSince[id] &lt; K: break # still inside reorder window
+      lost[id] = true; gapOrder += id
+      delivered[j] = k              # compact over the predecessor
+</code></pre>
+<h3>3.4 Determinism</h3>
+<ul>
+<li><code>classifyGaps</code> iterates sender ids in sorted order.</li>
+<li><code>pickReady</code> delivers the deliverable buffer entry with the smallest arrival rank, giving a deterministic total order over concurrent messages.</li>
+<li>All <code>String</code>/report output sorts keys. No wall clock, no goroutine timing, no map-iteration order leaks into the result.</li>
+</ul>
+<h3>3.5 Termination bound</h3>
+<p>Every <code>settle</code> iteration either delivers a message (strictly reduces <code>holdback</code>) or declares a gap lost (strictly advances <code>delivered</code>). Both are bounded by the number of messages ever sent, so <code>settle</code> is a terminating fixed-point loop. Memory is bounded by <code>O(K * senders)</code>: at most <code>K+1</code> messages can accumulate behind a head gap before it is reclassified, after which the buffer flushes.</p>
+<hr />
+<h2>4. Exact code</h2>
+<h3><code>go.mod</code></h3>
+<pre><code class="language-go">module causalbc
+
+go 1.26
+</code></pre>
+<h3><code>causal/message.go</code></h3>
+<pre><code class="language-go">package causal
+
+import &quot;fmt&quot;
+
+// Message is a broadcast message enriched with the sender's vector clock at
+// send time. Clock[From] equals Seq; for every other node j, Clock[j] is the
+// number of messages from j that the sender had delivered when it sent this.
+type Message struct {
+    ID    string      `json:&quot;id&quot;`
+    From  string      `json:&quot;from&quot;`
+    Seq   int         `json:&quot;seq&quot;`
+    Clock VectorClock `json:&quot;clock&quot;`
+    Body  string      `json:&quot;body,omitempty&quot;`
+}
+
+// MakeID builds a stable, lexicographically ordered id: &quot;&lt;node&gt;:&lt;8-digit seq&gt;&quot;.
+func MakeID(from string, seq int) string {
+    return fmt.Sprintf(&quot;%s:%08d&quot;, from, seq)
+}
+</code></pre>
+<h3><code>causal/clock.go</code></h3>
+<pre><code class="language-go">package causal
+
+import (
+    &quot;sort&quot;
+    &quot;strconv&quot;
+    &quot;strings&quot;
+)
+
+// VectorClock maps a node ID to the number of messages from that node that
+// have been delivered (the classic vector-clock component).
+type VectorClock map[string]int
+
+func NewClock() VectorClock { return VectorClock{} }
+
+func (vc VectorClock) Clone() VectorClock {
+    c := make(VectorClock, len(vc))
+    for k, v := range vc {
+        c[k] = v
+    }
+    return c
+}
+
+func (vc VectorClock) Get(node string) int { return vc[node] }
+
+func (vc VectorClock) Set(node string, v int) { vc[node] = v }
+
+// Inc increments the component for node and returns the new value.
+func (vc VectorClock) Inc(node string) int {
+    vc[node]++
+    return vc[node]
+}
+
+// Merge folds other into vc using a component-wise maximum.
+func (vc VectorClock) Merge(other VectorClock) {
+    for k, v := range other {
+        if v &gt; vc[k] {
+            vc[k] = v
+        }
+    }
+}
+
+// Max returns the component-wise maximum of a and b.
+func Max(a, b VectorClock) VectorClock {
+    c := a.Clone()
+    c.Merge(b)
+    return c
+}
+
+// LessEq reports whether a &lt;= b component-wise (a is &quot;dominated by&quot; b).
+func (a VectorClock) LessEq(b VectorClock) bool {
+    for k, av := range a {
+        if av &gt; b[k] {
+            return false
+        }
+    }
+    return true
+}
+
+// Equal reports component-wise equality.
+func (a VectorClock) Equal(b VectorClock) bool {
+    return a.LessEq(b) &amp;&amp; b.LessEq(a)
+}
+
+// Compare returns:
+//
+//  -1 if a &lt; b  (a happens-before b)
+//   1 if b &lt; a  (b happens-before a)
+//   0 if a == b
+//   2 if a and b are concurrent
+func (a VectorClock) Compare(b VectorClock) int {
+    ab := a.LessEq(b)
+    ba := b.LessEq(a)
+    switch {
+    case ab &amp;&amp; ba:
+        return 0
+    case ab:
+        return -1
+    case ba:
+        return 1
+    default:
+        return 2
+    }
+}
+
+// String renders the clock with sorted keys so output is byte-for-byte stable
+// across runs (Go map iteration order is randomized).
+func (vc VectorClock) String() string {
+    keys := make([]string, 0, len(vc))
+    for k := range vc {
+        keys = append(keys, k)
+    }
+    sort.Strings(keys)
+    parts := make([]string, 0, len(keys))
+    for _, k := range keys {
+        parts = append(parts, k+&quot;:&quot;+strconv.Itoa(vc[k]))
+    }
+    return &quot;{&quot; + strings.Join(parts, &quot;,&quot;) + &quot;}&quot;
+}
+</code></pre>
+<h3><code>causal/node.go</code></h3>
+<pre><code class="language-go">package causal
+
+import &quot;sort&quot;
+
+// DefaultLossThreshold is the number K of live messages after which a
+// predecessor that is known to exist but has not arrived is declared
+// permanently lost. It is measured in distinct live messages, never in wall
+// clock, so results are deterministic across runs and machines.
+const DefaultLossThreshold = 5
+
+// Node is one participant in the causally ordered broadcast layer.
+type Node struct {
+    ID        string
+    Threshold int // K; &lt;=0 means DefaultLossThreshold
+
+    // delivered is the vector clock of delivered messages.
+    delivered VectorClock
+    // deliveryOrder is the exact per-node order messages were delivered in.
+    deliveryOrder []string
+    deliveredSet  map[string]bool
+
+    // seen de-duplicates the unreliable transport.
+    seen map[string]bool
+    // live counts distinct messages that actually arrived (self-sends included).
+    live int
+
+    // holdback is the gap buffer: received but not yet causally deliverable.
+    holdback map[string]Message
+    // recvSeq gives a total arrival order used as the deterministic tie-break.
+    recvSeq  map[string]int
+    nextRecv int
+
+    // horizon is the component-wise max of every clock seen. It is the
+    // frontier of messages we know were *sent* to somebody.
+    horizon VectorClock
+
+    // missingSince[id] is the live-counter value when the gap id was first
+    // noticed as missing.
+    missingSince map[string]int
+    lost         map[string]bool
+    gapOrder     []string
+
+    joined bool
+    left   bool
+}
+
+// NewNode creates a node with the default loss threshold.
+func NewNode(id string) *Node { return NewNodeK(id, DefaultLossThreshold) }
+
+// NewNodeK creates a node with an explicit loss threshold K.
+func NewNodeK(id string, k int) *Node {
+    if k &lt;= 0 {
+        k = DefaultLossThreshold
+    }
+    return &amp;Node{
+        ID:           id,
+        Threshold:    k,
+        delivered:    NewClock(),
+        deliveredSet: map[string]bool{},
+        seen:         map[string]bool{},
+        holdback:     map[string]Message{},
+        recvSeq:      map[string]int{},
+        horizon:      NewClock(),
+        missingSince: map[string]int{},
+        lost:         map[string]bool{},
+    }
+}
+
+// Joined reports whether the node has been marked live.
+func (n *Node) Joined() bool { return n.joined }
+
+// Left reports whether the node has left the group.
+func (n *Node) Left() bool { return n.left }
+
+// Join marks the node live. A joining node starts with an empty clock, so its
+// first broadcast is &quot;&lt;id&gt;:00000001&quot;.
+func (n *Node) Join() {
+    n.joined = true
+    n.left = false
+}
+
+// Leave marks the node as having departed. The node sends nothing further, so
+// any outstanding gap that references it simply stops growing its horizon and
+// is resolved by the ordinary K-live-message rule.
+func (n *Node) Leave() { n.left = true }
+
+// Broadcast increments the local clock, emits a message and self-delivers it
+// immediately (a process always delivers its own broadcasts).
+func (n *Node) Broadcast(body string) Message {
+    seq := n.delivered.Inc(n.ID)
+    msg := Message{
+        ID:    MakeID(n.ID, seq),
+        From:  n.ID,
+        Seq:   seq,
+        Clock: n.delivered.Clone(),
+        Body:  body,
+    }
+    n.seen[msg.ID] = true
+    n.live++
+    n.horizon.Merge(msg.Clock)
+    n.deliverLocked(msg)
+    n.settle()
+    return msg
+}
+
+// Receive feeds one transport delivery into the causal layer. Duplicates are
+// ignored. Out-of-order messages are buffered until deliverable.
+func (n *Node) Receive(msg Message) {
+    if n.seen[msg.ID] {
+        return // duplicate
+    }
+    if n.lost[msg.ID] {
+        // The message surfaced after we already compacted over it and advanced
+        // the delivered clock. Re-delivering it would violate the order we
+        // already reported, so it is absorbed as a tombstone.
+        return
+    }
+    n.seen[msg.ID] = true
+    n.live++
+    n.horizon.Merge(msg.Clock)
+    n.recvSeq[msg.ID] = n.nextRecv
+    n.nextRecv++
+
+    if n.canDeliver(msg) {
+        n.deliverLocked(msg)
+    } else {
+        n.holdback[msg.ID] = msg
+    }
+    n.settle()
+}
+
+// canDeliver is the causal delivery predicate:
+//
+//  Clock[From]      == delivered[From] + 1   (next in this sender's FIFO order)
+//  Clock[j != From] &lt;= delivered[j]          (all cross-node predecessors done)
+func (n *Node) canDeliver(msg Message) bool {
+    for node, c := range msg.Clock {
+        if node == msg.From {
+            if c != n.delivered.Get(node)+1 {
+                return false
+            }
+        } else if c &gt; n.delivered.Get(node) {
+            return false
+        }
+    }
+    return true
+}
+
+func (n *Node) deliverLocked(msg Message) {
+    for node, c := range msg.Clock {
+        if c &gt; n.delivered.Get(node) {
+            n.delivered.Set(node, c)
+        }
+    }
+    n.deliveredSet[msg.ID] = true
+    n.deliveryOrder = append(n.deliveryOrder, msg.ID)
+    delete(n.holdback, msg.ID)
+}
+
+// pickReady returns the identifier of the deliverable holdback message with
+// the smallest arrival sequence, giving a deterministic total order over
+// concurrent messages. It returns ok=false when the buffer is blocked.
+func (n *Node) pickReady() (string, bool) {
+    best := &quot;&quot;
+    bestSeq := -1
+    for id, msg := range n.holdback {
+        if !n.canDeliver(msg) {
+            continue
+        }
+        s := n.recvSeq[id]
+        if bestSeq == -1 || s &lt; bestSeq {
+            best, bestSeq = id, s
+        }
+    }
+    return best, bestSeq != -1
+}
+
+// settle delivers everything that is currently enabled, then reclassifies
+// gaps (which may enable more), until a fixed point is reached. It terminates
+// because every iteration either delivers a message or marks a gap lost,
+// both strictly monotone and bounded by the number of messages.
+func (n *Node) settle() {
+    for {
+        changed := false
+        for {
+            id, ok := n.pickReady()
+            if !ok {
+                break
+            }
+            msg := n.holdback[id]
+            delete(n.holdback, id)
+            n.deliverLocked(msg)
+            changed = true
+        }
+        if n.classifyGaps() {
+            changed = true
+        }
+        if !changed {
+            break
+        }
+    }
+}
+
+// classifyGaps decides which known-but-missing predecessors are permanently
+// lost, then compacts the buffer by advancing the delivered clock over them.
+// This is what bounds memory and prevents deadlock when the transport has
+// permanently dropped a message.
+//
+// A gap &quot;j:k&quot; is noticed the first time some received message proves it was
+// sent (its clock has component j &gt;= k) while it is absent. Once the node has
+// observed Threshold further live messages without receiving it, it is
+// declared lost and recorded in the gap report.
+func (n *Node) classifyGaps() bool {
+    changed := false
+    nodes := make([]string, 0, len(n.horizon))
+    for j := range n.horizon {
+        nodes = append(nodes, j)
+    }
+    sort.Strings(nodes)
+
+    for _, j := range nodes {
+        exp := n.horizon.Get(j)
+        for n.delivered.Get(j) &lt; exp {
+            k := n.delivered.Get(j) + 1
+            id := MakeID(j, k)
+            if n.deliveredSet[id] {
+                break // bookkeeping safety
+            }
+            if _, buffered := n.holdback[id]; buffered {
+                break // the message exists; it is merely not deliverable yet
+            }
+            since, noticed := n.missingSince[id]
+            if !noticed {
+                n.missingSince[id] = n.live
+                break // start the bounded wait for this head gap
+            }
+            if n.live-since &lt; n.Threshold {
+                break // still within the reordering window
+            }
+            // Permanent loss: compact the buffer over this predecessor.
+            n.lost[id] = true
+            n.gapOrder = append(n.gapOrder, id)
+            n.delivered.Set(j, k)
+            changed = true
+        }
+    }
+    return changed
+}
+
+// DeliveryOrder returns a copy of the exact per-node delivery order.
+func (n *Node) DeliveryOrder() []string {
+    out := make([]string, len(n.deliveryOrder))
+    copy(out, n.deliveryOrder)
+    return out
+}
+
+// Gaps returns a copy of the unreachable predecessors declared lost at this
+// node, in the order they were reclassified.
+func (n *Node) Gaps() []string {
+    out := make([]string, len(n.gapOrder))
+    copy(out, n.gapOrder)
+    return out
+}
+
+// HoldbackLen is the live size of the gap buffer (should stay bounded).
+func (n *Node) HoldbackLen() int { return len(n.holdback) }
+
+// DeliveredClone returns a copy of the delivered vector clock.
+func (n *Node) DeliveredClone() VectorClock { return n.delivered.Clone() }
+
+// HorizonClone returns a copy of the horizon vector clock.
+func (n *Node) HorizonClone() VectorClock { return n.horizon.Clone() }
+</code></pre>
+<h3><code>causal/runner.go</code></h3>
+<pre><code class="language-go">package causal
+
+import (
+    &quot;fmt&quot;
+    &quot;sort&quot;
+    &quot;strings&quot;
+)
+
+// Command is one entry of the captured send/receive trace. The transport's
+// unreliability is expressed purely by which &quot;deliver&quot; commands exist and in
+// what order they appear: dropping is an omitted deliver, reordering is a
+// later position, duplication is a repeated deliver.
+type Command struct {
+    Op   string `json:&quot;op&quot;`             // join | leave | send | deliver
+    Node string `json:&quot;node&quot;`           // actor (join/leave/send) or source
+    To   string `json:&quot;to,omitempty&quot;`   // destination of a deliver
+    Tag  string `json:&quot;tag,omitempty&quot;`  // logical message name for deliver
+    Body string `json:&quot;body,omitempty&quot;` // payload for send
+}
+
+// Report is the deterministic result of running a trace.
+type Report struct {
+    Nodes      []string            `json:&quot;nodes&quot;`
+    Deliveries map[string][]string `json:&quot;deliveries&quot;`
+    Gaps       map[string][]string `json:&quot;gaps&quot;`
+    Holdback   map[string]int      `json:&quot;holdback&quot;`
+    Messages   map[string]Message  `json:&quot;messages&quot;`
+}
+
+// Runner replays a captured trace through the causal layer.
+type Runner struct {
+    K    int
+    msgs map[string]Message
+}
+
+// NewRunner creates a runner with loss threshold k (0 =&gt; default).
+func NewRunner(k int) *Runner {
+    if k &lt;= 0 {
+        k = DefaultLossThreshold
+    }
+    return &amp;Runner{K: k, msgs: map[string]Message{}}
+}
+
+// Run executes the trace and returns the report. Nodes referenced before a
+// &quot;join&quot; command are auto-created joined, so a partial trace still runs.
+func (r *Runner) Run(script []Command) *Report {
+    nodes := map[string]*Node{}
+    get := func(id string) *Node {
+        n, ok := nodes[id]
+        if !ok {
+            n = NewNodeK(id, r.K)
+            nodes[id] = n
+        }
+        return n
+    }
+
+    for _, c := range script {
+        switch c.Op {
+        case &quot;join&quot;:
+            get(c.Node).Join()
+        case &quot;leave&quot;:
+            get(c.Node).Leave()
+        case &quot;send&quot;:
+            msg := get(c.Node).Broadcast(c.Body)
+            r.msgs[c.Tag] = msg
+        case &quot;deliver&quot;:
+            msg, ok := r.msgs[c.Tag]
+            if !ok {
+                panic(fmt.Sprintf(&quot;deliver references unknown tag %q&quot;, c.Tag))
+            }
+            get(c.To).Receive(msg)
+        default:
+            panic(&quot;unknown op &quot; + c.Op)
+        }
+    }
+
+    rep := &amp;Report{
+        Deliveries: map[string][]string{},
+        Gaps:       map[string][]string{},
+        Holdback:   map[string]int{},
+        Messages:   r.msgs,
+    }
+    for id, n := range nodes {
+        rep.Nodes = append(rep.Nodes, id)
+        rep.Deliveries[id] = n.DeliveryOrder()
+        rep.Gaps[id] = n.Gaps()
+        rep.Holdback[id] = n.HoldbackLen()
+    }
+    sort.Strings(rep.Nodes)
+    return rep
+}
+
+// Format renders the report as stable, human-readable text.
+func (rep *Report) Format() string {
+    var b strings.Builder
+    for _, id := range rep.Nodes {
+        fmt.Fprintf(&amp;b, &quot;node %s\n&quot;, id)
+        fmt.Fprintf(&amp;b, &quot;  delivery order: %s\n&quot;, strings.Join(rep.Deliveries[id], &quot;, &quot;))
+        gaps := rep.Gaps[id]
+        if len(gaps) == 0 {
+            fmt.Fprintf(&amp;b, &quot;  gap report:     &lt;none&gt;\n&quot;)
+        } else {
+            fmt.Fprintf(&amp;b, &quot;  gap report:     %s\n&quot;, strings.Join(gaps, &quot;, &quot;))
+        }
+        fmt.Fprintf(&amp;b, &quot;  holdback size:  %d\n&quot;, rep.Holdback[id])
+    }
+    return b.String()
+}
+
+// Equal reports whether two reports are identical (used by the determinism
+// check in tests): same delivery order, gaps, holdback sizes and messages.
+func (rep *Report) Equal(other *Report) bool {
+    if strings.Join(rep.Nodes, &quot;,&quot;) != strings.Join(other.Nodes, &quot;,&quot;) {
+        return false
+    }
+    for _, id := range rep.Nodes {
+        if strings.Join(rep.Deliveries[id], &quot;,&quot;) != strings.Join(other.Deliveries[id], &quot;,&quot;) {
+            return false
+        }
+        if strings.Join(rep.Gaps[id], &quot;,&quot;) != strings.Join(other.Gaps[id], &quot;,&quot;) {
+            return false
+        }
+        if rep.Holdback[id] != other.Holdback[id] {
+            return false
+        }
+    }
+    if len(rep.Messages) != len(other.Messages) {
+        return false
+    }
+    for k, v := range rep.Messages {
+        ov, ok := other.Messages[k]
+        if !ok || !v.Clock.Equal(ov.Clock) || v.ID != ov.ID {
+            return false
+        }
+    }
+    return true
+}
+</code></pre>
+<h3><code>causal/scenario.go</code> (the captured trace)</h3>
+<pre><code class="language-go">package causal
+
+// DemoTrace is a captured send/receive trace that exercises every feature the
+// problem names: two node joins (C and D), one node leave (B), reordering,
+// duplicates, late arrivals, and one permanently lost pair of predecessors
+// (A:2 and B:2) that node C must classify and compact over.
+//
+// The order of &quot;deliver&quot; commands *is* the observed transport order. Omitted
+// delivers are drops; repeated delivers are duplicates; later positions are
+// reorderings/late arrivals.
+func DemoTrace() []Command {
+    return []Command{
+        // --- initial membership: A, B ---
+        {Op: &quot;join&quot;, Node: &quot;A&quot;},
+        {Op: &quot;join&quot;, Node: &quot;B&quot;},
+
+        // concurrent broadcasts A1 and B1
+        {Op: &quot;send&quot;, Node: &quot;A&quot;, Tag: &quot;a1&quot;, Body: &quot;a1&quot;},
+        {Op: &quot;send&quot;, Node: &quot;B&quot;, Tag: &quot;b1&quot;, Body: &quot;b1&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;B&quot;, Tag: &quot;a1&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;A&quot;, Tag: &quot;b1&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;B&quot;, Tag: &quot;a1&quot;}, // duplicate -&gt; ignored
+
+        // causal second round: B2 depends on A1, A2 depends on B1
+        {Op: &quot;send&quot;, Node: &quot;B&quot;, Tag: &quot;b2&quot;, Body: &quot;b2&quot;},
+        {Op: &quot;send&quot;, Node: &quot;A&quot;, Tag: &quot;a2&quot;, Body: &quot;a2&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;A&quot;, Tag: &quot;b2&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;B&quot;, Tag: &quot;a2&quot;},
+
+        // --- first join: C ---
+        {Op: &quot;join&quot;, Node: &quot;C&quot;},
+        {Op: &quot;send&quot;, Node: &quot;C&quot;, Tag: &quot;c1&quot;, Body: &quot;c1&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;A&quot;, Tag: &quot;c1&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;B&quot;, Tag: &quot;c1&quot;},
+
+        // third round
+        {Op: &quot;send&quot;, Node: &quot;A&quot;, Tag: &quot;a3&quot;, Body: &quot;a3&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;B&quot;, Tag: &quot;a3&quot;},
+        {Op: &quot;send&quot;, Node: &quot;B&quot;, Tag: &quot;b3&quot;, Body: &quot;b3&quot;},
+
+        // --- second join: D, with late/reordered delivery ---
+        {Op: &quot;join&quot;, Node: &quot;D&quot;},
+        {Op: &quot;send&quot;, Node: &quot;D&quot;, Tag: &quot;d1&quot;, Body: &quot;d1&quot;},
+
+        // D sees A's stream completely out of order: 3, 2, 1 -- all within K.
+        {Op: &quot;deliver&quot;, To: &quot;D&quot;, Tag: &quot;a3&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;D&quot;, Tag: &quot;a2&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;D&quot;, Tag: &quot;a1&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;D&quot;, Tag: &quot;a2&quot;}, // duplicate -&gt; ignored
+        {Op: &quot;deliver&quot;, To: &quot;D&quot;, Tag: &quot;b1&quot;}, // late arrival, still within K
+        {Op: &quot;deliver&quot;, To: &quot;D&quot;, Tag: &quot;b2&quot;}, // late arrival, still within K
+        {Op: &quot;deliver&quot;, To: &quot;D&quot;, Tag: &quot;c1&quot;},
+
+        // C receives A1, B1, then the two messages that prove A2 and B2 exist.
+        // A2 and B2 themselves are *never* delivered to C: permanent loss.
+        {Op: &quot;deliver&quot;, To: &quot;C&quot;, Tag: &quot;a1&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;C&quot;, Tag: &quot;b1&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;C&quot;, Tag: &quot;a3&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;C&quot;, Tag: &quot;b3&quot;},
+
+        // Pump enough distinctly-live traffic into C to exceed the loss
+        // threshold so A2 and B2 are declared permanently lost and compacted.
+        {Op: &quot;send&quot;, Node: &quot;A&quot;, Tag: &quot;a4&quot;, Body: &quot;a4&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;C&quot;, Tag: &quot;a4&quot;},
+        {Op: &quot;send&quot;, Node: &quot;D&quot;, Tag: &quot;d2&quot;, Body: &quot;d2&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;C&quot;, Tag: &quot;d2&quot;},
+        {Op: &quot;send&quot;, Node: &quot;C&quot;, Tag: &quot;c2&quot;, Body: &quot;c2&quot;},
+        {Op: &quot;send&quot;, Node: &quot;B&quot;, Tag: &quot;b4&quot;, Body: &quot;b4&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;C&quot;, Tag: &quot;b4&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;C&quot;, Tag: &quot;d1&quot;},
+        {Op: &quot;send&quot;, Node: &quot;D&quot;, Tag: &quot;d3&quot;, Body: &quot;d3&quot;},
+        {Op: &quot;deliver&quot;, To: &quot;C&quot;, Tag: &quot;d3&quot;},
+
+        // --- one leave: B departs ---
+        {Op: &quot;leave&quot;, Node: &quot;B&quot;},
+    }
+}
+</code></pre>
+<h3><code>causal/node_test.go</code></h3>
+<pre><code class="language-go">package causal
+
+import (
+    &quot;strings&quot;
+    &quot;testing&quot;
+)
+
+// idToMessage builds an ID -&gt; Message index from a report.
+func idToMessage(rep *Report) map[string]Message {
+    m := map[string]Message{}
+    for _, msg := range rep.Messages {
+        m[msg.ID] = msg
+    }
+    return m
+}
+
+// assertCausalOrder is the central correctness invariant: a message may only
+// be delivered once every causal predecessor is either already delivered or
+// has been declared permanently lost. It also checks that no message is
+// delivered twice and that lost predecessors are never delivered.
+func assertCausalOrder(t *testing.T, rep *Report) {
+    t.Helper()
+    byID := idToMessage(rep)
+    for _, node := range rep.Nodes {
+        order := rep.Deliveries[node]
+        pos := map[string]int{}
+        for i, id := range order {
+            if _, dup := pos[id]; dup {
+                t.Fatalf(&quot;node %s delivered %s twice&quot;, node, id)
+            }
+            pos[id] = i
+        }
+        lost := map[string]bool{}
+        for _, id := range rep.Gaps[node] {
+            lost[id] = true
+            if _, delivered := pos[id]; delivered {
+                t.Fatalf(&quot;node %s both delivered and declared lost %s&quot;, node, id)
+            }
+        }
+        for i, id := range order {
+            msg, ok := byID[id]
+            if !ok {
+                t.Fatalf(&quot;node %s delivered unknown message %s&quot;, node, id)
+            }
+            for j := range msg.Clock {
+                upto := msg.Clock[j]
+                if j == msg.From {
+                    upto = msg.Seq - 1 // own predecessors, excluding self
+                }
+                for k := 1; k &lt;= upto; k++ {
+                    p := MakeID(j, k)
+                    pp, delivered := pos[p]
+                    if delivered {
+                        if pp &gt; i {
+                            t.Fatalf(&quot;node %s delivered %s before predecessor %s&quot;, node, id, p)
+                        }
+                        continue
+                    }
+                    if !lost[p] {
+                        t.Fatalf(&quot;node %s delivered %s with unsatisfied, unclassified predecessor %s&quot;, node, id, p)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// TestDemoGolden pins the exact, deterministic result of the captured trace.
+func TestDemoGolden(t *testing.T) {
+    rep := NewRunner(0).Run(DemoTrace())
+
+    wantDeliveries := map[string][]string{
+        &quot;A&quot;: {&quot;A:00000001&quot;, &quot;B:00000001&quot;, &quot;A:00000002&quot;, &quot;B:00000002&quot;, &quot;C:00000001&quot;, &quot;A:00000003&quot;, &quot;A:00000004&quot;},
+        &quot;B&quot;: {&quot;B:00000001&quot;, &quot;A:00000001&quot;, &quot;B:00000002&quot;, &quot;A:00000002&quot;, &quot;C:00000001&quot;, &quot;A:00000003&quot;, &quot;B:00000003&quot;, &quot;B:00000004&quot;},
+        &quot;C&quot;: {&quot;C:00000001&quot;, &quot;A:00000001&quot;, &quot;B:00000001&quot;, &quot;C:00000002&quot;, &quot;A:00000003&quot;, &quot;B:00000003&quot;, &quot;A:00000004&quot;, &quot;B:00000004&quot;, &quot;D:00000001&quot;, &quot;D:00000002&quot;, &quot;D:00000003&quot;},
+        &quot;D&quot;: {&quot;D:00000001&quot;, &quot;A:00000001&quot;, &quot;B:00000001&quot;, &quot;A:00000002&quot;, &quot;B:00000002&quot;, &quot;C:00000001&quot;, &quot;A:00000003&quot;, &quot;D:00000002&quot;, &quot;D:00000003&quot;},
+    }
+    for node, want := range wantDeliveries {
+        got := strings.Join(rep.Deliveries[node], &quot;,&quot;)
+        if got != strings.Join(want, &quot;,&quot;) {
+            t.Errorf(&quot;node %s delivery order\n got: %s\nwant: %s&quot;, node, got, strings.Join(want, &quot;,&quot;))
+        }
+    }
+    // Exactly node C permanently loses the dropped A:2 and B:2.
+    if got := strings.Join(rep.Gaps[&quot;C&quot;], &quot;,&quot;); got != &quot;A:00000002,B:00000002&quot; {
+        t.Errorf(&quot;C gap report = %q&quot;, got)
+    }
+    for _, node := range []string{&quot;A&quot;, &quot;B&quot;, &quot;D&quot;} {
+        if len(rep.Gaps[node]) != 0 {
+            t.Errorf(&quot;node %s unexpectedly reported gaps %v&quot;, node, rep.Gaps[node])
+        }
+    }
+    // Every buffer drains once loss is classified.
+    for _, node := range rep.Nodes {
+        if rep.Holdback[node] != 0 {
+            t.Errorf(&quot;node %s left %d messages in holdback&quot;, node, rep.Holdback[node])
+        }
+    }
+    assertCausalOrder(t, rep)
+}
+
+// TestDeterminism runs the same trace many times; the report must be identical
+// every time (no map-iteration nondeterminism).
+func TestDeterminism(t *testing.T) {
+    first := NewRunner(0).Run(DemoTrace())
+    for i := 0; i &lt; 200; i++ {
+        if got := NewRunner(0).Run(DemoTrace()); !first.Equal(got) {
+            t.Fatalf(&quot;run %d differs from first run&quot;, i)
+        }
+    }
+}
+
+// TestLateArrivalNotClassifiedLost shows the K rule does not fire early: a
+// predecessor delayed by fewer than K live messages is still delivered, not
+// reported as a gap.
+func TestLateArrivalNotClassifiedLost(t *testing.T) {
+    const k = 4
+    a, b := NewNodeK(&quot;A&quot;, k), NewNodeK(&quot;B&quot;, k)
+    a.Join()
+    b.Join()
+
+    var msgs []Message
+    for i := 1; i &lt;= 6; i++ {
+        msgs = append(msgs, a.Broadcast(&quot;m&quot;))
+    }
+    // B sees 1, then 3,4,5 (fewer than K after the gap), then finally 2.
+    b.Receive(msgs[0])
+    b.Receive(msgs[2])
+    b.Receive(msgs[3])
+    b.Receive(msgs[4])
+    if len(b.Gaps()) != 0 {
+        t.Fatalf(&quot;premature loss classification: %v&quot;, b.Gaps())
+    }
+    b.Receive(msgs[1]) // late but in time
+    for i := 5; i &lt; 6; i++ {
+        b.Receive(msgs[i])
+    }
+    if len(b.Gaps()) != 0 {
+        t.Fatalf(&quot;late arrival misclassified: %v&quot;, b.Gaps())
+    }
+    if b.HoldbackLen() != 0 {
+        t.Fatalf(&quot;holdback not drained: %d&quot;, b.HoldbackLen())
+    }
+    want := []string{&quot;A:00000001&quot;, &quot;A:00000002&quot;, &quot;A:00000003&quot;, &quot;A:00000004&quot;, &quot;A:00000005&quot;, &quot;A:00000006&quot;}
+    if strings.Join(b.DeliveryOrder(), &quot;,&quot;) != strings.Join(want, &quot;,&quot;) {
+        t.Fatalf(&quot;delivery order = %v&quot;, b.DeliveryOrder())
+    }
+}
+
+// TestPermanentLossBoundedBuffer proves the memory bound: after a predecessor
+// is permanently dropped, at most K further live messages can pile up before
+// the gap is classified and the buffer is compacted.
+func TestPermanentLossBoundedBuffer(t *testing.T) {
+    const k = 5
+    a := NewNodeK(&quot;A&quot;, k)
+    b := NewNodeK(&quot;B&quot;, k)
+    a.Join()
+    b.Join()
+
+    // A broadcasts 1, 2, 3, ...; sequence 2 is *dropped* and never delivered.
+    m1 := a.Broadcast(&quot;m1&quot;) // A:1
+    b.Receive(m1)
+    dropped := a.Broadcast(&quot;dropped&quot;) // A:2 -- dropped for B
+    _ = dropped
+
+    maxHoldback := 0
+    var pending []Message
+    for i := 3; i &lt;= 40; i++ {
+        pending = append(pending, a.Broadcast(&quot;m&quot;))
+    }
+    for _, m := range pending {
+        b.Receive(m)
+        if n := b.HoldbackLen(); n &gt; maxHoldback {
+            maxHoldback = n
+        }
+    }
+    if maxHoldback &gt; k+1 {
+        t.Fatalf(&quot;holdback grew to %d, bound is %d&quot;, maxHoldback, k+1)
+    }
+    if got := strings.Join(b.Gaps(), &quot;,&quot;); got != &quot;A:00000002&quot; {
+        t.Fatalf(&quot;gaps = %q&quot;, got)
+    }
+    if b.HoldbackLen() != 0 {
+        t.Fatalf(&quot;holdback not compacted: %d&quot;, b.HoldbackLen())
+    }
+    if got := len(b.DeliveryOrder()); got != 39 {
+        t.Fatalf(&quot;delivered %d messages, want 39&quot;, got)
+    }
+}
+
+// TestNoClassificationGrowsUnbounded demonstrates the pre-fix failure mode:
+// with the live-message classification effectively disabled (huge K) the gap
+// buffer grows without bound and the node can never make progress.
+func TestNoClassificationGrowsUnbounded(t *testing.T) {
+    const n = 1000
+    a := NewNodeK(&quot;A&quot;, 1&lt;&lt;30) // K effectively infinite: no reclassification
+    b := NewNodeK(&quot;B&quot;, 1&lt;&lt;30)
+    b.Receive(a.Broadcast(&quot;m1&quot;)) // A:1 arrives
+    a.Broadcast(&quot;dropped&quot;)       // A:2 is dropped
+    for i := 0; i &lt; n; i++ {
+        b.Receive(a.Broadcast(&quot;m&quot;)) // A:3.. blocked forever
+    }
+    if b.HoldbackLen() &lt; n {
+        t.Fatalf(&quot;expected unbounded holdback growth, got %d&quot;, b.HoldbackLen())
+    }
+    if len(b.Gaps()) != 0 {
+        t.Fatalf(&quot;huge K should never classify a gap&quot;)
+    }
+}
+
+// TestCrossNodeCausalDelivery exercises a delayed dependency that must be
+// ordered across nodes even though it arrives out of order.
+func TestCrossNodeCausalDelivery(t *testing.T) {
+    a, b, x := NewNode(&quot;A&quot;), NewNode(&quot;B&quot;), NewNode(&quot;X&quot;)
+    a.Join()
+    b.Join()
+    x.Join()
+
+    a1 := a.Broadcast(&quot;a1&quot;)
+    b.Receive(a1)
+    b1 := b.Broadcast(&quot;b1&quot;)
+    a2 := a.Broadcast(&quot;a2&quot;) // concurrent with b1
+
+    // X receives them in an adversarial order.
+    x.Receive(a2)
+    x.Receive(b1)
+    x.Receive(a1)
+    if x.HoldbackLen() != 0 {
+        t.Fatalf(&quot;holdback = %d, want 0&quot;, x.HoldbackLen())
+    }
+    // a1 must precede both a2 and b1; a2/b1 are concurrent.
+    idx := map[string]int{}
+    for i, id := range x.DeliveryOrder() {
+        idx[id] = i
+    }
+    if idx[a1.ID] &gt; idx[a2.ID] || idx[a1.ID] &gt; idx[b1.ID] {
+        t.Fatalf(&quot;causal violation in %v&quot;, x.DeliveryOrder())
+    }
+}
+</code></pre>
+<h3><code>cmd/demo/main.go</code></h3>
+<pre><code class="language-go">package main
+
+import (
+    &quot;encoding/json&quot;
+    &quot;fmt&quot;
+
+    &quot;causalbc/causal&quot;
+)
+
+func main() {
+    rep := causal.NewRunner(0).Run(causal.DemoTrace())
+    fmt.Print(rep.Format())
+    fmt.Println(&quot;---&quot;)
+    b, _ := json.MarshalIndent(rep.Gaps, &quot;&quot;, &quot;  &quot;)
+    fmt.Println(&quot;gap report (machine readable):&quot;, string(b))
+}
+</code></pre>
+<hr />
+<h2>5. Verification</h2>
+<h3>Commands</h3>
+<pre><code class="language-bash">cd ~/causalbc
+go build ./...
+go vet ./...
+go test ./...                  # all six tests
+go test -race -count=3 ./...   # race + repeatability
+go run ./cmd/demo              # the exact report below
+</code></pre>
+<h3>Observed report</h3>
+<pre><code class="language-text">node A
+  delivery order: A:00000001, B:00000001, A:00000002, B:00000002, C:00000001, A:00000003, A:00000004
+  gap report:     &lt;none&gt;
+  holdback size:  0
+node B
+  delivery order: B:00000001, A:00000001, B:00000002, A:00000002, C:00000001, A:00000003, B:00000003, B:00000004
+  gap report:     &lt;none&gt;
+  holdback size:  0
+node C
+  delivery order: C:00000001, A:00000001, B:00000001, C:00000002, A:00000003, B:00000003, A:00000004, B:00000004, D:00000001, D:00000002, D:00000003
+  gap report:     A:00000002, B:00000002
+  holdback size:  0
+node D
+  delivery order: D:00000001, A:00000001, B:00000001, A:00000002, B:00000002, C:00000001, A:00000003, D:00000002, D:00000003
+  gap report:     &lt;none&gt;
+  holdback size:  0
+---
+gap report (machine readable): {
+  &quot;A&quot;: [],
+  &quot;B&quot;: [],
+  &quot;C&quot;: [
+    &quot;A:00000002&quot;,
+    &quot;B:00000002&quot;
+  ],
+  &quot;D&quot;: []
+}
+</code></pre>
+<h3>What each test proves</h3>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Property</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TestDemoGolden</code></td>
+<td>exact per-node delivery order + the gap report (<code>C</code> loses <code>A:2</code>, <code>B:2</code>); every buffer drains to 0</td>
+</tr>
+<tr>
+<td><code>TestDeterminism</code></td>
+<td>200 independent runs are bit-identical, so the K rule and tie-breaks are truly deterministic</td>
+</tr>
+<tr>
+<td><code>TestLateArrivalNotClassifiedLost</code></td>
+<td>a predecessor delayed by fewer than <code>K</code> live messages is delivered, not misreported</td>
+</tr>
+<tr>
+<td><code>TestPermanentLossBoundedBuffer</code></td>
+<td>memory is bounded: holdback peaks at <code>K+1</code> and is compacted after loss is declared; all 39 messages still delivered</td>
+</tr>
+<tr>
+<td><code>TestNoClassificationGrowsUnbounded</code></td>
+<td>reproduces the original failure: with the K rule disabled the buffer grows to 1000+ and never progresses</td>
+</tr>
+<tr>
+<td><code>TestCrossNodeCausalDelivery</code></td>
+<td>cross-node causal predecessors are ordered even when delivered in adversarial order</td>
+</tr>
+<tr>
+<td><code>assertCausalOrder</code> (inside golden test)</td>
+<td>no duplicates; every delivered message has every causal predecessor either already delivered or explicitly in the gap report</td>
+</tr>
+</tbody>
+</table>
+<h3>Test output</h3>
+<pre><code class="language-text">=== RUN   TestDemoGolden
+--- PASS: TestDemoGolden (0.00s)
+=== RUN   TestDeterminism
+--- PASS: TestDeterminism (0.01s)
+=== RUN   TestLateArrivalNotClassifiedLost
+--- PASS: TestLateArrivalNotClassifiedLost (0.00s)
+=== RUN   TestPermanentLossBoundedBuffer
+--- PASS: TestPermanentLossBoundedBuffer (0.00s)
+=== RUN   TestNoClassificationGrowsUnbounded
+--- PASS: TestNoClassificationGrowsUnbounded (0.03s)
+=== RUN   TestCrossNodeCausalDelivery
+--- PASS: TestCrossNodeCausalDelivery (0.00s)
+PASS
+ok      causalbc/causal 0.038s
+</code></pre>
+<hr />
+<h2>6. Guarantees, complexity and tuning</h2>
+<ul>
+<li><strong>Safety.</strong> <code>canDeliver</code> never lets a message pass an unsatisfied predecessor. The only way past a predecessor is an explicit, reported loss classification.</li>
+<li><strong>Liveness.</strong> Once a predecessor is known-sent and absent for <code>K</code> distinct live messages, it is declared lost and the node continues. With <code>K</code> finite, no drop can stall a node forever.</li>
+<li><strong>Bounded memory.</strong> Peak holdback behind a head gap is <code>K+1</code> messages; worst case <code>O(K * number_of_senders)</code>. <code>settle</code> is a fixed-point loop that strictly decreases the buffer or advances the delivered clock each iteration.</li>
+<li><strong>Determinism.</strong> All iteration and tie-breaking is key-sorted; <code>K</code> is counted in live messages, never wall time. The 200-run test enforces this.</li>
+<li><strong>Tuning <code>K</code>.</strong> Set <code>K</code> to the transport's worst-case reordering/late window measured in live messages. Too small ⇒ false loss classification (the late message is absorbed as a tombstone). Too large ⇒ buffer lingers longer, but memory is still bounded by <code>K</code>. The default is <code>DefaultLossThreshold = 5</code>.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-vector-clock-causal-broadcast-gap-buffer
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-11-04T22:33:44.339Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a causally ordered broadcast layer over an unreliable transport: every node keeps a vector clock and a holdback queue and may deliver a message only once all of its causal predecessors have been delivered, while a node that stalls for K messages must not cause unbounded memory growth or deadlock. Given a captured trace of send/receive events with duplicates, reordering, late arrivals, two node joins and one node leave, produce the exact per-node delivery order plus a gap report naming the unreachable predecessors. The layer must be deterministic across runs and must classify a predecessor as permanently lost within a bounded number of live messages so the holdback queue can be compacted.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-vector-clock-causal-broadcast-gap-buffer&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-11-04T22:33:44.339Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

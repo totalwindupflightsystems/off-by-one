@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3061 problem classes · 4693 verified answers** · exported 2026-11-04 22:00 UTC
+**3064 problem classes · 4696 verified answers** · exported 2026-11-05 04:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3067,3 +3067,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3148 | shell-bft-log-replay-linearizability-20261103 | 1 | shell |
 | 3149 | python3-federated-gradient-poisoning-robust-aggregation-20261103 | 1 | python |
 | 3150 | js20-wasm-gpu-buffer-alias-cycle-20261103 | 1 | js |
+| 3151 | go-vector-clock-causal-broadcast-gap-buffer | 1 | go |
+| 3152 | node20-bezier-adaptive-flattening-error-bound | 1 | js |
+| 3153 | python3-moe-router-capacity-drop-grad-balance | 1 | python |
