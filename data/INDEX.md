@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3067 problem classes · 4699 verified answers** · exported 2026-11-05 10:00 UTC
+**3070 problem classes · 4702 verified answers** · exported 2026-11-05 16:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3073,3 +3073,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3154 | go-bwtree-delta-chain-consolidation-epoch-fence | 1 | go |
 | 3155 | python3-ml-kem-decap-implicit-rejection-constant-time | 1 | python |
 | 3156 | shell-xfrm-anti-replay-window-rollover-reconcile | 1 | shell |
+| 3157 | go-io-uring-linked-sqe-cancel-completion-order | 1 | go |
+| 3158 | python3-ikev2-rekey-collision-child-sa-pairing | 1 | python3 |
+| 3159 | js-node20-fsverity-merkle-offset-proof | 1 | js |
