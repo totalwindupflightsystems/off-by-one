@@ -1,0 +1,28 @@
+{
+  "class_id": 3154,
+  "title": "go-bwtree-delta-chain-consolidation-epoch-fence",
+  "description": "go-bwtree-delta-chain-consolidation-epoch-fence",
+  "created_at": "2026-11-05 05:43:38",
+  "answers": [
+    {
+      "answer_id": 4889,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "Done. The verified solution is at **`~/SOLUTION.md`** (regenerated from the actual, passing source), with the runnable module in **`~/bwtree/`**.\n\n## Summary\n\n**Root causes identified** (why a naive concurrent Bw-tree breaks):\n1. **Torn splits** — a split touches a leaf *and* its parent; a lock-free reader can read the old parent then the mutated left leaf and lose keys.\n2. **Use-after-free** — retired pre-split chains can still be traversed by an in-flight reader.\n3. **Epoch publication gap** — choosing and publishing a reader epoch non-atomically lets `Reclaim` scan between the two and free live data.\n4. **Off-by-one reclamation** — `retireEpoch <= minActive` is unsafe; must be strict `<`.\n5. **Delta order** — chains must apply oldest→newest and preserve per-entry write sequence across consolidation/split.\n\n**The fix** (all in `bwtree.go`):\n- Immutable `*pageState{base, deltas, maxSeq}` published with a single atomic store; reads fold the chain oldest-first.\n- `deltaThreshold` triggers consolidation; splits cascade to a new root.\n- A **seqlock** brackets all structural changes, so readers retry instead of observing a half-split tree.\n- `epochManager.pin()` selects **and publishes** the epoch under the same mutex `Reclaim` scans with — no gap. Order is *publish replacement, then retire*, giving `pinEpoch < retireEpoch`. `Reclaim(now)` frees only `retireEpoch < minActiveEpoch`.\n- `Scan`/`Iterator` hold a pinned epoch over an immutable snapshot.\n\n**Verification** (`go test -race`, Go 1.26.8):\n- `TestSequentialBasic` — 500 inserts/deletes + B-tree invariant checker.\n- `TestConcurrentLinearizable` — 8 writers + 8 readers × 5000 ops; each `Get` returns its linearization `seq` and is checked against a serial model, plus final byte-for-byte divergence check.\n- `TestReclaimEpoch` — proves deferral while pinned, reclamation after unpin.\n- `TestScanSnapshotUnderWrites` — snapshot consistency under continuous writes.\n\nAll tests pass under `-race` and across `GOMAXPROCS` 1/2/4/16; `go vet` and `gofmt -l` are clean.\n",
+      "evidence": "# Evidence\n- Problem class: go-bwtree-delta-chain-consolidation-epoch-fence\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-05T05:43:36.716Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement an in-memory Bw-tree mapping uint64 keys to byte-slice values in which every mutation appends a delta record (insert, update, delete) to a page delta chain, and pages consolidate into base nodes only when the chain exceeds a threshold or a split is required. Consolidation must stay correct under concurrent readers that snapshot an epoch counter: a reader holding an older epoch may still traverse pre-split chains, so no page may be retired or freed while any live reader epoch precedes its retire sequence number. Expose Get, Upsert, Delete, a Scan with a pinned-epoch iterator, and Reclaim(now) that frees only pages whose retire epoch is strictly older than every active reader epoch; emit per-operation stats (deltas traversed, consolidations, splits, reclaim deferrals) and prove linearizability against a serial map under a randomized concurrent workload.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-bwtree-delta-chain-consolidation-epoch-fence",
+        "provider": "openrouter",
+        "solved_at": "2026-11-05T05:43:36.717Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-11-05 05:43:42"
+    }
+  ]
+}

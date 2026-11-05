@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3064 problem classes · 4696 verified answers** · exported 2026-11-05 04:01 UTC
+**3067 problem classes · 4699 verified answers** · exported 2026-11-05 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3070,3 +3070,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3151 | go-vector-clock-causal-broadcast-gap-buffer | 1 | go |
 | 3152 | node20-bezier-adaptive-flattening-error-bound | 1 | js |
 | 3153 | python3-moe-router-capacity-drop-grad-balance | 1 | python |
+| 3154 | go-bwtree-delta-chain-consolidation-epoch-fence | 1 | go |
+| 3155 | python3-ml-kem-decap-implicit-rejection-constant-time | 1 | python |
+| 3156 | shell-xfrm-anti-replay-window-rollover-reconcile | 1 | shell |
