@@ -28,7 +28,16 @@ import (
 	"log"
 	"strings"
 	"sync"
+
+	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
+
+// SolvePeakRSSBuckets are the obo_solve_peak_rss_bytes histogram bucket
+// upper bounds in bytes (OBS-OB-003, docs/observability-spec.md §3.3):
+// 256 MiB, 512 MiB, 1 GiB, 2.5 GiB, 4 GiB. The top bound is the default
+// alert threshold, so every solve that would have paged someone lands in
+// the last finite bucket or in +Inf.
+var SolvePeakRSSBuckets = []uint64{256 << 20, 512 << 20, 1 << 30, 2684354560, 4 << 30}
 
 // DefaultRSSAlertBytes is the default over-budget threshold: 4 GiB.
 // The unit-level cap (DF-OFF-BY-ONE-30) bounds a single solve at
@@ -95,6 +104,47 @@ type Observer struct {
 	// discovery-outcome measure.
 	discoveryHits   int64
 	discoveryMisses int64
+
+	// Cumulative per-solve resource and failure-cause totals feeding
+	// obo_solve_* on GET /metrics/prom (OBS-OB-003). They are kept apart
+	// from o.records because records is a bounded (and trimmable) window:
+	// a counter derived from it would go backwards. peakBuckets is the
+	// cumulative count per SolvePeakRSSBuckets entry plus a final +Inf
+	// slot, i.e. len(SolvePeakRSSBuckets)+1 entries.
+	killed        int64
+	overBudget    int64
+	rejected      int64
+	peakBuckets   []uint64
+	peakSum       uint64
+	peakCount     int64
+	failureCauses map[string]int64
+}
+
+// SolveResources is the cumulative resource + failure-attribution view
+// of every solve the Observer has recorded. It exists for the Prometheus
+// exposition (OBS-OB-003): the JSON Snapshot keeps its historical shape
+// (a bounded window plus last/last-host), while these totals never go
+// backwards.
+type SolveResources struct {
+	// PeakRSSBucketCounts are CUMULATIVE counts: entry i counts solves
+	// whose peak was <= SolvePeakRSSBuckets[i]; the final entry is the
+	// +Inf bucket, so PeakRSSBucketCounts[len-1] == PeakRSSCount.
+	PeakRSSBucketCounts []uint64
+	// PeakRSSSum is the sum of every observed peak in bytes.
+	PeakRSSSum uint64
+	// PeakRSSCount is the number of observations (one per solve, failed
+	// solves and harness rejections included — they consumed memory too).
+	PeakRSSCount int64
+	// Killed counts solves that died on their memory cap.
+	Killed int64
+	// OverBudget counts solves whose peak exceeded the alert threshold.
+	OverBudget int64
+	// Rejected counts harness-side rejections (peak above the reject
+	// threshold, result never committed).
+	Rejected int64
+	// Failures counts failures by cause. Every key is a member of
+	// solver.FailureCauses; a nil map means "no failures recorded".
+	Failures map[string]int64
 }
 
 // New returns an Observer that keeps the last keepRecent records and
@@ -108,7 +158,12 @@ func New(alertBytes uint64, logger *log.Logger) *Observer {
 	if logger == nil {
 		logger = log.Default()
 	}
-	return &Observer{alertBytes: alertBytes, logger: logger}
+	return &Observer{
+		alertBytes:    alertBytes,
+		logger:        logger,
+		peakBuckets:   make([]uint64, len(SolvePeakRSSBuckets)+1),
+		failureCauses: make(map[string]int64),
+	}
 }
 
 // RecordSolve appends rec, marks it over-budget when its peak RSS
@@ -127,13 +182,98 @@ func (o *Observer) RecordSolve(rec SolveRecord) {
 	over := rec.PeakRSSBytes > o.alertBytes
 	rec.OverBudget = over
 	o.records = append(o.records, rec)
+	// Cumulative resource totals (OBS-OB-003) — independent of the
+	// bounded records window above.
+	o.observePeakLocked(rec.PeakRSSBytes)
+	if rec.Killed {
+		o.killed++
+	}
+	if over {
+		o.overBudget++
+	}
+	if rec.Rejected {
+		o.rejected++
+	}
 	o.mu.Unlock()
 
 	if over {
-		o.logger.Printf("ERROR solve ALERT: peak RSS %d (%.1f GiB) exceeds %d (%.1f GiB) — problem_class=%s submission=%s model=%s killed=%t",
+		// A zero-value Observer (struct literal, never New'ed) has no
+		// logger; fall back to the standard one instead of panicking on
+		// a nil *log.Logger.
+		logger := o.logger
+		if logger == nil {
+			logger = log.Default()
+		}
+		logger.Printf("ERROR solve ALERT: peak RSS %d (%.1f GiB) exceeds %d (%.1f GiB) — problem_class=%s submission=%s model=%s killed=%t",
 			rec.PeakRSSBytes, gib(rec.PeakRSSBytes),
 			o.alertBytes, gib(o.alertBytes),
 			rec.ProblemClass, rec.SubmissionID, rec.Model, rec.Killed)
+	}
+}
+
+// observePeakLocked folds one solve's peak RSS into the cumulative
+// bucket counters. Caller holds mu.
+func (o *Observer) observePeakLocked(peak uint64) {
+	if len(o.peakBuckets) != len(SolvePeakRSSBuckets)+1 {
+		// A zero-value Observer (never New'ed) still has to produce a
+		// consistent histogram rather than panicking on a short slice.
+		o.peakBuckets = make([]uint64, len(SolvePeakRSSBuckets)+1)
+	}
+	for i, bound := range SolvePeakRSSBuckets {
+		if peak <= bound {
+			o.peakBuckets[i]++
+		}
+	}
+	o.peakBuckets[len(SolvePeakRSSBuckets)]++
+	o.peakSum += peak
+	o.peakCount++
+}
+
+// RecordFailureCause counts n failures attributed to cause. A value
+// outside the closed solver.FailureCauses set is coalesced to
+// solver.CauseOther: the label set is closed by contract (spec §3.3), so
+// a caller passing free text can never widen the exposition's
+// cardinality. n <= 0 is a no-op (the stale-reaper calls this with the
+// number of rows it reaped, which can legitimately be 0).
+func (o *Observer) RecordFailureCause(cause string, n int64) {
+	if o == nil || n <= 0 {
+		return
+	}
+	if !solver.IsFailureCause(cause) {
+		cause = solver.CauseOther
+	}
+	o.mu.Lock()
+	if o.failureCauses == nil {
+		o.failureCauses = make(map[string]int64)
+	}
+	o.failureCauses[cause] += n
+	o.mu.Unlock()
+}
+
+// SolveResources returns the cumulative resource + failure-cause totals
+// (OBS-OB-003). A copy: mutating the result never touches the Observer.
+// Nil-receiver-safe — a nil Observer yields zeros with a full-length
+// bucket slice so the caller's histogram is still well-formed.
+func (o *Observer) SolveResources() SolveResources {
+	buckets := make([]uint64, len(SolvePeakRSSBuckets)+1)
+	if o == nil {
+		return SolveResources{PeakRSSBucketCounts: buckets}
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	copy(buckets, o.peakBuckets)
+	failures := make(map[string]int64, len(o.failureCauses))
+	for cause, n := range o.failureCauses {
+		failures[cause] = n
+	}
+	return SolveResources{
+		PeakRSSBucketCounts: buckets,
+		PeakRSSSum:          o.peakSum,
+		PeakRSSCount:        o.peakCount,
+		Killed:              o.killed,
+		OverBudget:          o.overBudget,
+		Rejected:            o.rejected,
+		Failures:            failures,
 	}
 }
 

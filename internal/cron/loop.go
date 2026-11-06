@@ -507,6 +507,13 @@ func (l *Loop) Tick(ctx context.Context) error {
 	if n, err := l.cfg.Queue.ReapStale(ctx, l.cfg.ReapAfter); err != nil {
 		l.cfg.Logger.Printf("cron: reap stale failed: %v (continuing)", err)
 	} else if n > 0 {
+		// A reaped entry is a solve that died with the server and can
+		// never reach processOne, so its failure has no other owner:
+		// count it here (OBS-OB-003) or stale_reaped stays permanently
+		// at zero despite 6+ rows of history.
+		if l.cfg.Observer != nil {
+			l.cfg.Observer.RecordFailureCause(solver.CauseStaleReaped, n)
+		}
 		l.cfg.Logger.Printf("cron: reaped %d stale in_progress queue entries (older than %s)", n, l.cfg.ReapAfter)
 	}
 
@@ -674,11 +681,17 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 	// Model attribution comes from the solution when the solve
 	// produced one (it carries the configured model); the failed
 	// paths below have no solution, so they record no model.
+	//
+	// The memory-kill flag is derived from the ERROR, not from a
+	// solution: a solve killed by its cap never returns a solution
+	// (solver.Solve returns nil on every error path), so gating this
+	// on sol != nil made obo_solve_killed_total permanently zero — the
+	// exact blindness the 2026-10-03 47GB incident exposed
+	// (OBS-OB-003).
 	solveModel := ""
-	killed := false
+	killed := isMemoryKill(err)
 	if sol != nil {
 		solveModel = sol.Model
-		killed = isMemoryKill(err)
 	}
 
 	record := func(success, rejected bool) metrics.SolveRecord {
@@ -695,7 +708,7 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 	}
 
 	if err != nil {
-		_ = l.cfg.Queue.SetStage(ctx, entry.ID, "solver_failed")
+		_ = l.cfg.Queue.SetStage(ctx, entry.ID, solver.StageSolverFailed)
 		// FailureHint appends an actionable line for the known
 		// provider-side failures (e.g. OpenRouter guardrail/data-policy
 		// blocks) and passes everything else through unchanged, so the
@@ -704,11 +717,16 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 		// raw: Commit only touches the graph (piagent.go:335), so no
 		// provider routing error can originate there.
 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error()))
+		// Classify HERE, with the raw error in hand (OBS-OB-003): a
+		// closed-set cause label on the failure counter, never a
+		// re-parse of stored text at scrape time.
+		cause := solver.ClassifyCause(solver.StageSolverFailed, err.Error())
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
 		if l.cfg.Observer != nil {
 			l.cfg.Observer.RecordSolve(record(false, false))
+			l.cfg.Observer.RecordFailureCause(cause, 1)
 		}
-		l.cfg.Logger.Printf("cron: solve failed for %s (peak_rss=%s): %v", entry.ID, gibStr(peakRSS), err)
+		l.cfg.Logger.Printf("cron: solve failed for %s (cause=%s peak_rss=%s): %v", entry.ID, cause, gibStr(peakRSS), err)
 		return fmt.Errorf("solve: %w", err)
 	}
 
@@ -721,13 +739,20 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 	// packet simulator (the 2026-10-03 incident) is the class this
 	// guards, and a solution from such a run is not trustworthy evidence.
 	if l.cfg.SolveRejectRSSBytes > 0 && peakRSS > l.cfg.SolveRejectRSSBytes {
-		_ = l.cfg.Queue.SetStage(ctx, entry.ID, "solver_rejected")
+		_ = l.cfg.Queue.SetStage(ctx, entry.ID, solver.StageSolverRejected)
 		reason := fmt.Sprintf("rejected: peak RSS %s GiB exceeds reject threshold %s GiB (problem_class=%s)",
 			gibStr(peakRSS), gibStr(l.cfg.SolveRejectRSSBytes), entry.ProblemClass)
 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, reason)
 		l.metrics.recordRejection(l.cfg.Now().Sub(start))
 		if l.cfg.Observer != nil {
 			l.cfg.Observer.RecordSolve(record(false, true))
+			// The rejection has its own counters (obo_solve_rejected_total,
+			// obo_solves_total{outcome="rejected"}); the cause set is
+			// closed at seven values (spec §3.3), so it counts as "other"
+			// rather than inventing an eighth label — a rejected solve
+			// still accounting for exactly one failure_total sample keeps
+			// the failure series complete.
+			l.cfg.Observer.RecordFailureCause(solver.ClassifyCause(solver.StageSolverRejected, reason), 1)
 		}
 		l.cfg.Logger.Printf("cron: solve REJECTED for %s (peak_rss=%s GiB > reject_threshold=%s GiB, problem_class=%s)",
 			entry.ID, gibStr(peakRSS), gibStr(l.cfg.SolveRejectRSSBytes), entry.ProblemClass)
@@ -737,13 +762,15 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 	_ = l.cfg.Queue.SetStage(ctx, entry.ID, "committing")
 	answerID, err := l.cfg.Solver.Commit(ctx, entry, sol)
 	if err != nil {
-		_ = l.cfg.Queue.SetStage(ctx, entry.ID, "commit_failed")
+		_ = l.cfg.Queue.SetStage(ctx, entry.ID, solver.StageCommitFailed)
 		_ = l.cfg.Queue.MarkFailed(ctx, entry.ID, err.Error())
+		cause := solver.ClassifyCause(solver.StageCommitFailed, err.Error())
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
 		if l.cfg.Observer != nil {
 			l.cfg.Observer.RecordSolve(record(false, false))
+			l.cfg.Observer.RecordFailureCause(cause, 1)
 		}
-		l.cfg.Logger.Printf("cron: commit failed for %s (peak_rss=%s): %v", entry.ID, gibStr(peakRSS), err)
+		l.cfg.Logger.Printf("cron: commit failed for %s (cause=%s peak_rss=%s): %v", entry.ID, cause, gibStr(peakRSS), err)
 		return fmt.Errorf("commit: %w", err)
 	}
 
@@ -751,6 +778,11 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 		l.metrics.recordFailure(l.cfg.Now().Sub(start))
 		if l.cfg.Observer != nil {
 			l.cfg.Observer.RecordSolve(record(false, false))
+			// The answer WAS committed; only the queue row update
+			// failed. That is a store-side failure, not Commit, so it
+			// lands in the closed set's catch-all rather than being
+			// mislabelled as a commit failure.
+			l.cfg.Observer.RecordFailureCause(solver.CauseOther, 1)
 		}
 		l.cfg.Logger.Printf("cron: mark-complete failed for %s (peak_rss=%s): %v", entry.ID, gibStr(peakRSS), err)
 		return fmt.Errorf("mark complete: %w", err)
@@ -763,15 +795,43 @@ func (l *Loop) processOne(ctx context.Context, entry *ingest.Entry) error {
 	return nil
 }
 
-// isMemoryKill reports whether err is a solve death by its memory cap
-// (SIGKILL / "signal: killed" from the RLIMIT_AS enforcement). The
-// sandbox's oby-memcap wrapper + kernel OOM-kill surface this exact
-// string; anything else is an ordinary failure.
+// isMemoryKill reports whether err is a solve death caused by a memory
+// limit (RLIMIT_AS enforcement or the kernel OOM killer), as opposed to
+// an ordinary failure or a timeout kill.
+//
+// This is NOT just "did the process die by a signal": a solve killed by
+// --solve-timeout or by the bwrap timeout also surfaces as
+// "signal: killed". Counting those in obo_solve_killed_total made the
+// memory counter lie — a live probe for OBS-OB-003 showed a forced
+// timeout raising killed_total to 1, implying a memory kill that never
+// happened. Precedence:
+//
+//  1. The solver's own memory-limit attribution ("solve killed by
+//     --solve-mem-mb N (RLIMIT_AS)", added by
+//     solver.classifyExecError only when it saw a limit signal) is
+//     authoritative — the cap is why the solve died, whatever exit
+//     shape the child produced.
+//  2. A timeout attribution (--solve-timeout, bwrap timeout) is never a
+//     memory kill, even though it dies by SIGKILL.
+//  3. Otherwise a bare SIGKILL/SIGSEGV death (the kernel OOM killer's
+//     signature) counts as a memory kill.
 func isMemoryKill(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(err.Error(), "signal: killed")
+	msg := err.Error()
+	if strings.Contains(msg, "--solve-mem-mb") || strings.Contains(msg, "RLIMIT_AS") {
+		return true
+	}
+	if strings.Contains(msg, "solve killed by --solve-timeout") ||
+		strings.Contains(msg, "solve killed by bwrap timeout") ||
+		strings.Contains(msg, "deadline exceeded") {
+		return false
+	}
+	return strings.Contains(msg, "signal: killed") ||
+		strings.Contains(msg, "exit status 137") ||
+		strings.Contains(msg, "signal: segmentation fault") ||
+		strings.Contains(msg, "exit status 139")
 }
 
 // gibStr renders a byte count as GiB for log lines (3 decimals; 0

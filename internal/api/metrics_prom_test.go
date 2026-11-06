@@ -99,6 +99,15 @@ func TestMetricsPromNilSafe(t *testing.T) {
 		`obo_solves_total{outcome="succeeded"} 0`,
 		"obo_queue_pending 0",
 		"obo_solve_duration_seconds_bucket",
+		// OBS-OB-003: the solve resource / failure-cause families are
+		// served even with no observer wired, at zero.
+		"obo_solve_peak_rss_bytes_bucket",
+		"obo_solve_peak_rss_bytes_count 0",
+		"obo_solve_killed_total 0",
+		"obo_solve_over_budget_total 0",
+		"obo_solve_rejected_total 0",
+		`obo_solve_failure_total{cause="timeout"} 0`,
+		`obo_solve_failure_total{cause="commit"} 0`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("nil-safe exposition missing %q", want)

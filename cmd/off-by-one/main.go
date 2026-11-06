@@ -263,6 +263,10 @@ func main() {
 				Rejected: snap.SolveRejected,
 			}
 		},
+		// Solve resources + failure causes (OBS-OB-003): the same
+		// Observer the loop records into, so a scrape cannot disagree
+		// with the per-solve records the JSON surface serves.
+		SolveResources: observer.SolveResources,
 	})
 	apiServer.Prom = prom
 	if loop != nil {
