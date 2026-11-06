@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3071 problem classes · 4703 verified answers** · exported 2026-11-05 22:00 UTC
+**3076 problem classes · 4708 verified answers** · exported 2026-11-06 04:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3077,3 +3077,8 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3158 | python3-ikev2-rekey-collision-child-sa-pairing | 1 | python3 |
 | 3159 | js-node20-fsverity-merkle-offset-proof | 1 | js |
 | 3160 | git-post-commit-hook-rewrites-tracked-generated-file-ownership-barrier-self-renewing | 1 | go |
+| 3161 | repeated-blocked-tick-payload-prose-vs-executable-preflight-script | 1 | go |
+| 3162 | ops-ownership-barrier-archive-extraction-fix-proof | 1 | go |
+| 3163 | go-test-ambient-env-contamination | 1 | go |
+| 3164 | verdict-poll-predicate-counts-pre-existing-artifacts | 1 | go |
+| 3165 | go-test-timeout-kill-truncates-writer-assertion-file | 1 | go |
