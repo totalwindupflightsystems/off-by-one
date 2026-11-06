@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-compiler-ssa-spill-slot-coalescing-critical-path — Off-By-One verified answer</title>
+<meta name="description" content="The complete, runnable solution is at ~/spillcoalesce/SOLUTION.md, with sources in the same directory. Everything below is reproducible with go1.26.8 linux/amd6">
+<meta property="og:title" content="go-compiler-ssa-spill-slot-coalescing-critical-path — Off-By-One">
+<meta property="og:description" content="The complete, runnable solution is at ~/spillcoalesce/SOLUTION.md, with sources in the same directory. Everything below is reproducible with go1.26.8 linux/amd6">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3173-go-compiler-ssa-spill-slot-coalescing-critical-path.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-compiler-ssa-spill-slot-coalescing-critical-path</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>The complete, runnable solution is at ~/spillcoalesce/SOLUTION.md, with sources in the same directory. Everything below is reproducible with go1.26.8 linux/amd64.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3173-go-compiler-ssa-spill-slot-coalescing-critical-path.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Spill-Slot Coalescing Across Loop Back Edges — Diagnosis and Verified Fix</h1>
+<p>The complete, runnable solution is at <strong><code>~/spillcoalesce/SOLUTION.md</code></strong>, with sources in the same directory. Everything below is reproducible with <code>go1.26.8 linux/amd64</code>.</p>
+<h2>Root-cause analysis</h2>
+<p>The bug is not in the greedy allocator; it is in the <strong>interference graph supplied to it</strong>.</p>
+<p>Interference over machine basic blocks is built from:</p>
+<ul>
+<li>a clique over <code>LiveIn(b)</code> and <code>LiveOut(b)</code> for each block,</li>
+<li>within each block, <code>def(v)</code> interfering with every value live immediately after <code>v</code>.</li>
+</ul>
+<p>When critical edges are split, the split block sits <strong>on the edge</strong> — here on the loop back edges <code>inner.crit -&gt; inner.header</code> and <code>outer.crit -&gt; outer.header</code>. If interference is computed from a stale, pre-split view (or a cached pre-split <code>live</code> table), those split blocks are omitted. Consequently:</p>
+<ol>
+<li>The defs that exist only on the back-edge critical path get <strong>zero interference edges</strong>.</li>
+<li>The coalescer sees them as free and packs them into the same stack slot as a <strong>loop-carried value</strong> that is live across the back edge.</li>
+<li>On the next iteration the header reads the carried value and instead gets a critical-path temporary — a silent miscompile.</li>
+</ol>
+<p>On the supplied nested-loop / register-pressure-cliff function, the unguarded allocator produces <strong>4 unsafe shared-slot violations</strong>: <code>v0</code> merged with <code>v8,v9</code> on the outer back edge and with <code>v10,v11</code> on the inner back edge.</p>
+<h2>Exact fix</h2>
+<p>Re-establish the lost interference for every critical block <code>C</code> whose successor <code>H</code> is dominated by <code>C</code> (so <code>C -&gt; H</code> is a back edge), and attach a concrete witness to every added edge:</p>
+<pre><code class="language-go">func addCriticalGuards(p *Program, dom []map[int]bool, g *Interference) []Witness {
+    var ws []Witness
+    for _, b := range p.Blocks {
+        if !b.Critical {
+            continue
+        }
+        head := -1
+        for _, s := range b.Succs {
+            if dom[b.ID][s] { // b-&gt;s is a back edge
+                head = s
+                break
+            }
+        }
+        if head &lt; 0 {
+            continue
+        }
+
+        var critDefs []ValueID
+        for _, op := range b.Ops {
+            if op.Def != NoValue {
+                critDefs = append(critDefs, op.Def)
+            }
+        }
+        live := make([]ValueID, 0, len(b.LiveIn))
+        for v := range b.LiveIn {
+            live = append(live, v)
+        }
+        sort.Slice(live, func(i, j int) bool { return live[i] &lt; live[j] })
+
+        // Core safety edge: carried value vs critical-path definition.
+        for _, v := range live {
+            for _, w := range critDefs {
+                if v == w {
+                    continue
+                }
+                wit := Witness{Kind: &quot;backedge-critical&quot;, Tail: b.ID, Head: head, Block: b.ID, A: v, B: w}
+                ws = append(ws, wit)
+                g.add(v, w, wit)
+            }
+        }
+
+        // Restore the entry-live clique the pre-split pass never built.
+        for i := 0; i &lt; len(live); i++ {
+            for j := i + 1; j &lt; len(live); j++ {
+                wit := Witness{Kind: &quot;critical-entry-live&quot;, Tail: b.ID, Head: head, Block: b.ID, A: live[i], B: live[j]}
+                ws = append(ws, wit)
+                g.add(live[i], live[j], wit)
+            }
+        }
+
+        // Genuine intra-block interference: replay backwards from LiveOut.
+        // Do NOT add a clique over all defs; sequential defs are non-interfering.
+        liveSet := map[ValueID]bool{}
+        for v := range b.LiveOut {
+            liveSet[v] = true
+        }
+        for i := len(b.Ops) - 1; i &gt;= 0; i-- {
+            op := b.Ops[i]
+            if op.Def != NoValue {
+                for v := range liveSet {
+                    if v == op.Def {
+                        continue
+                    }
+                    wit := Witness{Kind: &quot;critical-def-live&quot;, Tail: b.ID, Head: head, Block: b.ID, A: op.Def, B: v}
+                    ws = append(ws, wit)
+                    g.add(op.Def, v, wit)
+                }
+                delete(liveSet, op.Def)
+            }
+            for _, u := range op.Uses {
+                liveSet[u] = true
+            }
+        }
+    }
+    return ws
+}
+</code></pre>
+<p>The coalescer records a <code>Rejection{V, SlotID, Conflict, Witness}</code> for every declined merge, so no rejection is witness-free.</p>
+<p>Run it:</p>
+<pre><code class="language-bash">cd ~/spillcoalesce
+gofmt -l .            # must print nothing
+go vet ./...          # must print nothing
+go test ./...         # must pass
+go run .
+</code></pre>
+<h2>Verification</h2>
+<p>All six regression tests pass:</p>
+<pre><code class="language-text">=== RUN   TestFixedGraphCoversGroundTruth        --- PASS
+=== RUN   TestUnsafeCoalescingIsCaught           --- PASS
+=== RUN   TestGuardedCoalescingIsSafe            --- PASS
+=== RUN   TestCriticalPairNeverMerged            --- PASS
+=== RUN   TestEveryRejectionHasWitness           --- PASS
+=== RUN   TestFrameSavings                       --- PASS
+    spill_test.go:106: naive=288 bytes coalesced=136 bytes saved=152 bytes
+PASS
+ok      spillcoalesce   0.008s
+</code></pre>
+<p>End-to-end results:</p>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pre-split graph edges</td>
+<td>376</td>
+</tr>
+<tr>
+<td>Ground-truth edges</td>
+<td>400</td>
+</tr>
+<tr>
+<td>Guard witness attempts</td>
+<td>82</td>
+</tr>
+<tr>
+<td>Fixed graph edges</td>
+<td><strong>400</strong></td>
+</tr>
+<tr>
+<td>Ground-truth edges missing from fixed graph</td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td>Unsafe violations, unguarded coalescer</td>
+<td><strong>4</strong></td>
+</tr>
+<tr>
+<td>Unsafe violations, guarded coalescer</td>
+<td><strong>0</strong></td>
+</tr>
+<tr>
+<td>Naive allocation</td>
+<td>36 slots / 288 bytes</td>
+</tr>
+<tr>
+<td>Coalesced allocation</td>
+<td><strong>17 slots / 136 bytes</strong></td>
+</tr>
+<tr>
+<td>Frame savings</td>
+<td><strong>19 slots / 152 bytes (52.8%)</strong></td>
+</tr>
+</tbody>
+</table>
+<p>Concrete witness emitted for the mandatory rejection class:</p>
+<pre><code class="language-text">v0 live across loop back-edge B6-&gt;B3, but v10 is defined on the back-edge critical path B6
+</code></pre>
+<p>And the invariant checks both print <code>true</code>:</p>
+<pre><code class="language-text">outer carried values and outer-critical values share no slot: true
+inner carried values and inner-critical values share no slot: true
+RESULT: PASS
+</code></pre>
+<p>The fixed graph has <strong>no extra false edges</strong> — it exactly matches ground truth — so the allocator still coalesces every genuinely non-interfering pair while enforcing the back-edge invariant. Section 4.5 of <code>SOLUTION.md</code> gives the porting recipe for <code>cmd/compile/internal/ssa/stackalloc.go</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-compiler-ssa-spill-slot-coalescing-critical-path
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-11-06T08:01:22.517Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Given a function in SSA form with liveness and interference already computed over machine basic blocks, implement spill-slot allocation that coalesces non-interfering spilled values to shrink the frame. The allocator must never merge a value live across a loop back-edge with a value defined only on that back-edge critical path, and must emit the concrete interference witness for every rejection. Report frame-size savings versus naive one-slot-per-value on a function with nested loops and a register-pressure cliff.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-compiler-ssa-spill-slot-coalescing-critical-path&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-11-06T08:01:22.518Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

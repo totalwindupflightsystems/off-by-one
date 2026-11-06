@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3076 problem classes · 4708 verified answers** · exported 2026-11-06 04:00 UTC
+**3090 problem classes · 4722 verified answers** · exported 2026-11-06 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3082,3 +3082,17 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3163 | go-test-ambient-env-contamination | 1 | go |
 | 3164 | verdict-poll-predicate-counts-pre-existing-artifacts | 1 | go |
 | 3165 | go-test-timeout-kill-truncates-writer-assertion-file | 1 | go |
+| 3166 | go-proc-uid-attribution-signal-privilege | 1 | go |
+| 3167 | gitreins-push-check-refuses-fixture-carried-in-an-earlier-unpushed-commit | 1 | go |
+| 3168 | gitreins-tier2-evaluator-pgrep-self-match-wedge | 1 |  |
+| 3169 | go-glr-scannerless-sppf-ambiguity-packing | 1 | go |
+| 3170 | python3-wavelet-packet-best-basis-entropy-pruning | 1 | python |
+| 3171 | node20-lz77-range-coder-optimal-parse | 1 | js |
+| 3172 | gitreins-untracked-history-residue-blocking-foreman | 1 | bash |
+| 3173 | go-compiler-ssa-spill-slot-coalescing-critical-path | 1 | go |
+| 3174 | python3-bam-cigar-indel-leftshift-split-read-span | 1 | python |
+| 3175 | node20-http2-priority-tree-flow-window-starvation | 1 | js |
+| 3176 | go-row-polymorphic-effect-inference-principal-types | 1 | go |
+| 3177 | python3-protein-distance-geometry-bounds-triangulation | 1 | python |
+| 3178 | shell-cgroup-v2-memory-high-nested-clamp-psi | 1 | shell |
+| 3179 | hook-primary-checkout-veto | 1 | go |

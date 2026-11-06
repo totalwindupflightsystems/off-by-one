@@ -1,0 +1,28 @@
+{
+  "class_id": 3175,
+  "title": "node20-http2-priority-tree-flow-window-starvation",
+  "description": "node20-http2-priority-tree-flow-window-starvation",
+  "created_at": "2026-11-06 08:27:09",
+  "answers": [
+    {
+      "answer_id": 4910,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "Done. The complete, self-contained solution is written to **`~/h2-flow/SOLUTION.md`** (1143 lines: analysis + full source + verification). Working files:\n\n| File | Purpose |\n|---|---|\n| `SOLUTION.md` | The deliverable markdown |\n| `allocator.js` | Implementation (`Http2FlowPriorityAllocator`) |\n| `test.js` | 15 unit tests incl. a 2000-op mutation fuzz |\n| `verify.js` | Independent differential + utilisation verifier |\n\n## Root cause (4 compounding defects)\n\n1. **Blocked ancestor hoards the window.** A node with `sendWindow == 0` cannot make progress, so RFC 7540 §5.3.1 says descendants should proceed. The naive top-down walk keeps the node's share and never descends → the *entire connection window is assigned to a stream that can't send* → deadlock.\n2. **Weighted rounding starves low-weight streams** (`floor(w_i/Σw · budget) → 0` forever).\n3. **Mutable topology invalidates cached effective weights**; naive recompute is O(streams²) per `WINDOW_UPDATE`.\n4. **Reparenting can create a cycle** (`A→B→A`).\n\n## The fix\n\n- `_allocate()` consumes a node's own window only when sendable; **blocked or saturated nodes release their whole budget to children** (kills the deadlock).\n- `_distribute()` does per-sibling **weighted water-filling with per-subtree caps** in `O(deg log deg)`.\n- `allocate()` carves a configurable `slaMinShare` of the window for streams past `slaMs`, oldest-first, then tops them up — total stays `≤ connWindow`, each stream `≤ sendWindow`.\n- `simulateNaiveReservation()` + `detectDependencyDeadlock()` reproduce and report the deadlock.\n- `reparent()` normalises cycles per RFC 7540 §5.3.3.\n\n## O(streams²) question\n\nHTTP/2 weights are **relative to siblings**, so a subtree's effective share only changes on the mutated node's path to the root. The allocator maintains two aggregates — `capacity(node)` and `eligibleWeightSum(node)` — and `_bumpCapacity()` updates them in **O(depth)** per `WINDOW_UPDATE`/close/reparent/reweight. Allocation itself is a pruned weighted DFS visiting only nodes that receive budget, giving **O(k log n)** for `k` served streams. No global recompute ever happens.\n\n## Verification (all green)\n\n```\nnode --test   →  # tests 15  # pass 15  # fail 0\nnode verify.js → flat water-filling vs binary-search reference: OK (3000 trials)\n                 deep-tree utilisation + invariants fuzz: OK (600 trials)\n                 ALL VERIFICATION PASSED\n```\n\nHighlights: the deadlock test shows the buggy policy assigns all 1000 bytes to a blocked node and sends 0, detection flags it, and the fix routes 1000 bytes to the ready descendant; a depth-500 chain proves one `WINDOW_UPDATE` touches `≤ depth+1` aggregate nodes; 2000 streams are satisfied in `≤ 3n+10` visits. Code targets Node 20+ APIs (verified on Node 22).\n",
+      "evidence": "# Evidence\n- Problem class: node20-http2-priority-tree-flow-window-starvation\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-06T08:27:09.568Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement a per-stream HTTP/2 flow-control allocator layered on a mutable priority tree whose weights and parent links are reparented while DATA frames are in flight. The allocator must honour the connection-level window, keep a low-weight stream under a configurable latency SLA instead of starving it, and detect the deadlock where the whole remaining connection window is assigned to streams blocked behind their own dependency. Explain how you re-derive fairness after each WINDOW_UPDATE without O(streams squared) work.",
+        "environment": "node20",
+        "language": "js",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "node20-http2-priority-tree-flow-window-starvation",
+        "provider": "openrouter",
+        "solved_at": "2026-11-06T08:27:09.568Z",
+        "version": "20"
+      },
+      "status": "verified",
+      "created_at": "2026-11-06 08:27:09"
+    }
+  ]
+}
