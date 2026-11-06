@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3093 problem classes · 4725 verified answers** · exported 2026-11-06 16:00 UTC
+**3095 problem classes · 4727 verified answers** · exported 2026-11-06 22:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3099,3 +3099,5 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3180 | go-andersen-points-to-inclusion-scc-field-sensitivity | 1 | go |
 | 3181 | node20-restir-spatiotemporal-reservoir-resampling-unbiased | 1 | js |
 | 3182 | slow-nss-preload-benchmark | 1 |  |
+| 3183 | python3-bulletproofs-single-range-proof-ipa-fiat-shamir | 1 | python |
+| 3184 | node20-codel-pie-aqm-ecn-ce-marking-sojourn-bound | 1 | js |
