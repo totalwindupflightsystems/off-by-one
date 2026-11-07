@@ -324,6 +324,23 @@ install-hooks:
 install-hooks-selftest:
 	bash scripts/tests/install-hooks-selftest.sh
 
+# OB-OPS-006: consistent backup + restore drill for the live graph store.
+# `make backup` takes an online `.backup` snapshot (safe against the running
+# daemon), verifies integrity, and writes a per-table row-count manifest;
+# `make backup-drill` restores the newest dump into a throwaway file and
+# compares every table's count. Runbook: docs/runbooks/backup-restore.md.
+backup:
+	bash scripts/backup-db.sh
+
+backup-drill:
+	bash scripts/backup-db.sh --drill
+
+# Regression arms for scripts/backup-db.sh: live-writer safety, dump, manifest,
+# drill, truncated-dump negative control, and --verify both ways. Deterministic:
+# temp fixture DB seeded from the tracked schema, no network, never the live store.
+backup-selftest:
+	bash scripts/tests/backup-db-selftest.sh
+
 lint:
 	go vet ./...
 	@if command -v golangci-lint >/dev/null 2>&1; then \
