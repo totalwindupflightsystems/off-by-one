@@ -1,0 +1,28 @@
+{
+  "class_id": 3185,
+  "title": "go-hopscotch-concurrent-resize-tombstone-migration",
+  "description": "go-hopscotch-concurrent-resize-tombstone-migration",
+  "created_at": "2026-11-06 22:38:52",
+  "answers": [
+    {
+      "answer_id": 4920,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "# Concurrent Hopscotch Hash Table: Verified Solution\n\nThe complete, self-contained solution is written to:\n\n- `~/SOLUTION.md`\n- `~/hhc/SOLUTION.md`\n- Implementation: `~/hhc/hhc.go`\n- Tests/checker: `~/hhc/hhc_test.go`\n\n## Root-cause analysis\n\nThe primary bug class is coupling the hop bitmap to the record occupying the home bucket. Deleting, tombstoning, or migrating that record can erase metadata that other live keys still depend on, stranding them outside their neighbourhood.\n\nAdditional failure sources:\n\n- Publishing the hop bit before the record makes a reader see metadata for an absent slot.\n- Copying raw bucket positions during resize preserves stale offsets and tombstones.\n- Reusing an old table while readers hold its pointer causes use-after-free.\n- Letting writers mutate the source during migration loses or duplicates writes.\n\n## Exact fix\n\nThe implementation enforces these invariants:\n\n1. Hop words belong to bucket indices, not records:\n   ```go\n   type bucket struct {\n       slot atomic.Pointer[record]\n       hop  atomic.Uint64\n   }\n   ```\n   Replacing `bucket[i].slot` never changes `bucket[i].hop`.\n\n2. Readers are lock-free and use immutable records loaded through `atomic.Pointer[record]`.\n\n3. Writers lock every stripe covering their home window. Stripes are sorted before acquisition to prevent deadlock.\n\n4. Insert publishes the record first, then the hop bit. Delete clears the hop bit first, then installs a reusable tombstone.\n\n5. Resize builds a private new snapshot with a fresh seed and capacity, reinserting every live record and recomputing all hop bitmaps. The old snapshot is immutable, so readers holding it remain safe through GC lifetime. The new snapshot is published with one atomic store.\n\n6. Fault injection never publishes an aborted migration. A partial migration resumes only while the source snapshot version is unchanged; otherwise it restarts from the current live set. This prevents lost or duplicated keys.\n\n7. Full home-window collisions trigger growth with a new hash seed.\n\n## Verification\n\nFrom `~/hhc` or `~`:\n\n```bash\ngo test -race -count=5 ./...\n```\n\nVerified result:\n\n```text\nok  \texample.com/hhc\t2.377s\n```\n\nAlso verified across scheduler variations:\n\n```bash\ngo test -race -count=2 -cpu=1,4,32 ./...\n# ok  \texample.com/hhc\t4.369s\n```\n\nCoverage includes:\n\n- `TestStressRace32Writers8Readers`: exactly 32 writers and 8 readers, with automatic resizes, final key/value checks, and exact length check.\n- `TestResizeAbortResume`: aborts after 150 migrated entries, verifies the old table remains intact, resumes the partial migration, and verifies no loss or duplication.\n- `TestAbortedResizeRestartsIfSnapshotChanged`: mutates the old snapshot after abort, forcing safe restart rather than resuming a stale partial table.\n- `TestLinearizabilityUnderResize`: records concurrent operation intervals and verifies the history with `checkLinearizable`.\n- `TestLinearizabilityCheckerRejectsBadHistory`: confirms the checker rejects impossible histories.\n",
+      "evidence": "# Evidence\n- Problem class: go-hopscotch-concurrent-resize-tombstone-migration\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-06T22:38:52.142Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement a concurrent hopscotch hash table (HHC) supporting lock-free point reads, per-neighbourhood write locks, and online growth that migrates buckets while readers hold stale epoch handles. Tombstone deletion must preserve probe-run contiguity: entries displaced by the hop window must be re-placed during both deletion and resize, and tombstone cascades must never strand a live key outside its neighbourhood. Pass -race with 32 writer/8 reader goroutines, plus a linearizability checker and a fault-injection mode that aborts resize midway and resumes it without losing or duplicating keys.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-hopscotch-concurrent-resize-tombstone-migration",
+        "provider": "openrouter",
+        "solved_at": "2026-11-06T22:38:52.142Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-11-06 22:38:52"
+    }
+  ]
+}
