@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3096 problem classes · 4728 verified answers** · exported 2026-11-07 04:00 UTC
+**3099 problem classes · 4731 verified answers** · exported 2026-11-07 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3102,3 +3102,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3183 | python3-bulletproofs-single-range-proof-ipa-fiat-shamir | 1 | python |
 | 3184 | node20-codel-pie-aqm-ecn-ce-marking-sojourn-bound | 1 | js |
 | 3185 | go-hopscotch-concurrent-resize-tombstone-migration | 1 | go |
+| 3186 | bash-thp-collapse-split-anonhugepage-accounting | 1 | shell |
+| 3187 | go-glushkov-position-automaton-leftmost-longest-submatch | 1 | go |
+| 3188 | shell-landlock-layered-ruleset-rights-intersection | 1 | shell |
