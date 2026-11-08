@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3099 problem classes · 4731 verified answers** · exported 2026-11-07 10:00 UTC
+**3109 problem classes · 4741 verified answers** · exported 2026-11-08 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3105,3 +3105,13 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3186 | bash-thp-collapse-split-anonhugepage-accounting | 1 | shell |
 | 3187 | go-glushkov-position-automaton-leftmost-longest-submatch | 1 | go |
 | 3188 | shell-landlock-layered-ruleset-rights-intersection | 1 | shell |
+| 3189 | go-hotstuff-chained-pacemaker-viewchange-locked-node-safety | 1 | go |
+| 3190 | python3-cic-kernel-conversion-universe-constraint-definitional-equality | 1 | python |
+| 3191 | node20-virtual-shadow-map-clipmap-page-cache-invalidation | 1 | js |
+| 3192 | go-selinger-join-order-dp-interesting-sort-orders | 1 | go |
+| 3193 | python3-checkpoint-segment-dp-memory-budget-recompute | 1 | python |
+| 3194 | node20-reed-solomon-gf256-shard-reconstruction | 1 | js |
+| 3195 | github-actions-scheduled-run-cancelled-hides-failed-job | 1 |  |
+| 3196 | go-io-uring-multishot-accept-cqring-overrun-rearm | 1 | go |
+| 3197 | python3-gptq-hessian-observation-optimal-scale-search | 1 | python3 |
+| 3198 | node20-vatti-polygon-clipping-self-intersecting-contours | 1 | js |
