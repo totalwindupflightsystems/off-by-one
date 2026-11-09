@@ -1,0 +1,818 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>node20-consistent-hash-ring-bounded-vnode-migration-dual-write-window — Off-By-One verified answer</title>
+<meta name="description" content="A naive consistent-hash implementation fails this problem in five distinct ways:">
+<meta property="og:title" content="node20-consistent-hash-ring-bounded-vnode-migration-dual-write-window — Off-By-One">
+<meta property="og:description" content="A naive consistent-hash implementation fails this problem in five distinct ways:">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3207-node20-consistent-hash-ring-bounded-vnode-migration-dual-write-window.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>node20-consistent-hash-ring-bounded-vnode-migration-dual-write-window</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>js</span><span class='badge v'>node20</span></div><div class='desc'><p>A naive consistent-hash implementation fails this problem in five distinct ways:</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3207-node20-consistent-hash-ring-bounded-vnode-migration-dual-write-window.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>Implemented and verified in <code>~/solution</code>. The full solution follows.</p>
+<h1>Bounded-Migration Consistent Hash Ring with a Dual-Write Cutover Window</h1>
+<h2>Root-cause analysis</h2>
+<p>A naive consistent-hash implementation fails this problem in five distinct ways:</p>
+<ol>
+<li><strong>Nondeterministic collision handling.</strong> Two virtual nodes can hash to the same token. If the ring stores only <code>token -&gt; node</code> or relies on insertion order, different processes can disagree about the owner of keys in the colliding interval, causing split-brain writes and data loss on failover.</li>
+<li><strong>Unbounded ownership movement.</strong> Rebalancing by rebuilding the whole ring, or by remapping several successor positions at once, can move a key through many owners during a join. There is no per-key migration budget and no atomic rejection when the budget would be exceeded.</li>
+<li><strong>A hard cutover.</strong> The directory is switched to the new owner before the old copy is drained. Reads routed to the new owner then return <code>not found</code>, while the only valid copy is still on the old owner.</li>
+<li><strong>Last-writer confusion during dual writes.</strong> If reads simply prefer the new owner, or pick the first copy they see, a stale old copy can mask a newer in-flight write. Writes must be versioned and reads must choose <code>max(version, writeId)</code> across all live copies.</li>
+<li><strong>Lost in-flight writes.</strong> If a write is acknowledged after reaching only one side, or if the outbox entry is removed before every destination acknowledges it, a crash or join between phases loses the write. The fix requires a durable write intent, dynamic destination resolution, idempotent apply, retries, and a drain/close fence.</li>
+</ol>
+<h2>Invariants and the fix</h2>
+<ul>
+<li>Vnodes are sorted by <code>(token, nodeId, replica)</code>. A key token is mapped to the first vnode whose token is <code>&gt;= keyToken</code>; on an exact collision, the first vnode in the same deterministic order owns the key.</li>
+<li><strong>One join changes a key's primary owner by at most one hop.</strong> Existing vnode order is unchanged when a node is added. Therefore the successor of any key either stays the same or becomes the newly added node. The join is validated for every existing key <em>before</em> the live ring is mutated; if <code>hops &gt; K</code>, the whole join is rejected atomically. <code>K=0</code> is supported and rejects any join that would move an existing key.</li>
+<li>During the window, a key may have several holders. Writes are written to all current candidates; reads inspect all candidates and return the record with the highest <code>(version, writeId)</code>.</li>
+<li>A write intent is inserted into the outbox before delivery. Destinations are resolved at delivery time, so a write in flight across a join automatically includes the new candidates. Delivery is idempotent by <code>writeId + version</code>; an entry leaves the outbox only after every current candidate has acknowledged it.</li>
+<li>Drain copies the maximum record from every holder to the migration target. The window can close only when the outbox is empty, every key is drained, and the target dominates every source copy. Only then are old copies deleted.</li>
+</ul>
+<h3>At-least-once proof for in-flight writes</h3>
+<p>Let write <code>w</code> be accepted while the window is open.</p>
+<ol>
+<li><code>put(w)</code> stores the intent in the outbox before attempting any delivery. If the process stops at any point, the intent is still replayable.</li>
+<li>The destination set is recomputed from the current ring, holders, and active migration at every delivery attempt. Thus a write that starts before a join but is delivered after it is sent to both sides; a write that reaches only the old side before the join is still in the old holder set and is copied by drain.</li>
+<li><code>_apply</code> is monotone and idempotent: an older or equal <code>(version, writeId)</code> cannot overwrite a newer record, and replaying the same <code>(version, writeId)</code> with the same value is a no-op. Duplicate delivery therefore cannot corrupt state.</li>
+<li>The outbox entry is deleted only when every current candidate is in <code>acked</code>. If any destination fails, <code>finishWindow()</code> refuses to close because the outbox is non-empty. Retrying replays the same intent until at least one successful delivery exists at every required holder.</li>
+<li>Drain copies the maximum source record to the target. A write acknowledged before the join is present on an old holder and is therefore copied; a write acknowledged during the join is dual-written or drained. At window close, the target is the only remaining copy and is at least as new as every source.</li>
+</ol>
+<p>Therefore every accepted in-flight write is delivered to at least one holder and, by drain/close, to the final owner; retries may deliver it more than once, but idempotence makes that safe. This is at-least-once delivery, not loss.</p>
+<h2>Exact implementation (<code>consistent-ring.js</code>)</h2>
+<pre><code class="language-js">'use strict';
+
+/**
+ * Deterministic consistent-hash ring + bounded-migration dual-write store.
+ * Node 20 compatible (CommonJS, no dependencies).
+ */
+
+function fnv1a32(value) {
+  const bytes = Buffer.from(String(value), 'utf8');
+  let h = 0x811c9dc5;
+  for (const b of bytes) {
+    h ^= b;
+    h = Math.imul(h, 0x01000193) &gt;&gt;&gt; 0;
+  }
+  return h &gt;&gt;&gt; 0;
+}
+
+function compareVnode(a, b) {
+  if (a.token !== b.token) return a.token - b.token;
+  if (a.nodeId !== b.nodeId) return a.nodeId &lt; b.nodeId ? -1 : 1;
+  return a.replica - b.replica;
+}
+
+function firstTokenGE(vnodes, token) {
+  let lo = 0;
+  let hi = vnodes.length;
+  while (lo &lt; hi) {
+    const mid = (lo + hi) &gt;&gt;&gt; 1;
+    if (vnodes[mid].token &lt; token) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+class ConsistentHashRing {
+  constructor({ replicas = 128, hash = fnv1a32 } = {}) {
+    if (!Number.isInteger(replicas) || replicas &lt; 1) {
+      throw new RangeError('replicas must be a positive integer');
+    }
+    if (typeof hash !== 'function') throw new TypeError('hash must be a function');
+    this.replicas = replicas;
+    this.hash = hash;
+    this.nodes = new Set();
+    this.vnodes = [];
+  }
+
+  tokenFor(nodeId, replica) {
+    return this.hash(`${nodeId}#${replica}`) &gt;&gt;&gt; 0;
+  }
+
+  addNode(nodeId, replicas = this.replicas) {
+    if (typeof nodeId !== 'string' || nodeId.length === 0) {
+      throw new TypeError('nodeId must be a non-empty string');
+    }
+    if (!Number.isInteger(replicas) || replicas &lt; 1) {
+      throw new RangeError('replicas must be a positive integer');
+    }
+    if (this.nodes.has(nodeId)) return [];
+
+    const inserted = [];
+    for (let replica = 0; replica &lt; replicas; replica += 1) {
+      inserted.push({
+        token: this.tokenFor(nodeId, replica),
+        nodeId,
+        replica,
+      });
+    }
+    this.nodes.add(nodeId);
+    this.vnodes.push(...inserted);
+    this.vnodes.sort(compareVnode);
+    return inserted;
+  }
+
+  removeNode(nodeId) {
+    if (!this.nodes.has(nodeId)) return false;
+    this.nodes.delete(nodeId);
+    this.vnodes = this.vnodes.filter((v) =&gt; v.nodeId !== nodeId);
+    return true;
+  }
+
+  hasNode(nodeId) {
+    return this.nodes.has(nodeId);
+  }
+
+  clone() {
+    const copy = new ConsistentHashRing({
+      replicas: this.replicas,
+      hash: this.hash,
+    });
+    copy.nodes = new Set(this.nodes);
+    copy.vnodes = this.vnodes.map((v) =&gt; ({ ...v }));
+    return copy;
+  }
+
+  _startIndex(key) {
+    if (this.vnodes.length === 0) throw new Error('ring is empty');
+    const keyToken = this.hash(String(key)) &gt;&gt;&gt; 0;
+    const idx = firstTokenGE(this.vnodes, keyToken);
+    return idx === this.vnodes.length ? 0 : idx;
+  }
+
+  primary(key) {
+    return this.vnodes[this._startIndex(key)].nodeId;
+  }
+
+  ownersOf(key, count = 1) {
+    if (!Number.isInteger(count) || count &lt; 1) {
+      throw new RangeError('count must be a positive integer');
+    }
+    const start = this._startIndex(key);
+    const owners = [];
+    const seen = new Set();
+    for (let i = 0; i &lt; this.vnodes.length &amp;&amp; owners.length &lt; count; i += 1) {
+      const nodeId = this.vnodes[(start + i) % this.vnodes.length].nodeId;
+      if (!seen.has(nodeId)) {
+        seen.add(nodeId);
+        owners.push(nodeId);
+      }
+    }
+    return owners;
+  }
+}
+
+class MigrationBudgetExceededError extends Error {
+  constructor(message, details) {
+    super(message);
+    this.name = 'MigrationBudgetExceededError';
+    this.details = details;
+  }
+}
+
+function compareRecord(a, b) {
+  if (!a &amp;&amp; !b) return 0;
+  if (!a) return -1;
+  if (!b) return 1;
+  if (a.version !== b.version) return a.version - b.version;
+  if (a.writeId === b.writeId) return 0;
+  return a.writeId &lt; b.writeId ? -1 : 1;
+}
+
+/**
+ * A primary-copy store (replicationFactor defaults to 1) implementing a
+ * draining window. The ring keeps replica lookup support; migration below is
+ * deliberately per-primary-copy so the K-hop proof is exact.
+ */
+class MigratingStore {
+  constructor({
+    ring = new ConsistentHashRing(),
+    maxHopsPerJoin = 1,
+    replicationFactor = 1,
+    hash,
+    replicas,
+  } = {}) {
+    if (ring &amp;&amp; !(ring instanceof ConsistentHashRing)) {
+      throw new TypeError('ring must be a ConsistentHashRing');
+    }
+    this.ring = ring || new ConsistentHashRing({ hash, replicas });
+    this.maxHopsPerJoin = maxHopsPerJoin;
+    this.replicationFactor = replicationFactor;
+    this.data = new Map();          // ownerId -&gt; Map(key -&gt; record)
+    this.holders = new Map();       // key -&gt; Set(ownerId)
+    this.migrations = new Map();    // key -&gt; migration
+    this.outbox = new Map();        // writeId -&gt; write intent
+    this.completed = new Map();     // writeId -&gt; completed metadata
+    this.versions = new Map();      // key -&gt; highest observed version
+    this.failOwners = new Set();    // deterministic fault injection
+    this.deliveries = new Map();    // writeId -&gt; Map(ownerId -&gt; successful deliveries)
+    this.writeSeq = 0;
+  }
+
+  _ownerData(ownerId) {
+    let map = this.data.get(ownerId);
+    if (!map) {
+      map = new Map();
+      this.data.set(ownerId, map);
+    }
+    return map;
+  }
+
+  _record(ownerId, key) {
+    const map = this.data.get(ownerId);
+    return map ? map.get(key) : undefined;
+  }
+
+  _rememberHolder(key, ownerId) {
+    let set = this.holders.get(key);
+    if (!set) {
+      set = new Set();
+      this.holders.set(key, set);
+    }
+    set.add(ownerId);
+  }
+
+  _maxRecordVersion(key) {
+    let max = 0;
+    for (const map of this.data.values()) {
+      const rec = map.get(key);
+      if (rec &amp;&amp; rec.version &gt; max) max = rec.version;
+    }
+    return max;
+  }
+
+  _nextVersion(key) {
+    const current = Math.max(this.versions.get(key) || 0, this._maxRecordVersion(key));
+    const version = current + 1;
+    this.versions.set(key, version);
+    return version;
+  }
+
+  _allKeys() {
+    const keys = new Set(this.holders.keys());
+    for (const key of this.migrations.keys()) keys.add(key);
+    for (const map of this.data.values()) {
+      for (const key of map.keys()) keys.add(key);
+    }
+    return keys;
+  }
+
+  candidateOwners(key) {
+    const candidates = new Set(this.ring.ownersOf(key, this.replicationFactor));
+    const held = this.holders.get(key);
+    if (held) for (const ownerId of held) candidates.add(ownerId);
+    const migration = this.migrations.get(key);
+    if (migration) {
+      candidates.add(migration.to);
+      for (const ownerId of migration.from) candidates.add(ownerId);
+    }
+    return [...candidates].sort();
+  }
+
+  _apply(ownerId, key, record) {
+    const map = this._ownerData(ownerId);
+    const current = map.get(key);
+    const cmp = compareRecord(record, current);
+    if (cmp === 0 &amp;&amp; current &amp;&amp; current.value !== record.value) {
+      throw new Error(`writeId ${record.writeId} was reused with a different value`);
+    }
+    if (cmp &gt; 0) map.set(key, { ...record });
+    this._rememberHolder(key, ownerId);
+    const highest = this.versions.get(key) || 0;
+    if (record.version &gt; highest) this.versions.set(key, record.version);
+    return cmp &gt; 0;
+  }
+
+  _noteDelivery(writeId, ownerId) {
+    let byOwner = this.deliveries.get(writeId);
+    if (!byOwner) {
+      byOwner = new Map();
+      this.deliveries.set(writeId, byOwner);
+    }
+    byOwner.set(ownerId, (byOwner.get(ownerId) || 0) + 1);
+  }
+
+  deliveryCount(writeId, ownerId) {
+    const byOwner = this.deliveries.get(writeId);
+    return byOwner ? byOwner.get(ownerId) || 0 : 0;
+  }
+
+  _flushEntry(entry, failOwners = this.failOwners) {
+    const owners = this.candidateOwners(entry.key);
+    for (const ownerId of owners) {
+      if (entry.acked.has(ownerId)) continue;
+      if (failOwners.has(ownerId)) continue;
+      this._apply(ownerId, entry.key, entry);
+      entry.acked.add(ownerId);
+      this._noteDelivery(entry.writeId, ownerId);
+    }
+
+    const remaining = this.candidateOwners(entry.key)
+      .filter((ownerId) =&gt; !entry.acked.has(ownerId));
+    if (remaining.length === 0) {
+      this.outbox.delete(entry.writeId);
+      this.completed.set(entry.writeId, {
+        key: entry.key,
+        value: entry.value,
+        version: entry.version,
+      });
+      return { ok: true, writeId: entry.writeId, version: entry.version, pending: [] };
+    }
+    return {
+      ok: false,
+      writeId: entry.writeId,
+      version: entry.version,
+      pending: remaining,
+    };
+  }
+
+  put(key, value, { writeId, version, failOwners } = {}) {
+    const id = writeId || `w${++this.writeSeq}`;
+
+    if (this.completed.has(id)) {
+      const done = this.completed.get(id);
+      if (done.key !== key || done.value !== value) {
+        throw new Error(`completed writeId ${id} cannot be reused for another value`);
+      }
+      return { ok: true, writeId: id, version: done.version, duplicate: true, pending: [] };
+    }
+
+    let entry = this.outbox.get(id);
+    if (entry) {
+      if (entry.key !== key || entry.value !== value) {
+        throw new Error(`in-flight writeId ${id} cannot be reused for another value`);
+      }
+    } else {
+      const v = version === undefined ? this._nextVersion(key) : version;
+      if (!Number.isSafeInteger(v) || v &lt; 1) {
+        throw new RangeError('version must be a positive safe integer');
+      }
+      this.versions.set(key, Math.max(this.versions.get(key) || 0, v));
+      entry = {
+        writeId: id,
+        key,
+        value,
+        version: v,
+        acked: new Set(),
+      };
+      this.outbox.set(id, entry);
+    }
+    return this._flushEntry(entry, failOwners || this.failOwners);
+  }
+
+  flushPending(failOwners = this.failOwners) {
+    const entries = [...this.outbox.values()];
+    const results = entries.map((entry) =&gt; this._flushEntry(entry, failOwners));
+    return { pending: this.outbox.size, results };
+  }
+
+  get(key) {
+    const owners = this.candidateOwners(key);
+    let best = null;
+    for (const ownerId of owners) {
+      const rec = this._record(ownerId, key);
+      if (rec &amp;&amp; compareRecord(rec, best) &gt; 0) best = rec;
+    }
+    return best
+      ? { value: best.value, version: best.version, writeId: best.writeId, owners }
+      : null;
+  }
+
+  join(nodeId, { maxHops = this.maxHopsPerJoin, replicas } = {}) {
+    if (!Number.isInteger(maxHops) || maxHops &lt; 0) {
+      throw new RangeError('maxHops must be a non-negative integer');
+    }
+    if (this.ring.hasNode(nodeId)) {
+      return { added: false, moved: 0, maxHopsObserved: 0, plans: [] };
+    }
+
+    const nextRing = this.ring.clone();
+    nextRing.addNode(nodeId, replicas);
+
+    // Validate the whole join before mutating the live ring. This makes a
+    // budget rejection atomic: no partial vnode insertion is visible.
+    const plans = [];
+    let maxHopsObserved = 0;
+    for (const key of this._allKeys()) {
+      const oldPrimary = this.ring.primary(key);
+      const newPrimary = nextRing.primary(key);
+      let hops = 0;
+      if (oldPrimary !== newPrimary) {
+        // Adding one node can only change the successor to that new node.
+        if (newPrimary !== nodeId) {
+          throw new Error('internal invariant broken: a join changed owner to an existing node');
+        }
+        hops = 1;
+      }
+      if (hops &gt; maxHopsObserved) maxHopsObserved = hops;
+      if (hops &gt; maxHops) {
+        throw new MigrationBudgetExceededError(
+          `join ${nodeId} would move key ${key} ${hops} hop(s), budget is ${maxHops}`,
+          { key, oldPrimary, newPrimary, hops, maxHops },
+        );
+      }
+      plans.push({ key, oldPrimary, newPrimary, hops });
+    }
+
+    this.ring = nextRing;
+    let moved = 0;
+    for (const plan of plans) {
+      if (plan.hops === 0) continue;
+      moved += 1;
+      const key = plan.key;
+      const previous = this.migrations.get(key);
+      const from = new Set();
+
+      // Every copy that may contain this key is a drain source.
+      const held = this.holders.get(key);
+      if (held) for (const ownerId of held) from.add(ownerId);
+      if (previous) {
+        from.add(previous.to);
+        for (const ownerId of previous.from) from.add(ownerId);
+      }
+      from.add(plan.oldPrimary);
+      from.delete(plan.newPrimary);
+
+      this.migrations.set(key, {
+        key,
+        from,
+        to: plan.newPrimary,
+        status: 'draining',
+        epoch: (previous ? previous.epoch : 0) + 1,
+      });
+      this._rememberHolder(key, plan.newPrimary);
+      for (const ownerId of from) this._rememberHolder(key, ownerId);
+    }
+
+    return { added: true, moved, maxHopsObserved, plans };
+  }
+
+  addNode(nodeId, options) {
+    return this.join(nodeId, options);
+  }
+
+  drain() {
+    let copied = 0;
+    for (const migration of this.migrations.values()) {
+      const key = migration.key;
+      const target = migration.to;
+      const sources = new Set([
+        ...(this.holders.get(key) || []),
+        ...migration.from,
+        this.ring.primary(key),
+      ]);
+      sources.delete(target);
+
+      let best = this._record(target, key);
+      for (const ownerId of sources) {
+        const rec = this._record(ownerId, key);
+        if (rec &amp;&amp; compareRecord(rec, best) &gt; 0) best = rec;
+      }
+      if (best) {
+        const current = this._record(target, key);
+        if (compareRecord(best, current) &gt; 0) {
+          this._apply(target, key, best);
+          copied += 1;
+        }
+      }
+
+      const targetRecord = this._record(target, key);
+      let targetIsAtLeastAllSources = true;
+      for (const ownerId of sources) {
+        const rec = this._record(ownerId, key);
+        if (rec &amp;&amp; compareRecord(rec, targetRecord) &gt; 0) {
+          targetIsAtLeastAllSources = false;
+          break;
+        }
+      }
+      const pendingForThisKey = [...this.outbox.values()].some((e) =&gt; e.key === key);
+      migration.status = targetIsAtLeastAllSources &amp;&amp; !pendingForThisKey
+        ? 'drained'
+        : 'draining';
+    }
+    return {
+      copied,
+      open: this.migrations.size,
+      undrained: [...this.migrations.values()].filter((m) =&gt; m.status !== 'drained').length,
+    };
+  }
+
+  finishWindow() {
+    if (this.outbox.size &gt; 0) {
+      throw new Error(`cannot close dual-write window: ${this.outbox.size} write(s) still in flight`);
+    }
+    this.drain();
+    const undrained = [...this.migrations.values()].filter((m) =&gt; m.status !== 'drained');
+    if (undrained.length &gt; 0) {
+      throw new Error(`cannot close dual-write window: ${undrained.length} key(s) not drained`);
+    }
+
+    // Final fence: target must dominate every remaining source before old
+    // copies are removed. A read can therefore never fall back to stale data.
+    for (const migration of this.migrations.values()) {
+      const target = migration.to;
+      const currentPrimary = this.ring.primary(migration.key);
+      if (currentPrimary !== target) {
+        throw new Error(`internal invariant broken: migration target ${target} != primary ${currentPrimary}`);
+      }
+      const targetRecord = this._record(target, migration.key);
+      const allSources = new Set([
+        ...(this.holders.get(migration.key) || []),
+        ...migration.from,
+      ]);
+      for (const ownerId of allSources) {
+        if (ownerId === target) continue;
+        const rec = this._record(ownerId, migration.key);
+        if (rec &amp;&amp; compareRecord(rec, targetRecord) &gt; 0) {
+          throw new Error(`cannot close window: ${ownerId} is newer than target ${target}`);
+        }
+      }
+    }
+
+    let deleted = 0;
+    for (const migration of this.migrations.values()) {
+      const key = migration.key;
+      const keep = migration.to;
+      const allHolders = new Set([
+        ...(this.holders.get(key) || []),
+        ...migration.from,
+        keep,
+      ]);
+      for (const ownerId of allHolders) {
+        if (ownerId === keep) continue;
+        const map = this.data.get(ownerId);
+        if (map &amp;&amp; map.delete(key)) deleted += 1;
+        if (map &amp;&amp; map.size === 0) this.data.delete(ownerId);
+      }
+      this.holders.set(key, new Set([keep]));
+    }
+
+    const closed = this.migrations.size;
+    this.migrations.clear();
+    return { closed, deletedStaleCopies: deleted };
+  }
+
+  isWindowOpen() {
+    return this.migrations.size &gt; 0;
+  }
+}
+
+module.exports = {
+  fnv1a32,
+  compareVnode,
+  ConsistentHashRing,
+  MigratingStore,
+  MigrationBudgetExceededError,
+  compareRecord,
+};
+</code></pre>
+<h2>Verification (<code>test.js</code>)</h2>
+<pre><code class="language-js">'use strict';
+
+const assert = require('node:assert/strict');
+const {
+  fnv1a32,
+  ConsistentHashRing,
+  MigratingStore,
+  MigrationBudgetExceededError,
+} = require('./consistent-ring');
+
+function test(name, fn) {
+  try {
+    fn();
+    console.log(`ok - ${name}`);
+  } catch (err) {
+    console.error(`not ok - ${name}`);
+    throw err;
+  }
+}
+
+function collisionRing() {
+  const hash = (s) =&gt; {
+    if (s === 'node-a#0' || s === 'node-b#0' || s === 'K') return 42;
+    return fnv1a32(s);
+  };
+  return new ConsistentHashRing({ replicas: 1, hash });
+}
+
+function twoNodeMigrationHash(s) {
+  if (s === 'old#0') return 200;
+  if (s === 'new#0') return 100;
+  if (s === 'k') return 50;
+  return fnv1a32(s);
+}
+
+function threeNodeMigrationHash(s) {
+  if (s === 'old#0') return 300;
+  if (s === 'mid#0') return 200;
+  if (s === 'new#0') return 100;
+  if (s === 'k') return 50;
+  return fnv1a32(s);
+}
+
+test('vnode collisions use a deterministic (token,nodeId,replica) tie-break', () =&gt; {
+  const r1 = collisionRing();
+  r1.addNode('node-b');
+  r1.addNode('node-a');
+
+  const r2 = collisionRing();
+  r2.addNode('node-a');
+  r2.addNode('node-b');
+
+  assert.equal(r1.primary('K'), 'node-a');
+  assert.equal(r2.primary('K'), 'node-a');
+  assert.deepEqual(r1.ownersOf('K', 2), ['node-a', 'node-b']);
+  assert.deepEqual(r2.ownersOf('K', 2), ['node-a', 'node-b']);
+});
+
+test('one join moves every existing key at most one hop (K=1)', () =&gt; {
+  const store = new MigratingStore({ ring: new ConsistentHashRing({ replicas: 32 }) });
+  for (const node of ['n0', 'n1', 'n2']) store.join(node);
+
+  const keys = Array.from({ length: 250 }, (_, i) =&gt; `key:${i}`);
+  for (const key of keys) store.put(key, `value:${key}`);
+
+  const before = new Map(keys.map((key) =&gt; [key, store.ring.primary(key)]));
+  const result = store.join('n3', { maxHops: 1 });
+
+  assert.ok(result.moved &gt; 0, 'test should actually exercise a migration');
+  assert.ok(result.maxHopsObserved &lt;= 1);
+  for (const plan of result.plans) {
+    assert.ok(plan.hops &lt;= 1, `key ${plan.key} moved ${plan.hops} hops`);
+    if (plan.hops === 1) {
+      assert.equal(plan.newPrimary, 'n3');
+      assert.notEqual(plan.oldPrimary, 'n3');
+    }
+    assert.equal(plan.oldPrimary, before.get(plan.key));
+  }
+
+  store.drain();
+  store.finishWindow();
+  for (const key of keys) {
+    assert.equal(store.get(key).value, `value:${key}`);
+    assert.equal(store.ring.primary(key), store.get(key).owners[0]);
+  }
+});
+
+test('K=0 rejects an ownership-moving join atomically, then K=1 succeeds', () =&gt; {
+  const ring = new ConsistentHashRing({ replicas: 1, hash: twoNodeMigrationHash });
+  ring.addNode('old');
+  const store = new MigratingStore({ ring });
+  store.put('k', 'v1', { writeId: 'w-budget' });
+  assert.equal(ring.primary('k'), 'old');
+
+  assert.throws(
+    () =&gt; store.join('new', { maxHops: 0 }),
+    (err) =&gt; err instanceof MigrationBudgetExceededError
+      &amp;&amp; err.details.key === 'k'
+      &amp;&amp; err.details.hops === 1,
+  );
+  assert.equal(store.ring.hasNode('new'), false, 'rejected join must not partially mutate ring');
+  assert.equal(store.ring.primary('k'), 'old');
+  assert.equal(store.get('k').value, 'v1');
+
+  const joined = store.join('new', { maxHops: 1 });
+  assert.equal(joined.moved, 1);
+  assert.equal(joined.maxHopsObserved, 1);
+  assert.equal(store.ring.primary('k'), 'new');
+});
+
+test('dual-write window: newer source beats stale target and drain copies it forward', () =&gt; {
+  const ring = new ConsistentHashRing({ replicas: 1, hash: twoNodeMigrationHash });
+  ring.addNode('old');
+  const store = new MigratingStore({ ring });
+
+  assert.deepEqual(store.put('k', 'v1', { writeId: 'before-join' }), {
+    ok: true,
+    writeId: 'before-join',
+    version: 1,
+    pending: [],
+  });
+  store.join('new');
+  assert.equal(store.isWindowOpen(), true);
+  assert.equal(store.get('k').value, 'v1');
+
+  const partial = store.put('k', 'v2', {
+    writeId: 'during-window',
+    failOwners: new Set(['new']),
+  });
+  assert.equal(partial.ok, false);
+  assert.deepEqual(partial.pending, ['new']);
+  assert.equal(store.get('k').value, 'v2', 'read must select max(version,writeId), not stale target');
+
+  const drained = store.drain();
+  assert.ok(drained.copied &gt;= 1);
+  assert.equal(store.data.get('new').get('k').value, 'v2');
+
+  assert.throws(() =&gt; store.finishWindow(), /still in flight/);
+  const retry = store.flushPending(new Set());
+  assert.equal(retry.pending, 0);
+
+  // At-least-once: the in-flight write reached both old and new at least once.
+  assert.ok(store.deliveryCount('during-window', 'old') &gt;= 1);
+  assert.ok(store.deliveryCount('during-window', 'new') &gt;= 1);
+
+  store.finishWindow();
+  assert.equal(store.isWindowOpen(), false);
+  assert.equal(store.get('k').value, 'v2');
+  assert.equal(store.data.has('old'), false, 'old stale copy should be removed after drain');
+
+  const duplicate = store.put('k', 'v2', { writeId: 'during-window' });
+  assert.equal(duplicate.duplicate, true);
+  assert.equal(duplicate.version, 2, 'duplicate delivery must not create a new version');
+});
+
+test('a second join during the window drains all previous holders to the final target', () =&gt; {
+  const ring = new ConsistentHashRing({ replicas: 1, hash: threeNodeMigrationHash });
+  ring.addNode('old');
+  const store = new MigratingStore({ ring });
+  store.put('k', 'v1', { writeId: 'multi-join' });
+
+  assert.equal(store.join('mid').moved, 1);
+  assert.equal(store.join('new').moved, 1);
+  assert.equal(store.ring.primary('k'), 'new');
+
+  store.drain();
+  store.finishWindow();
+  assert.equal(store.get('k').value, 'v1');
+  assert.equal(store.data.has('old'), false);
+  assert.equal(store.data.has('mid'), false);
+  assert.deepEqual([...store.holders.get('k')], ['new']);
+});
+
+test('a write completed before the join is copied to the new owner by drain', () =&gt; {
+  const ring = new ConsistentHashRing({ replicas: 1, hash: twoNodeMigrationHash });
+  ring.addNode('old');
+  const store = new MigratingStore({ ring });
+  store.put('k', 'pre-join-value', { writeId: 'pre' });
+  store.join('new');
+
+  assert.equal(store.data.get('new') &amp;&amp; store.data.get('new').get('k'), undefined);
+  store.drain();
+  assert.equal(store.data.get('new').get('k').value, 'pre-join-value');
+  store.finishWindow();
+  assert.equal(store.get('k').value, 'pre-join-value');
+});
+
+console.log('\nAll ring/migration/dual-write tests passed.');
+</code></pre>
+<h2>Run</h2>
+<pre><code class="language-bash">cd ~/solution
+npx --yes node@20 test.js
+</code></pre>
+<p>Observed output on Node <code>v20.20.2</code>:</p>
+<pre><code class="language-text">ok - vnode collisions use a deterministic (token,nodeId,replica) tie-break
+ok - one join moves every existing key at most one hop (K=1)
+ok - K=0 rejects an ownership-moving join atomically, then K=1 succeeds
+ok - dual-write window: newer source beats stale target and drain copies it forward
+ok - a second join during the window drains all previous holders to the final target
+ok - a write completed before the join is copied to the new owner by drain
+
+All ring/migration/dual-write tests passed.
+</code></pre>
+<p>The tests cover the required properties directly: deterministic collision ownership under different insertion orders, <code>maxHopsObserved &lt;= 1</code> for a 250-key join, atomic <code>K=0</code> rejection, stale-read prevention during a partially failed dual write, at-least-once delivery to both old and new owners, idempotent replay, multiple joins in one window, and pre-join writes copied during drain.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: node20-consistent-hash-ring-bounded-vnode-migration-dual-write-window
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-11-08T22:04:05.909Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a consistent-hash ring with virtual nodes where rebalancing honors a bounded-migration budget: keys must never move more than K hops per node join, and a dual-write window must keep stale reads consistent while data drains. Include a deterministic tie-break for vnode ownership collisions and prove at-least-once delivery for in-flight writes during the window.&quot;, &quot;environment&quot;: &quot;node20&quot;, &quot;language&quot;: &quot;js&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;node20-consistent-hash-ring-bounded-vnode-migration-dual-write-window&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-11-08T22:04:05.910Z&quot;, &quot;version&quot;: &quot;20&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

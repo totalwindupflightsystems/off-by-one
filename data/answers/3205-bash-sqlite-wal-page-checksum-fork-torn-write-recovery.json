@@ -1,0 +1,28 @@
+{
+  "class_id": 3205,
+  "title": "bash-sqlite-wal-page-checksum-fork-torn-write-recovery",
+  "description": "bash-sqlite-wal-page-checksum-fork-torn-write-recovery",
+  "created_at": "2026-11-08 16:14:40",
+  "answers": [
+    {
+      "answer_id": 4940,
+      "language": "shell",
+      "environment": "bash",
+      "version": "5.2",
+      "solution": "Done. The full self-contained deliverable is at **`~/wal_torn_recovery_solution.md`** (662 lines), and its embedded script was extracted and re-run to confirm it is byte-identical to the tested version.\n\n## Diagnosis (root causes)\n\n1. **The stated checksum is wrong.** SQLite WAL does *not* use SHA-256. It uses a 64-bit rolling checksum over native-endian 32-bit words (`s0 += x0+s1; s1 += x1+s0`, mod 2³²). A WAL built with SHA-256 digests is rejected by `sqlite3`. SHA-256 is only usable as an independent manifest.\n2. **WAL integers are big-endian**, and the frame checksum is **chained** (each frame seeded by the previous frame's checksum; frame 0 seeded by the header checksum). So one torn frame invalidates *the entire tail* — physically intact later commits are still discarded.\n3. **Commit boundary** = any frame whose `dbsize` field (frame header offset 4) is nonzero. Recovery must truncate there.\n4. **Salt rotation on restart:** after a full checkpoint the next writer resets the WAL in place (`ckptseq+1`, new salts) leaving stale old-generation frames in the tail. Verified: frames `0..5` new salt, `6..19` old salt. A scanner that ignores salts would resurrect an older DB image.\n5. **A destroyed WAL header is recoverable**, but only by rebuilding the *exact* original header (page size from the DB header, salts from frame 0, brute-forcing the small checkpoint sequence), because frame 0's checksum is seeded by the header checksum.\n\n## Fix\n\n`wal_torn_recovery.sh` with three subcommands:\n\n```bash\n./wal_torn_recovery.sh demo   /tmp/wal-demo                       # full end-to-end\n./wal_torn_recovery.sh corrupt my.db my.db-wal --seed 1 --frame 2 # inject tear\n./wal_torn_recovery.sh recover my.db my.db-wal --expected tags.txt --out ./recovered\n```\n\nIt parses/rebuilds the header, walks frames validating **salt + chained native checksum**, keeps the newest commit frame, truncates the WAL, verifies `PRAGMA integrity_check` on a sandbox copy, diffs committed-transaction markers to report lost txns, and emits a SHA-256 frame-chain manifest. No `.recover`/`.dump`.\n\n## Verification (all executed)\n\n- `integrity_check` → **`ok`** on every repaired WAL.\n- Manual recovery produces **identical** surviving rows to SQLite's own WAL recovery (`diff` empty).\n- Exhaustive fuzz — corrupt every frame in a single-generation WAL and every current-generation frame after salt rotation, plus header reconstruction and truncation: **37/37 pass**.\n- Zeroed 32-byte WAL header → reconstructed and recovered **all** frames with **zero** loss.\n- Corruption shapes tested: page body, frame salts, whole frame header, whole frame 0, whole WAL header, empty/truncated WAL (table in §3.5).\n\nOne documented limitation: the physical `lost_commits` count under-counts if the tear destroys a commit frame's own `dbsize` marker; `--expected tags.txt` gives the exact logical lost set (used by the demo/fuzz).\n",
+      "evidence": "# Evidence\n- Problem class: bash-sqlite-wal-page-checksum-fork-torn-write-recovery\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-08T16:14:40.146Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Write a bash script that takes a live SQLite database plus its -wal file and simulates a torn mid-transaction write by zeroing a random page region of the WAL, then must recover the database to the newest consistent transaction boundary without sqlite3 CLI recovery helpers (no .recover, no .dump). The script must checksum WAL frames manually (SHA-256 over the 24-byte WAL header salt chain and per-page checksums), rebuild a truncated WAL that passes PRAGMA integrity_check, and report exactly which committed transactions were lost. Edge cases: WAL checkpoint mid-flight and salt-rotation on restart.",
+        "environment": "bash",
+        "language": "shell",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "bash-sqlite-wal-page-checksum-fork-torn-write-recovery",
+        "provider": "openrouter",
+        "solved_at": "2026-11-08T16:14:40.146Z",
+        "version": "5.2"
+      },
+      "status": "verified",
+      "created_at": "2026-11-08 16:14:40"
+    }
+  ]
+}

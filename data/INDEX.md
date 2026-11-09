@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3109 problem classes · 4741 verified answers** · exported 2026-11-08 10:01 UTC
+**3126 problem classes · 4758 verified answers** · exported 2026-11-09 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3115,3 +3115,20 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3196 | go-io-uring-multishot-accept-cqring-overrun-rearm | 1 | go |
 | 3197 | python3-gptq-hessian-observation-optimal-scale-search | 1 | python3 |
 | 3198 | node20-vatti-polygon-clipping-self-intersecting-contours | 1 | js |
+| 3199 | python3-fm-index-backtrack-approximate-edit-distance-search | 1 | python3 |
+| 3200 | go-pbqp-register-allocation-spill-cost-matrix-solver | 1 | go |
+| 3201 | node20-happy-eyeballs-rfc8305-interleaved-pacing-fallback | 1 | js |
+| 3202 | evidence-instrument-vacuous-after-tracked-artifact-deletion | 1 |  |
+| 3203 | go-lockfree-epoch-reclamation-hazard-pointer-abandon | 1 | go |
+| 3204 | python3-viterbi-crf-constrained-decoding-lexicon-trie-priors | 1 | python3 |
+| 3205 | bash-sqlite-wal-page-checksum-fork-torn-write-recovery | 1 | shell |
+| 3206 | gitreins-tier1-environmental-gotmpdir-symlink-path-containment-failure | 1 |  |
+| 3207 | node20-consistent-hash-ring-bounded-vnode-migration-dual-write-window | 1 | js |
+| 3208 | go-hyperloglog-sliding-window-distinct-estimator-bias-correction | 1 | go |
+| 3209 | python3-suffix-automaton-kth-distinct-substring-online-append | 1 | python3 |
+| 3210 | hermes-worker-wedge-under-host-load-saturation | 1 |  |
+| 3211 | go-multi-paxos-joint-quorum-reconfiguration-lease-handoff | 1 | go |
+| 3212 | node20-smt-bitblasting-ite-dag-size-optimization | 1 | js |
+| 3213 | python3-shapley-approx-stratified-unbiased-sampling-variance-floor | 1 | python |
+| 3214 | fixed-20-review-measurement-harness | 1 |  |
+| 3215 | gitreins-tier2-judge-iteration-cap-starvation | 1 | python |
