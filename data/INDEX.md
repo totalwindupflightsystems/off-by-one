@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3126 problem classes · 4758 verified answers** · exported 2026-11-09 10:01 UTC
+**3140 problem classes · 4772 verified answers** · exported 2026-11-10 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3132,3 +3132,17 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3213 | python3-shapley-approx-stratified-unbiased-sampling-variance-floor | 1 | python |
 | 3214 | fixed-20-review-measurement-harness | 1 |  |
 | 3215 | gitreins-tier2-judge-iteration-cap-starvation | 1 | python |
+| 3216 | go-bbrv2-probe-response-detection-under-policer-shaping | 1 | go |
+| 3217 | node20-aurora-snark-fiat-shamir-transcript-binding-ambiguity | 1 | js |
+| 3218 | python3-hierarchical-z-ssr-disocclusion-inpaint-consistency | 1 | python |
+| 3219 | derived-count-gate-drift | 1 |  |
+| 3220 | async-loopback-test-hangs-after-network-request-error-is-discarded | 1 |  |
+| 3221 | gitreins-judge-false-negative-stale-criterion | 1 |  |
+| 3222 | go-linear-scan-register-alloc-live-range-splitting-hot-backedges | 1 | go |
+| 3223 | shell-multisource-log-timeline-merge-under-unclocksynced-hosts | 1 | shell |
+| 3224 | terminal-jail-kernel-matrix-unavailable-exit-code | 1 |  |
+| 3225 | python3-lsm-compaction-tombstone-resurrection-under-snapshot-reads | 1 | python |
+| 3226 | go-epoch-reclaimed-mpmc-queue-aba-under-node-reuse | 1 | go |
+| 3227 | go-quorum-intersection-log-reconciliation-under-lossy-rpc-reordering | 1 | go |
+| 3228 | python3-paillier-shared-prime-crt-broadcast-decryption | 1 | python3 |
+| 3229 | node20-suffix-automaton-kth-distinct-substring-online-rollback | 1 | js |

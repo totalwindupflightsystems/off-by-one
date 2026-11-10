@@ -1,0 +1,28 @@
+{
+  "class_id": 3226,
+  "title": "go-epoch-reclaimed-mpmc-queue-aba-under-node-reuse",
+  "description": "go-epoch-reclaimed-mpmc-queue-aba-under-node-reuse",
+  "created_at": "2026-11-09 22:29:58",
+  "answers": [
+    {
+      "answer_id": 4961,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "I reproduced the bug, fixed it, and verified the fix. The complete self-contained write-up is at **`~/SOLUTION.md`** (with the full runnable program embedded), and the working code is at `~/aba-epoch/main.go`.\n\n## Diagnosis\n\nThe ring's `head`/`tail` CAS on **monotonic 64-bit indices** cannot ABA by itself. The corruption lives in the **recycled `node` payload**, and it comes from two ordering mistakes in the epoch protocol:\n\n1. **Pin published after the node read** (or not at all) → the grace-period scan misses the in-flight reader and recycles the node.\n2. **Release before dereference** (`FreeNow(n)` then `n.value`) → a producer pops the node and overwrites its payload before the reader reads it.\n\nBecause the CAS word is an index but the data it guards is a reused object, monotonic indices do *not* remove pointer ABA.\n\n## Exact fix\n\nStrict protocol in `Dequeue`:\n\n```go\nh.Pin()                 // publish pinSeq BEFORE any node load\ndefer h.Unpin()         // keep until last dereference\n...\nn := s.node.Load()\n...\nv := n.value            // deref while pinned\nq.ep.Retire(n)          // unlink already done; now tag with retireSeq\nreturn v, true\n```\n\nplus a collector that frees a retired node only when\n\n```\nretireSeq(node) <= min(pinSeq of every pinned participant)\n```\n\nand a `Pin` double-check loop so a retirement between the two loads can't be missed.\n\n## Verification (go1.26.8, 16 CPUs)\n\n| Kernel | Result |\n|---|---|\n| `-mode=buggy` 8×8, 2M ops | **3/3 runs anomalous** — e.g. `producer 0: count=250040 want=250000`, `xor=69028 want=0`; global `consumed` still equals total, so the corruption is silent |\n| `-mode=fixed` 8×8, **10^8 ops** | `OK consumed=100000000 5.14M ops/s (19.45s)` — clean |\n| `go build -race` fixed | no races |\n| `go build -race` buggy | `DATA RACE` on `n.value` (producer write vs. reader after recycle) |\n| `go vet ./...` | clean |\n\nThe detector checks per-producer exact count + sum + xor, so OK means no loss, no duplication, and no payload aliasing. I extracted the code block from `SOLUTION.md` and recompiled/reran it independently to confirm the document is self-contained and directly usable.\n",
+      "evidence": "# Evidence\n- Problem class: go-epoch-reclaimed-mpmc-queue-aba-under-node-reuse\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-09T22:29:58.188Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Build a bounded lock-free multi-producer multi-consumer ring queue in Go using atomic CAS on head/tail indices, where slot storage is backed by a pool of reusable node structs freed via epoch-based reclamation. The core hazard is the ABA problem: a CAS succeeds on an index whose referenced node was retired and reused by another goroutine between read and CAS, silently corrupting the queue ordering. You must implement the epoch reclaimer (with per-goroutine epoch pins and a grace-period minimum) and stress it with GOMAXPROCS-heavy producers/consumers until a buggy epoch fence ordering reproduces a lost or duplicated item, then prove the corrected version survives 10^8 ops without anomaly.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-epoch-reclaimed-mpmc-queue-aba-under-node-reuse",
+        "provider": "openrouter",
+        "solved_at": "2026-11-09T22:29:58.188Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-11-09 22:29:58"
+    }
+  ]
+}
