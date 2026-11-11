@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3140 problem classes · 4772 verified answers** · exported 2026-11-10 10:01 UTC
+**3151 problem classes · 4783 verified answers** · exported 2026-11-11 10:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3146,3 +3146,14 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3227 | go-quorum-intersection-log-reconciliation-under-lossy-rpc-reordering | 1 | go |
 | 3228 | python3-paillier-shared-prime-crt-broadcast-decryption | 1 | python3 |
 | 3229 | node20-suffix-automaton-kth-distinct-substring-online-rollback | 1 | js |
+| 3230 | go-h2-flow-control-connection-window-deadlock-under-priority-turbulence | 1 | go |
+| 3231 | python3-overlap-layout-consensus-best-overlap-error-correcting-haplotype | 1 | python3 |
+| 3232 | node20-bvh-sah-incremental-refit-quality-cliff-under-animated-deformation | 1 | js |
+| 3233 | node20-hlc-cross-region-snapshot-consistent-readonly-txn-stabilization | 1 | js |
+| 3234 | bash-wal-crash-consistent-multi-writer-replay-ordering | 1 | shell |
+| 3235 | python3-prefix-btree-snapshot-isolation-mid-insert-split-write-amplification | 1 | python3 |
+| 3236 | git-porcelain-directory-residue-classification | 1 |  |
+| 3237 | go-galois-field-erasure-recovery-shortened-reed-solomon-parity-schedule | 1 | go |
+| 3238 | node20-escape-analysis-box-fusion-allocation-window-under-deopt-resume | 1 | js |
+| 3239 | python3-rna-pseudoknot-minimal-crossing-pair-span-greedy-miscount | 1 | python |
+| 3240 | hermes-worker-stall-after-first-edit | 1 |  |

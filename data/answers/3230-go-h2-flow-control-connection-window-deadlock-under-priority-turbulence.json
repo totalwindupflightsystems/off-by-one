@@ -1,0 +1,28 @@
+{
+  "class_id": 3230,
+  "title": "go-h2-flow-control-connection-window-deadlock-under-priority-turbulence",
+  "description": "go-h2-flow-control-connection-window-deadlock-under-priority-turbulence",
+  "created_at": "2026-11-10 10:07:23",
+  "answers": [
+    {
+      "answer_id": 4965,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "Done. Here's what I produced and verified.\n\n## Deliverables\n\n- **`~/SOLUTION.md`** — the self-contained write-up: title, root-cause analysis, exact fix (code + integration), and verification section. 393 lines.\n- **`~/h2flow/`** — runnable Go 1.26 reference implementation + property tests:\n  - `flowcontrol.go` — `ConnFlow`, `StreamFlow`, `Controller` (the accounting)\n  - `scheduler.go` — `Scheduler.Pop` (readiness-before-priority, three lanes)\n  - `wire.go` — independent protocol-checking peer receiver\n  - `flow_test.go` — deadlock repro + drain proofs + randomized soak\n\n## Core diagnosis\n\nThe deadlock comes from treating the connection send window as implied by the stream windows. In HTTP/2 a DATA frame consumes **both** budgets, and the only link is `sent_conn = Σ sentᵢ`; the peer grants stream credit independently, so **`Σ Wᵢ ≤ C` is false** (test shows 524280 > 65535 for 8 streams). A scheduler that inspects only `stream.window` either head-of-line blocks (S1) or overruns `C` and gets `GOAWAY(FLOW_CONTROL_ERROR)` (S0).\n\nThe enforceable invariants are: per-frame `len ≤ min(Wᵢ, C)`; aggregate reservations `Σ Rᵢ ≤ C`; and drain (if `C>0` and some `Wᵢ>0` with queued DATA, make progress). This matches Go's own `http2outflow.available()` = `min(stream, conn)`.\n\n## Exact fix\n\n1. `Available() = min(streamWindow, connWindow)`, atomic `Take` on both.\n2. Readiness filter **before** priority selection (fixes PRIORITY turbulence).\n3. Three lanes: control → HEADERS (one global HPACK order, bypasses blocked DATA) → ready DATA.\n4. Never let a blocked write stop the connection reader, or the peer's `WINDOW_UPDATE(0)` never arrives.\n5. Negative stream windows after SETTINGS reduction are legal; `Available()` floors at 0.\n\n## Verification (all green)\n\n```\ngo test -count=1 ./...   ok\ngo vet ./...             clean\ngo test -race ./...      clean\ngo test -run TestRandomizedPriorityTurbulenceDrains -count=8   PASS\ngo test -cover ./...     70.6%\n```\n\nTests prove: the literal invariant is false; a naive FIFO deadlocks (negative control: `stream1=65535 stream2=0`) while the fix drains 400000 bytes; connection-window starvation recovers on one `WINDOW_UPDATE(0)`; HEADERS bypass blocked DATA with order `[1 2]`; and a 200×96-stream randomized priority-turbulence soak drains with sender/receiver accounting matching exactly and zero wire rejections.\n",
+      "evidence": "# Evidence\n- Problem class: go-h2-flow-control-connection-window-deadlock-under-priority-turbulence\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-10T10:07:23.778Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A Go HTTP/2 gateway multiplexes hundreds of streams over one connection. When a backend stalls mid-response, the connection-level send window can deadlock with stream-level window updates and HPACK dynamic-table resends, especially when clients interleave PRIORITY re-prioritization. Implement the connection/stream window accounting that provably drains: derive the invariant (sum of stream windows <= connection window) and the exact frame ordering that recovers from each stall mode.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-h2-flow-control-connection-window-deadlock-under-priority-turbulence",
+        "provider": "openrouter",
+        "solved_at": "2026-11-10T10:07:23.778Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-11-10 10:07:23"
+    }
+  ]
+}
