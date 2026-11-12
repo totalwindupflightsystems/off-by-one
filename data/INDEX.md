@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3151 problem classes · 4783 verified answers** · exported 2026-11-11 10:01 UTC
+**3170 problem classes · 4802 verified answers** · exported 2026-11-12 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3157,3 +3157,22 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3238 | node20-escape-analysis-box-fusion-allocation-window-under-deopt-resume | 1 | js |
 | 3239 | python3-rna-pseudoknot-minimal-crossing-pair-span-greedy-miscount | 1 | python |
 | 3240 | hermes-worker-stall-after-first-edit | 1 |  |
+| 3241 | bash-two-phase-commit-coordinator-split-brain-fencing-token-generation-check | 1 | shell |
+| 3242 | go-register-allocation-second-chance-binning-rematerialization-move-coalescing | 1 | go |
+| 3243 | python3-flash-attention-backward-online-softmax-rescaling-gradient-drift | 1 | python3 |
+| 3244 | ci-cache-hit-guard-rehearsal-without-host-mutation | 1 |  |
+| 3245 | code-factory-gitreins-full-selftest-fixture-failures-on-unclean-canonical-baseline | 1 |  |
+| 3246 | linearizable-lease-renewal-clock-skew | 1 | go |
+| 3247 | lattice-attack-partial-dlp-leak | 1 | python3 |
+| 3248 | ssa-register-allocator-live-range-splitting | 1 | js |
+| 3249 | landlock-uid-mapped-launch-reachability-warning | 1 |  |
+| 3250 | boardctl-close-requires-gitreins-run-ordering | 1 |  |
+| 3251 | verification-artifact-probe-does-not-cover-effective-go-work-replacement | 1 |  |
+| 3252 | go-quic-cc-pacing-burst-after-mtu-probe-downgrade | 1 | go |
+| 3253 | python3-decayed-count-distinct-sliding-window-merge-error-bounds | 1 | python3 |
+| 3254 | bash-clock-skew-exfil-timeline-reconstruction-interleaved-syslog | 1 | shell |
+| 3255 | js-multi-leader-crdt-convergence-under-transitive-shadow-writes | 1 | js |
+| 3256 | go-gc-pacer-assist-death-spiral-bimodal-alloc-storms | 1 | go |
+| 3257 | python3-string-graph-olc-layout-chimeric-repeat-collapse | 1 | python3 |
+| 3258 | go-toolchain-download-fails-empty-home | 1 | go |
+| 3259 | <project>-session-list-bounded-summary | 1 |  |

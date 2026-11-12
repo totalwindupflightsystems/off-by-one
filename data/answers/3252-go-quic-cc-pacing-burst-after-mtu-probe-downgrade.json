@@ -1,0 +1,28 @@
+{
+  "class_id": 3252,
+  "title": "go-quic-cc-pacing-burst-after-mtu-probe-downgrade",
+  "description": "go-quic-cc-pacing-burst-after-mtu-probe-downgrade",
+  "created_at": "2026-11-12 00:52:13",
+  "answers": [
+    {
+      "answer_id": 4987,
+      "language": "go",
+      "environment": "go1.26",
+      "version": "1.26",
+      "solution": "Done. Here's the summary.\n\n## Diagnosis\n\nThe task had no repository, so I built a self-contained Go 1.26 model of the QUIC loss-recovery/pacing/DPLPMTU layer in `~/quic-pmtu-pacing`, reproduced the burst, and fixed it. Full write-up: **`~/SOLUTION.md`**.\n\n**Root cause (two coupled defects):**\n\n1. `Pacer.SetCwnd` and `Pacer.SetMaxDatagramSize` only assigned the scalar. The token bucket's `capacity = min(cwnd, 10*MTU)` and accumulated `tokens` were never recomputed/clamped. A failed PMTU probe is the worst case: the bucket fills to the old, large budget during the idle PTO wait, then the rollback collapses `cwnd` to the new minimum — leaving a full stale bucket. The next send fires it as a burst far above the reduced cwnd (14520 B vs cwnd 2400 B).\n2. `Recovery.OnProbeTimeout` updated the congestion controller and pacer on downgrade but not `sendMSS`, so the builder kept emitting 1452-byte packets on a 1200-byte path. `OnProbeAcked` already synced on the success path.\n\n**Fix:**\n- Added `Pacer.rebase()` (recompute capacity, clamp tokens) and call it from both `SetCwnd` and `SetMaxDatagramSize`.\n- Set `r.sendMSS = newMSS` in `OnProbeTimeout`'s downgrade branch, atomically with the MTU/cwnd/pacer updates.\n\n## Verification\n\n```\nbefore fix: 4 tests FAIL (burst 14520 > cwnd 2400; 1452-byte packet on 1200 path)\nafter fix:  5 tests PASS under -race, gofmt + go vet clean\n```\n\nTests: direct pacer invariant, end-to-end post-downgrade budget, pacing-after-burst, a 3000-trial randomized invariant test, and a success-path guard (no over-restriction). After downgrade: `cwnd=2400`, `PMTU=1200`, burst `= 2×1200 = 2400`, next packet delayed.\n\nArtifacts: `SOLUTION.md` (title, root cause, exact patch, verification), `fix.patch`, `before.txt`/`after.txt`, and the module sources.\n",
+      "evidence": "# Evidence\n- Problem class: go-quic-cc-pacing-burst-after-mtu-probe-downgrade\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-12T00:52:12.994Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Implement the loss-recovery and pacing layer of a QUIC endpoint where a path MTU probe fails and the PMTU downgrades mid-flight. Packets sized to the probe MTU are all lost, the DPLPMTU state machine rolls back, and congestion window collapse interacts with the probe retransmission timer. Reproduce the pacing burst that follows and implement the fix so that post-downgrade recovery never exceeds the downgraded MTU budget or the reduced cwnd.",
+        "environment": "go1.26",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-quic-cc-pacing-burst-after-mtu-probe-downgrade",
+        "provider": "openrouter",
+        "solved_at": "2026-11-12T00:52:12.994Z",
+        "version": "1.26"
+      },
+      "status": "verified",
+      "created_at": "2026-11-12 00:52:13"
+    }
+  ]
+}
