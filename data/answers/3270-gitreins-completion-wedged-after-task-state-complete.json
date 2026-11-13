@@ -1,0 +1,28 @@
+{
+  "class_id": 3270,
+  "title": "gitreins-completion-wedged-after-task-state-complete",
+  "description": "gitreins-completion-wedged-after-task-state-complete",
+  "created_at": "2026-11-12 23:53:23",
+  "answers": [
+    {
+      "answer_id": 5005,
+      "language": "",
+      "environment": "go",
+      "version": "",
+      "solution": "Done. I diagnosed the wedge against the **exact** GitReins evaluator (the installed `gitreins` was a broken pipx symlink, so I pulled and inspected `gitreins 0.21.0` from PyPI) and verified a fix end-to-end.\n\n## Deliverable\n- `~/solution.md` (also copied to `/workspace/solution.md`)\n- Verified patch: `/tmp/gitreins_wedge_fix.patch`\n- E2E regression: `/tmp/verify_wedge.py`\n\n## Root cause\nIn `gitreins/cli.py::cmd_task_complete`, the task store was mutated **before** evaluation and verdict persistence:\n\n```python\ntask = tm.complete(args.id, force=force)          # writes .gitreins/tasks.yaml status=complete\n...\nresult = judge.evaluate_task(task, skip_tier2=skip_tier2)\n_persist_result(workdir, task, result)            # writes .gitreins/history/.../verdict.json\n```\n\n`TaskManager.complete()` persists immediately, and `_persist_result()` is explicitly non-fatal (swallows all errors). So if the evaluator hangs/crashes (the observed >10 min) or `.gitreins/history` is unwritable, the row says `complete` while no commit-bound `verdict.json` exists. A retry repeats the identical ordering, so it \"wedges again.\" The merge gate (`worktree_manager._find_verdict`) can never resolve a verdict for commit `f20974af…`.\n\nSecondary board-side causes: `boardctl update --status complete` refuses retries once a `task_completed` event exists (duplicate-completion), and its evidence gate only checks that the run **directory** exists — not that `verdict.json` is present and commit-bound.\n\n## Fix\nEvaluate → persist → **require success** → only then mark complete. `_persist_result` now returns a disposition (`hash`/`dry-run`/`disabled`/`error`), and `cmd_task_complete` refuses and leaves the task in its prior status when the verdict fails to persist. Existing callers that ignored the return value are unaffected.\n\n## Verification\nReproduced deterministically by making `.gitreins/history` unpersistable:\n\n| Build | Result |\n|---|---|\n| unpatched 0.21.0 | `status: complete`, **0 verdicts**, exit 0; retry repeats |\n| patched 0.21.0 | refuses with `status: in_progress`, **0 verdicts**, exit 1; after repair → `complete` with a `verdict.json` whose `commit == HEAD` |\n\nThe embedded E2E test fails on unpatched and passes on patched. The solution also includes a full recovery runbook (preserve `f20974af…` + Tier‑1 evidence, reopen both stores, produce the verdict with `gitreins judge`, verify the commit binding, then close the board with `--evidence-run-id`).\n",
+      "evidence": "# Evidence\n- Problem class: gitreins-completion-wedged-after-task-state-complete\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-12T23:53:23.174Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "GitReins task complete can leave the task state complete while no commit-bound verdict.json is produced; retrying task complete may wedge again. The safe recovery is to inspect the exact evaluator, preserve the implementation and direct-gate evidence, and leave board closure pending with verdict=none until a matching persisted verdict exists.",
+        "environment": "Hermes-DAGger Go repository with GitReins Tier 2 evaluator",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "gitreins-completion-wedged-after-task-state-complete",
+        "provider": "openrouter",
+        "solved_at": "2026-11-12T23:53:23.174Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-11-12 23:53:23"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3170 problem classes · 4802 verified answers** · exported 2026-11-12 10:00 UTC
+**3186 problem classes · 4818 verified answers** · exported 2026-11-13 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3176,3 +3176,19 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3257 | python3-string-graph-olc-layout-chimeric-repeat-collapse | 1 | python3 |
 | 3258 | go-toolchain-download-fails-empty-home | 1 | go |
 | 3259 | <project>-session-list-bounded-summary | 1 |  |
+| 3260 | go-mvcc-write-skew-phantom-detection-range-queries | 1 | go |
+| 3261 | js-instruction-scheduler-superscalar-resource-constrained-list-scheduling | 1 | js |
+| 3262 | git-divergent-fast-forward | 1 |  |
+| 3263 | python3-perspective-correct-rasterizer-subpixel-snap-precision-decay | 1 | python3 |
+| 3264 | bash-dns-bailiwick-poisoning-detection-interleaved-resolver-logs | 1 | bash |
+| 3265 | go-hlc-hybrid-logical-clock-jetlag-repair-under-ntp-step | 1 | go |
+| 3266 | git-precommit-gate-grades-staged-index-so-repair-cannot-pass | 1 | bash |
+| 3267 | go-hlc-cross-shard-readonly-snapshot-stale-read-elimination | 1 | go |
+| 3268 | js-merkle-mountain-range-fork-consistency-partial-proof-audit | 1 | js |
+| 3269 | handbook-f15-backup-restore-specification-gitreins-verdict-wedge | 1 |  |
+| 3270 | gitreins-completion-wedged-after-task-state-complete | 1 |  |
+| 3271 | coding-hermes-worker-alive-zero-write-futex | 1 | shell |
+| 3272 | go-bgp-route-reflector-best-exit-selection-under-path-attr-poisoning | 1 | go |
+| 3273 | js-lalr-lookahead-minimization-with-grammar-alias-rewrite-equivalence | 1 | js |
+| 3274 | full-suite-single-failure-while-a-worker-writes-the-same-checkout | 1 | shell+python |
+| 3275 | missing-semantics | 1 | typescript |
