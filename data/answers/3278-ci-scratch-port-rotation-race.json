@@ -1,0 +1,28 @@
+{
+  "class_id": 3278,
+  "title": "ci-scratch-port-rotation-race",
+  "description": "ci-scratch-port-rotation-race",
+  "created_at": "2026-11-13 13:04:29",
+  "answers": [
+    {
+      "answer_id": 5013,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "I diagnosed the failure, implemented a fix, and verified it. The full written solution is at **`/workspace/solution.md`**. Summary:\n\n## Root cause\n`select_scratch_port` (`scripts/lib/port-guard.sh`) is a **probe, not a reservation** — it checks `ss -tlnp` and hands the port to the caller without holding it. Every runner selects the port **before** its multi-second `go build`, and binds later, so the pick→bind window is seconds wide. In CI a foreign socket took `:38614` after the pre-check and before the bind, so the relay died with `EADDRINUSE`; the \"run did not start / pid mismatch / mesh not empty\" checks were all downstream fallout. This is the runner-side twin of the already-fixed INT-CI-005 decoy-bind race.\n\n## Fix\n1. **`scripts/lib/port-guard.sh`** — added two shared helpers:\n   - `port_is_free <port>` — non-exiting occupancy probe.\n   - `reselect_lost_port …` — re-probes the chosen port immediately before the bind; if taken, rotates through the same candidate block via `select_scratch_port` (naming the thief) and updates the caller's port variable. Explicit ports still fail closed, never rotate.\n2. **`examples/ws-mesh-demo/run-demo.sh`** — remembered `DEMO_PORT_EXPLICIT`, and replaced the single start with a bounded `reselect_lost_port` + start + health **rotate-and-retry** loop. A real product death (port free, process dead) is still surfaced, not retried.\n\n## Verification (all passed)\n- **Deterministic repro**: old single-attempt start dies on the stolen port; `reselect_lost_port` rotates `:39520 → :39521`, comes up healthy, and `ss` confirms it owns the port.\n- **Real runner end-to-end**: with a slow-`go` shim stealing the selected port during the build, `run-demo.sh` logged the rotation and reached `DEMO PASS` (exit 0).\n- **No regressions**: `port-guard.sh --selftest` 11/11; `scratch-port-rotation-selftest.py --case wiring --case ws-mesh-rotate --case ws-mesh-exhaust --case ws-mesh-explicit` all pass (97/11/12/13 checks).\n\nThe writeup also gives the mechanical recipe (§2.4) for applying the same helper to the federation/gateway/llm-mesh starts. Note the `degraded` case and the non-ws-mesh live arms are unchanged by this patch.\n",
+      "evidence": "# Evidence\n- Problem class: ci-scratch-port-rotation-race\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-13T13:04:29.296Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Crier CI run 43414244304 on df5b50ab failed in Scratch-port rotation selftest. The ws-mesh rotation arm selected :38614 after :38613 was occupied, but the relay startup failed because :38614 was also occupied by a listener not identified by the candidate pre-check. The selftest then reported three downstream false failures (run did not start, health pid mismatch, mesh not empty). Evidence: gh run 43414244304, job 131848012355, step Scratch-port rotation selftest. This is a CI harness/port-allocation race, not yet a product fix; next debugging should audit candidate selection and ownership immediately before process start, and ensure the selected port is reserved or revalidated.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "ci-scratch-port-rotation-race",
+        "provider": "openrouter",
+        "solved_at": "2026-11-13T13:04:29.296Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-11-13 13:04:29"
+    }
+  ]
+}

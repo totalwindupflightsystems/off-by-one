@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3186 problem classes · 4818 verified answers** · exported 2026-11-13 10:00 UTC
+**3201 problem classes · 4834 verified answers** · exported 2026-11-14 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -1504,6 +1504,7 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2478 | cli-error-message-missing-population-guidance | 2 | go |
 | 2480 | js-scanline-rasterizer-top-left-fill-rule-subpixel | 2 | js |
 | 2481 | h3-board-header-guard-history-limited | 2 | sh |
+| 2918 | go-test-untouched-package-schedule-flake-under-load | 2 | go |
 | 1 | unknown | 1 | go |
 | 2 | js-array-dedupe | 1 | go |
 | 4 | shell-sum-column-numbers | 1 | go |
@@ -2834,7 +2835,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 2915 | bash-tcp-sack-scoreboard-dsack-spurious-audit | 1 | shell |
 | 2916 | stale-test-server-squatting-port-misleads-endpoint-probes | 1 | go |
 | 2917 | python-futures-import-before-docstring-kills-doc | 1 | python |
-| 2918 | go-test-untouched-package-schedule-flake-under-load | 1 | go |
 | 2919 | probe-fields-x1 | 1 | go |
 | 2920 | python-exec-slice-annotation-nameerror | 1 | go |
 | 2921 | go-explicit-state-modelcheck-symmetry-canonicalization | 1 | go |
@@ -3192,3 +3192,18 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3273 | js-lalr-lookahead-minimization-with-grammar-alias-rewrite-equivalence | 1 | js |
 | 3274 | full-suite-single-failure-while-a-worker-writes-the-same-checkout | 1 | shell+python |
 | 3275 | missing-semantics | 1 | typescript |
+| 3276 | prune-ssa-minimal-phi-placement-with-liveness-quotes | 1 | go |
+| 3277 | bft-view-change-quorum-intersection-under-partition-healing | 1 | go |
+| 3278 | ci-scratch-port-rotation-race | 1 | go |
+| 3279 | paired-end-hybrid-alignment-gap-affine-overlap-layout | 1 | python |
+| 3280 | hlc-lease-transplant-fencing-token-split-brain-recovery | 1 | go |
+| 3281 | constant-time-edwards-decompression-cofactor-verification-timing-oracle | 1 | js |
+| 3282 | gitreins-tier1-admin-only-diff-false-negative | 1 |  |
+| 3283 | peephole-superoptimizer-phase-ordering-cycle-elimination | 1 | python |
+| 3284 | tiered-lsm-compaction-read-amplification-budget-scheduling | 1 | go |
+| 3285 | tiled-attention-kernel-online-softmax-boundary-ownership | 1 | js |
+| 3286 | shell-evidence-closure-binding-verdicts | 1 | go |
+| 3287 | python-spec-context-brief-wiring | 1 | go |
+| 3288 | go-coverage-guided-deep-guard-reacher-nested-checksum-constraint-inversion | 1 | go |
+| 3289 | js-mu-calculus-fixpoint-model-checking-fairness-constraint-parity-game-solving | 1 | js |
+| 3290 | stale-bare-git-marker-after-completed-rebase | 1 | go |
