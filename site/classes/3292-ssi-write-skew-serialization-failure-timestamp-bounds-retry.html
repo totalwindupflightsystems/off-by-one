@@ -1,0 +1,1240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ssi-write-skew-serialization-failure-timestamp-bounds-retry — Off-By-One verified answer</title>
+<meta name="description" content="Problem class: ssi-write-skew-serialization-failure-timestamp-bounds-retry">
+<meta property="og:title" content="ssi-write-skew-serialization-failure-timestamp-bounds-retry — Off-By-One">
+<meta property="og:description" content="Problem class: ssi-write-skew-serialization-failure-timestamp-bounds-retry">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3292-ssi-write-skew-serialization-failure-timestamp-bounds-retry.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>ssi-write-skew-serialization-failure-timestamp-bounds-retry</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>Problem class: ssi-write-skew-serialization-failure-timestamp-bounds-retry</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3292-ssi-write-skew-serialization-failure-timestamp-bounds-retry.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><p>I implemented the store from scratch (empty working directory), verified it under the race detector, and wrote the full solution document to <code>~/SOLUTION.md</code> (source in <code>~/ssikv/</code>). The complete self-contained solution follows.</p>
+<hr />
+<h1>SSI write-skew serialization failure: timestamp bounds and retry</h1>
+<p><strong>Problem class:</strong> <code>ssi-write-skew-serialization-failure-timestamp-bounds-retry</code>
+<strong>Environment:</strong> Go 1.26 (single node)
+<strong>Deliverable:</strong> a self-contained, verified implementation of a transactional key/value store with <strong>Serializable Snapshot Isolation (SSI)</strong>, a bounded timestamp oracle, and a retry policy that guarantees forward progress on the classic doctor-on-call write-skew workload.</p>
+<hr />
+<h2>1. Symptom</h2>
+<p>A transactional KV store gives snapshot reads and correct read-your-writes, yet a concurrent, write-skew-prone workload silently violates an invariant even though every transaction "committed successfully". The canonical case is <em>doctor on call</em>:</p>
+<pre><code>T1: check that some other doctor is on call  -&gt;  take Alice off call
+T2: check that some other doctor is on call  -&gt;  take Bob off call
+</code></pre>
+<p>Under plain <strong>snapshot isolation</strong> both transactions read the pre-state, both see another doctor on call, both succeed, and the system ends with <strong>zero</strong> doctors on call. Snapshot isolation is <em>not</em> serializable.</p>
+<p>When SSI is bolted on naively, a second failure mode appears: commits start failing with serialization errors, but under contention the system either (a) still lets write skew through, or (b) livelocks because every retry takes a snapshot that is still behind the conflicting commit, so the same pair always re-conflicts.</p>
+<hr />
+<h2>2. Root-cause analysis</h2>
+<p>The failure has four independent root causes. Each maps to a specific line of defence in the implementation.</p>
+<h3>RC1 — Snapshot isolation cannot prevent write skew</h3>
+<p>Snapshot isolation only detects <strong>write–write</strong> conflicts (first committer wins). Write skew creates a cycle using <strong>read–write</strong> anti-dependencies only:</p>
+<ul>
+<li><code>A -&gt;rw B</code> means <em>A read a version that B overwrote</em>.</li>
+<li>Doctor-on-call produces <code>A -&gt;rw B</code> and <code>B -&gt;rw A</code> with <strong>no</strong> shared key.</li>
+</ul>
+<p>No ww check can see this. SSI must materialise rw-antidependencies and reject a commit when it would close a <strong>dangerous structure</strong></p>
+<pre><code>T1 -&gt;rw T2 -&gt;rw T3      (two consecutive rw edges)
+</code></pre>
+<p>The safe rule of Cahill et al. (2008), also used by PostgreSQL, is: abort the pivot <code>T2</code> when <code>T3</code> has already committed (T3 is the first committer). This breaks exactly the cycles that could otherwise form while letting the first committer make progress.</p>
+<h3>RC2 — The rw-edge set must be complete in <em>both</em> directions and <em>both</em> commit orders</h3>
+<p>This is the subtle bug that makes naive SSI both unsound and inert.</p>
+<p><strong>2a. Missing edge when a reader's snapshot predates a commit but the read happens after it.</strong> If writer <code>W</code> commits the successor version <em>before</em> reader <code>R</code> performs its read, then at <code>W</code>'s commit time <code>R</code> was not yet registered as a reader, so <code>W</code> cannot create the edge <code>R -&gt;rw W</code>. The edge is nevertheless real: <code>R</code> read the version <code>W</code> superseded. A correct implementation must, at <strong>read time</strong>, add <code>R -&gt;rw W</code> for the first version newer than <code>R</code>'s snapshot. Without this, dangerous structures are missed and the store is <strong>not serializable</strong>.</p>
+<p><strong>2b. Wrong ordering inside commit.</strong> The pivot's <strong>incoming</strong> edges <code>T1 -&gt;rw T2</code> are exactly the edges created by <em>T2's own writes</em> (T2 commits and discovers readers of those keys). If the dangerous-structure test runs <em>before</em> those edges are recorded, the pivot sees <code>inFrom == empty</code> and the check is a no-op — write skew passes. The commit must therefore:</p>
+<ol>
+<li>allocate <code>commitTS</code>,</li>
+<li>run ww validation,</li>
+<li><strong>record the readers' <code>-&gt;rw</code> edges into the pivot</strong>,</li>
+<li><strong>then</strong> run the dangerous-structure test,</li>
+<li>apply the write set.</li>
+</ol>
+<h3>RC3 — Timestamp bounds</h3>
+<p>The conflict window is the <strong>half-open</strong> interval <code>(startTS, commitTS]</code>:</p>
+<ul>
+<li>a writer that committed at <code>ts &lt;= startTS</code> is already in the snapshot — no conflict;</li>
+<li>a writer that committed at <code>startTS &lt; ts &lt;= commitTS</code> is a conflict.</li>
+</ul>
+<p>Getting the bounds wrong produces either spurious aborts (closed lower bound) or <strong>missed</strong> conflicts (closed-but-too-wide or open upper bound). Two invariants are non-negotiable:</p>
+<ul>
+<li><code>Allocate()</code> must be <strong>strictly monotonic</strong>: <code>ts = max(now, last+1)</code>. A coarse or backwards-stepping wall clock otherwise hands out duplicate timestamps and destroys the window.</li>
+<li><code>commitTS &gt; startTS</code> always. If a commit timestamp can equal or precede its snapshot, read-your-writes and ordering break.</li>
+</ul>
+<p>Clock uncertainty (<code>maxOffset</code>) is modelled with a TrueTime-style <strong>commit-wait</strong>: a commit is not externally visible until the physical clock passes <code>commitTS + maxOffset</code>. This guarantees no future timestamp can be below an already-issued one.</p>
+<h3>RC4 — Retry must guarantee forward progress</h3>
+<p>Retrying with the <em>same</em> snapshot, or without jitter, makes symmetric transactions re-conflict forever (livelock). The fix is to retry with a <strong>brand-new snapshot timestamp</strong> and a jittered exponential backoff. Progress is structural: in every dangerous structure only the pivot aborts, so the first committer's writes persist; the retry takes a later snapshot and observes them.</p>
+<hr />
+<h2>3. The fix</h2>
+<p>The complete, verified implementation is below. It is a single Go package (<code>ssikv</code>). Highlights:</p>
+<ul>
+<li><code>TSO.Allocate</code> — strict monotonicity + <code>maxOffset</code> commit-wait.</li>
+<li><code>version{ts, value, deleted, writer}</code> — MVCC versions remember their writer.</li>
+<li><code>Txn.Get</code> calls <code>recordReadConflict</code> to close the RC2a hole.</li>
+<li><code>Txn.Commit</code> orders: ww check, <strong>record incoming rw edges</strong>, dangerous structure test, apply, commit-wait.</li>
+<li><code>Store.Run</code> — fresh transaction + jittered exponential backoff.</li>
+</ul>
+<h3><code>go.mod</code></h3>
+<pre><code class="language-go">module ssikv
+
+go 1.26
+</code></pre>
+<h3><code>ssi.go</code></h3>
+<pre><code class="language-go">// Package ssikv implements a single-node transactional key/value store with
+// Serializable Snapshot Isolation (SSI).
+//
+// Design summary
+//
+//   - A monotonic timestamp oracle (TSO) hands out strictly increasing
+//     timestamps and models a bounded clock-uncertainty window (TrueTime
+//     style epsilon).  Snapshot reads use a start timestamp; committing
+//     writers use a commit timestamp and commit-wait so that timestamps are
+//     externally consistent.
+//
+//   - Storage is multi-version: every committed write appends a version
+//     tagged with its commit timestamp, so a reader can reconstruct any
+//     snapshot by scanning versions &lt;= startTS.
+//
+//   - Snapshot isolation alone permits write skew.  We additionally track
+//     rw-antidependencies: an edge T1 -&gt;rw T2 exists when T1 read a version
+//     that T2 later overwrote.  A commit is rejected when the pivot of a
+//     dangerous structure T1 -&gt;rw T2 -&gt;rw T3 has an already-committed
+//     successor T3 (T3 is the first committer).  This is the SSI safety rule
+//     of Cahill et al. (2008), as implemented by PostgreSQL.
+//
+//   - Commit validation uses the half-open interval (startTS, commitTS]:
+//     a write by another transaction committed strictly after our snapshot
+//     and at or before our commit timestamp conflicts.
+//
+//   - Run() supplies a jittered, exponentially backed-off retry loop so that
+//     write-skew-prone workloads (doctor-on-call) make forward progress:
+//     only the pivot aborts, the first committer always wins, and retries
+//     observe the new state.
+package ssikv
+
+import (
+    &quot;errors&quot;
+    &quot;math/rand&quot;
+    &quot;sort&quot;
+    &quot;sync&quot;
+    &quot;time&quot;
+)
+
+// ---------------------------------------------------------------------------
+// Errors
+// ---------------------------------------------------------------------------
+
+var (
+    // ErrSerialization is returned when a commit would create a dangerous
+    // structure in the rw-antidependency graph.  The transaction must be
+    // retried from a fresh snapshot.
+    ErrSerialization = errors.New(&quot;ssikv: serialization failure (dangerous structure)&quot;)
+
+    // ErrWriteConflict is returned when a concurrent transaction already
+    // committed a write to one of our keys after our snapshot was taken
+    // (first-committer-wins).  Retryable.
+    ErrWriteConflict = errors.New(&quot;ssikv: write-write conflict&quot;)
+
+    // ErrAborted is returned for any operation on a finished transaction.
+    ErrAborted = errors.New(&quot;ssikv: transaction already finished&quot;)
+
+    // ErrNotFound is a non-retryable &quot;key absent in this snapshot&quot;.
+    ErrNotFound = errors.New(&quot;ssikv: key not found&quot;)
+)
+
+// Retryable reports whether err may be resolved by retrying the transaction
+// from a fresh snapshot.
+func Retryable(err error) bool {
+    return errors.Is(err, ErrSerialization) || errors.Is(err, ErrWriteConflict)
+}
+
+// ---------------------------------------------------------------------------
+// Timestamp oracle
+// ---------------------------------------------------------------------------
+
+// TSO allocates strictly monotonically increasing timestamps.  maxOffset is
+// the clock-uncertainty bound: the maximum amount by which the physical clock
+// of any node could differ from ours.  CommitWait blocks for that bound so a
+// commit cannot be observed with a timestamp that &quot;moves backwards&quot; from the
+// point of view of a future reader.
+type TSO struct {
+    mu        sync.Mutex
+    last      int64
+    maxOffset int64 // nanoseconds
+    now       func() time.Time
+}
+
+// NewTSO returns a TSO with the supplied clock-uncertainty bound.
+func NewTSO(maxOffset time.Duration) *TSO {
+    return &amp;TSO{
+        maxOffset: int64(maxOffset),
+        now:       time.Now,
+    }
+}
+
+// Allocate returns a timestamp strictly greater than every timestamp returned
+// before.  It is never less than the current physical time, so timestamps are
+// monotonically non-decreasing with respect to wall-clock time even if the
+// wall clock steps backwards.
+func (o *TSO) Allocate() int64 {
+    o.mu.Lock()
+    defer o.mu.Unlock()
+    ts := o.now().UnixNano()
+    // Timestamp bounds: enforce strict monotonicity.  Without the +1 below a
+    // coarse or regressing clock can hand out duplicate timestamps, which
+    // breaks the (startTS, commitTS] conflict window.
+    if ts &lt;= o.last {
+        ts = o.last + 1
+    }
+    o.last = ts
+    return ts
+}
+
+// Last returns the most recently allocated timestamp.
+func (o *TSO) Last() int64 {
+    o.mu.Lock()
+    defer o.mu.Unlock()
+    return o.last
+}
+
+// CommitWait blocks until the physical clock has advanced past ts+maxOffset.
+// After it returns, no future Allocate can produce a value &lt;= ts, which makes
+// commit timestamps externally consistent.
+func (o *TSO) CommitWait(ts int64) {
+    deadline := time.Unix(0, ts+o.maxOffset)
+    for {
+        d := time.Until(deadline)
+        if d &lt;= 0 {
+            return
+        }
+        time.Sleep(d)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MVCC storage
+// ---------------------------------------------------------------------------
+
+type version struct {
+    ts      int64
+    value   []byte
+    deleted bool
+    // writer is the id of the transaction that produced this version.  It is
+    // needed to record rw-edges when a reader with an old snapshot reads a
+    // value that a transaction which has already committed overwrote.
+    writer uint64
+}
+
+type entry struct {
+    versions []version // ascending by ts
+}
+
+// lookup returns the version visible at snapshot ts, or false if the key did
+// not exist (or was deleted) at that snapshot.
+func (e *entry) lookup(ts int64) (version, bool) {
+    // Greatest index with versions[i].ts &lt;= ts.
+    i := sort.Search(len(e.versions), func(i int) bool { return e.versions[i].ts &gt; ts }) - 1
+    if i &lt; 0 {
+        return version{}, false
+    }
+    v := e.versions[i]
+    if v.deleted {
+        return version{}, false
+    }
+    return v, true
+}
+
+func (e *entry) latestTS() int64 {
+    if len(e.versions) == 0 {
+        return 0
+    }
+    return e.versions[len(e.versions)-1].ts
+}
+
+// ---------------------------------------------------------------------------
+// Store
+// ---------------------------------------------------------------------------
+
+// Store is a single-node SSI key/value store.  A single mutex guards all
+// mutable state; transactions interleave between calls, not inside them.
+type Store struct {
+    mu     sync.Mutex
+    tso    *TSO
+    data   map[string]*entry
+    next   uint64
+    active map[uint64]*Txn
+    // committedTx holds committed transactions so rw-edges can be resolved to
+    // a commit order during dangerous-structure detection.
+    committedTx map[uint64]*Txn
+    // readers maps a key to the transactions that read it.  Readers are kept
+    // after commit so that a later writer can still record the rw-edge.
+    readers map[string]map[uint64]*Txn
+
+    // counters for observability / tests
+    aborts int
+}
+
+// New returns an empty store with the given clock-uncertainty bound.
+func New(maxOffset time.Duration) *Store {
+    return &amp;Store{
+        tso:         NewTSO(maxOffset),
+        data:        make(map[string]*entry),
+        active:      make(map[uint64]*Txn),
+        committedTx: make(map[uint64]*Txn),
+        readers:     make(map[string]map[uint64]*Txn),
+    }
+}
+
+// Aborts returns the number of transactions aborted by SSI/ww validation.
+func (s *Store) Aborts() int {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    return s.aborts
+}
+
+// Begin starts a transaction and pins its snapshot at a fresh timestamp.
+func (s *Store) Begin() *Txn {
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    s.next++
+    t := &amp;Txn{
+        id:        s.next,
+        startTS:   s.tso.Allocate(),
+        store:     s,
+        writeSet:  make(map[string][]byte),
+        deleteSet: make(map[string]bool),
+        readSet:   make(map[string]int64),
+        inFrom:    make(map[uint64]struct{}),
+        outTo:     make(map[uint64]struct{}),
+    }
+    s.active[t.id] = t
+    return t
+}
+
+func (s *Store) registerReader(key string, t *Txn) {
+    set := s.readers[key]
+    if set == nil {
+        set = make(map[uint64]*Txn)
+        s.readers[key] = set
+    }
+    set[t.id] = t
+}
+
+// writtenKeys returns the union of the write and delete sets.
+func (t *Txn) writtenKeys() []string {
+    keys := make([]string, 0, len(t.writeSet)+len(t.deleteSet))
+    for k := range t.writeSet {
+        keys = append(keys, k)
+    }
+    for k := range t.deleteSet {
+        keys = append(keys, k)
+    }
+    sort.Strings(keys)
+    return keys
+}
+
+func (t *Txn) abortLocked() {
+    t.state = aborted
+    delete(t.store.active, t.id)
+    t.store.aborts++
+    // Remove this transaction from the reader registry so it can no longer
+    // generate rw-edges, and drop its edges.
+    for key := range t.readSet {
+        if set := t.store.readers[key]; set != nil {
+            delete(set, t.id)
+        }
+    }
+    // Remove dangling edges in both directions so a later pivot does not
+    // inspect an aborted neighbour.
+    lookup := func(id uint64) *Txn {
+        if x := t.store.active[id]; x != nil {
+            return x
+        }
+        return t.store.committedTx[id]
+    }
+    for id := range t.inFrom {
+        if x := lookup(id); x != nil {
+            delete(x.outTo, t.id)
+        }
+    }
+    for id := range t.outTo {
+        if x := lookup(id); x != nil {
+            delete(x.inFrom, t.id)
+        }
+    }
+    t.inFrom = map[uint64]struct{}{}
+    t.outTo = map[uint64]struct{}{}
+}
+
+// ---------------------------------------------------------------------------
+// Transaction
+// ---------------------------------------------------------------------------
+
+type txnState int
+
+const (
+    active txnState = iota
+    committed
+    aborted
+)
+
+// Txn is a single transaction.  It is not safe for concurrent use by multiple
+// goroutines; create one transaction per goroutine.
+type Txn struct {
+    id      uint64
+    startTS int64
+    store   *Store
+
+    writeSet  map[string][]byte
+    deleteSet map[string]bool
+    // readSet maps key -&gt; the version timestamp observed (0 means &quot;absent&quot;).
+    readSet map[string]int64
+
+    // rw-antidependency edges, as transaction ids:
+    //   inFrom[X] : X -&gt;rw this
+    //   outTo[Y]  : this -&gt;rw Y
+    inFrom map[uint64]struct{}
+    outTo  map[uint64]struct{}
+
+    state    txnState
+    commitTS int64
+}
+
+// StartTS returns the snapshot timestamp of the transaction.
+func (t *Txn) StartTS() int64 { return t.startTS }
+
+// CommitTS returns the commit timestamp once the transaction has committed.
+func (t *Txn) CommitTS() int64 { return t.commitTS }
+
+// Get reads key at the transaction's snapshot (or its own buffered write).
+// It returns ErrNotFound if the key is absent in this snapshot.
+func (t *Txn) Get(key string) ([]byte, error) {
+    s := t.store
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if t.state != active {
+        return nil, ErrAborted
+    }
+    // Read-your-own-writes takes precedence over the snapshot.
+    if v, ok := t.writeSet[key]; ok {
+        return append([]byte(nil), v...), nil
+    }
+    if t.deleteSet[key] {
+        return nil, ErrNotFound
+    }
+    if e := s.data[key]; e != nil {
+        if v, ok := e.lookup(t.startTS); ok {
+            t.readSet[key] = v.ts
+            s.registerReader(key, t)
+            t.recordReadConflict(e)
+            return append([]byte(nil), v.value...), nil
+        }
+        t.recordReadConflict(e)
+    }
+    // Record a read of an absent key: a later write to it is still an
+    // rw-conflict (phantom-style write skew).
+    t.readSet[key] = 0
+    s.registerReader(key, t)
+    return nil, ErrNotFound
+}
+
+// Put buffers a write.  It becomes visible to other transactions only on
+// commit.
+func (t *Txn) Put(key string, value []byte) error {
+    s := t.store
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if t.state != active {
+        return ErrAborted
+    }
+    t.writeSet[key] = append([]byte(nil), value...)
+    delete(t.deleteSet, key)
+    return nil
+}
+
+// Delete buffers a deletion of key.
+func (t *Txn) Delete(key string) error {
+    s := t.store
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if t.state != active {
+        return ErrAborted
+    }
+    delete(t.writeSet, key)
+    t.deleteSet[key] = true
+    return nil
+}
+
+// Rollback abandons the transaction.
+func (t *Txn) Rollback() {
+    s := t.store
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if t.state == active {
+        t.abortLocked()
+    }
+}
+
+// recordReadConflict records an rw-edge to the writer of the first version
+// newer than the reader's snapshot.  This closes the soundness hole where a
+// transaction takes its snapshot before a commit but performs the read after
+// that commit: the writer is already committed and therefore cannot discover
+// the reader when it processes its own reader set.  Looking at it from the
+// reader side restores the missing edge.  Caller holds s.mu.
+func (t *Txn) recordReadConflict(e *entry) {
+    i := sort.Search(len(e.versions), func(i int) bool { return e.versions[i].ts &gt; t.startTS })
+    if i &gt;= len(e.versions) {
+        return
+    }
+    v := &amp;e.versions[i]
+    if v.writer == 0 || v.writer == t.id {
+        return
+    }
+    w := t.store.committedTx[v.writer]
+    if w == nil {
+        return
+    }
+    t.outTo[w.id] = struct{}{}
+    w.inFrom[t.id] = struct{}{}
+}
+
+// isDangerousPivot reports whether committing this transaction would close an
+// SSI dangerous structure T1 -&gt;rw pivot -&gt;rw T3 where T3 has already committed
+// (T3 is the first committer).  Caller holds s.mu.
+func (t *Txn) isDangerousPivot() bool {
+    if len(t.inFrom) == 0 {
+        return false
+    }
+    for id := range t.outTo {
+        y := t.store.active[id]
+        if y == nil {
+            // Not active; look it up among committed writers.
+            y = t.store.committedTx[id]
+        }
+        if y != nil &amp;&amp; y.state == committed {
+            return true
+        }
+    }
+    return false
+}
+
+// Commit validates and atomically applies the transaction.
+//
+// The conflict window is the half-open interval (startTS, commitTS]:  any
+// other write committed strictly after our snapshot but at or before our
+// commit timestamp is a conflict.  Using a closed lower bound would
+// spuriously abort on our own snapshot version; using a closed upper bound
+// would miss a writer that committed at exactly commitTS.
+func (t *Txn) Commit() error {
+    s := t.store
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    if t.state != active {
+        return ErrAborted
+    }
+
+    commitTS := s.tso.Allocate()
+    if commitTS &lt;= t.startTS {
+        // Timestamp bounds invariant: a commit must be strictly newer than
+        // its snapshot, otherwise read-your-writes and ordering break.
+        t.abortLocked()
+        return ErrSerialization
+    }
+
+    // 1. Snapshot-isolation write-write validation (first committer wins).
+    for _, key := range t.writtenKeys() {
+        if e := s.data[key]; e != nil {
+            if latest := e.latestTS(); latest &gt; t.startTS {
+                t.abortLocked()
+                return ErrWriteConflict
+            }
+        }
+    }
+
+    // 2. Record rw-edges from every reader of a key we write to us.  A reader
+    // whose observed version is older than commitTS did not see our write, so
+    // reader -&gt;rw us.  These are the pivot's incoming edges, so they MUST be
+    // established before the dangerous-structure test below.
+    for _, key := range t.writtenKeys() {
+        for id, r := range s.readers[key] {
+            if id == t.id || r.state == aborted {
+                continue
+            }
+            if obs, ok := r.readSet[key]; ok &amp;&amp; obs &lt; commitTS {
+                r.outTo[t.id] = struct{}{}
+                t.inFrom[id] = struct{}{}
+            }
+        }
+    }
+
+    // 3. SSI dangerous-structure detection: reject the commit if this
+    // transaction is the pivot T2 of T1 -&gt;rw T2 -&gt;rw T3 and T3 has already
+    // committed (T3 is the first committer).
+    if t.isDangerousPivot() {
+        t.abortLocked()
+        return ErrSerialization
+    }
+
+    // 4. Apply the write set atomically at commitTS.
+    for _, key := range t.writtenKeys() {
+        e := s.data[key]
+        if e == nil {
+            e = &amp;entry{}
+            s.data[key] = e
+        }
+        if v, ok := t.writeSet[key]; ok {
+            e.versions = append(e.versions, version{ts: commitTS, value: v, writer: t.id})
+        } else {
+            e.versions = append(e.versions, version{ts: commitTS, deleted: true, writer: t.id})
+        }
+    }
+
+    t.commitTS = commitTS
+    t.state = committed
+    delete(s.active, t.id)
+    s.committedTx[t.id] = t
+
+    // TrueTime-style commit-wait: make the commit externally visible only
+    // once its timestamp is safely in the past of every clock.
+    s.tso.CommitWait(commitTS)
+    return nil
+}
+
+// ---------------------------------------------------------------------------
+// Retry helper
+// ---------------------------------------------------------------------------
+
+// Run executes fn in a transaction, committing on success.  On a retryable
+// SSI/ww abort it starts a completely fresh transaction (new snapshot
+// timestamp) after a jittered exponential backoff.  Forward progress is
+// guaranteed for finite workloads: in every dangerous structure only the
+// pivot aborts, so the first committer's writes persist and each retry
+// observes strictly more committed state.
+func (s *Store) Run(fn func(t *Txn) error) error {
+    backoff := 200 * time.Microsecond
+    const maxBackoff = 50 * time.Millisecond
+    for {
+        t := s.Begin()
+        err := fn(t)
+        if err == nil {
+            err = t.Commit()
+        } else {
+            t.Rollback()
+        }
+        if err == nil {
+            return nil
+        }
+        if !Retryable(err) {
+            return err
+        }
+        // Jitter breaks lock-step retries from symmetric transactions.
+        // The global math/rand source is safe for concurrent use and is
+        // auto-seeded in modern Go.
+        jitter := time.Duration(rand.Int63n(int64(backoff) + 1))
+        time.Sleep(backoff/2 + jitter/2)
+        if backoff &lt; maxBackoff {
+            backoff *= 2
+        }
+    }
+}
+</code></pre>
+<h3>Applying it</h3>
+<pre><code class="language-go">s := ssikv.New(1 * time.Millisecond) // maxOffset = clock-uncertainty bound
+
+err := s.Run(func(tx *ssikv.Txn) error {
+    // 1) read whatever you need at the snapshot
+    if _, err := tx.Get(&quot;oncall/alice&quot;); err != nil {
+        return err
+    }
+    // 2) validate the invariant, then write
+    return tx.Delete(&quot;oncall/alice&quot;)
+})
+if err != nil {
+    log.Fatal(err)
+}
+</code></pre>
+<p><code>Run</code> returns only non-retryable errors; <code>ErrSerialization</code> and <code>ErrWriteConflict</code> are retried automatically with a fresh snapshot.</p>
+<hr />
+<h2>4. Verification</h2>
+<h3>4.1 Commands</h3>
+<pre><code class="language-bash">mkdir -p ssikv &amp;&amp; cd ssikv
+cat &gt; go.mod &lt;&lt;'EOF'
+module ssikv
+
+go 1.26
+EOF
+# write ssi.go and ssi_test.go
+go vet ./...
+go test ./... -race -count=30
+</code></pre>
+<h3>4.2 What the tests assert</h3>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Property verified</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TestTSOMonotonicConcurrent</code></td>
+<td>32 goroutines × 200 allocations: no duplicates, strictly increasing</td>
+</tr>
+<tr>
+<td><code>TestCommitWaitHonoursUncertaintyBound</code></td>
+<td>commit blocks for at least <code>maxOffset</code> (clock uncertainty)</td>
+</tr>
+<tr>
+<td><code>TestCommitTimestampStrictlyAfterSnapshot</code></td>
+<td><code>commitTS &gt; startTS</code> (timestamp bounds)</td>
+</tr>
+<tr>
+<td><code>TestSnapshotIsolation</code></td>
+<td>old snapshot still reads the old version after a newer commit</td>
+</tr>
+<tr>
+<td><code>TestWriteWriteConflict</code></td>
+<td>second writer of the same key gets retryable <code>ErrWriteConflict</code></td>
+</tr>
+<tr>
+<td><code>TestReadConflictRecordedAfterCommit</code></td>
+<td><strong>RC2a</strong>: stale read after the overwriter committed still records <code>reader -&gt;rw writer</code></td>
+</tr>
+<tr>
+<td><code>TestDoctorOnCallDeterministic</code></td>
+<td><strong>RC1/RC2b</strong>: classic write skew aborts exactly the second committer; invariant holds; exactly 1 abort</td>
+</tr>
+<tr>
+<td><code>TestDoctorOnCallForcedOverlap</code></td>
+<td>all writers read before any commit: exactly 1 commit, <code>n-1</code> serialization aborts</td>
+</tr>
+<tr>
+<td><code>TestDoctorOnCallConcurrent</code></td>
+<td>5 doctors × 8 rounds of retrying workload: invariant "&gt;=1 on call" holds and every transaction terminates</td>
+</tr>
+<tr>
+<td><code>TestRetryForwardProgress</code></td>
+<td>16 blind writers on one counter converge to exactly 16 (no livelock)</td>
+</tr>
+</tbody>
+</table>
+<h3>4.3 Observed result</h3>
+<pre><code>$ go test ./... -race -count=30
+ok      ssikv   1.355s
+</code></pre>
+<p>All tests pass repeatedly under the race detector. The forced-overlap and deterministic doctor tests demonstrate that write skew is rejected (not just detected) and that the first committer always wins; the concurrent and counter tests demonstrate that retries make forward progress and never livelock.</p>
+<h3>4.4 <code>ssi_test.go</code></h3>
+<pre><code class="language-go">package ssikv
+
+import (
+    &quot;errors&quot;
+    &quot;strconv&quot;
+    &quot;sync&quot;
+    &quot;sync/atomic&quot;
+    &quot;testing&quot;
+    &quot;time&quot;
+)
+
+func seed(t *testing.T, s *Store, kv map[string]string) {
+    t.Helper()
+    tx := s.Begin()
+    for k, v := range kv {
+        if err := tx.Put(k, []byte(v)); err != nil {
+            t.Fatalf(&quot;seed put: %v&quot;, err)
+        }
+    }
+    if err := tx.Commit(); err != nil {
+        t.Fatalf(&quot;seed commit: %v&quot;, err)
+    }
+}
+
+func present(t *testing.T, s *Store, key string) bool {
+    t.Helper()
+    s.mu.Lock()
+    defer s.mu.Unlock()
+    e := s.data[key]
+    if e == nil {
+        return false
+    }
+    _, ok := e.lookup(s.tso.Last())
+    return ok
+}
+
+// ---------------------------------------------------------------------------
+// Timestamp oracle
+// ---------------------------------------------------------------------------
+
+func TestTSOMonotonicConcurrent(t *testing.T) {
+    o := NewTSO(0)
+    const goroutines, per = 32, 200
+    var wg sync.WaitGroup
+    results := make([][]int64, goroutines)
+    for g := 0; g &lt; goroutines; g++ {
+        wg.Add(1)
+        go func(g int) {
+            defer wg.Done()
+            rs := make([]int64, per)
+            for i := 0; i &lt; per; i++ {
+                rs[i] = o.Allocate()
+            }
+            results[g] = rs
+        }(g)
+    }
+    wg.Wait()
+
+    seen := make(map[int64]bool)
+    for _, rs := range results {
+        for i, ts := range rs {
+            if seen[ts] {
+                t.Fatalf(&quot;duplicate timestamp %d&quot;, ts)
+            }
+            seen[ts] = true
+            if i &gt; 0 &amp;&amp; rs[i] &lt;= rs[i-1] {
+                t.Fatalf(&quot;non-monotonic within goroutine: %d then %d&quot;, rs[i-1], rs[i])
+            }
+        }
+    }
+}
+
+func TestCommitWaitHonoursUncertaintyBound(t *testing.T) {
+    const eps = 3 * time.Millisecond
+    s := New(eps)
+    start := time.Now()
+
+    tx := s.Begin()
+    if err := tx.Put(&quot;x&quot;, []byte(&quot;1&quot;)); err != nil {
+        t.Fatal(err)
+    }
+    if err := tx.Commit(); err != nil {
+        t.Fatal(err)
+    }
+
+    if elapsed := time.Since(start); elapsed &lt; eps {
+        t.Fatalf(&quot;commit returned after %v, want at least the uncertainty bound %v&quot;, elapsed, eps)
+    }
+}
+
+func TestCommitTimestampStrictlyAfterSnapshot(t *testing.T) {
+    s := New(0)
+    seed(t, s, map[string]string{&quot;k&quot;: &quot;0&quot;})
+    start := s.Begin()
+    if _, err := start.Get(&quot;k&quot;); err != nil {
+        t.Fatal(err)
+    }
+    if err := start.Commit(); err != nil {
+        t.Fatal(err)
+    }
+    if start.CommitTS() &lt;= start.StartTS() {
+        t.Fatalf(&quot;commit ts %d must exceed start ts %d&quot;, start.CommitTS(), start.StartTS())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot isolation + write-write conflicts
+// ---------------------------------------------------------------------------
+
+func TestSnapshotIsolation(t *testing.T) {
+    s := New(0)
+    seed(t, s, map[string]string{&quot;a&quot;: &quot;1&quot;})
+
+    t1 := s.Begin() // old snapshot
+
+    seed(t, s, map[string]string{&quot;a&quot;: &quot;2&quot;}) // committed after t1's snapshot
+
+    v, err := t1.Get(&quot;a&quot;)
+    if err != nil {
+        t.Fatalf(&quot;snapshot read: %v&quot;, err)
+    }
+    if string(v) != &quot;1&quot; {
+        t.Fatalf(&quot;snapshot read = %q, want \&quot;1\&quot;&quot;, v)
+    }
+    t1.Rollback()
+}
+
+func TestWriteWriteConflict(t *testing.T) {
+    s := New(0)
+    seed(t, s, map[string]string{&quot;k&quot;: &quot;0&quot;})
+
+    t1 := s.Begin()
+    t2 := s.Begin()
+    if err := t1.Put(&quot;k&quot;, []byte(&quot;1&quot;)); err != nil {
+        t.Fatal(err)
+    }
+    if err := t2.Put(&quot;k&quot;, []byte(&quot;2&quot;)); err != nil {
+        t.Fatal(err)
+    }
+    if err := t1.Commit(); err != nil {
+        t.Fatalf(&quot;first writer should win: %v&quot;, err)
+    }
+    err := t2.Commit()
+    if !errors.Is(err, ErrWriteConflict) {
+        t.Fatalf(&quot;second writer err = %v, want ErrWriteConflict&quot;, err)
+    }
+    if !Retryable(err) {
+        t.Fatalf(&quot;write conflict must be retryable&quot;)
+    }
+}
+
+// TestReadConflictRecordedAfterCommit covers the soundness hole where a
+// snapshot predates a commit but the read happens after the commit.  The
+// writer can no longer discover the reader, so the reader must record the
+// rw-edge itself.
+func TestReadConflictRecordedAfterCommit(t *testing.T) {
+    s := New(0)
+    seed(t, s, map[string]string{&quot;a&quot;: &quot;1&quot;, &quot;b&quot;: &quot;1&quot;})
+
+    reader := s.Begin()
+    writer := s.Begin()
+    if _, err := writer.Get(&quot;b&quot;); err != nil {
+        t.Fatal(err)
+    }
+    if err := writer.Put(&quot;a&quot;, []byte(&quot;2&quot;)); err != nil {
+        t.Fatal(err)
+    }
+    if err := writer.Commit(); err != nil {
+        t.Fatalf(&quot;writer commit: %v&quot;, err)
+    }
+
+    v, err := reader.Get(&quot;a&quot;) // old snapshot =&gt; sees the superseded value
+    if err != nil {
+        t.Fatal(err)
+    }
+    if string(v) != &quot;1&quot; {
+        t.Fatalf(&quot;reader saw %q, want \&quot;1\&quot;&quot;, v)
+    }
+    if _, ok := reader.outTo[writer.id]; !ok {
+        t.Fatalf(&quot;missing rw-edge reader -&gt;rw writer&quot;)
+    }
+    if _, ok := writer.inFrom[reader.id]; !ok {
+        t.Fatalf(&quot;missing reverse edge writer.inFrom[reader]&quot;)
+    }
+    reader.Rollback()
+}
+
+// ---------------------------------------------------------------------------
+// Doctor on call (write skew)
+// ---------------------------------------------------------------------------
+
+// TestDoctorOnCallDeterministic forces the classic write-skew interleaving:
+// two transactions each verify that another doctor is on call, then remove
+// themselves.  Snapshot isolation alone would leave zero doctors on call.
+// SSI must abort exactly the second committer.
+func TestDoctorOnCallDeterministic(t *testing.T) {
+    s := New(0)
+    seed(t, s, map[string]string{&quot;alice&quot;: &quot;on&quot;, &quot;bob&quot;: &quot;on&quot;})
+
+    a := s.Begin()
+    if _, err := a.Get(&quot;bob&quot;); err != nil { // guard: another doctor present
+        t.Fatal(err)
+    }
+    if _, err := a.Get(&quot;alice&quot;); err != nil {
+        t.Fatal(err)
+    }
+    if err := a.Delete(&quot;alice&quot;); err != nil {
+        t.Fatal(err)
+    }
+
+    b := s.Begin()
+    if _, err := b.Get(&quot;alice&quot;); err != nil {
+        t.Fatal(err)
+    }
+    if _, err := b.Get(&quot;bob&quot;); err != nil {
+        t.Fatal(err)
+    }
+    if err := b.Delete(&quot;bob&quot;); err != nil {
+        t.Fatal(err)
+    }
+
+    if err := a.Commit(); err != nil {
+        t.Fatalf(&quot;first committer must succeed: %v&quot;, err)
+    }
+    err := b.Commit()
+    if !errors.Is(err, ErrSerialization) {
+        t.Fatalf(&quot;pivot commit err = %v, want ErrSerialization&quot;, err)
+    }
+
+    // Retry b with a fresh snapshot: the other doctor is gone, so it is a
+    // no-op and the invariant is preserved.
+    err = s.Run(func(tx *Txn) error {
+        self, other := &quot;bob&quot;, &quot;alice&quot;
+        if _, err := tx.Get(other); errors.Is(err, ErrNotFound) {
+            return nil // nobody else on call: do not leave the desk
+        } else if err != nil {
+            return err
+        }
+        if _, err := tx.Get(self); errors.Is(err, ErrNotFound) {
+            return nil
+        } else if err != nil {
+            return err
+        }
+        return tx.Delete(self)
+    })
+    if err != nil {
+        t.Fatalf(&quot;retry: %v&quot;, err)
+    }
+
+    if present(t, s, &quot;alice&quot;) {
+        t.Fatalf(&quot;alice should have been removed&quot;)
+    }
+    if !present(t, s, &quot;bob&quot;) {
+        t.Fatalf(&quot;bob must remain on call (invariant)&quot;)
+    }
+    if s.Aborts() != 1 {
+        t.Fatalf(&quot;aborts = %d, want exactly 1&quot;, s.Aborts())
+    }
+}
+
+// TestDoctorOnCallConcurrent stresses the workload with many symmetric
+// transactions.  It verifies the invariant (at least one doctor stays on
+// call) and that every transaction eventually terminates (no livelock).
+func TestDoctorOnCallConcurrent(t *testing.T) {
+    s := New(0)
+    keys := []string{&quot;alice&quot;, &quot;bob&quot;, &quot;carol&quot;, &quot;dave&quot;, &quot;erin&quot;}
+    all := map[string]string{}
+    for _, k := range keys {
+        all[k] = &quot;on&quot;
+    }
+    seed(t, s, all)
+
+    const rounds = 8
+    var wg sync.WaitGroup
+    var done int64
+    errCh := make(chan error, len(keys)*rounds)
+
+    for r := 0; r &lt; rounds; r++ {
+        for _, key := range keys {
+            key := key
+            wg.Add(1)
+            go func() {
+                defer wg.Done()
+                err := s.Run(func(tx *Txn) error {
+                    n := 0
+                    selfOn := false
+                    for _, k := range keys {
+                        _, err := tx.Get(k)
+                        switch {
+                        case err == nil:
+                            n++
+                            if k == key {
+                                selfOn = true
+                            }
+                        case errors.Is(err, ErrNotFound):
+                        default:
+                            return err
+                        }
+                    }
+                    if !selfOn || n &lt; 2 {
+                        return nil // never drop below one on-call doctor
+                    }
+                    return tx.Delete(key)
+                })
+                if err != nil {
+                    errCh &lt;- err
+                    return
+                }
+                atomic.AddInt64(&amp;done, 1)
+            }()
+        }
+    }
+
+    waitTimeout(t, &amp;wg, 30*time.Second, errCh)
+
+    n := 0
+    for _, k := range keys {
+        if present(t, s, k) {
+            n++
+        }
+    }
+    if n != 1 {
+        t.Fatalf(&quot;invariant violated: %d doctors on call, want 1&quot;, n)
+    }
+    if got := atomic.LoadInt64(&amp;done); got != int64(len(keys)*rounds) {
+        t.Fatalf(&quot;completed %d/%d transactions&quot;, got, len(keys)*rounds)
+    }
+    close(errCh)
+    for err := range errCh {
+        t.Fatalf(&quot;transaction failed: %v&quot;, err)
+    }
+}
+
+// TestDoctorOnCallForcedOverlap removes scheduling luck: every transaction
+// reads the whole set before any of them commits, so all of them try to
+// remove themselves.  SSI must abort every writer but the first committer.
+func TestDoctorOnCallForcedOverlap(t *testing.T) {
+    s := New(0)
+    keys := []string{&quot;a&quot;, &quot;b&quot;, &quot;c&quot;}
+    all := map[string]string{}
+    for _, k := range keys {
+        all[k] = &quot;on&quot;
+    }
+    seed(t, s, all)
+
+    var ready sync.WaitGroup
+    ready.Add(len(keys))
+    release := make(chan struct{})
+
+    var commits, aborts int32
+    var wg sync.WaitGroup
+    for _, self := range keys {
+        self := self
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            tx := s.Begin()
+            for _, k := range keys {
+                if _, err := tx.Get(k); err != nil {
+                    t.Errorf(&quot;read %s: %v&quot;, k, err)
+                }
+            }
+            if err := tx.Delete(self); err != nil {
+                t.Errorf(&quot;delete %s: %v&quot;, self, err)
+            }
+            ready.Done()
+            &lt;-release
+            switch err := tx.Commit(); {
+            case err == nil:
+                atomic.AddInt32(&amp;commits, 1)
+            case errors.Is(err, ErrSerialization):
+                atomic.AddInt32(&amp;aborts, 1)
+            default:
+                t.Errorf(&quot;commit %s: %v&quot;, self, err)
+            }
+        }()
+    }
+    waitReady(t, &amp;ready)
+    close(release)
+    wg.Wait()
+
+    if commits != 1 {
+        t.Fatalf(&quot;commits = %d, want 1&quot;, commits)
+    }
+    if aborts != int32(len(keys)-1) {
+        t.Fatalf(&quot;aborts = %d, want %d&quot;, aborts, len(keys)-1)
+    }
+}
+
+func waitReady(t *testing.T, wg *sync.WaitGroup) {
+    t.Helper()
+    done := make(chan struct{})
+    go func() { wg.Wait(); close(done) }()
+    select {
+    case &lt;-done:
+    case &lt;-time.After(10 * time.Second):
+        t.Fatalf(&quot;timeout waiting for transactions to read&quot;)
+    }
+}
+
+// TestRetryForwardProgress checks that many blind writers to the same key
+// converge to a correct total instead of livelocking on write-write
+// conflicts.
+func TestRetryForwardProgress(t *testing.T) {
+    s := New(0)
+    seed(t, s, map[string]string{&quot;counter&quot;: &quot;0&quot;})
+
+    const writers = 16
+    var wg sync.WaitGroup
+    errCh := make(chan error, writers)
+    for i := 0; i &lt; writers; i++ {
+        wg.Add(1)
+        go func() {
+            defer wg.Done()
+            err := s.Run(func(tx *Txn) error {
+                v, err := tx.Get(&quot;counter&quot;)
+                if err != nil {
+                    return err
+                }
+                n, _ := strconv.Atoi(string(v))
+                return tx.Put(&quot;counter&quot;, []byte(strconv.Itoa(n+1)))
+            })
+            if err != nil {
+                errCh &lt;- err
+            }
+        }()
+    }
+    waitTimeout(t, &amp;wg, 30*time.Second, errCh)
+    close(errCh)
+    for err := range errCh {
+        t.Fatalf(&quot;writer failed: %v&quot;, err)
+    }
+
+    final := s.Begin()
+    v, err := final.Get(&quot;counter&quot;)
+    if err != nil {
+        t.Fatal(err)
+    }
+    if got, _ := strconv.Atoi(string(v)); got != writers {
+        t.Fatalf(&quot;counter = %s, want %d&quot;, v, writers)
+    }
+}
+
+// waitTimeout fails the test if wg does not complete in time, guarding
+// against a retry livelock hanging the suite.
+func waitTimeout(t *testing.T, wg *sync.WaitGroup, d time.Duration, errCh chan error) {
+    t.Helper()
+    doneCh := make(chan struct{})
+    go func() {
+        wg.Wait()
+        close(doneCh)
+    }()
+    select {
+    case &lt;-doneCh:
+    case &lt;-time.After(d):
+        select {
+        case err := &lt;-errCh:
+            t.Fatalf(&quot;timeout after error: %v&quot;, err)
+        default:
+        }
+        t.Fatalf(&quot;timeout: possible retry livelock&quot;)
+    }
+}
+</code></pre>
+<hr />
+<h3>Summary</h3>
+<ul>
+<li><strong>Root cause(s):</strong> plain SI cannot see write skew (RC1); naive SSI misses rw-edges in one commit order and tests the dangerous structure before the pivot's incoming edges exist (RC2); timestamp windows/monotonicity are wrong if not <code>(startTS, commitTS]</code> with a strict <code>max(now, last+1)</code> oracle and commit-wait (RC3); retries livelock without fresh snapshots and jitter (RC4).</li>
+<li><strong>Fix:</strong> the <code>ssikv</code> package above — MVCC + reader registry + bidirectional rw-edge tracking + safe pivot abort + bounded TSO + jittered retry.</li>
+<li><strong>Verified:</strong> <code>go test ./... -race -count=30</code> → <code>ok ssikv</code>, including deterministic write-skew rejection and forced-overlap <code>1 commit / n-1 serialization aborts</code>.</li>
+</ul>
+<p>Artifacts: <code>~/SOLUTION.md</code> (this document), <code>~/ssikv/{go.mod,ssi.go,ssi_test.go}</code>.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: ssi-write-skew-serialization-failure-timestamp-bounds-retry
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-11-14T10:08:51.135Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a single-node transactional key-value store with serializable snapshot isolation: reads use snapshot timestamps, writes take SSI read/write locks, and commit fails if the rw-antidependency graph contains a dangerous-structure cycle. Include timestamp-oracle allocation with clock uncertainty bounds and a retry policy that guarantees forward progress across concurrent write-skew-prone workloads like the classic doctor-on-call scenario.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;ssi-write-skew-serialization-failure-timestamp-bounds-retry&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-11-14T10:08:51.136Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

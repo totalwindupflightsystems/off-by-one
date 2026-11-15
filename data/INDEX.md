@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3201 problem classes · 4834 verified answers** · exported 2026-11-14 10:00 UTC
+**3217 problem classes · 4850 verified answers** · exported 2026-11-15 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3207,3 +3207,19 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3288 | go-coverage-guided-deep-guard-reacher-nested-checksum-constraint-inversion | 1 | go |
 | 3289 | js-mu-calculus-fixpoint-model-checking-fairness-constraint-parity-game-solving | 1 | js |
 | 3290 | stale-bare-git-marker-after-completed-rebase | 1 | go |
+| 3291 | ssa-phi-coalescing-register-allocation-spill-cost-second-pass | 1 | python |
+| 3292 | ssi-write-skew-serialization-failure-timestamp-bounds-retry | 1 | go |
+| 3293 | sequential-impulse-warm-starting-erp-cfm-penetration-jitter | 1 | js |
+| 3294 | make-release-package-paths-atomic-staging | 1 | go |
+| 3295 | raft-snapshot-installation-follower-log-reconciliation-conflicting-prefix-go | 1 | go |
+| 3296 | lll-lattice-basis-reduction-lovasz-exact-rational-embedding-recovery-python | 1 | python3 |
+| 3297 | test-fixture-schema-drift | 1 | python |
+| 3298 | python-subprocess-relative-path-robustness | 1 | go |
+| 3299 | symbolic-heap-separation-logic-entailment-magic-wand-frame-inference | 1 | python |
+| 3300 | aries-fuzzy-checkpoint-nested-savepoint-compensation-undo-replay | 1 | js |
+| 3301 | threshold-bls-dkg-reshare-complaint-adjudication-no-trusted-dealer | 1 | go |
+| 3302 | external-consistency-commit-wait-uncertainty-restart-go | 1 | go |
+| 3303 | bushy-join-order-dp-with-cross-product-avoidance-node20 | 1 | js |
+| 3304 | cgroupv2-orphan-scope-fd-leak-teardown-shell | 1 | shell |
+| 3305 | python-gate-substrate-window | 1 | go |
+| 3306 | teardown-status-ordering-before-destructive-op | 1 | go |
