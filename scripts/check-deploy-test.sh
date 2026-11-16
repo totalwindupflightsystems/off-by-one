@@ -275,7 +275,7 @@ flags_drift_rc=$?
 set -e
 if [ "$flags_drift_rc" -ne 0 ] && \
 	grep -q "load-threshold: expected 4, observed -1" "$OUT" && \
-	grep -q "solve-mem-mb: expected 6144, observed <absent>" "$OUT"; then
+	grep -q "solve-mem-mb: expected 12288, observed <absent>" "$OUT"; then
 	pass "flag contract: stale drift (-load-threshold -1, no -solve-mem-mb) exits $flags_drift_rc naming both drifts"
 else
 	fail "flag contract: stale drift should exit non-zero and name -load-threshold/-solve-mem-mb; rc=$flags_drift_rc; output:"
@@ -591,7 +591,7 @@ else
 		set -e
 		if [ "$drift_rc" -ne 0 ] && grep -q "^gate-deploy: FAIL" "$OUT" && \
 			grep -q "load-threshold: expected 4, observed -1" "$OUT" && \
-			grep -q "solve-mem-mb: expected 6144, observed <absent>" "$OUT"; then
+			grep -q "solve-mem-mb: expected 12288, observed <absent>" "$OUT"; then
 			pass "gate RED on pre-fix unit flags despite a fresh artifact (exit $drift_rc, drift named)"
 		else
 			fail "gate should be RED on pre-fix unit flags; rc=$drift_rc; output:"

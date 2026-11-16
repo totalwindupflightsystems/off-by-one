@@ -801,10 +801,10 @@ A solve is bounded in memory as well as in time. Two knobs, both wired from flag
 The reject threshold closes the gap between "the solve survived the cap" and "the solve is a trustworthy pre-verified answer". The daemon samples the solve process tree's peak RSS (`VmHWM`) while the solve runs; if the peak **exceeds** the threshold, the submission is marked `failed` and **nothing is committed to the graph**, even though `pi-agent` exited 0. The failure reason names the problem class, the measured peak, and the threshold, e.g.:
 
 ```
-rejected: peak RSS 5.012 GiB exceeds reject threshold 4.800 GiB (problem_class=go-bbr-pacing)
+rejected: peak RSS 10.012 GiB exceeds reject threshold 9.600 GiB (problem_class=go-bbr-pacing)
 ```
 
-The default auto threshold is 80% of the per-solve cap, so a capped deployment (e.g. `--solve-mem-mb 6144`) rejects solves peaking above ~4.8 GiB. With no cap configured there is no wall to approach, so the derived form is disabled. Rejected solves are counted separately from ordinary failures: the cron metrics expose `solve_rejected`, and the metrics endpoint (`GET /metrics`) reports the `rejected` roll-up alongside `over_budget`.
+The default auto threshold is 80% of the per-solve cap, so a capped deployment (e.g. `--solve-mem-mb 12288`) rejects solves peaking above ~9.6 GiB. With no cap configured there is no wall to approach, so the derived form is disabled. Rejected solves are counted separately from ordinary failures: the cron metrics expose `solve_rejected`, and the metrics endpoint (`GET /metrics`) reports the `rejected` roll-up alongside `over_budget`.
 
 The prompt-side half of the fix is a **bounds contract** in the shipped `pi-agent` wrapper (`scripts/pi-agent`), next to the other solve instructions. For simulation-style problems — anything that simulates, replays, or generates a sequence of events, packets, requests, or ticks — the solution must declare explicit bounds (the maximum number of simulated events/packets/seconds) and aggregate incrementally rather than retaining a record per event. The 2026-10-03 47 GB RAM + swap incident was a generated packet simulator that appended one record per simulated event; the contract plus the reject threshold mean such a run cannot be stored as a verified answer.
 
