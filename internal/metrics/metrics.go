@@ -28,6 +28,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
@@ -72,6 +73,80 @@ type SolveRecord struct {
 	AlertBytesUsed uint64 `json:"alert_threshold_bytes"`
 }
 
+// Tick outcome vocabulary — the closed `outcome` label set of
+// obo_cron_ticks_total (OBS-OB-002, docs/observability-spec.md §3.2).
+// Every tick of the cron loop settles on exactly one of these; an
+// outcome outside the set is dropped, never added as a label value
+// (spec §3.5: closed enumerations only).
+const (
+	// TickOutcomeSolved is a tick that solved and committed an entry.
+	TickOutcomeSolved = "solved"
+	// TickOutcomeEmpty is a tick that found nothing in the queue.
+	TickOutcomeEmpty = "empty"
+	// TickOutcomeIdleGated is a tick the host-pressure gate deferred:
+	// the loop is alive, but it deliberately did no work. This is the
+	// outcome that makes starvation alertable — the whole point of
+	// OBS-OB-002.
+	TickOutcomeIdleGated = "idle_gated"
+	// TickOutcomeError is a tick that failed for any other reason.
+	TickOutcomeError = "error"
+)
+
+// TickOutcomes is the complete `outcome` label set for
+// obo_cron_ticks_total. Every member is emitted on every scrape, at
+// zero before its first occurrence, so rate()-based alerts have a
+// series to fire on (a missing series is invisible to rate()).
+var TickOutcomes = []string{
+	TickOutcomeSolved,
+	TickOutcomeEmpty,
+	TickOutcomeIdleGated,
+	TickOutcomeError,
+}
+
+// SkipReasons is the complete `reason` label set for
+// obo_cron_skip_reason_total — the same vocabulary TrimSpaceReason
+// produces from the gate's parts, and the same strings the deferral
+// log line names. A reason outside this set is dropped rather than
+// widening the exposition's cardinality.
+var SkipReasons = []string{"load", "memory", "load+memory"}
+
+// IsTickOutcome reports whether outcome is a member of TickOutcomes.
+func IsTickOutcome(outcome string) bool { return containsString(TickOutcomes, outcome) }
+
+// IsSkipReason reports whether reason is a member of SkipReasons.
+func IsSkipReason(reason string) bool { return containsString(SkipReasons, reason) }
+
+func containsString(set []string, want string) bool {
+	for _, v := range set {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// SchedulerHealth is the scrape-time view of the loop's scheduler
+// state (OBS-OB-002, spec §3.2): cumulative tick outcomes, cumulative
+// skip reasons, the last host reading, and the last tick's wall clock.
+// Ticks and SkipReasons are copies — mutating them never touches the
+// Observer.
+type SchedulerHealth struct {
+	// Ticks counts every tick by outcome (TickOutcomes members only).
+	Ticks map[string]int64
+	// SkipReasons counts host-gate skips by reason (SkipReasons
+	// members only).
+	SkipReasons map[string]int64
+	// Host is the latest gate reading; HostOK is false before the
+	// first tick reached the gate, in which case the host gauges are
+	// omitted from the exposition rather than reported as 0.
+	Host   HostSnapshot
+	HostOK bool
+	// LastTick is the wall clock stamped at the top of the most
+	// recent tick; LastTickOK is false before the loop ever ticked.
+	LastTick   time.Time
+	LastTickOK bool
+}
+
 // HostSnapshot is one host-pressure observation taken when the gate
 // runs. Load1 is the 1-minute load average; MemUsedFraction is
 // MemAvailableBytes-derived (1.0 = full). Reason is the gate's skip
@@ -104,6 +179,16 @@ type Observer struct {
 	// discovery-outcome measure.
 	discoveryHits   int64
 	discoveryMisses int64
+
+	// Scheduler-health totals (OBS-OB-002, spec §3.2): cumulative tick
+	// outcomes, cumulative gate skip reasons, and the wall clock of the
+	// last tick. Kept here (not in cron.Metrics) because the exposition
+	// already reads this Observer and because the skip-reason tally
+	// belongs on the same path that records the skip. Both maps are
+	// keyed by the CLOSED vocabularies above — no caller can widen them.
+	tickCounts   map[string]int64
+	reasonCounts map[string]int64
+	lastTick     time.Time
 
 	// Cumulative per-solve resource and failure-cause totals feeding
 	// obo_solve_* on GET /metrics/prom (OBS-OB-003). They are kept apart
@@ -163,6 +248,8 @@ func New(alertBytes uint64, logger *log.Logger) *Observer {
 		logger:        logger,
 		peakBuckets:   make([]uint64, len(SolvePeakRSSBuckets)+1),
 		failureCauses: make(map[string]int64),
+		tickCounts:    make(map[string]int64),
+		reasonCounts:  make(map[string]int64),
 	}
 }
 
@@ -287,16 +374,130 @@ func (o *Observer) alertBytesUsed(rec *SolveRecord) {
 // RecordSkip counts a run skipped for host pressure and stores snap
 // (with Reason filled) as both the last skip and the last host
 // observation.
+//
+// The skip is also tallied into the reason counter behind
+// obo_cron_skip_reason_total (OBS-OB-002). The vocabulary is CLOSED —
+// TrimSpaceReason's three values — so a caller passing free text is
+// dropped instead of creating a new series (spec §3.5). Dropping loses
+// one sample; widening the label set would make the family's
+// cardinality unbounded, which is worse and unrecoverable.
 func (o *Observer) RecordSkip(snap HostSnapshot) {
 	if o == nil {
 		return
 	}
+	reason := snap.Reason
 	o.mu.Lock()
 	o.skips++
 	cp := snap
 	o.lastSkipped = &cp
 	o.lastHost = &cp
+	if IsSkipReason(reason) {
+		if o.reasonCounts == nil {
+			o.reasonCounts = make(map[string]int64)
+		}
+		o.reasonCounts[reason]++
+	}
 	o.mu.Unlock()
+}
+
+// RecordTickStart stamps the tick wall clock (gauge
+// obo_cron_last_tick_timestamp_seconds) without counting an outcome.
+//
+// Why a separate call: a tick that dequeues and solves can hold the
+// loop for minutes, and a freshness alert must still see the loop as
+// alive while that solve runs. The loop stamps at the TOP of Tick;
+// RecordTick then settles exactly one outcome on every return path.
+// Neither call can double-count — this one counts nothing.
+func (o *Observer) RecordTickStart() {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	o.lastTick = time.Now()
+	o.mu.Unlock()
+}
+
+// RecordTick stamps the tick wall clock and increments exactly one
+// outcome counter for obo_cron_ticks_total. The loop calls it ONCE per
+// tick, on every return path — including the gated and empty paths,
+// because a starving loop still ticks while a dead loop does not.
+//
+// An outcome outside TickOutcomes is dropped (closed label set, spec
+// §3.5); the stamp still lands, so an unknown value can never make a
+// live loop look dead.
+func (o *Observer) RecordTick(outcome string) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	o.lastTick = time.Now()
+	if IsTickOutcome(outcome) {
+		if o.tickCounts == nil {
+			o.tickCounts = make(map[string]int64)
+		}
+		o.tickCounts[outcome]++
+	}
+	o.mu.Unlock()
+}
+
+// LastHost returns the latest host observation and whether one has
+// been taken yet (false before the first tick reached the gate).
+func (o *Observer) LastHost() (HostSnapshot, bool) {
+	if o == nil {
+		return HostSnapshot{}, false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.lastHost == nil {
+		return HostSnapshot{}, false
+	}
+	return *o.lastHost, true
+}
+
+// LastTick returns the last tick's wall clock and whether the loop has
+// ticked at all.
+func (o *Observer) LastTick() (time.Time, bool) {
+	if o == nil {
+		return time.Time{}, false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.lastTick.IsZero() {
+		return time.Time{}, false
+	}
+	return o.lastTick, true
+}
+
+// SchedulerHealth returns a consistent copy of the scheduler-health
+// totals (OBS-OB-002). Nil-receiver-safe: a nil Observer reports every
+// counter at zero and both ok flags false, so the exposition keeps its
+// shape (all label values present at 0) and omits only the gauges that
+// would otherwise claim a reading nobody took.
+func (o *Observer) SchedulerHealth() SchedulerHealth {
+	h := SchedulerHealth{
+		Ticks:       make(map[string]int64, len(TickOutcomes)),
+		SkipReasons: make(map[string]int64, len(SkipReasons)),
+	}
+	if o == nil {
+		return h
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, outcome := range TickOutcomes {
+		h.Ticks[outcome] = o.tickCounts[outcome]
+	}
+	for _, reason := range SkipReasons {
+		h.SkipReasons[reason] = o.reasonCounts[reason]
+	}
+	if o.lastHost != nil {
+		h.Host = *o.lastHost
+		h.HostOK = true
+	}
+	if !o.lastTick.IsZero() {
+		h.LastTick = o.lastTick
+		h.LastTickOK = true
+	}
+	return h
 }
 
 // RecordHost stores snap as the latest host observation without

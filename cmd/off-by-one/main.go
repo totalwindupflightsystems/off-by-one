@@ -267,6 +267,12 @@ func main() {
 		// Observer the loop records into, so a scrape cannot disagree
 		// with the per-solve records the JSON surface serves.
 		SolveResources: observer.SolveResources,
+		// Scheduler health + starvation (OBS-OB-002, spec §3.2): tick
+		// outcomes, gate skip reasons, the last host reading and the
+		// last tick stamp — all recorded by the loop into this same
+		// Observer, so the counters and the gauges come from one
+		// consistent source.
+		Scheduler: observer.SchedulerHealth,
 	})
 	apiServer.Prom = prom
 	if loop != nil {

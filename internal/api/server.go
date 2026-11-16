@@ -107,6 +107,13 @@ func New(store *graph.Store, queue *ingest.Queue, spec []byte) *Server {
 				n, err := queue.Depth(ctx)
 				return int64(n), err
 			},
+			// Scheduler health (OBS-OB-002) reads the Observer LAZILY:
+			// New cannot capture it (main assigns Server.Observer after
+			// construction). Both the closure and the accessor are
+			// nil-safe, so a Server built in a unit test serves the
+			// families at zero and omits the gauges instead of
+			// panicking on a missing observer.
+			Scheduler: func() metrics.SchedulerHealth { return s.Observer.SchedulerHealth() },
 		})
 	}
 	return s

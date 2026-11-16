@@ -498,6 +498,24 @@ func (l *Loop) Tick(ctx context.Context) error {
 	}
 	defer l.inflight.Store(false)
 
+	// One-outcome-per-tick invariant (OBS-OB-002, spec §3.2): every tick
+	// that actually runs stamps obo_cron_last_tick_timestamp_seconds at
+	// the TOP (so a long solve cannot make a live loop look stale) and
+	// settles on EXACTLY ONE obo_cron_ticks_total outcome on its way
+	// out — the deferred settle covers every return path below,
+	// including the gated, empty and error ones. A call rejected by the
+	// CAS above is not a tick at all: it did no work and must not stamp
+	// liveness.
+	outcome := metrics.TickOutcomeError
+	if l.cfg.Observer != nil {
+		l.cfg.Observer.RecordTickStart()
+	}
+	defer func() {
+		if l.cfg.Observer != nil {
+			l.cfg.Observer.RecordTick(outcome)
+		}
+	}()
+
 	// Reap stale in_progress entries before anything else. This runs
 	// even when the system is busy — a wedged entry is stale no
 	// matter the load, and skipping the reap on a busy box would let
@@ -523,6 +541,10 @@ func (l *Loop) Tick(ctx context.Context) error {
 		// stamp the queue head so the submitter's next poll shows
 		// status=deferred with the gate's reason instead of a silent
 		// pending row (DF-OFF-BY-ONE-45).
+		//
+		// It IS an outcome (OBS-OB-002): a starving loop is alive and
+		// gated, which must be distinguishable from a dead one.
+		outcome = metrics.TickOutcomeIdleGated
 		var gate *IdleGateError
 		if errors.As(err, &gate) {
 			l.deferQueueHead(ctx, gate)
@@ -545,10 +567,15 @@ func (l *Loop) Tick(ctx context.Context) error {
 		return fmt.Errorf("dequeue: %w", err)
 	}
 	if entry == nil {
+		outcome = metrics.TickOutcomeEmpty
 		l.metrics.recordEmptySkip()
 		return nil
 	}
-	return l.processOne(ctx, entry)
+	if err := l.processOne(ctx, entry); err != nil {
+		return err
+	}
+	outcome = metrics.TickOutcomeSolved
+	return nil
 }
 
 // ErrAlreadyRunning signals that another Tick is already in

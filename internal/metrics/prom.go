@@ -67,6 +67,13 @@ type PromConfig struct {
 	// zero so the exposition keeps its shape (a missing series is
 	// invisible to rate(); a zero series is not).
 	SolveResources func() SolveResources
+	// Scheduler returns the loop's scheduler-health view (OBS-OB-002,
+	// spec §3.2): tick outcomes, gate skip reasons, the last host
+	// reading, and the last tick's wall clock. Production wires
+	// *metrics.Observer.SchedulerHealth. nil serves every counter label
+	// at zero and omits the gauges — a gauge with no reading must not
+	// claim 0 (see schedulerHealthCollector).
+	Scheduler func() SchedulerHealth
 }
 
 // Prom owns the private registry and its collectors. Construct once
@@ -178,6 +185,39 @@ func NewProm(cfg PromConfig) *Prom {
 			"obo_solve_failure_total",
 			"Failed solves by cause (closed set: timeout, solver_exit, toolchain_missing, invalid_problem, commit, stale_reaped, other). Classified at the failure site, never by re-parsing stored text.",
 			[]string{"cause"}, nil,
+		),
+	})
+
+	// Tier 2 — scheduler health and starvation (OBS-OB-002, spec §3.2).
+	// This is the tier that makes "the loop is alive and answering HTTP
+	// but never solving" visible: idle_gated ticks plus a fresh
+	// last-tick timestamp while solves_total stays flat.
+	reg.MustRegister(&schedulerHealthCollector{
+		src: cfg.Scheduler,
+		tickDesc: prometheus.NewDesc(
+			"obo_cron_ticks_total",
+			"Loop ticks by outcome (closed set: solved, empty, idle_gated, error). A starving loop keeps ticking with outcome=idle_gated; a dead loop stops advancing obo_cron_last_tick_timestamp_seconds.",
+			[]string{"outcome"}, nil,
+		),
+		skipReasonDesc: prometheus.NewDesc(
+			"obo_cron_skip_reason_total",
+			"Host-gate skips by reason (closed set: load, memory, load+memory). When reason=load, the gate is admitting it: rising rate here with flat obo_solves_total is idle-by-gate, not idle-by-absence.",
+			[]string{"reason"}, nil,
+		),
+		loadDesc: prometheus.NewDesc(
+			"obo_host_load1",
+			"Host 1-minute load average as read by the idle gate (mirrors HostSnapshot.Load1).",
+			nil, nil,
+		),
+		memDesc: prometheus.NewDesc(
+			"obo_host_mem_used_fraction",
+			"Host memory used fraction (0-1) as read by the memory gate — 1.0 minus MemAvailable/MemTotal (mirrors HostSnapshot.MemUsedFraction).",
+			nil, nil,
+		),
+		lastTickDesc: prometheus.NewDesc(
+			"obo_cron_last_tick_timestamp_seconds",
+			"Unix seconds of the most recent loop tick — advances on every tick including idle_gated and empty ones, so staleness means the loop is dead or hung rather than merely gated.",
+			nil, nil,
 		),
 	})
 
@@ -348,6 +388,80 @@ func (c *solveCountersCollector) Collect(ch chan<- prometheus.Metric) {
 			v = 0
 		}
 		ch <- prometheus.MustNewConstMetric(spec.desc, prometheus.CounterValue, float64(v))
+	}
+}
+
+// schedulerHealthCollector emits the five Tier-2 scheduler families
+// (OBS-OB-002, spec §3.2): two labelled counters over CLOSED
+// vocabularies plus three unlabelled gauges.
+//
+// Why a Collector and not GaugeFunc/CounterVec:
+//   - A GaugeFunc always emits, so it cannot satisfy "no reading yet →
+//     omit the gauge rather than emitting NaN". A nil source or an
+//     empty host reading here omits the series instead.
+//   - A CounterVec can only Add; the source is already cumulative, so
+//     mirroring it into a vec would need Set (which counters lack) or
+//     would double-count on every scrape. Const metrics read the
+//     cumulative source exactly once per scrape with no state to drift.
+//
+// Both label vocabularies are emitted in full on every scrape, at 0
+// before their first occurrence: a series that does not exist yet is
+// invisible to rate(), which is precisely the alert that must fire the
+// first time the gate closes.
+type schedulerHealthCollector struct {
+	src            func() SchedulerHealth
+	tickDesc       *prometheus.Desc
+	skipReasonDesc *prometheus.Desc
+	loadDesc       *prometheus.Desc
+	memDesc        *prometheus.Desc
+	lastTickDesc   *prometheus.Desc
+}
+
+func (c *schedulerHealthCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.tickDesc
+	ch <- c.skipReasonDesc
+	ch <- c.loadDesc
+	ch <- c.memDesc
+	ch <- c.lastTickDesc
+}
+
+func (c *schedulerHealthCollector) Collect(ch chan<- prometheus.Metric) {
+	var h SchedulerHealth
+	if c.src != nil {
+		h = c.src()
+	}
+	for _, outcome := range TickOutcomes {
+		n := h.Ticks[outcome]
+		if n < 0 {
+			n = 0
+		}
+		ch <- prometheus.MustNewConstMetric(c.tickDesc, prometheus.CounterValue, float64(n), outcome)
+	}
+	for _, reason := range SkipReasons {
+		n := h.SkipReasons[reason]
+		if n < 0 {
+			n = 0
+		}
+		ch <- prometheus.MustNewConstMetric(c.skipReasonDesc, prometheus.CounterValue, float64(n), reason)
+	}
+
+	// Gauges: no reading yet means OMIT, never 0. A zero load average
+	// is a real (idle-host) value so it is emitted whenever a snapshot
+	// exists; a zero memory fraction is not — a live host always has
+	// memory in use, so 0 means "the memory probe was disabled or
+	// failed" and claiming it would invert the gate's own judgement.
+	if h.HostOK {
+		ch <- prometheus.MustNewConstMetric(c.loadDesc, prometheus.GaugeValue, h.Host.Load1)
+		if h.Host.MemUsedFraction > 0 {
+			ch <- prometheus.MustNewConstMetric(c.memDesc, prometheus.GaugeValue, h.Host.MemUsedFraction)
+		}
+	}
+	// Fractional unix seconds: a scrape-to-scrape delta must be visible
+	// even when ticks are milliseconds apart (tests) — Prometheus
+	// timestamps are float seconds, so this loses nothing.
+	if h.LastTickOK {
+		ch <- prometheus.MustNewConstMetric(c.lastTickDesc, prometheus.GaugeValue,
+			float64(h.LastTick.UnixNano())/1e9)
 	}
 }
 
