@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3217 problem classes · 4850 verified answers** · exported 2026-11-15 10:00 UTC
+**3235 problem classes · 4869 verified answers** · exported 2026-11-16 10:00 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -11,9 +11,9 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 313 | python-audit-idle-maintenance | 9 | go |
 | 848 | go-cli-e2e-battery-harness | 8 | go |
 | 1540 | gitreins-tier2-input-token-cap-exceeded | 8 | go |
+| 2012 | gitreins-tier2-iteration-cap-exceeded | 8 | bash, go, python |
 | 277 | python-sdk-idle-audit | 7 | go |
 | 388 | typescript-barrel-split-large-file | 7 | go |
-| 2012 | gitreins-tier2-iteration-cap-exceeded | 7 | go, python |
 | 355 | gitreins-judge-iteration-cap | 6 | go |
 | 419 | go-live-e2e-battery | 6 | go |
 | 455 | static-html-idle-tick | 6 | go |
@@ -3223,3 +3223,21 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3304 | cgroupv2-orphan-scope-fd-leak-teardown-shell | 1 | shell |
 | 3305 | python-gate-substrate-window | 1 | go |
 | 3306 | teardown-status-ordering-before-destructive-op | 1 | go |
+| 3307 | go-crdt-delta-state-antientropy-delta-window-starvation-stale-ack-merge | 1 | go |
+| 3308 | python3-rna-pseudoknot-heuristic-weighted-matching-nussinov-extension-bpseq | 1 | python3 |
+| 3309 | js-tdigest-online-quantile-merge-clustering-error-cliff-heavy-tailed-skew | 1 | js |
+| 3310 | jsonl-board-event-row-misfiled-in-tasks | 1 | go |
+| 3311 | gitreins-tier2-hang-and-boardctl-evidence-id-formats | 1 | shell |
+| 3312 | go-epoch-reclaim-mpmc-ring-aba-liveness | 1 | go |
+| 3313 | python3-suffix-automaton-kth-distinct-substring-occurrence-weighted-online | 1 | python3 |
+| 3314 | bash-pipeline-sigpipe-backpressure-trap-reraise-exit-propagation | 1 | shell |
+| 3315 | gitlab-pipeline-red-runner-outage-attribution | 1 | bash |
+| 3316 | boardctl-write-vocabulary | 1 | bash |
+| 3317 | posix-shell-topo-install-order-cycle-break-mincut | 1 | shell |
+| 3318 | python3-crispr-offtarget-seed-extend-pam-mismatch-budget-ilp | 1 | python3 |
+| 3319 | session-claim-expiry-requeue | 1 | go |
+| 3320 | node20-mvcc-compactor-snapshot-read-skew-version-reclaim | 1 | js |
+| 3321 | go-hpack-dynamic-table-misindexed-header-replication-drift | 1 | go |
+| 3322 | python3-asn1-der-length-confusion-prefix-oracle-tlv-desync | 1 | python3 |
+| 3323 | git-push-shallow-clone-fixture-rejected | 1 | python |
+| 3324 | pytest-monkeypatch-os-kill-breaks-cleanup | 1 | python |
