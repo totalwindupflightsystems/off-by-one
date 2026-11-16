@@ -25,6 +25,18 @@ and `cmd/off-by-one/main.go` carries the 0.3.0-dev string — the ldflags build
 injects the tag on release. Cut under the standing release authority (minor:
 one `feat` — R4).
 
+### Toolchain
+
+- Raised the Go floor from `1.26.9` to `1.26.11` in `go.mod`, closing both
+  stdlib findings the old toolchain carried: GO-2026-6809 (`crypto/x509`
+  compromised intermediate CA, fixed in 1.26.10) and GO-2026-6859 (`net/http`,
+  fixed in 1.26.11). `govulncheck ./...` now prints `No vulnerabilities found.`
+  (it reported 2 at 1.26.9); no dependency, source or `go.sum` change was
+  involved. Every `setup-go` input in CI is pinned to the exact `1.26.11` patch
+  — a floating `'1.26'` silently drifts back below the floor — and the release
+  procedure now documents the `GOTOOLCHAIN=go1.26.11` prefix for a reproducible
+  build that links the same stdlib as CI.
+
 ## [v0.3.0] - 2026-11-04
 
 ### Observability: the lab can be scraped

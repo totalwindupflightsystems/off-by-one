@@ -423,7 +423,7 @@ The repository's traceability contract (board row → commit → guard → judge
 
 ### Prerequisites
 
-- Go **1.26.9+** — required to build (`make build`). `go.mod` declares `go 1.26.9` and CI runs the 1.26 matrix, so use a 1.26.9+ toolchain; the recipe below installs 1.26.9 directly.
+- Go **1.26.11+** — required to build (`make build`). `go.mod` declares `go 1.26.11` and CI pins exactly 1.26.11 in every `setup-go` step, so use a 1.26.11+ toolchain; the recipe below installs 1.26.11 directly.
 - Bubblewrap (`bwrap`) — optional, tests skip gracefully when absent
 - Pi Agent (`pi-agent`) — optional, solver tests mock the executor
 
@@ -434,7 +434,7 @@ The repository's traceability contract (board row → commit → guard → judge
 
 ```bash
 GO_TGZ="$(mktemp)"
-curl -fsSL https://go.dev/dl/go1.26.9.linux-amd64.tar.gz -o "$GO_TGZ"
+curl -fsSL https://go.dev/dl/go1.26.11.linux-amd64.tar.gz -o "$GO_TGZ"
 mkdir -p ~/toolchain && tar -C ~/toolchain -xzf "$GO_TGZ"
 export PATH="$HOME/toolchain/go/bin:$PATH"   # append the same line to ~/.profile to persist
 go version
@@ -446,6 +446,14 @@ or follow https://go.dev/doc/install) — the tarball recipe above needs no priv
 ### Install from a release (no toolchain needed)
 
 Prebuilt binaries are available for tagged releases (see [releases](https://github.com/totalwindupflightsystems/off-by-one/releases)). The build process is documented in the Makefile (`make release TAG=<version>`).
+
+Builds and releases must run with a toolchain at or above the floor declared in
+`go.mod` (`go 1.26.11`). Go's default `GOTOOLCHAIN=auto` selects that toolchain
+automatically when the local one is older — here it resolves
+`golang.org/toolchain@v0.0.1-go1.26.11` from the module cache. A reproducible
+release build pins it explicitly:
+`GOTOOLCHAIN=go1.26.11 make release TAG=vX.Y.Z`, then verify what was actually
+linked with `go version -m ./off-by-one | head -1`.
 
 ```bash
 V=v0.2.0

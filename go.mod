@@ -1,6 +1,6 @@
 module github.com/totalwindupflightsystems/off-by-one
 
-go 1.26.9
+go 1.26.11
 
 require (
 	github.com/joho/godotenv v1.5.1

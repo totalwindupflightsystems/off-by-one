@@ -160,6 +160,10 @@ check-deploy-test:
 # NOTE: TAG is intentionally read from the recipe environment (`$$TAG`), never
 # via `$(TAG)` interpolation — an interpolated TAG is unquoted make text that
 # a malicious/typo'd value could turn into arbitrary shell execution.
+# Build with a toolchain at or above the go.mod floor (`go 1.26.11`); Go's
+# default GOTOOLCHAIN=auto selects it automatically, and a reproducible cut
+# pins it explicitly: GOTOOLCHAIN=go1.26.11 make release TAG=vX.Y.Z
+# (verify with `go version -m ./off-by-one | head -1`).
 release:
 	@if [ -z "$${TAG:-}" ]; then \
 		echo "ERROR: TAG is required — usage: make release TAG=v0.1.0"; \
