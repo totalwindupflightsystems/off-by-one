@@ -1,0 +1,1025 @@
+commit 6c4e09aa54d7813b50fa0b866fa9b7a069bdfb8c
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Mon Nov 16 17:25:18 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Mon Nov 16 17:25:18 2026 -0500
+
+    obs(OBS-OB-002): emit gate/scheduler health metrics on /metrics/prom
+    
+    Ships spec §3.2's five Tier-2 families: obo_cron_ticks_total{outcome},
+    obo_cron_skip_reason_total{reason}, obo_host_load1, obo_host_mem_used_fraction,
+    obo_cron_last_tick_timestamp_seconds. Both label sets are CLOSED and
+    pre-initialised at 0 so rate() has a series before the first tick/skip; the three
+    gauges are omitted (never NaN, never a fabricated 0) until a reading exists. Tick
+    stamps at the TOP of Tick and settles exactly one outcome on every return path
+    (idle_gated for IdleGateError before returning, empty, solved, error).
+    
+    Label reconciliation vs the board row: the row's provisional `deferred`/`attempted`
+    are NOT what shipped — spec §3.2 is design authority, so the closed outcome set is
+    solved|empty|idle_gated|error (row `deferred` -> spec `idle_gated`, row `attempted`
+    -> spec `solved`). Reason vocabulary is TrimSpaceReason's load|memory|load+memory;
+    an unrecognised reason is dropped rather than widening the label set. Spec §3.2
+    needed no edit: names/types/labels shipped exactly as written.
+    
+    Live numbers (scratch :18766, -cron-interval 2s -load-threshold 0.1, host load1 ~20):
+    obo_host_load1 20.41 vs /proc/loadavg 20.41, then 20.61 vs 20.61 six seconds later
+    (0% delta, AC2's 5% bound). Across that same 6s gap: last_tick 1794867711.37 ->
+    1794867717.38, skip_reason{load} 7 -> 10, ticks{idle_gated} 7 -> 10. Scratch :18768
+    with -load-threshold -1 (gate open, empty queue): ticks{empty} 7 -> 10 while
+    idle_gated stayed 0. Live unit on :8766 untouched (health 200 before and after,
+    ActiveEnterTimestamp unchanged).
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ cmd/off-by-one/main.go                  |   6 +
+ internal/api/server.go                  |   7 +
+ internal/cron/loop.go                   |  29 ++-
+ internal/cron/scheduler_health_test.go  | 188 ++++++++++++++++++++
+ internal/metrics/metrics.go             | 201 +++++++++++++++++++++
+ internal/metrics/prom.go                | 114 ++++++++++++
+ internal/metrics/prom_scheduler_test.go | 300 ++++++++++++++++++++++++++++++++
+ 7 files changed, 844 insertions(+), 1 deletion(-)
+
+diff --git a/cmd/off-by-one/main.go b/cmd/off-by-one/main.go
+index 8ae3d784..9cd30423 100644
+--- a/cmd/off-by-one/main.go
++++ b/cmd/off-by-one/main.go
+@@ -267,6 +267,12 @@ func main() {
+ 		// Observer the loop records into, so a scrape cannot disagree
+ 		// with the per-solve records the JSON surface serves.
+ 		SolveResources: observer.SolveResources,
++		// Scheduler health + starvation (OBS-OB-002, spec §3.2): tick
++		// outcomes, gate skip reasons, the last host reading and the
++		// last tick stamp — all recorded by the loop into this same
++		// Observer, so the counters and the gauges come from one
++		// consistent source.
++		Scheduler: observer.SchedulerHealth,
+ 	})
+ 	apiServer.Prom = prom
+ 	if loop != nil {
+diff --git a/internal/api/server.go b/internal/api/server.go
+index 3ac42ce8..2e9e5675 100644
+--- a/internal/api/server.go
++++ b/internal/api/server.go
+@@ -107,6 +107,13 @@ func New(store *graph.Store, queue *ingest.Queue, spec []byte) *Server {
+ 				n, err := queue.Depth(ctx)
+ 				return int64(n), err
+ 			},
++			// Scheduler health (OBS-OB-002) reads the Observer LAZILY:
++			// New cannot capture it (main assigns Server.Observer after
++			// construction). Both the closure and the accessor are
++			// nil-safe, so a Server built in a unit test serves the
++			// families at zero and omits the gauges instead of
++			// panicking on a missing observer.
++			Scheduler: func() metrics.SchedulerHealth { return s.Observer.SchedulerHealth() },
+ 		})
+ 	}
+ 	return s
+diff --git a/internal/cron/loop.go b/internal/cron/loop.go
+index ee789150..b388ea57 100644
+--- a/internal/cron/loop.go
++++ b/internal/cron/loop.go
+@@ -498,6 +498,24 @@ func (l *Loop) Tick(ctx context.Context) error {
+ 	}
+ 	defer l.inflight.Store(false)
+ 
++	// One-outcome-per-tick invariant (OBS-OB-002, spec §3.2): every tick
++	// that actually runs stamps obo_cron_last_tick_timestamp_seconds at
++	// the TOP (so a long solve cannot make a live loop look stale) and
++	// settles on EXACTLY ONE obo_cron_ticks_total outcome on its way
++	// out — the deferred settle covers every return path below,
++	// including the gated, empty and error ones. A call rejected by the
++	// CAS above is not a tick at all: it did no work and must not stamp
++	// liveness.
++	outcome := metrics.TickOutcomeError
++	if l.cfg.Observer != nil {
++		l.cfg.Observer.RecordTickStart()
++	}
++	defer func() {
++		if l.cfg.Observer != nil {
++			l.cfg.Observer.RecordTick(outcome)
++		}
++	}()
++
+ 	// Reap stale in_progress entries before anything else. This runs
+ 	// even when the system is busy — a wedged entry is stale no
+ 	// matter the load, and skipping the reap on a busy box would let
+@@ -523,6 +541,10 @@ func (l *Loop) Tick(ctx context.Context) error {
+ 		// stamp the queue head so the submitter's next poll shows
+ 		// status=deferred with the gate's reason instead of a silent
+ 		// pending row (DF-OFF-BY-ONE-45).
++		//
++		// It IS an outcome (OBS-OB-002): a starving loop is alive and
++		// gated, which must be distinguishable from a dead one.
++		outcome = metrics.TickOutcomeIdleGated
+ 		var gate *IdleGateError
+ 		if errors.As(err, &gate) {
+ 			l.deferQueueHead(ctx, gate)
+@@ -545,10 +567,15 @@ func (l *Loop) Tick(ctx context.Context) error {
+ 		return fmt.Errorf("dequeue: %w", err)
+ 	}
+ 	if entry == nil {
++		outcome = metrics.TickOutcomeEmpty
+ 		l.metrics.recordEmptySkip()
+ 		return nil
+ 	}
+-	return l.processOne(ctx, entry)
++	if err := l.processOne(ctx, entry); err != nil {
++		return err
++	}
++	outcome = metrics.TickOutcomeSolved
++	return nil
+ }
+ 
+ // ErrAlreadyRunning signals that another Tick is already in
+diff --git a/internal/cron/scheduler_health_test.go b/internal/cron/scheduler_health_test.go
+new file mode 100644
+index 00000000..86f0023a
+--- /dev/null
++++ b/internal/cron/scheduler_health_test.go
+@@ -0,0 +1,188 @@
++package cron
++
++import (
++	"context"
++	"errors"
++	"testing"
++	"time"
++
++	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
++	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
++	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
++)
++
++// schedulerHealth returns the observer's scheduler view, asserting the
++// observer is wired (a nil observer would silently record nothing and
++// make every assertion below vacuous).
++func schedulerHealth(t *testing.T, obs *metrics.Observer) metrics.SchedulerHealth {
++	t.Helper()
++	if obs == nil {
++		t.Fatal("Observer is nil — the tick outcome would be recorded nowhere")
++	}
++	return obs.SchedulerHealth()
++}
++
++// sumTicks returns the total number of recorded ticks across outcomes.
++func sumTicks(h metrics.SchedulerHealth) int64 {
++	var n int64
++	for _, v := range h.Ticks {
++		n += v
++	}
++	return n
++}
++
++// TestTickGateClosedRecordsIdleGatedOnce is the OBS-OB-002 core case
++// (acceptance criterion AC3's unit half): a gate-closed tick is ONE
++// idle_gated outcome, its skip reason is tallied, and the last-tick
++// stamp still advances — a starving loop is alive and must look alive.
++func TestTickGateClosedRecordsIdleGatedOnce(t *testing.T) {
++	q := newFakeQueue(makeEntry("a"))
++	obs := metrics.New(0, nil)
++	l := NewLoop(Config{
++		Queue:         q,
++		Solver:        &fakeSolver{},
++		Interval:      time.Millisecond,
++		LoadThreshold: 0.5,
++		IdleProbe:     func() (float64, error) { return 12.0, nil },
++		Observer:      obs,
++	})
++
++	before := time.Now()
++	if err := l.Tick(context.Background()); !errors.Is(err, ErrNoIdle) {
++		t.Fatalf("Tick err = %v, want ErrNoIdle", err)
++	}
++	h := schedulerHealth(t, obs)
++	if got := h.Ticks[metrics.TickOutcomeIdleGated]; got != 1 {
++		t.Errorf("idle_gated ticks = %d, want 1", got)
++	}
++	if got := sumTicks(h); got != 1 {
++		t.Errorf("total ticks = %d, want 1 (exactly one outcome per tick, got %v)", got, h.Ticks)
++	}
++	if got := h.SkipReasons["load"]; got != 1 {
++		t.Errorf("skip reason load = %d, want 1 (%v)", got, h.SkipReasons)
++	}
++	if !h.HostOK {
++		t.Fatal("no host reading recorded on the gate path")
++	}
++	if h.Host.Load1 != 12.0 {
++		t.Errorf("host load1 = %v, want the probe's 12.0", h.Host.Load1)
++	}
++	if !h.LastTickOK {
++		t.Fatal("last tick not stamped on the gate path — a starving loop would look dead")
++	}
++	if h.LastTick.Before(before.Add(-2 * time.Second)) {
++		t.Errorf("last tick %v is not the tick's wall clock (tick started %v)", h.LastTick, before)
++	}
++
++	// A second gated tick advances the stamp and adds exactly one more
++	// outcome: the counters are per-tick, the gauge is freshness.
++	time.Sleep(5 * time.Millisecond)
++	if err := l.Tick(context.Background()); !errors.Is(err, ErrNoIdle) {
++		t.Fatalf("second Tick err = %v, want ErrNoIdle", err)
++	}
++	h2 := schedulerHealth(t, obs)
++	if got := h2.Ticks[metrics.TickOutcomeIdleGated]; got != 2 {
++		t.Errorf("idle_gated ticks after two gated ticks = %d, want 2", got)
++	}
++	if got := sumTicks(h2); got != 2 {
++		t.Errorf("total ticks after two gated ticks = %d, want 2 (%v)", got, h2.Ticks)
++	}
++	if !h2.LastTick.After(h.LastTick) {
++		t.Errorf("last tick did not advance: %v then %v", h.LastTick, h2.LastTick)
++	}
++}
++
++// TestTickEmptyQueueRecordsEmptyOnce: an empty queue is its own
++// outcome, counted once, with the stamp still advancing.
++func TestTickEmptyQueueRecordsEmptyOnce(t *testing.T) {
++	obs := metrics.New(0, nil)
++	l := fastLoop(newFakeQueue(), &fakeSolver{})
++	l.cfg.Observer = obs
++
++	if err := l.Tick(context.Background()); err != nil {
++		t.Fatalf("Tick err: %v", err)
++	}
++	h := schedulerHealth(t, obs)
++	if got := h.Ticks[metrics.TickOutcomeEmpty]; got != 1 {
++		t.Errorf("empty ticks = %d, want 1", got)
++	}
++	if got := sumTicks(h); got != 1 {
++		t.Errorf("total ticks = %d, want 1 (got %v)", got, h.Ticks)
++	}
++	if !h.LastTickOK {
++		t.Fatal("last tick not stamped on the empty path")
++	}
++	if h.SkipReasons["load"]+h.SkipReasons["memory"]+h.SkipReasons["load+memory"] != 0 {
++		t.Errorf("empty tick recorded a gate skip: %v", h.SkipReasons)
++	}
++}
++
++// TestTickSolvedRecordsSolvedOnce: the happy path is exactly one
++// solved outcome.
++func TestTickSolvedRecordsSolvedOnce(t *testing.T) {
++	obs := metrics.New(0, nil)
++	l := fastLoop(newFakeQueue(makeEntry("s1")), &fakeSolver{})
++	l.cfg.Observer = obs
++
++	if err := l.Tick(context.Background()); err != nil {
++		t.Fatalf("Tick err: %v", err)
++	}
++	h := schedulerHealth(t, obs)
++	if got := h.Ticks[metrics.TickOutcomeSolved]; got != 1 {
++		t.Errorf("solved ticks = %d, want 1", got)
++	}
++	if got := sumTicks(h); got != 1 {
++		t.Errorf("total ticks = %d, want 1 (got %v)", got, h.Ticks)
++	}
++	if !h.LastTickOK {
++		t.Fatal("last tick not stamped on the solved path")
++	}
++}
++
++// TestTickErrorRecordsErrorOnce: every other failure is one error
++// outcome, never zero (a failing tick that vanishes from the counter is
++// exactly the blindness this tier exists to close).
++func TestTickErrorRecordsErrorOnce(t *testing.T) {
++	obs := metrics.New(0, nil)
++	s := &fakeSolver{}
++	s.solveScript = func(*ingest.Entry) (*solver.Solution, error) {
++		return nil, errors.New("solver exploded")
++	}
++	l := fastLoop(newFakeQueue(makeEntry("e1")), s)
++	l.cfg.Observer = obs
++
++	if err := l.Tick(context.Background()); err == nil {
++		t.Fatal("Tick err = nil, want the solver failure")
++	}
++	h := schedulerHealth(t, obs)
++	if got := h.Ticks[metrics.TickOutcomeError]; got != 1 {
++		t.Errorf("error ticks = %d, want 1", got)
++	}
++	if got := sumTicks(h); got != 1 {
++		t.Errorf("total ticks = %d, want 1 (got %v)", got, h.Ticks)
++	}
++	if !h.LastTickOK {
++		t.Fatal("last tick not stamped on the error path")
++	}
++}
++
++// TestTickConcurrentCallIsNotATick: a Tick rejected by the in-flight
++// CAS did no work, so it must not count an outcome nor stamp liveness.
++func TestTickConcurrentCallIsNotATick(t *testing.T) {
++	obs := metrics.New(0, nil)
++	l := fastLoop(newFakeQueue(), &fakeSolver{})
++	l.cfg.Observer = obs
++	l.inflight.Store(true) // simulate a tick already running
++	defer l.inflight.Store(false)
++
++	if err := l.Tick(context.Background()); !errors.Is(err, ErrAlreadyRunning) {
++		t.Fatalf("Tick err = %v, want ErrAlreadyRunning", err)
++	}
++	h := schedulerHealth(t, obs)
++	if got := sumTicks(h); got != 0 {
++		t.Errorf("rejected concurrent call counted %d ticks, want 0 (%v)", got, h.Ticks)
++	}
++	if h.LastTickOK {
++		t.Errorf("rejected concurrent call stamped last tick at %v — it did no work", h.LastTick)
++	}
++}
+diff --git a/internal/metrics/metrics.go b/internal/metrics/metrics.go
+index df91393a..93181bbf 100644
+--- a/internal/metrics/metrics.go
++++ b/internal/metrics/metrics.go
+@@ -28,6 +28,7 @@ import (
+ 	"log"
+ 	"strings"
+ 	"sync"
++	"time"
+ 
+ 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
+ )
+@@ -72,6 +73,80 @@ type SolveRecord struct {
+ 	AlertBytesUsed uint64 `json:"alert_threshold_bytes"`
+ }
+ 
++// Tick outcome vocabulary — the closed `outcome` label set of
++// obo_cron_ticks_total (OBS-OB-002, docs/observability-spec.md §3.2).
++// Every tick of the cron loop settles on exactly one of these; an
++// outcome outside the set is dropped, never added as a label value
++// (spec §3.5: closed enumerations only).
++const (
++	// TickOutcomeSolved is a tick that solved and committed an entry.
++	TickOutcomeSolved = "solved"
++	// TickOutcomeEmpty is a tick that found nothing in the queue.
++	TickOutcomeEmpty = "empty"
++	// TickOutcomeIdleGated is a tick the host-pressure gate deferred:
++	// the loop is alive, but it deliberately did no work. This is the
++	// outcome that makes starvation alertable — the whole point of
++	// OBS-OB-002.
++	TickOutcomeIdleGated = "idle_gated"
++	// TickOutcomeError is a tick that failed for any other reason.
++	TickOutcomeError = "error"
++)
++
++// TickOutcomes is the complete `outcome` label set for
++// obo_cron_ticks_total. Every member is emitted on every scrape, at
++// zero before its first occurrence, so rate()-based alerts have a
++// series to fire on (a missing series is invisible to rate()).
++var TickOutcomes = []string{
++	TickOutcomeSolved,
++	TickOutcomeEmpty,
++	TickOutcomeIdleGated,
++	TickOutcomeError,
++}
++
++// SkipReasons is the complete `reason` label set for
++// obo_cron_skip_reason_total — the same vocabulary TrimSpaceReason
++// produces from the gate's parts, and the same strings the deferral
++// log line names. A reason outside this set is dropped rather than
++// widening the exposition's cardinality.
++var SkipReasons = []string{"load", "memory", "load+memory"}
++
++// IsTickOutcome reports whether outcome is a member of TickOutcomes.
++func IsTickOutcome(outcome string) bool { return containsString(TickOutcomes, outcome) }
++
++// IsSkipReason reports whether reason is a member of SkipReasons.
++func IsSkipReason(reason string) bool { return containsString(SkipReasons, reason) }
++
++func containsString(set []string, want string) bool {
++	for _, v := range set {
++		if v == want {
++			return true
++		}
++	}
++	return false
++}
++
++// SchedulerHealth is the scrape-time view of the loop's scheduler
++// state (OBS-OB-002, spec §3.2): cumulative tick outcomes, cumulative
++// skip reasons, the last host reading, and the last tick's wall clock.
++// Ticks and SkipReasons are copies — mutating them never touches the
++// Observer.
++type SchedulerHealth struct {
++	// Ticks counts every tick by outcome (TickOutcomes members only).
++	Ticks map[string]int64
++	// SkipReasons counts host-gate skips by reason (SkipReasons
++	// members only).
++	SkipReasons map[string]int64
++	// Host is the latest gate reading; HostOK is false before the
++	// first tick reached the gate, in which case the host gauges are
++	// omitted from the exposition rather than reported as 0.
++	Host   HostSnapshot
++	HostOK bool
++	// LastTick is the wall clock stamped at the top of the most
++	// recent tick; LastTickOK is false before the loop ever ticked.
++	LastTick   time.Time
++	LastTickOK bool
++}
++
+ // HostSnapshot is one host-pressure observation taken when the gate
+ // runs. Load1 is the 1-minute load average; MemUsedFraction is
+ // MemAvailableBytes-derived (1.0 = full). Reason is the gate's skip
+@@ -105,6 +180,16 @@ type Observer struct {
+ 	discoveryHits   int64
+ 	discoveryMisses int64
+ 
++	// Scheduler-health totals (OBS-OB-002, spec §3.2): cumulative tick
++	// outcomes, cumulative gate skip reasons, and the wall clock of the
++	// last tick. Kept here (not in cron.Metrics) because the exposition
++	// already reads this Observer and because the skip-reason tally
++	// belongs on the same path that records the skip. Both maps are
++	// keyed by the CLOSED vocabularies above — no caller can widen them.
++	tickCounts   map[string]int64
++	reasonCounts map[string]int64
++	lastTick     time.Time
++
+ 	// Cumulative per-solve resource and failure-cause totals feeding
+ 	// obo_solve_* on GET /metrics/prom (OBS-OB-003). They are kept apart
+ 	// from o.records because records is a bounded (and trimmable) window:
+@@ -163,6 +248,8 @@ func New(alertBytes uint64, logger *log.Logger) *Observer {
+ 		logger:        logger,
+ 		peakBuckets:   make([]uint64, len(SolvePeakRSSBuckets)+1),
+ 		failureCauses: make(map[string]int64),
++		tickCounts:    make(map[string]int64),
++		reasonCounts:  make(map[string]int64),
+ 	}
+ }
+ 
+@@ -287,18 +374,132 @@ func (o *Observer) alertBytesUsed(rec *SolveRecord) {
+ // RecordSkip counts a run skipped for host pressure and stores snap
+ // (with Reason filled) as both the last skip and the last host
+ // observation.
++//
++// The skip is also tallied into the reason counter behind
++// obo_cron_skip_reason_total (OBS-OB-002). The vocabulary is CLOSED —
++// TrimSpaceReason's three values — so a caller passing free text is
++// dropped instead of creating a new series (spec §3.5). Dropping loses
++// one sample; widening the label set would make the family's
++// cardinality unbounded, which is worse and unrecoverable.
+ func (o *Observer) RecordSkip(snap HostSnapshot) {
+ 	if o == nil {
+ 		return
+ 	}
++	reason := snap.Reason
+ 	o.mu.Lock()
+ 	o.skips++
+ 	cp := snap
+ 	o.lastSkipped = &cp
+ 	o.lastHost = &cp
++	if IsSkipReason(reason) {
++		if o.reasonCounts == nil {
++			o.reasonCounts = make(map[string]int64)
++		}
++		o.reasonCounts[reason]++
++	}
+ 	o.mu.Unlock()
+ }
+ 
++// RecordTickStart stamps the tick wall clock (gauge
++// obo_cron_last_tick_timestamp_seconds) without counting an outcome.
++//
++// Why a separate call: a tick that dequeues and solves can hold the
++// loop for minutes, and a freshness alert must still see the loop as
++// alive while that solve runs. The loop stamps at the TOP of Tick;
++// RecordTick then settles exactly one outcome on every return path.
++// Neither call can double-count — this one counts nothing.
++func (o *Observer) RecordTickStart() {
++	if o == nil {
++		return
++	}
++	o.mu.Lock()
++	o.lastTick = time.Now()
++	o.mu.Unlock()
++}
++
++// RecordTick stamps the tick wall clock and increments exactly one
++// outcome counter for obo_cron_ticks_total. The loop calls it ONCE per
++// tick, on every return path — including the gated and empty paths,
++// because a starving loop still ticks while a dead loop does not.
++//
++// An outcome outside TickOutcomes is dropped (closed label set, spec
++// §3.5); the stamp still lands, so an unknown value can never make a
++// live loop look dead.
++func (o *Observer) RecordTick(outcome string) {
++	if o == nil {
++		return
++	}
++	o.mu.Lock()
++	o.lastTick = time.Now()
++	if IsTickOutcome(outcome) {
++		if o.tickCounts == nil {
++			o.tickCounts = make(map[string]int64)
++		}
++		o.tickCounts[outcome]++
++	}
++	o.mu.Unlock()
++}
++
++// LastHost returns the latest host observation and whether one has
++// been taken yet (false before the first tick reached the gate).
++func (o *Observer) LastHost() (HostSnapshot, bool) {
++	if o == nil {
++		return HostSnapshot{}, false
++	}
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.lastHost == nil {
++		return HostSnapshot{}, false
++	}
++	return *o.lastHost, true
++}
++
++// LastTick returns the last tick's wall clock and whether the loop has
++// ticked at all.
++func (o *Observer) LastTick() (time.Time, bool) {
++	if o == nil {
++		return time.Time{}, false
++	}
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	if o.lastTick.IsZero() {
++		return time.Time{}, false
++	}
++	return o.lastTick, true
++}
++
++// SchedulerHealth returns a consistent copy of the scheduler-health
++// totals (OBS-OB-002). Nil-receiver-safe: a nil Observer reports every
++// counter at zero and both ok flags false, so the exposition keeps its
++// shape (all label values present at 0) and omits only the gauges that
++// would otherwise claim a reading nobody took.
++func (o *Observer) SchedulerHealth() SchedulerHealth {
++	h := SchedulerHealth{
++		Ticks:       make(map[string]int64, len(TickOutcomes)),
++		SkipReasons: make(map[string]int64, len(SkipReasons)),
++	}
++	if o == nil {
++		return h
++	}
++	o.mu.Lock()
++	defer o.mu.Unlock()
++	for _, outcome := range TickOutcomes {
++		h.Ticks[outcome] = o.tickCounts[outcome]
++	}
++	for _, reason := range SkipReasons {
++		h.SkipReasons[reason] = o.reasonCounts[reason]
++	}
++	if o.lastHost != nil {
++		h.Host = *o.lastHost
++		h.HostOK = true
++	}
++	if !o.lastTick.IsZero() {
++		h.LastTick = o.lastTick
++		h.LastTickOK = true
++	}
++	return h
++}
++
+ // RecordHost stores snap as the latest host observation without
+ // counting a skip (the healthy-path gate reading).
+ func (o *Observer) RecordHost(snap HostSnapshot) {
+diff --git a/internal/metrics/prom.go b/internal/metrics/prom.go
+index 734c20fc..ad2c3983 100644
+--- a/internal/metrics/prom.go
++++ b/internal/metrics/prom.go
+@@ -67,6 +67,13 @@ type PromConfig struct {
+ 	// zero so the exposition keeps its shape (a missing series is
+ 	// invisible to rate(); a zero series is not).
+ 	SolveResources func() SolveResources
++	// Scheduler returns the loop's scheduler-health view (OBS-OB-002,
++	// spec §3.2): tick outcomes, gate skip reasons, the last host
++	// reading, and the last tick's wall clock. Production wires
++	// *metrics.Observer.SchedulerHealth. nil serves every counter label
++	// at zero and omits the gauges — a gauge with no reading must not
++	// claim 0 (see schedulerHealthCollector).
++	Scheduler func() SchedulerHealth
+ }
+ 
+ // Prom owns the private registry and its collectors. Construct once
+@@ -181,6 +188,39 @@ func NewProm(cfg PromConfig) *Prom {
+ 		),
+ 	})
+ 
++	// Tier 2 — scheduler health and starvation (OBS-OB-002, spec §3.2).
++	// This is the tier that makes "the loop is alive and answering HTTP
++	// but never solving" visible: idle_gated ticks plus a fresh
++	// last-tick timestamp while solves_total stays flat.
++	reg.MustRegister(&schedulerHealthCollector{
++		src: cfg.Scheduler,
++		tickDesc: prometheus.NewDesc(
++			"obo_cron_ticks_total",
++			"Loop ticks by outcome (closed set: solved, empty, idle_gated, error). A starving loop keeps ticking with outcome=idle_gated; a dead loop stops advancing obo_cron_last_tick_timestamp_seconds.",
++			[]string{"outcome"}, nil,
++		),
++		skipReasonDesc: prometheus.NewDesc(
++			"obo_cron_skip_reason_total",
++			"Host-gate skips by reason (closed set: load, memory, load+memory). When reason=load, the gate is admitting it: rising rate here with flat obo_solves_total is idle-by-gate, not idle-by-absence.",
++			[]string{"reason"}, nil,
++		),
++		loadDesc: prometheus.NewDesc(
++			"obo_host_load1",
++			"Host 1-minute load average as read by the idle gate (mirrors HostSnapshot.Load1).",
++			nil, nil,
++		),
++		memDesc: prometheus.NewDesc(
++			"obo_host_mem_used_fraction",
++			"Host memory used fraction (0-1) as read by the memory gate — 1.0 minus MemAvailable/MemTotal (mirrors HostSnapshot.MemUsedFraction).",
++			nil, nil,
++		),
++		lastTickDesc: prometheus.NewDesc(
++			"obo_cron_last_tick_timestamp_seconds",
++			"Unix seconds of the most recent loop tick — advances on every tick including idle_gated and empty ones, so staleness means the loop is dead or hung rather than merely gated.",
++			nil, nil,
++		),
++	})
++
+ 	p.handler = promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+ 	return p
+ }
+@@ -351,6 +391,80 @@ func (c *solveCountersCollector) Collect(ch chan<- prometheus.Metric) {
+ 	}
+ }
+ 
++// schedulerHealthCollector emits the five Tier-2 scheduler families
++// (OBS-OB-002, spec §3.2): two labelled counters over CLOSED
++// vocabularies plus three unlabelled gauges.
++//
++// Why a Collector and not GaugeFunc/CounterVec:
++//   - A GaugeFunc always emits, so it cannot satisfy "no reading yet →
++//     omit the gauge rather than emitting NaN". A nil source or an
++//     empty host reading here omits the series instead.
++//   - A CounterVec can only Add; the source is already cumulative, so
++//     mirroring it into a vec would need Set (which counters lack) or
++//     would double-count on every scrape. Const metrics read the
++//     cumulative source exactly once per scrape with no state to drift.
++//
++// Both label vocabularies are emitted in full on every scrape, at 0
++// before their first occurrence: a series that does not exist yet is
++// invisible to rate(), which is precisely the alert that must fire the
++// first time the gate closes.
++type schedulerHealthCollector struct {
++	src            func() SchedulerHealth
++	tickDesc       *prometheus.Desc
++	skipReasonDesc *prometheus.Desc
++	loadDesc       *prometheus.Desc
++	memDesc        *prometheus.Desc
++	lastTickDesc   *prometheus.Desc
++}
++
++func (c *schedulerHealthCollector) Describe(ch chan<- *prometheus.Desc) {
++	ch <- c.tickDesc
++	ch <- c.skipReasonDesc
++	ch <- c.loadDesc
++	ch <- c.memDesc
++	ch <- c.lastTickDesc
++}
++
++func (c *schedulerHealthCollector) Collect(ch chan<- prometheus.Metric) {
++	var h SchedulerHealth
++	if c.src != nil {
++		h = c.src()
++	}
++	for _, outcome := range TickOutcomes {
++		n := h.Ticks[outcome]
++		if n < 0 {
++			n = 0
++		}
++		ch <- prometheus.MustNewConstMetric(c.tickDesc, prometheus.CounterValue, float64(n), outcome)
++	}
++	for _, reason := range SkipReasons {
++		n := h.SkipReasons[reason]
++		if n < 0 {
++			n = 0
++		}
++		ch <- prometheus.MustNewConstMetric(c.skipReasonDesc, prometheus.CounterValue, float64(n), reason)
++	}
++
++	// Gauges: no reading yet means OMIT, never 0. A zero load average
++	// is a real (idle-host) value so it is emitted whenever a snapshot
++	// exists; a zero memory fraction is not — a live host always has
++	// memory in use, so 0 means "the memory probe was disabled or
++	// failed" and claiming it would invert the gate's own judgement.
++	if h.HostOK {
++		ch <- prometheus.MustNewConstMetric(c.loadDesc, prometheus.GaugeValue, h.Host.Load1)
++		if h.Host.MemUsedFraction > 0 {
++			ch <- prometheus.MustNewConstMetric(c.memDesc, prometheus.GaugeValue, h.Host.MemUsedFraction)
++		}
++	}
++	// Fractional unix seconds: a scrape-to-scrape delta must be visible
++	// even when ticks are milliseconds apart (tests) — Prometheus
++	// timestamps are float seconds, so this loses nothing.
++	if h.LastTickOK {
++		ch <- prometheus.MustNewConstMetric(c.lastTickDesc, prometheus.GaugeValue,
++			float64(h.LastTick.UnixNano())/1e9)
++	}
++}
++
+ // solveFailureCollector emits obo_solve_failure_total{cause} over the
+ // CLOSED seven-value cause vocabulary (OBS-OB-003). Every cause is
+ // always present — a zero series is what makes rate()/absent() alerts
+diff --git a/internal/metrics/prom_scheduler_test.go b/internal/metrics/prom_scheduler_test.go
+new file mode 100644
+index 00000000..ebbcbb00
+--- /dev/null
++++ b/internal/metrics/prom_scheduler_test.go
+@@ -0,0 +1,300 @@
++package metrics
++
++import (
++	"math"
++	"os"
++	"strconv"
++	"strings"
++	"testing"
++	"time"
++
++	dto "github.com/prometheus/client_model/go"
++)
++
++// readProcLoad1 returns /proc/loadavg field 1 (the 1-minute average the
++// idle gate itself judges) and skips the test where /proc is absent.
++func readProcLoad1(t *testing.T) float64 {
++	t.Helper()
++	data, err := os.ReadFile("/proc/loadavg")
++	if err != nil {
++		t.Skipf("/proc/loadavg unavailable: %v", err)
++	}
++	fields := strings.Fields(string(data))
++	if len(fields) == 0 {
++		t.Skipf("/proc/loadavg is empty: %q", string(data))
++	}
++	v, err := strconv.ParseFloat(fields[0], 64)
++	if err != nil {
++		t.Skipf("/proc/loadavg field 1 %q is not a float: %v", fields[0], err)
++	}
++	return v
++}
++
++// schedulerHealthFixture drives one Observer through every member of
++// both closed vocabularies plus one value OUTSIDE each, so the closed-set
++// assertions below have something to reject.
++func schedulerHealthFixture(t *testing.T) *Observer {
++	t.Helper()
++	obs := New(0, nil)
++	for _, outcome := range TickOutcomes {
++		obs.RecordTick(outcome)
++	}
++	obs.RecordTick("definitely_not_an_outcome") // must be dropped
++
++	for _, reason := range SkipReasons {
++		obs.RecordSkip(HostSnapshot{Load1: 12.5, MemUsedFraction: 0.42, Reason: reason})
++	}
++	// An unrecognised reason must never create a series (spec §3.5:
++	// closed enumerations only).
++	obs.RecordSkip(HostSnapshot{Load1: 12.5, MemUsedFraction: 0.42, Reason: "disk"})
++	// RecordHost without a skip is the healthy gate reading: it moves
++	// the host gauges but no counter.
++	obs.RecordHost(HostSnapshot{Load1: 11.25, MemUsedFraction: 0.5})
++	return obs
++}
++
++// family returns the named family, failing the test (instead of
++// panicking inside sampleValue) when the exposition does not carry it.
++func family(t *testing.T, fams map[string]*dto.MetricFamily, name string) *dto.MetricFamily {
++	t.Helper()
++	f, ok := fams[name]
++	if !ok || f == nil {
++		t.Fatalf("exposition is missing family %q", name)
++	}
++	return f
++}
++
++// TestPromSchedulerHealthFamilies is the exposition contract for
++// OBS-OB-002 (docs/observability-spec.md §3.2): all five families are
++// on the wire with # HELP/# TYPE lines and the spec's label names, the
++// counters carry every closed-vocabulary value exactly once, and the
++// gauges mirror the last host reading + last tick stamp.
++func TestPromSchedulerHealthFamilies(t *testing.T) {
++	obs := schedulerHealthFixture(t)
++	p := NewProm(PromConfig{Scheduler: obs.SchedulerHealth})
++	body := serveProm(t, p)
++
++	for _, want := range []string{
++		"# HELP obo_cron_ticks_total",
++		"# TYPE obo_cron_ticks_total counter",
++		"# HELP obo_cron_skip_reason_total",
++		"# TYPE obo_cron_skip_reason_total counter",
++		"# HELP obo_host_load1",
++		"# TYPE obo_host_load1 gauge",
++		"# HELP obo_host_mem_used_fraction",
++		"# TYPE obo_host_mem_used_fraction gauge",
++		"# HELP obo_cron_last_tick_timestamp_seconds",
++		"# TYPE obo_cron_last_tick_timestamp_seconds gauge",
++	} {
++		if !strings.Contains(body, want) {
++			t.Errorf("exposition missing %q", want)
++		}
++	}
++
++	fams := parseProm(t, body)
++	for _, name := range []string{
++		"obo_cron_ticks_total",
++		"obo_cron_skip_reason_total",
++		"obo_host_load1",
++		"obo_host_mem_used_fraction",
++		"obo_cron_last_tick_timestamp_seconds",
++	} {
++		family(t, fams, name) // fail loudly, not with a nil deref below
++	}
++	// Each outcome counted once; the out-of-vocabulary value added no
++	// series and no count.
++	if got := len(fams["obo_cron_ticks_total"].GetMetric()); got != len(TickOutcomes) {
++		t.Errorf("obo_cron_ticks_total has %d series, want %d (closed set: %v)",
++			got, len(TickOutcomes), TickOutcomes)
++	}
++	for _, outcome := range TickOutcomes {
++		if v := sampleValue(t, fams["obo_cron_ticks_total"], map[string]string{"outcome": outcome}); v != 1 {
++			t.Errorf("obo_cron_ticks_total{outcome=%q} = %v, want 1", outcome, v)
++		}
++	}
++	var tickSum float64
++	for _, m := range fams["obo_cron_ticks_total"].GetMetric() {
++		tickSum += m.GetCounter().GetValue()
++	}
++	if tickSum != float64(len(TickOutcomes)) {
++		t.Errorf("sum(obo_cron_ticks_total) = %v, want %d — an unknown outcome created a series",
++			tickSum, len(TickOutcomes))
++	}
++
++	if got := len(fams["obo_cron_skip_reason_total"].GetMetric()); got != len(SkipReasons) {
++		t.Errorf("obo_cron_skip_reason_total has %d series, want %d (closed set: %v)",
++			got, len(SkipReasons), SkipReasons)
++	}
++	for _, reason := range SkipReasons {
++		if v := sampleValue(t, fams["obo_cron_skip_reason_total"], map[string]string{"reason": reason}); v != 1 {
++			t.Errorf("obo_cron_skip_reason_total{reason=%q} = %v, want 1", reason, v)
++		}
++	}
++	for _, m := range fams["obo_cron_skip_reason_total"].GetMetric() {
++		for _, lp := range m.GetLabel() {
++			if lp.GetName() == "reason" && !IsSkipReason(lp.GetValue()) {
++				t.Errorf("exposition contains out-of-vocabulary reason %q", lp.GetValue())
++			}
++		}
++	}
++
++	// The last reading wins for the unattributed gauges (RecordHost
++	// after the skips).
++	if v := sampleValue(t, fams["obo_host_load1"], nil); v != 11.25 {
++		t.Errorf("obo_host_load1 = %v, want 11.25 (last host reading)", v)
++	}
++	if v := sampleValue(t, fams["obo_host_mem_used_fraction"], nil); v != 0.5 {
++		t.Errorf("obo_host_mem_used_fraction = %v, want 0.5 (last host reading)", v)
++	}
++	_, ok := obs.LastTick()
++	if !ok {
++		t.Fatal("LastTick reported no reading after five RecordTick calls")
++	}
++	ts := sampleValue(t, fams["obo_cron_last_tick_timestamp_seconds"], nil)
++	if delta := math.Abs(ts - float64(time.Now().Unix())); delta > 120 {
++		t.Errorf("obo_cron_last_tick_timestamp_seconds = %v, want unix seconds near now (delta %.0fs)", ts, delta)
++	}
++}
++
++// TestPromSchedulerHostLoadMatchesProcLoadavg pins the gauge against the
++// host's real 1-minute load average (acceptance criterion AC2): the
++// exposed value must be within 5% of /proc/loadavg field 1, so a unit
++// conversion or truncation bug in the gauge cannot pass.
++func TestPromSchedulerHostLoadMatchesProcLoadavg(t *testing.T) {
++	before := readProcLoad1(t)
++	obs := New(0, nil)
++	obs.RecordHost(HostSnapshot{Load1: before, MemUsedFraction: 0.5})
++	p := NewProm(PromConfig{Scheduler: obs.SchedulerHealth})
++	fams := parseProm(t, serveProm(t, p))
++	family(t, fams, "obo_host_load1")
++	after := readProcLoad1(t)
++
++	got := sampleValue(t, fams["obo_host_load1"], nil)
++	if got != before {
++		t.Errorf("obo_host_load1 = %v, want the recorded reading %v", got, before)
++	}
++	// The reading is taken between the two /proc samples; the 1-minute
++	// average moves slowly, so 5% is a generous and stable bound.
++	if delta := math.Abs(got - after); delta > 0.05*after {
++		t.Errorf("obo_host_load1 = %v vs /proc/loadavg field 1 = %v (delta %.3f > 5%%)", got, after, delta)
++	}
++}
++
++// TestPromSchedulerLastTickAdvances proves the freshness gauge moves
++// between ticks — the property that makes "dead" distinguishable from
++// "gated" (a starving loop still ticks).
++func TestPromSchedulerLastTickAdvances(t *testing.T) {
++	obs := New(0, nil)
++	p := NewProm(PromConfig{Scheduler: obs.SchedulerHealth})
++
++	// lastTick samples the freshness gauge, failing cleanly when the
++	// exposition does not carry it.
++	lastTick := func() float64 {
++		t.Helper()
++		fams := parseProm(t, serveProm(t, p))
++		return sampleValue(t, family(t, fams, "obo_cron_last_tick_timestamp_seconds"), nil)
++	}
++
++	obs.RecordTick(TickOutcomeIdleGated)
++	first := lastTick()
++
++	time.Sleep(5 * time.Millisecond)
++	obs.RecordTick(TickOutcomeIdleGated)
++	second := lastTick()
++
++	if !(second > first) {
++		t.Fatalf("obo_cron_last_tick_timestamp_seconds did not advance: %v then %v", first, second)
++	}
++	// RecordTickStart (the loop's top-of-tick stamp) must move it too.
++	time.Sleep(5 * time.Millisecond)
++	obs.RecordTickStart()
++	third := lastTick()
++	if !(third > second) {
++		t.Fatalf("RecordTickStart did not advance the stamp: %v then %v", second, third)
++	}
++	if h := obs.SchedulerHealth(); h.Ticks[TickOutcomeIdleGated] != 2 {
++		t.Errorf("idle_gated ticks = %d, want 2 (RecordTickStart must not count an outcome)",
++			h.Ticks[TickOutcomeIdleGated])
++	}
++}
++
++// TestPromSchedulerClosedVocabulary feeds out-of-vocabulary labels and
++// proves they are dropped rather than emitted (AC4's closed-set
++// requirement): three reasons, four outcomes, nothing else.
++func TestPromSchedulerClosedVocabulary(t *testing.T) {
++	obs := New(0, nil)
++	obs.RecordSkip(HostSnapshot{Load1: 40, MemUsedFraction: 0.99, Reason: "disk+io"})
++	obs.RecordSkip(HostSnapshot{Load1: 40, MemUsedFraction: 0.99, Reason: ""})
++	obs.RecordSkip(HostSnapshot{Load1: 40, MemUsedFraction: 0.99, Reason: "load"})
++	obs.RecordTick("SOLVED") // case matters: not the closed value
++	obs.RecordTick("")       // nothing to count
++	obs.RecordTick(TickOutcomeSolved)
++
++	p := NewProm(PromConfig{Scheduler: obs.SchedulerHealth})
++	fams := parseProm(t, serveProm(t, p))
++	ticks := family(t, fams, "obo_cron_ticks_total")
++	reasons := family(t, fams, "obo_cron_skip_reason_total")
++
++	if got := len(reasons.GetMetric()); got != len(SkipReasons) {
++		t.Errorf("skip-reason series = %d, want %d (unknown reasons must be dropped)", got, len(SkipReasons))
++	}
++	if v := sampleValue(t, reasons, map[string]string{"reason": "load"}); v != 1 {
++		t.Errorf("obo_cron_skip_reason_total{reason=\"load\"} = %v, want 1", v)
++	}
++	if got := len(ticks.GetMetric()); got != len(TickOutcomes) {
++		t.Errorf("tick-outcome series = %d, want %d (unknown outcomes must be dropped)", got, len(TickOutcomes))
++	}
++	var sum float64
++	for _, m := range ticks.GetMetric() {
++		sum += m.GetCounter().GetValue()
++	}
++	if sum != 1 {
++		t.Errorf("sum(obo_cron_ticks_total) = %v, want 1 (only TickOutcomeSolved counted)", sum)
++	}
++	// The dropped skip still counted the ordinary skip total and stored
++	// the reading: only the LABEL is suppressed, never the liveness data.
++	if snap := obs.Snapshot(); snap.SkippedHostPressure != 3 {
++		t.Errorf("SkippedHostPressure = %d, want 3 (dropping a label must not drop the skip)", snap.SkippedHostPressure)
++	}
++}
++
++// TestPromSchedulerNilSource proves the no-source exposition keeps its
++// counter shape (all label values at 0, so rate() has a series) while
++// omitting the gauges — a gauge with no reading must not claim 0.
++func TestPromSchedulerNilSource(t *testing.T) {
++	fams := parseProm(t, serveProm(t, NewProm(PromConfig{})))
++	family(t, fams, "obo_cron_ticks_total")
++	family(t, fams, "obo_cron_skip_reason_total")
++
++	for _, outcome := range TickOutcomes {
++		if v := sampleValue(t, fams["obo_cron_ticks_total"], map[string]string{"outcome": outcome}); v != 0 {
++			t.Errorf("no-source obo_cron_ticks_total{outcome=%q} = %v, want 0", outcome, v)
++		}
++	}
++	for _, reason := range SkipReasons {
++		if v := sampleValue(t, fams["obo_cron_skip_reason_total"], map[string]string{"reason": reason}); v != 0 {
++			t.Errorf("no-source obo_cron_skip_reason_total{reason=%q} = %v, want 0", reason, v)
++		}
++	}
++	if fams["obo_host_load1"] != nil {
++		t.Error("obo_host_load1 present with no reading — a gauge must be omitted, never fabricated as 0")
++	}
++	if fams["obo_host_mem_used_fraction"] != nil {
++		t.Error("obo_host_mem_used_fraction present with no reading")
++	}
++	if fams["obo_cron_last_tick_timestamp_seconds"] != nil {
++		t.Error("obo_cron_last_tick_timestamp_seconds present before the first tick")
++	}
++
++	// A host reading with no memory signal (memory gate disabled) emits
++	// load but not a fabricated 0 memory fraction.
++	obs := New(0, nil)
++	obs.RecordHost(HostSnapshot{Load1: 3.5})
++	fams = parseProm(t, serveProm(t, NewProm(PromConfig{Scheduler: obs.SchedulerHealth})))
++	if v := sampleValue(t, fams["obo_host_load1"], nil); v != 3.5 {
++		t.Errorf("obo_host_load1 = %v, want 3.5", v)
++	}
++	if fams["obo_host_mem_used_fraction"] != nil {
++		t.Error("obo_host_mem_used_fraction emitted 0 for a snapshot that carried no memory reading")
++	}
++}

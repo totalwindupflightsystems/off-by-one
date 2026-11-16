@@ -1,0 +1,187 @@
+commit 17258b9ea837358fd9ba10fd80a3dee00fdc0d3d
+Author:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+AuthorDate: Mon Nov 16 14:44:53 2026 -0500
+Commit:     totalwindupflightsystems <totalwindupflightsystems@gmail.com>
+CommitDate: Mon Nov 16 14:51:57 2026 -0500
+
+    chore(toolchain): raise Go floor to 1.26.11 (GO-2026-6809, GO-2026-6859)
+    
+    The row was written on 2026-11-04, when 1.26.10 was sufficient; it no longer
+    is. go.mod declared `go 1.26.9`, and that stdlib carries two known
+    vulnerabilities: GO-2026-6809 (crypto/x509 compromised intermediate CA, fixed
+    in 1.26.10) and GO-2026-6859 (net/http, fixed in 1.26.11). "govulncheck
+    reports 0 vulnerabilities" is only reachable at >= 1.26.11, so the floor is
+    1.26.11, not the row's original 1.26.10 target.
+    
+    Evidence, measured in this worktree with a plain environment (no GOTOOLCHAIN
+    override, so GOTOOLCHAIN=auto resolves the floor toolchain):
+    
+      - at 1.26.9:  govulncheck ./... reported exactly those 2 stdlib findings
+                    (nothing in imported packages or modules)
+      - at 1.26.11: go env GOVERSION = go1.26.11
+                    make build => rc 0
+                    go version -m ./off-by-one | head -1 => "./off-by-one: go1.26.11"
+                    ~/go/bin/govulncheck ./... => "No vulnerabilities found." (rc 0)
+                    make test => all 15 packages ok, zero failures
+                    go vet ./... => clean
+    
+    No source edit, dependency bump or go.sum change is involved: the go.mod floor
+    alone drives GOTOOLCHAIN=auto to the already-cached
+    golang.org/toolchain@v0.0.1-go1.26.11. No `toolchain` directive was added on
+    purpose — the go.mod floor must stay the single source of truth that local
+    builds and CI share.
+    
+    CI now pins exact patch versions everywhere (the matrix plus the deploy-gate,
+    binary-seed-probe and golangci-lint jobs): a floating '1.26' resolves to
+    whatever patch ships that week and can silently drift back below a security
+    floor. README prerequisites and the bootstrap tarball move to 1.26.11, and the
+    release procedure documents the reproducible prefix
+    `GOTOOLCHAIN=go1.26.11 make release TAG=vX.Y.Z`, verified with
+    `go version -m ./off-by-one | head -1`.
+    
+    Addresses RELEASE-OB-019.
+    
+    Co-authored-by: Alexis Okuwa <wojonstech@gmail.com>
+---
+ .github/workflows/ci.yml | 16 ++++++++--------
+ CHANGELOG.md             | 12 ++++++++++++
+ Makefile                 |  4 ++++
+ README.md                | 12 ++++++++++--
+ go.mod                   |  2 +-
+ 5 files changed, 35 insertions(+), 11 deletions(-)
+
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+index d1a4c8d2..03c31aad 100644
+--- a/.github/workflows/ci.yml
++++ b/.github/workflows/ci.yml
+@@ -13,11 +13,11 @@ jobs:
+     runs-on: ubuntu-latest
+     strategy:
+       matrix:
+-        # Single leg on purpose: go.mod demands go 1.26.0, so with
+-        # GOTOOLCHAIN=auto any older leg silently downloads the 1.26
+-        # toolchain and both matrix legs test the identical toolchain
+-        # (OB-GAP-088). Keep matrix versions aligned with go.mod.
+-        go-version: ['1.26']
++        # Single leg on purpose (OB-GAP-088). The pin is the EXACT patch
++        # version matching the go.mod floor so CI and local builds link the
++        # same stdlib; a floating '1.26' silently resolves to whatever patch
++        # ships that week and can drift back below a security floor.
++        go-version: ['1.26.11']
+     steps:
+       - name: Checkout
+         uses: actions/checkout@v4
+@@ -111,7 +111,7 @@ jobs:
+       - name: Set up Go
+         uses: actions/setup-go@v5
+         with:
+-          go-version: '1.26'
++          go-version: '1.26.11'
+ 
+       - name: Cache Go modules
+         uses: actions/cache@v4
+@@ -150,7 +150,7 @@ jobs:
+       - name: Set up Go
+         uses: actions/setup-go@v5
+         with:
+-          go-version: '1.26'
++          go-version: '1.26.11'
+ 
+       - name: Cache Go modules
+         uses: actions/cache@v4
+@@ -211,7 +211,7 @@ jobs:
+       - name: Set up Go
+         uses: actions/setup-go@v5
+         with:
+-          go-version: '1.26'
++          go-version: '1.26.11'
+ 
+       - name: golangci-lint
+         uses: golangci/golangci-lint-action@v7
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 9179c96d..0d8b05e7 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -25,6 +25,18 @@ and `cmd/off-by-one/main.go` carries the 0.3.0-dev string — the ldflags build
+ injects the tag on release. Cut under the standing release authority (minor:
+ one `feat` — R4).
+ 
++### Toolchain
++
++- Raised the Go floor from `1.26.9` to `1.26.11` in `go.mod`, closing both
++  stdlib findings the old toolchain carried: GO-2026-6809 (`crypto/x509`
++  compromised intermediate CA, fixed in 1.26.10) and GO-2026-6859 (`net/http`,
++  fixed in 1.26.11). `govulncheck ./...` now prints `No vulnerabilities found.`
++  (it reported 2 at 1.26.9); no dependency, source or `go.sum` change was
++  involved. Every `setup-go` input in CI is pinned to the exact `1.26.11` patch
++  — a floating `'1.26'` silently drifts back below the floor — and the release
++  procedure now documents the `GOTOOLCHAIN=go1.26.11` prefix for a reproducible
++  build that links the same stdlib as CI.
++
+ ## [v0.3.0] - 2026-11-04
+ 
+ ### Observability: the lab can be scraped
+diff --git a/Makefile b/Makefile
+index a9b42956..5c4a8bc1 100644
+--- a/Makefile
++++ b/Makefile
+@@ -160,6 +160,10 @@ check-deploy-test:
+ # NOTE: TAG is intentionally read from the recipe environment (`$$TAG`), never
+ # via `$(TAG)` interpolation — an interpolated TAG is unquoted make text that
+ # a malicious/typo'd value could turn into arbitrary shell execution.
++# Build with a toolchain at or above the go.mod floor (`go 1.26.11`); Go's
++# default GOTOOLCHAIN=auto selects it automatically, and a reproducible cut
++# pins it explicitly: GOTOOLCHAIN=go1.26.11 make release TAG=vX.Y.Z
++# (verify with `go version -m ./off-by-one | head -1`).
+ release:
+ 	@if [ -z "$${TAG:-}" ]; then \
+ 		echo "ERROR: TAG is required — usage: make release TAG=v0.1.0"; \
+diff --git a/README.md b/README.md
+index 8b6ab356..21c10ce4 100644
+--- a/README.md
++++ b/README.md
+@@ -423,7 +423,7 @@ The repository's traceability contract (board row → commit → guard → judge
+ 
+ ### Prerequisites
+ 
+-- Go **1.26.9+** — required to build (`make build`). `go.mod` declares `go 1.26.9` and CI runs the 1.26 matrix, so use a 1.26.9+ toolchain; the recipe below installs 1.26.9 directly.
++- Go **1.26.11+** — required to build (`make build`). `go.mod` declares `go 1.26.11` and CI pins exactly 1.26.11 in every `setup-go` step, so use a 1.26.11+ toolchain; the recipe below installs 1.26.11 directly.
+ - Bubblewrap (`bwrap`) — optional, tests skip gracefully when absent
+ - Pi Agent (`pi-agent`) — optional, solver tests mock the executor
+ 
+@@ -434,7 +434,7 @@ The repository's traceability contract (board row → commit → guard → judge
+ 
+ ```bash
+ GO_TGZ="$(mktemp)"
+-curl -fsSL https://go.dev/dl/go1.26.9.linux-amd64.tar.gz -o "$GO_TGZ"
++curl -fsSL https://go.dev/dl/go1.26.11.linux-amd64.tar.gz -o "$GO_TGZ"
+ mkdir -p ~/toolchain && tar -C ~/toolchain -xzf "$GO_TGZ"
+ export PATH="$HOME/toolchain/go/bin:$PATH"   # append the same line to ~/.profile to persist
+ go version
+@@ -447,6 +447,14 @@ or follow https://go.dev/doc/install) — the tarball recipe above needs no priv
+ 
+ Prebuilt binaries are available for tagged releases (see [releases](https://github.com/totalwindupflightsystems/off-by-one/releases)). The build process is documented in the Makefile (`make release TAG=<version>`).
+ 
++Builds and releases must run with a toolchain at or above the floor declared in
++`go.mod` (`go 1.26.11`). Go's default `GOTOOLCHAIN=auto` selects that toolchain
++automatically when the local one is older — here it resolves
++`golang.org/toolchain@v0.0.1-go1.26.11` from the module cache. A reproducible
++release build pins it explicitly:
++`GOTOOLCHAIN=go1.26.11 make release TAG=vX.Y.Z`, then verify what was actually
++linked with `go version -m ./off-by-one | head -1`.
++
+ ```bash
+ V=v0.2.0
+ base=https://github.com/totalwindupflightsystems/off-by-one/releases/download/$V
+diff --git a/go.mod b/go.mod
+index efa3219e..a53eddd9 100644
+--- a/go.mod
++++ b/go.mod
+@@ -1,6 +1,6 @@
+ module github.com/totalwindupflightsystems/off-by-one
+ 
+-go 1.26.9
++go 1.26.11
+ 
+ require (
+ 	github.com/joho/godotenv v1.5.1
