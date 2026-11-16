@@ -1048,7 +1048,7 @@ $ systemctl show off-by-one -p ExecStart --value
 /home/kara/off-by-one/off-by-one --port 8766 -load-threshold -1 -cron-interval 60s \
   -pi-agent /home/kara/.local/bin/pi-agent -bwrap /usr/bin/bwrap        # gate OFF, no -solve-mem-mb
 $ grep ExecStart deploy/off-by-one.service
-ExecStart=... --port 8766 -load-threshold 4 ... -solve-mem-mb 6144      # the vendored canonical unit
+ExecStart=... --port 8766 -load-threshold 4 ... -solve-mem-mb 12288     # the vendored canonical unit
 ```
 
 **This comparison is no longer manual.** DF-OFF-BY-ONE-29-R2 made it a machine-checkable gate:
@@ -1060,7 +1060,7 @@ expected-vs-observed per flag:
 ```
 FAIL: running unit's ExecStart flags drifted from deploy/off-by-one.service:
   -load-threshold: expected 4, observed -1
-  -solve-mem-mb: expected 6144, observed <absent>
+  -solve-mem-mb: expected 12288, observed <absent>
 ```
 
 The remedy is to install the vendored unit (`install -m 0644 deploy/off-by-one.service

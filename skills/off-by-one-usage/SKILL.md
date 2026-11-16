@@ -529,7 +529,7 @@ hands you something to poll. Three pitfalls, in the order they bite:
 
 41. **The repo's fix and the RUNNING configuration can differ, and nothing checks the flags
     (`DF-OFF-BY-ONE-29-R2`, P1 — live).** The vendored `deploy/off-by-one.service` ships
-    `-load-threshold 4 … -solve-mem-mb 6144`; the host unit still runs
+    `-load-threshold 4 … -solve-mem-mb 12288`; the host unit still runs
     `-load-threshold -1` (idle gate OFF) with no per-solve cap, so the lab solves on a box at
     loadavg 20. Before blaming the product, read the RUNNING deployment — all four commands are
     read-only:

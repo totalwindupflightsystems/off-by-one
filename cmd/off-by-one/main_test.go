@@ -421,7 +421,7 @@ func TestSolverModelFromProcessEnv(t *testing.T) {
 // reject-threshold resolution matrix (auto / disabled / explicit), which
 // is the default the daemon hands the cron loop.
 func TestResolveSolveRejectBytes(t *testing.T) {
-	const capMB = 6144 // the deploy unit's -solve-mem-mb value
+	const capMB = 12288 // the deploy unit's -solve-mem-mb value
 
 	cases := []struct {
 		name     string

@@ -478,7 +478,7 @@ func TestSolveRejectThreshold(t *testing.T) {
 	if got := SolveRejectThreshold(0); got != 0 {
 		t.Errorf("SolveRejectThreshold(0) = %d, want 0 (no cap = no rejection)", got)
 	}
-	capBytes := uint64(6144) << 20 // the deploy unit's -solve-mem-mb 6144
+	capBytes := uint64(12288) << 20 // the deploy unit's -solve-mem-mb 12288
 	got := SolveRejectThreshold(capBytes)
 	if want := uint64(float64(capBytes) * DefaultSolveRejectFraction); got != want {
 		t.Errorf("SolveRejectThreshold(%d) = %d, want %d", capBytes, got, want)
