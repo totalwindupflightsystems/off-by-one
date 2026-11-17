@@ -651,6 +651,35 @@ func (q *Queue) Depth(ctx context.Context) (int, error) {
 	return n, err
 }
 
+// OldestPendingAge returns how long the oldest still-waiting entry has
+// been waiting: now - MIN(created_at) over the same status set Depth
+// counts (pending, deferred, in_progress), so a deferred entry keeps
+// ageing while the gate holds it (OBS-OB-004, docs/observability-spec.md
+// §3.4). An empty queue returns 0 with no error — the same shape
+// AvgSolveTime uses, because the exposition must always carry the
+// family and "nothing is waiting" is a real zero, not a missing
+// reading. A failed query is the error arm.
+//
+// The arithmetic is done in SQL against julianday('now'), which is UTC
+// like created_at's datetime('now') default, so a host timezone never
+// shifts the age. A negative age (a created_at in the future, i.e.
+// clock skew) is clamped to 0 rather than reported as a negative wait.
+func (q *Queue) OldestPendingAge(ctx context.Context) (time.Duration, error) {
+	var age sql.NullFloat64
+	err := q.db.QueryRowContext(ctx, `
+		SELECT (julianday('now') - julianday(MIN(created_at))) * 86400.0
+		FROM queue_entries
+		WHERE status IN ('pending', 'deferred', 'in_progress')`,
+	).Scan(&age)
+	if err != nil {
+		return 0, fmt.Errorf("oldest pending age: %w", err)
+	}
+	if !age.Valid || age.Float64 <= 0 {
+		return 0, nil
+	}
+	return time.Duration(age.Float64 * float64(time.Second)), nil
+}
+
 // avgSolveTimeWindow bounds the sample AvgSolveTime averages over: the
 // most recently completed N solves. Solve conditions (model, sandbox
 // setup, corpus mix) drift over time, so an all-history mean lets

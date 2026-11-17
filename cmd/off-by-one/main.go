@@ -248,10 +248,53 @@ func main() {
 	// once per completed solve.
 	prom := metrics.NewProm(metrics.PromConfig{
 		LoopRunning: func() bool { return solverExec != nil },
-		QueuePending: func(ctx context.Context) (int64, error) {
-			n, err := queue.Depth(ctx)
-			return int64(n), err
+		// DB-derived Tier-3 gauges (OBS-OB-004, spec §3.4). Read ONLY
+		// by the refresher below, never by a scrape: queue depth and
+		// oldest-pending age (the same status set /api/v1/stats
+		// counts), the catalogue's verified/total answers (the same
+		// graph.Stats handleStats serves), and the SQLite file sizes
+		// from the configured --db path. Each leg is independently
+		// optional — a failed read omits its series instead of
+		// claiming zero.
+		DBDerived: func(ctx context.Context) metrics.DBDerived {
+			var d metrics.DBDerived
+			if n, err := queue.Depth(ctx); err == nil {
+				d.QueuePending = int64(n)
+				d.QueuePendingOK = true
+			}
+			if age, err := queue.OldestPendingAge(ctx); err == nil {
+				d.OldestPendingAge = age
+				d.OldestPendingOK = true
+			}
+			if st, err := store.Stats(ctx); err == nil {
+				d.VerifiedAnswers = int64(st.VerifiedAnswers)
+				d.TotalAnswers = int64(st.TotalAnswers)
+				d.CatalogOK = true
+			}
+			if fi, err := os.Stat(*cfg.dbPath); err == nil {
+				d.DBSizeMainBytes = fi.Size()
+				d.DBSizeMainOK = true
+				// A -wal sibling that does not exist is a real 0: the
+				// store is not in WAL mode (or the WAL was fully
+				// checkpointed and removed), not an unread gauge.
+				if wi, werr := os.Stat(*cfg.dbPath + "-wal"); werr == nil {
+					d.DBSizeWALBytes = wi.Size()
+					d.DBSizeWALOK = true
+				} else if os.IsNotExist(werr) {
+					d.DBSizeWALBytes = 0
+					d.DBSizeWALOK = true
+				}
+			}
+			return d
 		},
+		// Discovery outcomes and host-pressure deferrals (OBS-OB-004,
+		// spec §3.4): request-path counters recorded by the API and the
+		// cron loop into the shared Observer.
+		Discovery: func() metrics.PromDiscoveryCounts {
+			hits, misses := observer.DiscoveryCounts()
+			return metrics.PromDiscoveryCounts{Hits: hits, Misses: misses}
+		},
+		Deferrals: observer.Deferrals,
 		SolveCounts: func() metrics.PromSolveCounts {
 			if loop == nil {
 				return metrics.PromSolveCounts{}
@@ -278,6 +321,15 @@ func main() {
 	if loop != nil {
 		loop.Metrics().SetDurationObserver(prom.ObserveSolveDuration)
 	}
+
+	// DB-derived gauge refresher (OBS-OB-004, spec §3.4/§4.4): the
+	// queue-age, catalogue and storage gauges are cached and refreshed
+	// on a 15s ticker HERE — never queried inside a scrape, so a scrape
+	// storm cannot become a SQL storm and the 50ms budget holds on a
+	// large store. StartDBRefresh takes the first reading synchronously,
+	// so the families carry real values on the process's first scrape.
+	promCtx, promCancel := context.WithCancel(context.Background())
+	prom.StartDBRefresh(promCtx, metrics.DefaultDBRefreshInterval)
 	apiHandler := apiServer.Handler()
 
 	// --- 6. WebSocket chat handler ------------------------------------
@@ -355,6 +407,9 @@ func main() {
 		if cronCancel != nil {
 			cronCancel()
 		}
+		// Stop the DB-gauge refresher; nothing reads the cache after the
+		// HTTP server stops, and a refresh must not race store.Close().
+		promCancel()
 
 		// Wait for the loop to exit (best-effort, bounded).
 		if loop != nil {

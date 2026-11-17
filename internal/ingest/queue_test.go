@@ -1152,6 +1152,60 @@ func TestQueue_AvgSolveTime_NoCompletes(t *testing.T) {
 	}
 }
 
+// TestQueue_OldestPendingAge pins the SQL truth behind
+// obo_queue_oldest_pending_age_seconds (OBS-OB-004, spec §3.4): the age
+// is now - MIN(created_at) over pending/deferred/in_progress only. An
+// empty queue reads 0 (the family must exist on every scrape, the shape
+// AvgSolveTime already uses), a deferred entry keeps ageing while the
+// gate holds it, and a terminal entry never dominates the reading.
+func TestQueue_OldestPendingAge(t *testing.T) {
+	q, store := newTestQueue(t)
+	ctx := context.Background()
+
+	if age, err := q.OldestPendingAge(ctx); err != nil || age != 0 {
+		t.Fatalf("empty queue: age=%s err=%v, want 0 and no error", age, err)
+	}
+
+	insert := func(id, status string, ageSeconds int) {
+		t.Helper()
+		if _, err := store.DB().ExecContext(ctx, `INSERT INTO queue_entries
+			(id, problem_class, status, created_at)
+			VALUES (?, 'cls-observed', ?, datetime('now', ?))`,
+			id, status, fmt.Sprintf("-%d seconds", ageSeconds)); err != nil {
+			t.Fatalf("insert %s entry: %v", status, err)
+		}
+	}
+	// The completed row is by far the oldest: if it were counted the age
+	// would read ~7200s instead of ~600s.
+	insert("sub_done", "complete", 7200)
+	insert("sub_oldest", "deferred", 600)
+	insert("sub_running", "in_progress", 120)
+	insert("sub_newest", "pending", 30)
+
+	age, err := q.OldestPendingAge(ctx)
+	if err != nil {
+		t.Fatalf("OldestPendingAge: %v", err)
+	}
+	if age < 590*time.Second || age > 620*time.Second {
+		t.Errorf("OldestPendingAge = %s, want ~600s (the deferred row; the complete row must not count)", age)
+	}
+
+	// The age covers exactly the statuses Depth counts.
+	if depth, err := q.Depth(ctx); err != nil || depth != 3 {
+		t.Errorf("Depth = %d (err %v), want 3 — age and depth must cover the same statuses", depth, err)
+	}
+
+	// Once every waiting row reaches a terminal state the age returns to
+	// 0 — no waiting work, but still a reading.
+	if _, err := store.DB().ExecContext(ctx,
+		`UPDATE queue_entries SET status = 'complete' WHERE status != 'complete'`); err != nil {
+		t.Fatalf("complete all rows: %v", err)
+	}
+	if age, err := q.OldestPendingAge(ctx); err != nil || age != 0 {
+		t.Errorf("all-complete queue: age=%s err=%v, want 0", age, err)
+	}
+}
+
 // TestQueue_Submit_PersistsToolClassification is the DF-OFF-BY-ONE-41
 // store-level contract: Submit runs the wired ToolResolver over
 // RequiredTools and persists both verdicts on the row, so every later

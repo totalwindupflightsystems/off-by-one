@@ -69,12 +69,13 @@ type Server struct {
 
 	// Prom is the Prometheus text-exposition surface for
 	// GET /metrics/prom (OBS-OB-001): a private registry with the
-	// obo_* families. New wires obo_queue_pending from the queue by
-	// default; main replaces it with the fully wired registry (loop
-	// counters, loop-running gauge, duration histogram sink). nil is
-	// tolerated — the handler serves a shared zero-source registry,
-	// so the endpoint answers 200 with every family present even in
-	// unit tests that construct Server directly.
+	// obo_* families. New wires the DB-derived Tier-3 gauges (OBS-OB-004)
+	// from the queue and graph store by default; main replaces it with
+	// the fully wired registry (loop counters, discovery outcomes, DB
+	// file sizes, duration histogram sink). nil is tolerated — the
+	// handler serves a shared zero-source registry, so the endpoint
+	// answers 200 with every family present even in unit tests that
+	// construct Server directly.
 	Prom *metrics.Prom
 
 	// StartedAt is set in New and used by /health to report uptime.
@@ -98,15 +99,13 @@ func New(store *graph.Store, queue *ingest.Queue, spec []byte) *Server {
 		StartedAt:   time.Now(),
 	}
 	if queue != nil {
-		// Default /metrics/prom wiring (OBS-OB-001): obo_queue_pending
-		// reads the same queue.Depth source /api/v1/stats uses, so the
-		// two surfaces agree. main replaces this with the fully wired
-		// Prom (cron loop counters + duration histogram).
+		// Default /metrics/prom wiring (OBS-OB-001/OBS-OB-004): the
+		// DB-derived gauges read the same queue/graph truth
+		// /api/v1/stats serves, so the two surfaces agree. main
+		// replaces this with the fully wired Prom (cron loop counters,
+		// discovery outcomes, DB file sizes, duration histogram).
 		s.Prom = metrics.NewProm(metrics.PromConfig{
-			QueuePending: func(ctx context.Context) (int64, error) {
-				n, err := queue.Depth(ctx)
-				return int64(n), err
-			},
+			DBDerived: s.dbDerived,
 			// Scheduler health (OBS-OB-002) reads the Observer LAZILY:
 			// New cannot capture it (main assigns Server.Observer after
 			// construction). Both the closure and the accessor are
@@ -115,8 +114,45 @@ func New(store *graph.Store, queue *ingest.Queue, spec []byte) *Server {
 			// panicking on a missing observer.
 			Scheduler: func() metrics.SchedulerHealth { return s.Observer.SchedulerHealth() },
 		})
+		// One immediate refresh so the DB-derived gauges carry real
+		// values on the FIRST scrape instead of waiting a refresh
+		// interval (§4.4: 15s); later refreshes are driven by main's
+		// StartDBRefresh.
+		s.Prom.RefreshDB(context.Background())
 	}
 	return s
+}
+
+// dbDerived is the default reader behind the Tier-3 DB-derived gauges
+// (OBS-OB-004, docs/observability-spec.md §3.4): queue depth and
+// oldest-pending age, plus the catalogue's verified/total answer
+// counts. It is called by the Prometheus refresher only — never from a
+// Collect() path (§4.4) — and every leg is independently optional, so
+// a nil store or a failed query omits that series rather than
+// fabricating a zero.
+//
+// The DB file sizes are deliberately not read here: a *Server does not
+// know the database path. main installs a provider that adds them.
+func (s *Server) dbDerived(ctx context.Context) metrics.DBDerived {
+	var d metrics.DBDerived
+	if s.Queue != nil {
+		if n, err := s.Queue.Depth(ctx); err == nil {
+			d.QueuePending = int64(n)
+			d.QueuePendingOK = true
+		}
+		if age, err := s.Queue.OldestPendingAge(ctx); err == nil {
+			d.OldestPendingAge = age
+			d.OldestPendingOK = true
+		}
+	}
+	if s.Store != nil {
+		if st, err := s.Store.Stats(ctx); err == nil {
+			d.VerifiedAnswers = int64(st.VerifiedAnswers)
+			d.TotalAnswers = int64(st.TotalAnswers)
+			d.CatalogOK = true
+		}
+	}
+	return d
 }
 
 // Handler returns the *http.ServeMux with all routes registered.

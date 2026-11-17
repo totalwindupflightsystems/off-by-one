@@ -2,7 +2,6 @@ package metrics
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http/httptest"
 	"strings"
@@ -90,8 +89,13 @@ func TestPromExpositionFamiliesAndPartition(t *testing.T) {
 			// rejected=1 — sum 8 == attempts.
 			return PromSolveCounts{Success: 5, Failed: 3, Rejected: 1}
 		},
-		QueuePending: func(ctx context.Context) (int64, error) { return 7, nil },
+		DBDerived: func(ctx context.Context) DBDerived {
+			return DBDerived{QueuePending: 7, QueuePendingOK: true}
+		},
 	})
+	// DB-derived gauges come from the refresher's cache, never from the
+	// scrape (§4.4): one refresh ahead of the assertion.
+	p.RefreshDB(context.Background())
 	p.ObserveSolveDuration("succeeded", 95*time.Second)
 
 	body := serveProm(t, p)
@@ -206,8 +210,12 @@ func TestPromNilSafeZeroExposition(t *testing.T) {
 
 func TestPromQueuePendingSourceErrorOmitsSeries(t *testing.T) {
 	p := NewProm(PromConfig{
-		QueuePending: func(ctx context.Context) (int64, error) { return 0, errors.New("db wedged") },
+		DBDerived: func(ctx context.Context) DBDerived {
+			// The depth leg failed; every other leg is unread too.
+			return DBDerived{}
+		},
 	})
+	p.RefreshDB(context.Background())
 	fams := parseProm(t, serveProm(t, p))
 	fam := fams["obo_queue_pending"]
 	if fam != nil && len(fam.Metric) != 0 {

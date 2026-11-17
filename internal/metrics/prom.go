@@ -2,23 +2,26 @@
 // docs/observability-spec.md §3.1/§4.1/§4.2).
 //
 // A private prometheus.Registry (never the global default, never the
-// Go/process collectors) carrying exactly the five Tier-1 obo_*
-// families, served by promhttp at GET /metrics/prom. The existing JSON
-// GET /metrics (Observer.Snapshot) is untouched — the two surfaces
-// coexist because dogfood docs and operator runbooks already consume
-// the JSON one.
+// Go/process collectors) carrying the obo_* families the observability
+// spec catalogues — Tier 1 (§3.1), Tier 2 (§3.2/§3.3) and Tier 3
+// (§3.4, the DB-derived gauges in prom_db.go) — served by promhttp at
+// GET /metrics/prom. The existing JSON GET /metrics
+// (Observer.Snapshot) is untouched — the two surfaces coexist because
+// dogfood docs and operator runbooks already consume the JSON one.
 //
-// Sources are pull-based at scrape time: the cron loop's counters
-// (internal/cron.Metrics — previously dead code, "will eventually
-// expose"), the queue depth (same query /api/v1/stats uses), and the
-// solver-availability signal. All sources are optional: a zero
-// PromConfig yields a valid exposition with every family present at
-// zero/one values, which is what a nil *Prom serves.
+// Sources are pull-based at scrape time for in-process counters, and
+// CACHE-based for anything that would need a SQLite query or a stat():
+// §4.4 forbids DB reads inside Collect(), so those gauges are refreshed
+// on a ticker by Prom.StartDBRefresh and merely read during a scrape.
+// All sources are optional: a zero PromConfig yields a valid exposition
+// with every family present at zero/one values, which is what a nil
+// *Prom serves.
 package metrics
 
 import (
 	"context"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -47,6 +50,14 @@ type PromSolveCounts struct {
 	Rejected int64
 }
 
+// PromDiscoveryCounts is the scrape-time snapshot of the discover
+// request outcomes behind obo_discovery_requests_total (OBS-OB-004,
+// spec §3.4). Both members are cumulative since process start.
+type PromDiscoveryCounts struct {
+	Hits   int64
+	Misses int64
+}
+
 // PromConfig supplies the live sources for the obo_* families. Every
 // field is optional; a nil source serves the family at its zero value.
 type PromConfig struct {
@@ -57,10 +68,16 @@ type PromConfig struct {
 	// SolveCounts returns the loop's solve counters (see
 	// PromSolveCounts for the failed/rejected overlap).
 	SolveCounts func() PromSolveCounts
-	// QueuePending returns the pending/deferred/in_progress queue
-	// depth — the same query /api/v1/stats serves as queue_depth, so
-	// the two numbers agree at any instant.
-	QueuePending func(ctx context.Context) (int64, error)
+	// DBDerived reads the DB-derived Tier-3 gauges (OBS-OB-004, spec
+	// §3.4): queue depth and oldest-pending age, catalogue verified
+	// answers / hit rate, and the SQLite file sizes. It is called ONLY
+	// by the refresher (RefreshDB / StartDBRefresh), never from a
+	// Collect() path — §4.4 requires the DB reads to be cached so a
+	// scrape storm cannot become a SQL storm. Calls are bounded to
+	// 2s. A leg that could not be read sets its OK flag false and is
+	// omitted from the exposition rather than reported as 0. Production
+	// wires this in main (queue + graph store + the --db path).
+	DBDerived func(ctx context.Context) DBDerived
 	// SolveResources returns the cumulative per-solve resource totals
 	// and failure-cause counts (OBS-OB-003, spec §3.3). Production
 	// wires *metrics.Observer.SolveResources; nil serves every family at
@@ -74,6 +91,17 @@ type PromConfig struct {
 	// at zero and omits the gauges — a gauge with no reading must not
 	// claim 0 (see schedulerHealthCollector).
 	Scheduler func() SchedulerHealth
+	// Deferrals returns the cumulative per-reason count of entries the
+	// host-pressure gate postponed (OBS-OB-004, spec §3.4). Production
+	// wires *metrics.Observer.Deferrals, which always reports every
+	// member of the closed SkipReasons vocabulary. nil serves every
+	// reason at zero.
+	Deferrals func() map[string]int64
+	// Discovery returns the cumulative discover-request outcomes
+	// (OBS-OB-004, spec §3.4). Production wires
+	// *metrics.Observer.DiscoveryCounts. nil serves both closed outcomes
+	// at zero.
+	Discovery func() PromDiscoveryCounts
 }
 
 // Prom owns the private registry and its collectors. Construct once
@@ -83,15 +111,23 @@ type Prom struct {
 	registry *prometheus.Registry
 	handler  http.Handler
 	duration *prometheus.HistogramVec
+
+	// Tier-3 DB-derived gauge cache (OBS-OB-004, spec §3.4/§4.4):
+	// dbSrc is read only by the refresher, db is read only by the
+	// collector, and dbRefreshMu serialises refreshes so a slow
+	// refresh cannot overlap the next tick.
+	dbSrc       func(ctx context.Context) DBDerived
+	db          *dbGaugeCache
+	dbRefreshMu sync.Mutex
 }
 
-// NewProm builds the private registry with the five Tier-1 families.
+// NewProm builds the private registry with the Tier-1/2/3 families.
 // It never fails: MustRegister panics only on a programming error
 // (duplicate/invalid descriptor), which the fixed definitions below
 // cannot produce.
 func NewProm(cfg PromConfig) *Prom {
 	reg := prometheus.NewRegistry()
-	p := &Prom{registry: reg}
+	p := &Prom{registry: reg, dbSrc: cfg.DBDerived, db: newDBGaugeCache()}
 
 	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "obo_http_up",
@@ -117,12 +153,54 @@ func NewProm(cfg PromConfig) *Prom {
 		),
 	})
 
-	reg.MustRegister(&queuePendingCollector{
-		src: cfg.QueuePending,
-		desc: prometheus.NewDesc(
+	// Tier-3 DB-derived gauges (OBS-OB-004, spec §3.4/§4.4): served from
+	// Prom.db, which only the refresher writes. Collect() never touches
+	// SQLite or the filesystem, so a scrape storm cannot become a SQL
+	// storm and the 50ms scrape budget holds regardless of DB size.
+	reg.MustRegister(&dbGaugeCollector{
+		cache: p.db,
+		pendingDesc: prometheus.NewDesc(
 			"obo_queue_pending",
-			"Queue entries pending, deferred, or in_progress — the same count /api/v1/stats serves as queue_depth.",
+			"Queue entries pending, deferred, or in_progress — the same count /api/v1/stats serves as queue_depth (refreshed from the DB every 15s, never queried per scrape).",
 			nil, nil,
+		),
+		oldestPendingAgeDesc: prometheus.NewDesc(
+			"obo_queue_oldest_pending_age_seconds",
+			"Age in seconds of the oldest waiting entry (now - MIN(created_at) over status IN ('pending','deferred','in_progress')) — answers \"is a submission stuck?\". Refreshed from the DB every 15s.",
+			nil, nil,
+		),
+		verifiedAnswersDesc: prometheus.NewDesc(
+			"obo_catalog_verified_answers",
+			"Answer nodes the catalogue counts as verified — the same figure /api/v1/stats serves as verified_answers (status verified/ci_passed and no failed result signature). Refreshed every 15s.",
+			nil, nil,
+		),
+		hitRateDesc: prometheus.NewDesc(
+			"obo_catalog_hit_rate",
+			"Catalog hit rate: verified_answers / total_answers, 0 when the catalogue is empty — the same ratio /api/v1/stats serves as hit_rate. Refreshed every 15s.",
+			nil, nil,
+		),
+		sizeDesc: prometheus.NewDesc(
+			"obo_db_size_bytes",
+			"On-disk size of the SQLite store by part (closed set: main, wal). A missing -wal file is a real 0 (the DB is not in WAL mode); a failed stat omits the part instead of claiming a size.",
+			[]string{"kind"}, nil,
+		),
+	})
+
+	reg.MustRegister(&deferredTotalCollector{
+		src: cfg.Deferrals,
+		desc: prometheus.NewDesc(
+			"obo_queue_deferred_total",
+			"Entries the host-pressure gate postponed, by gate reason (closed set: load, memory, load+memory). Counts displaced work, not gate decisions: a gated tick with an empty queue moves nothing here.",
+			[]string{"reason"}, nil,
+		),
+	})
+
+	reg.MustRegister(&discoveryTotalCollector{
+		src: cfg.Discovery,
+		desc: prometheus.NewDesc(
+			"obo_discovery_requests_total",
+			"Discover requests by outcome (closed set: hit, miss). Distinct from obo_catalog_hit_rate, which measures catalogue coverage rather than discovery outcomes.",
+			[]string{"outcome"}, nil,
 		),
 	})
 
@@ -297,30 +375,61 @@ func (c *solvesTotalCollector) Collect(ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(s.Rejected), "rejected")
 }
 
-// queuePendingCollector emits obo_queue_pending from queue.Depth. On a
-// source error the series is omitted for that scrape — a missing
-// series is honest, a fabricated 0 is not.
-type queuePendingCollector struct {
-	src  func(ctx context.Context) (int64, error)
+// deferredTotalCollector emits obo_queue_deferred_total{reason} from the
+// Observer's cumulative deferral tallies (OBS-OB-004, spec §3.4) over
+// the CLOSED SkipReasons vocabulary — the same strings the gate writes
+// into queue_entries.gate_reason. Every reason is present on every
+// scrape, at 0 before it first fires, so rate() has a series to alert
+// on. A reason outside the set can never appear: RecordDeferred drops
+// it, and this collector only iterates the vocabulary.
+type deferredTotalCollector struct {
+	src  func() map[string]int64
 	desc *prometheus.Desc
 }
 
-func (c *queuePendingCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+func (c *deferredTotalCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
 
-func (c *queuePendingCollector) Collect(ch chan<- prometheus.Metric) {
-	if c.src == nil {
-		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, 0)
-		return
+func (c *deferredTotalCollector) Collect(ch chan<- prometheus.Metric) {
+	var counts map[string]int64
+	if c.src != nil {
+		counts = c.src()
 	}
-	// The scrape has no request context of its own; bound the read so
-	// a wedged store cannot hang the collector walk.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	n, err := c.src(ctx)
-	cancel()
-	if err != nil {
-		return
+	for _, reason := range SkipReasons {
+		n := counts[reason]
+		if n < 0 {
+			n = 0
+		}
+		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(n), reason)
 	}
-	ch <- prometheus.MustNewConstMetric(c.desc, prometheus.GaugeValue, float64(n))
+}
+
+// discoveryTotalCollector emits obo_discovery_requests_total{outcome}
+// over the CLOSED two-value DiscoveryOutcomes vocabulary (OBS-OB-004,
+// spec §3.4). Both outcomes are always present, so a hit-driven alert
+// cannot be fooled by a series that only exists once a miss happened.
+type discoveryTotalCollector struct {
+	src  func() PromDiscoveryCounts
+	desc *prometheus.Desc
+}
+
+func (c *discoveryTotalCollector) Describe(ch chan<- *prometheus.Desc) { ch <- c.desc }
+
+func (c *discoveryTotalCollector) Collect(ch chan<- prometheus.Metric) {
+	var counts PromDiscoveryCounts
+	if c.src != nil {
+		counts = c.src()
+	}
+	values := map[string]int64{
+		DiscoveryOutcomes[0]: counts.Hits,   // "hit"
+		DiscoveryOutcomes[1]: counts.Misses, // "miss"
+	}
+	for _, outcome := range DiscoveryOutcomes {
+		n := values[outcome]
+		if n < 0 {
+			n = 0
+		}
+		ch <- prometheus.MustNewConstMetric(c.desc, prometheus.CounterValue, float64(n), outcome)
+	}
 }
 
 // solvePeakRSSCollector emits obo_solve_peak_rss_bytes as a cumulative

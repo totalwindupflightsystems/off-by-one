@@ -11,6 +11,7 @@ import (
 
 	"github.com/totalwindupflightsystems/off-by-one/internal/graph"
 	"github.com/totalwindupflightsystems/off-by-one/internal/ingest"
+	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
 
@@ -1045,9 +1046,11 @@ func TestTickGateDeferral_RealQueuePersistence(t *testing.T) {
 	}
 
 	s := &fakeSolver{}
+	obs := metrics.New(0, nil)
 	l := NewLoop(Config{
 		Queue:           q,
 		Solver:          s,
+		Observer:        obs,
 		Interval:        time.Millisecond,
 		LoadThreshold:   -1,
 		MemoryThreshold: 0.001,
@@ -1056,6 +1059,20 @@ func TestTickGateDeferral_RealQueuePersistence(t *testing.T) {
 
 	if err := l.Tick(ctx); !errors.Is(err, ErrNoIdle) {
 		t.Fatalf("busy Tick err = %v, want ErrNoIdle", err)
+	}
+	// obo_queue_deferred_total (OBS-OB-004): the gated tick that stamped
+	// a real waiting row must count exactly one deferral, under the
+	// gate's closed reason vocabulary.
+	if got := obs.Deferrals()["memory"]; got != 1 {
+		t.Errorf("Observer.Deferrals()[memory] = %d, want 1 after one deferral stamp", got)
+	}
+	for _, reason := range metrics.SkipReasons {
+		if reason == "memory" {
+			continue
+		}
+		if got := obs.Deferrals()[reason]; got != 0 {
+			t.Errorf("Observer.Deferrals()[%s] = %d, want 0", reason, got)
+		}
 	}
 	got, err := q.Get(ctx, id)
 	if err != nil {

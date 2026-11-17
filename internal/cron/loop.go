@@ -683,6 +683,13 @@ func (l *Loop) deferQueueHead(ctx context.Context, gate *IdleGateError) {
 	}
 	if err := l.cfg.Queue.MarkDeferred(ctx, head.ID, gate.Snapshot.Reason); err != nil {
 		l.cfg.Logger.Printf("cron: deferral stamp: mark %s deferred failed: %v (continuing)", head.ID, err)
+		return
+	}
+	// obo_queue_deferred_total (OBS-OB-004, spec §3.4): count the work
+	// the gate actually postponed. A failed stamp displaced nothing and
+	// returns above; an empty queue never gets here.
+	if l.cfg.Observer != nil {
+		l.cfg.Observer.RecordDeferred(gate.Snapshot.Reason)
 	}
 }
 
