@@ -167,6 +167,7 @@ For detailed integration examples and a per-route reference, see [`docs/integrat
 | `GET` | `/openapi.json` | OpenAPI 3.0.3 specification |
 | `GET` | `/health` | Health check (status + uptime) |
 | `GET` | `/metrics` | Runtime metrics snapshot — solve counts, host-pressure skips, and `over_budget`/`rejected` roll-ups (404 when the metrics observer is disabled) |
+| `GET` | `/metrics/prom` | Prometheus text exposition (`text/plain; version=0.0.4`) of the `obo_*` meter families — always answers 200 and never 404s, unlike `/metrics`, which returns 404 when the metrics observer is disabled |
 
 `GET /metrics` returns the daemon's runtime metrics snapshot (fields include
 `solve_count`, `solve_rejected`, `over_budget`, and `alert_threshold_bytes`); it
