@@ -25,8 +25,14 @@ with this note added under the block:
 > put a repo venv first on PATH for this: `$HOME/gitreins-poc` no longer exists
 > (renamed to `~/gitreins`), and where a similar stale venv does exist, its
 > tools shadow the repo interpreter and can falsely FAIL the tests lane on a
-> clean tree. The tests lane is interpreter-pinned in `.gitreins/config.yaml`
-> (`test_command`), so it is independent of PATH ordering.
+> clean tree. Which lanes run — and how — is fixed in `.gitreins/config.yaml`,
+> not by the caller's PATH: `guards.test_mode: full`, the generic `guards.tests`
+> leg is off (`false`) and `guards.go.tests: true` (with `guards.go.build: true`)
+> is the lane that actually executes. The file contains no command or interpreter
+> override of any kind, so the guard runs its own built-in Go test invocation —
+> `go test -short -count=1 ./...`, the gate table's Tests lane — rather than a
+> command selected from the environment. PATH ordering decides which `gitreins`
+> binary you execute; it cannot change what gates the tests lane.
 
 Precedent: `terminal-jail/AGENTS.md` carries exactly this corrected form
 (observed 2026-09-22).
