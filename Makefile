@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test tick-closeout tick-closeout-selftest connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest check-distribute-deploy deploy-distribute check-distribute-deploy-selftest install-hooks install-hooks-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test tick-closeout tick-closeout-selftest connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest check-distribute-deploy deploy-distribute check-distribute-deploy-selftest check-readme-release-pin check-readme-release-pin-selftest install-hooks install-hooks-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -280,6 +280,24 @@ check-corpus-hygiene:
 # "real tree passes" arm.
 check-corpus-hygiene-selftest:
 	bash scripts/tests/check-corpus-hygiene-selftest.sh
+
+# README-11 — the README's "Install from a release" first-run snippet pins the
+# release tag in a shell literal (`V=vX.Y.Z`). That literal rotted twice
+# (v0.1.1 -> v0.2.0 -> v0.3.0), each time shipping a first run that pointed at
+# a superseded tag — fatal for the no-toolchain user the snippet exists for.
+# This guard compares that pin against the repo's latest v<semver> tag and
+# FAILS (exit 1, naming both values) on drift. Read-only and fully offline: it
+# reads .git and README.md, nothing else; when a shallow/tagless checkout
+# leaves no tags it prints a loud SKIP instead of passing quietly.
+check-readme-release-pin:
+	bash scripts/check-readme-release-pin.sh
+
+# Non-vacuity self-test for the guard: temp fixture repos + READMEs prove the
+# stale pin fails (naming both values), a matching pin passes, a tagless repo
+# SKIPs loudly, and a missing section / missing literal / broken git is never
+# reported as a pass. Hermetic: mktemp -d fixtures only, no network.
+check-readme-release-pin-selftest:
+	bash scripts/tests/check-readme-release-pin-selftest.sh
 
 # OB-DIST-003 — the ob1-distribute cron (4x/day) runs the UNTRACKED deployed
 # copy at ~/.hermes/scripts/ob1-distribute.sh of the tracked
