@@ -68,13 +68,24 @@ func TestMetricsPromEndpoint(t *testing.T) {
 		t.Fatalf("/api/v1/stats: status %d", statsRR.Code)
 	}
 	var stats struct {
-		QueueDepth int `json:"queue_depth"`
+		QueueDepth      int     `json:"queue_depth"`
+		VerifiedAnswers int     `json:"verified_answers"`
+		HitRate         float64 `json:"hit_rate"`
 	}
 	if err := json.Unmarshal(statsRR.Body.Bytes(), &stats); err != nil {
 		t.Fatalf("decode stats: %v", err)
 	}
 	if v := promGauge(t, body, "obo_queue_pending"); v != float64(stats.QueueDepth) {
 		t.Errorf("obo_queue_pending = %v, /api/v1/stats queue_depth = %d — must agree", v, stats.QueueDepth)
+	}
+
+	// Tier-3 (OBS-OB-004): the catalogue gauges are the SAME SQL truth
+	// /api/v1/stats serves, refreshed into the cache at construction.
+	if v := promGauge(t, body, "obo_catalog_verified_answers"); v != float64(stats.VerifiedAnswers) {
+		t.Errorf("obo_catalog_verified_answers = %v, /api/v1/stats verified_answers = %d — must agree", v, stats.VerifiedAnswers)
+	}
+	if v := promGauge(t, body, "obo_catalog_hit_rate"); v != stats.HitRate {
+		t.Errorf("obo_catalog_hit_rate = %v, /api/v1/stats hit_rate = %v — must agree", v, stats.HitRate)
 	}
 }
 

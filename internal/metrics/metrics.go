@@ -110,11 +110,25 @@ var TickOutcomes = []string{
 // widening the exposition's cardinality.
 var SkipReasons = []string{"load", "memory", "load+memory"}
 
+// DiscoveryOutcomes is the complete `outcome` label set for
+// obo_discovery_requests_total (OBS-OB-004, docs/observability-spec.md
+// §3.4): a discover request either resolved an exact answer (hit) or
+// found nothing for the requested class (miss). Invalid requests (400)
+// and internal errors (500) are counted as neither — they measure the
+// caller and the store, not discovery outcomes (see RecordDiscovery).
+var DiscoveryOutcomes = []string{"hit", "miss"}
+
 // IsTickOutcome reports whether outcome is a member of TickOutcomes.
 func IsTickOutcome(outcome string) bool { return containsString(TickOutcomes, outcome) }
 
 // IsSkipReason reports whether reason is a member of SkipReasons.
 func IsSkipReason(reason string) bool { return containsString(SkipReasons, reason) }
+
+// IsDiscoveryOutcome reports whether outcome is a member of
+// DiscoveryOutcomes.
+func IsDiscoveryOutcome(outcome string) bool {
+	return containsString(DiscoveryOutcomes, outcome)
+}
 
 func containsString(set []string, want string) bool {
 	for _, v := range set {
@@ -190,6 +204,14 @@ type Observer struct {
 	reasonCounts map[string]int64
 	lastTick     time.Time
 
+	// deferralCounts counts how often the host-pressure gate actually
+	// POSTPONED waiting work — one increment per entry it stamped
+	// deferred — keyed by the same closed reason vocabulary the gate
+	// writes into queue_entries.gate_reason (SkipReasons). It is the
+	// obo_queue_deferred_total source (OBS-OB-004, spec §3.4); a
+	// reason outside the set is dropped, never added as a series.
+	deferralCounts map[string]int64
+
 	// Cumulative per-solve resource and failure-cause totals feeding
 	// obo_solve_* on GET /metrics/prom (OBS-OB-003). They are kept apart
 	// from o.records because records is a bounded (and trimmable) window:
@@ -244,12 +266,13 @@ func New(alertBytes uint64, logger *log.Logger) *Observer {
 		logger = log.Default()
 	}
 	return &Observer{
-		alertBytes:    alertBytes,
-		logger:        logger,
-		peakBuckets:   make([]uint64, len(SolvePeakRSSBuckets)+1),
-		failureCauses: make(map[string]int64),
-		tickCounts:    make(map[string]int64),
-		reasonCounts:  make(map[string]int64),
+		alertBytes:     alertBytes,
+		logger:         logger,
+		peakBuckets:    make([]uint64, len(SolvePeakRSSBuckets)+1),
+		failureCauses:  make(map[string]int64),
+		tickCounts:     make(map[string]int64),
+		reasonCounts:   make(map[string]int64),
+		deferralCounts: make(map[string]int64),
 	}
 }
 
@@ -400,6 +423,48 @@ func (o *Observer) RecordSkip(snap HostSnapshot) {
 	o.mu.Unlock()
 }
 
+// RecordDeferred counts one entry the host-pressure gate actually
+// POSTPONED (the loop's deferral stamp succeeded), under the gate's
+// closed reason vocabulary — obo_queue_deferred_total (OBS-OB-004,
+// spec §3.4).
+//
+// Unlike RecordSkip (which counts the decision) this counts the work
+// the decision displaced: a gated tick with an empty queue postpones
+// nothing and must not move this counter. A reason outside SkipReasons
+// is dropped: the label set is closed by contract (spec §3.5), so free
+// text can never widen the exposition's cardinality.
+func (o *Observer) RecordDeferred(reason string) {
+	if o == nil || !IsSkipReason(reason) {
+		return
+	}
+	o.mu.Lock()
+	if o.deferralCounts == nil {
+		o.deferralCounts = make(map[string]int64)
+	}
+	o.deferralCounts[reason]++
+	o.mu.Unlock()
+}
+
+// Deferrals returns the cumulative per-reason deferral counts. Every
+// member of the closed SkipReasons vocabulary is present (at zero
+// before it first fires), so the exposition has a series for rate() to
+// alert on. Nil-receiver-safe.
+func (o *Observer) Deferrals() map[string]int64 {
+	out := make(map[string]int64, len(SkipReasons))
+	for _, reason := range SkipReasons {
+		out[reason] = 0
+	}
+	if o == nil {
+		return out
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for _, reason := range SkipReasons {
+		out[reason] = o.deferralCounts[reason]
+	}
+	return out
+}
+
 // RecordTickStart stamps the tick wall clock (gauge
 // obo_cron_last_tick_timestamp_seconds) without counting an outcome.
 //
@@ -528,6 +593,20 @@ func (o *Observer) RecordDiscovery(found bool) {
 		o.discoveryMisses++
 	}
 	o.mu.Unlock()
+}
+
+// DiscoveryCounts returns the cumulative discover-request outcomes:
+// hits (an exact answer resolved) and misses (the class was absent).
+// These feed obo_discovery_requests_total{outcome} (OBS-OB-004, spec
+// §3.4). Distinct from the /api/v1/stats hit_rate ratio, which measures
+// catalog coverage rather than discovery outcomes. Nil-receiver-safe.
+func (o *Observer) DiscoveryCounts() (hits, misses int64) {
+	if o == nil {
+		return 0, 0
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.discoveryHits, o.discoveryMisses
 }
 
 // Skips returns the number of runs skipped for host pressure.
