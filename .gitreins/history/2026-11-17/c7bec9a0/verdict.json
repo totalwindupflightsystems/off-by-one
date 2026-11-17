@@ -1,0 +1,421 @@
+{
+  "task_id": "OBS-OB-003",
+  "task_title": "Emit solve resource + failure-cause metrics; stop discarding failure_reason",
+  "task_criteria": [
+    "GET /metrics/prom on the running service exposes obo_solve_peak_rss_bytes (histogram, buckets 256MiB/512MiB/1GiB/2.5GiB/4GiB), obo_solve_killed_total, obo_solve_over_budget_total, obo_solve_rejected_total and obo_solve_failure_total{cause} whose cause label is a closed 7-value set {timeout,solver_exit,toolchain_missing,invalid_problem,commit,stale_reaped,other}, classified at the failure site (internal/solver/cause.go ClassifyCause) rather than by re-parsing stored text; a forced per-solve timeout raises obo_solve_failure_total{cause=\"timeout\"} by exactly 1 (internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne drives the real loop and the real handler), a memory kill raises obo_solve_killed_total (TestMemoryKillRaisesKilledTotalAndHistogram), and the vocabulary is closed for arbitrary error strings (internal/solver/cause_test.go TestFailureCauseVocabularyIsClosed and TestClassifyCauseArbitraryStringsStayClosed); go test ./internal/... -count=1 exits 0."
+  ],
+  "passed": true,
+  "worktree": "/home/kara/off-by-one",
+  "branch": "master",
+  "commit": "1734cb00358e841900d0ca10f90c11468e5fb057",
+  "pass_class": "judged",
+  "tier2_skipped": false,
+  "working_tree_content_fingerprint": "a549727c681686661dc62719de71e95ddc3647d03daf564f442c1547e38bcdd7",
+  "working_tree_dirty_path_count": 2,
+  "items": [
+    {
+      "criterion": "GET /metrics/prom on the running service exposes obo_solve_peak_rss_bytes (histogram, buckets 256MiB/512MiB/1GiB/2.5GiB/4GiB), obo_solve_killed_total, obo_solve_over_budget_total, obo_solve_rejected_total and obo_solve_failure_total{cause} whose cause label is a closed 7-value set {timeout,solver_exit,toolchain_missing,invalid_problem,commit,stale_reaped,other}, classified at the failure site (internal/solver/cause.go ClassifyCause) rather than by re-parsing stored text; a forced per-solve timeout raises obo_solve_failure_total{cause=\"timeout\"} by exactly 1 (internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne drives the real loop and the real handler), a memory kill raises obo_solve_killed_total (TestMemoryKillRaisesKilledTotalAndHistogram), and the vocabulary is closed for arbitrary error strings (internal/solver/cause_test.go TestFailureCauseVocabularyIsClosed and TestClassifyCauseArbitraryStringsStayClosed); go test ./internal/... -count=1 exits 0.",
+      "status": "PASS",
+      "detail": "All five families confirmed on the real wire by dumping the promhttp exposition from NewProm(PromConfig{SolveResources: obs.SolveResources}): obo_solve_peak_rss_bytes histogram with exactly the 5 required finite buckets le=2.68435456e+08 (256MiB), 5.36870912e+08 (512MiB), 1.073741824e+09 (1GiB), 2.68435456e+09 (2.5GiB), 4.294967296e+09 (4GiB) plus +Inf (bounds at internal/metrics/metrics.go:41); obo_solve_killed_total / obo_solve_over_budget_total / obo_solve_rejected_total present (internal/metrics/prom.go:232-258); obo_solve_failure_total{cause} emitted for exactly the 7 closed values (internal/metrics/prom.go:580-600 iterating solver.FailureCauses, internal/solver/cause.go:70-78). Classified at the failure site with the raw error in hand, not by re-parsing stored text: internal/cron/loop.go:757 (solver_failed), :789 (rejected), :801 (commit_failed), :819 (mark-complete), :533 (stale-reap batch). Route reachable: internal/api/server.go:185 mux.HandleFunc(\"GET /metrics/prom\", s.handleMetricsProm), wired in cmd/off-by-one/main.go:312. Tests run fresh: `go test ./internal/cron/ -run 'TestTimeoutKillRaisesCauseTimeoutByExactlyOne|TestMemoryKillRaisesKilledTotalAndHistogram' -count=1 -v` => '--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)' and '--- PASS: TestMemoryKillRaisesKilledTotalAndHistogram (0.00s)'; `go test ./internal/solver/ -run 'TestFailureCauseVocabularyIsClosed|TestClassifyCauseArbitraryStringsStayClosed' -count=1 -v` => PASS (plus FuzzClassifyCause 7 seeds PASS); `go test ./internal/... -count=1` => EXIT_CODE=0 with all 13 packages 'ok'. go build ./... exit 0, go vet exit 0, LSP diagnostics empty. [resolution 0.01; internal/solver/cause.go, internal/cron/cause_test.go, internal/solver/cause_test.go]"
+    },
+    {
+      "criterion": "The Observer instance the cron loop records into is the same instance main.go wires as the Prom SolveResources source (seam: value written == value read)",
+      "status": "PASS",
+      "detail": "cmd/off-by-one/main.go:182 `observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())`; :209 `Observer: observer` into the cron Config; :312 `SolveResources: observer.SolveResources` into PromConfig. One pointer, so a cause recorded by the loop is the value the scrape reads.",
+      "derived": true
+    },
+    {
+      "criterion": "The failure_reason is still persisted to the queue and surfaced to the submitter (the metric is additive, not a replacement for the stored text)",
+      "status": "PASS",
+      "detail": "internal/cron/loop.go:756 `MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error()))` persists the raw solver error; internal/ingest/queue.go:821-828 `UPDATE queue_entries SET ... failure_reason = ?`; internal/api/handlers.go:922 exposes FailureReason in the queue-status JSON. TestTimeoutKillRaisesCauseTimeoutByExactlyOne asserts `q.failText[\"timeout-1\"]` contains \"--solve-timeout 25s\" and PASSED.",
+      "derived": true
+    },
+    {
+      "criterion": "obo_solve_failure_total does not double-count: one failed solve yields exactly one cause sample across the whole closed set",
+      "status": "PASS",
+      "detail": "internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne sums obo_solve_failure_total over all 7 solver.FailureCauses and asserts total == 1 for a single failed solve. Ran: '--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)'.",
+      "derived": true
+    },
+    {
+      "criterion": "A timeout kill must NOT increment obo_solve_killed_total (the two counters must not conflate SIGKILL causes)",
+      "status": "PASS",
+      "detail": "internal/cron/loop.go:852 isMemoryKill returns false for \"--solve-timeout\"/\"bwrap timeout\"/\"deadline exceeded\" before the SIGKILL check. TestTimeoutKillDoesNotCountAsMemoryKill asserts obo_solve_killed_total == 0 after a forced timeout; TestIsMemoryKillAttribution's 9 subtests all PASS. Ran: '--- PASS: TestTimeoutKillDoesNotCountAsMemoryKill (0.00s)'.",
+      "derived": true
+    }
+  ],
+  "merge_recommendation": "no_concerns_found",
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 secrets: secrets: scanners=gitleaks+builtin cross-check\n  \u2713 tests: scanners: nice=nice -n 10",
+      "steps": [
+        {
+          "id": "secrets",
+          "type": "script",
+          "passed": true,
+          "output": "secrets: scanners=gitleaks+builtin cross-check\nscanners: nice=nice -n 10\n10:42AM INF scanned ~8558598 bytes (8.56 MB) in 2.32s\n10:42AM INF no leaks found\nsecrets: gitleaks: clean\nsecrets: builtin cross-check: Scanned 6791 files \u2014 clean (excluded harness state: .gitreins/**)\nsensitive-path override applied: .env.example\nsecrets: builtin cross-check status: clean\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/off-by-one/.gitreins/logs/guard-20261117T154034.404125Z.log",
+            "secrets_scanners": [
+              "gitleaks",
+              "builtin"
+            ]
+          }
+        },
+        {
+          "id": "tests",
+          "type": "script",
+          "passed": true,
+          "output": "scanners: nice=nice -n 10\n?   \tgithub.com/totalwindupflightsystems/off-by-one/cmd/oby-memcap\t[no test files]\nok  \tgithub.com/totalwindupflightsystems/off-by-one/cmd/off-by-one\t2.573s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/api\t1.371s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/cron\t0.131s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/export\t2.103s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/graph\t0.677s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/import\t1.580s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/ingest\t0.165s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/metrics\t0.465s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/muster\t0.059s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/sandbox\t1.408s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/seed\t0.492s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/solver\t2.928s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/tools\t0.024s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/web\t2.551s\nok  \tgithub.com/totalwindupflightsystems/off-by-one/pkg/api\t0.061s\n?   \tgithub.com/totalwindupflightsystems/off-by-one/sql/schema\t[no test files]\n?   \tgithub.com/totalwindupflightsystems/off-by-one/web\t[no test files]\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/off-by-one/.gitreins/logs/guard-20261117T154034.404125Z.log"
+          }
+        }
+      ],
+      "coverage": "secrets+tests"
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 GET /metrics/prom on the running service exposes obo_solve_peak_rss_bytes (histogram, buckets 256MiB/512MiB/1GiB/2.5GiB/4GiB), obo_solve_killed_total, obo_solve_over_budget_total, obo_solve_rejected_total and obo_solve_failure_total{cause} whose cause label is a closed 7-value set {timeout,solver_exit,toolchain_missing,invalid_problem,commit,stale_reaped,other}, classified at the failure site (internal/solver/cause.go ClassifyCause) rather than by re-parsing stored text; a forced per-solve timeout raises obo_solve_failure_total{cause=\"timeout\"} by exactly 1 (internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne drives the real loop and the real handler), a memory kill raises obo_solve_killed_total (TestMemoryKillRaisesKilledTotalAndHistogram), and the vocabulary is closed for arbitrary error strings (internal/solver/cause_test.go TestFailureCauseVocabularyIsClosed and TestClassifyCauseArbitraryStringsStayClosed); go test ./internal/... -count=1 exits 0.: All five families confirmed on the real wire by dumping the promhttp exposition from NewProm(PromConfig{SolveResources: obs.SolveResources}): obo_solve_peak_rss_bytes histogram with exactly the 5 required finite buckets le=2.68435456e+08 (256MiB), 5.36870912e+08 (512MiB), 1.073741824e+09 (1GiB), 2.68435456e+09 (2.5GiB), 4.294967296e+09 (4GiB) plus +Inf (bounds at internal/metrics/metrics.go:41); obo_solve_killed_total / obo_solve_over_budget_total / obo_solve_rejected_total present (internal/metrics/prom.go:232-258); obo_solve_failure_total{cause} emitted for exactly the 7 closed values (internal/metrics/prom.go:580-600 iterating solver.FailureCauses, internal/solver/cause.go:70-78). Classified at the failure site with the raw error in hand, not by re-parsing stored text: internal/cron/loop.go:757 (solver_failed), :789 (rejected), :801 (commit_failed), :819 (mark-complete), :533 (stale-reap batch). Route reachable: internal/api/server.go:185 mux.HandleFunc(\"GET /metrics/prom\", s.handleMetricsProm), wired in cmd/off-by-one/main.go:312. Tests run fresh: `go test ./internal/cron/ -run 'TestTimeoutKillRaisesCauseTimeoutByExactlyOne|TestMemoryKillRaisesKilledTotalAndHistogram' -count=1 -v` => '--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)' and '--- PASS: TestMemoryKillRaisesKilledTotalAndHistogram (0.00s)'; `go test ./internal/solver/ -run 'TestFailureCauseVocabularyIsClosed|TestClassifyCauseArbitraryStringsStayClosed' -count=1 -v` => PASS (plus FuzzClassifyCause 7 seeds PASS); `go test ./internal/... -count=1` => EXIT_CODE=0 with all 13 packages 'ok'. go build ./... exit 0, go vet exit 0, LSP diagnostics empty. [resolution 0.01; internal/solver/cause.go, internal/cron/cause_test.go, internal/solver/cause_test.go]\n  \u2713 The Observer instance the cron loop records into is the same instance main.go wires as the Prom SolveResources source (seam: value written == value read): cmd/off-by-one/main.go:182 `observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())`; :209 `Observer: observer` into the cron Config; :312 `SolveResources: observer.SolveResources` into PromConfig. One pointer, so a cause recorded by the loop is the value the scrape reads.\n  \u2713 The failure_reason is still persisted to the queue and surfaced to the submitter (the metric is additive, not a replacement for the stored text): internal/cron/loop.go:756 `MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error()))` persists the raw solver error; internal/ingest/queue.go:821-828 `UPDATE queue_entries SET ... failure_reason = ?`; internal/api/handlers.go:922 exposes FailureReason in the queue-status JSON. TestTimeoutKillRaisesCauseTimeoutByExactlyOne asserts `q.failText[\"timeout-1\"]` contains \"--solve-timeout 25s\" and PASSED.\n  \u2713 obo_solve_failure_total does not double-count: one failed solve yields exactly one cause sample across the whole closed set: internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne sums obo_solve_failure_total over all 7 solver.FailureCauses and asserts total == 1 for a single failed solve. Ran: '--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)'.\n  \u2713 A timeout kill must NOT increment obo_solve_killed_total (the two counters must not conflate SIGKILL causes): internal/cron/loop.go:852 isMemoryKill returns false for \"--solve-timeout\"/\"bwrap timeout\"/\"deadline exceeded\" before the SIGKILL check. TestTimeoutKillDoesNotCountAsMemoryKill asserts obo_solve_killed_total == 0 after a forced timeout; TestIsMemoryKillAttribution's 9 subtests all PASS. Ran: '--- PASS: TestTimeoutKillDoesNotCountAsMemoryKill (0.00s)'.\nThe pre-screen's 0.01 probability was wrong: all five metric families are emitted on the real /metrics/prom wire with the exact 5 histogram buckets and closed 7-value cause set, causes are classified at the failure site in cron/loop.go with the raw error in hand, the loop and Prom share one Observer, failure_reason is still persisted and surfaced, and go test ./internal/... -count=1 exits 0 with every named test passing. [uncovered failure paths: failure mode 0 (A solve killed by the kernel OOM killer with an error shape outside the recognised signatures (e.g. a bare non-zero exit with no 'signal: killed'/'exit status 137' text) is counted as solver_exit rather than a memory kill, so obo_solve_killed_total under-reports): detected_by is empty \u2014 uncovered failure path]",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n\n\u2026 [4134 chars omitted \u2014 4 line(s)] \u2026\n  \u2713 A timeout kill must NOT increment obo_solve_killed_total (the two counters must not conflate SIGKILL causes): internal/cron/loop.go:852 isMemoryKill returns false for \"--solve-timeout\"/\"bwrap timeout\"/\"deadline exceeded\" before the SIGKILL check. TestTimeoutKillDoesNotCountAsMemoryKill asserts obo_solve_killed_total == 0 after a forced timeout; TestIsMemoryKillAttribution's 9 subtests all PASS. Ran: '--- PASS: TestTimeoutKillDoesNotCountAsMemoryKill (0.00s)'.\nThe pre-screen's 0.01 probability was wrong: all five metric families are emitted on the real /metrics/prom wire with the exact 5 histogram buckets and closed 7-value cause set, causes are classified at the failure site in cron/loop.go with the raw error in hand, the loop and Prom share one Observer, failure_reason is still persisted and surfaced, and go test ./internal/... -count=1 exits 0 with every named test passing. [uncovered failure paths: failure mode 0 (A solve killed by the kernel OOM killer with an error shape outside the recognised signatures (e.g. a bare non-zero exit with no 'signal: killed'/'exit status 137' text) is counted as solver_exit rather than a memory kill, so obo_solve_killed_total under-reports): detected_by is empty \u2014 uncovered failure path]",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "GET /metrics/prom on the running service exposes obo_solve_peak_rss_bytes (histogram, buckets 256MiB/512MiB/1GiB/2.5GiB/4GiB), obo_solve_killed_total, obo_solve_over_budget_total, obo_solve_rejected_total and obo_solve_failure_total{cause} whose cause label is a closed 7-value set {timeout,solver_exit,toolchain_missing,invalid_problem,commit,stale_reaped,other}, classified at the failure site (internal/solver/cause.go ClassifyCause) rather than by re-parsing stored text; a forced per-solve timeout raises obo_solve_failure_total{cause=\"timeout\"} by exactly 1 (internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne drives the real loop and the real handler), a memory kill raises obo_solve_killed_total (TestMemoryKillRaisesKilledTotalAndHistogram), and the vocabulary is closed for arbitrary error strings (internal/solver/cause_test.go TestFailureCauseVocabularyIsClosed and TestClassifyCauseArbitraryStringsStayClosed); go test ./internal/... -count=1 exits 0.",
+                "status": "PASS",
+                "detail": "All five families confirmed on the real wire by dumping the promhttp exposition from NewProm(PromConfig{SolveResources: obs.SolveResources}): obo_solve_peak_rss_bytes histogram with exactly the 5 required finite buckets le=2.68435456e+08 (256MiB), 5.36870912e+08 (512MiB), 1.073741824e+09 (1GiB), 2.68435456e+09 (2.5GiB), 4.294967296e+09 (4GiB) plus +Inf (bounds at internal/metrics/metrics.go:41); obo_solve_killed_total / obo_solve_over_budget_total / obo_solve_rejected_total present (internal/metrics/prom.go:232-258); obo_solve_failure_total{cause} emitted for exactly the 7 closed values (internal/metrics/prom.go:580-600 iterating solver.FailureCauses, internal/solver/cause.go:70-78). Classified at the failure site with the raw error in hand, not by re-parsing stored text: internal/cron/loop.go:757 (solver_failed), :789 (rejected), :801 (commit_failed), :819 (mark-complete), :533 (stale-reap batch). Route reachable: internal/api/server.go:185 mux.HandleFunc(\"GET /metrics/prom\", s.handleMetricsProm), wired in cmd/off-by-one/main.go:312. Tests run fresh: `go test ./internal/cron/ -run 'TestTimeoutKillRaisesCauseTimeoutByExactlyOne|TestMemoryKillRaisesKilledTotalAndHistogram' -count=1 -v` => '--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)' and '--- PASS: TestMemoryKillRaisesKilledTotalAndHistogram (0.00s)'; `go test ./internal/solver/ -run 'TestFailureCauseVocabularyIsClosed|TestClassifyCauseArbitraryStringsStayClosed' -count=1 -v` => PASS (plus FuzzClassifyCause 7 seeds PASS); `go test ./internal/... -count=1` => EXIT_CODE=0 with all 13 packages 'ok'. go build ./... exit 0, go vet exit 0, LSP diagnostics empty. [resolution 0.01; internal/solver/cause.go, internal/cron/cause_test.go, internal/solver/cause_test.go]",
+                "resolution_probability": 0.01,
+                "cited_path": "internal/solver/cause.go, internal/cron/cause_test.go, internal/solver/cause_test.go"
+              },
+              {
+                "criterion": "The Observer instance the cron loop records into is the same instance main.go wires as the Prom SolveResources source (seam: value written == value read)",
+                "status": "PASS",
+                "detail": "cmd/off-by-one/main.go:182 `observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())`; :209 `Observer: observer` into the cron Config; :312 `SolveResources: observer.SolveResources` into PromConfig. One pointer, so a cause recorded by the loop is the value the scrape reads.",
+                "derived": true
+              },
+              {
+                "criterion": "The failure_reason is still persisted to the queue and surfaced to the submitter (the metric is additive, not a replacement for the stored text)",
+                "status": "PASS",
+                "detail": "internal/cron/loop.go:756 `MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error()))` persists the raw solver error; internal/ingest/queue.go:821-828 `UPDATE queue_entries SET ... failure_reason = ?`; internal/api/handlers.go:922 exposes FailureReason in the queue-status JSON. TestTimeoutKillRaisesCauseTimeoutByExactlyOne asserts `q.failText[\"timeout-1\"]` contains \"--solve-timeout 25s\" and PASSED.",
+                "derived": true
+              },
+              {
+                "criterion": "obo_solve_failure_total does not double-count: one failed solve yields exactly one cause sample across the whole closed set",
+                "status": "PASS",
+                "detail": "internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne sums obo_solve_failure_total over all 7 solver.FailureCauses and asserts total == 1 for a single failed solve. Ran: '--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)'.",
+                "derived": true
+              },
+              {
+                "criterion": "A timeout kill must NOT increment obo_solve_killed_total (the two counters must not conflate SIGKILL causes)",
+                "status": "PASS",
+                "detail": "internal/cron/loop.go:852 isMemoryKill returns false for \"--solve-timeout\"/\"bwrap timeout\"/\"deadline exceeded\" before the SIGKILL check. TestTimeoutKillDoesNotCountAsMemoryKill asserts obo_solve_killed_total == 0 after a forced timeout; TestIsMemoryKillAttribution's 9 subtests all PASS. Ran: '--- PASS: TestTimeoutKillDoesNotCountAsMemoryKill (0.00s)'.",
+                "derived": true
+              }
+            ],
+            "summary": "The pre-screen's 0.01 probability was wrong: all five metric families are emitted on the real /metrics/prom wire with the exact 5 histogram buckets and closed 7-value cause set, causes are classified at the failure site in cron/loop.go with the raw error in hand, the loop and Prom share one Observer, failure_reason is still persisted and surfaced, and go test ./internal/... -count=1 exits 0 with every named test passing. [uncovered failure paths: failure mode 0 (A solve killed by the kernel OOM killer with an error shape outside the recognised signatures (e.g. a bare non-zero exit with no 'signal: killed'/'exit status 137' text) is counted as solver_exit rather than a memory kill, so obo_solve_killed_total under-reports): detected_by is empty \u2014 uncovered failure path]",
+            "provenance": {
+              "model": "deepseek-v4-flash",
+              "base_url_source": "GITREINS_LLM_BASE_URL",
+              "api_key_source": "GITREINS_LLM_API_KEY"
+            }
+          }
+        }
+      ],
+      "model": "deepseek-v4-flash",
+      "base_url_source": "GITREINS_LLM_BASE_URL",
+      "api_key_source": "GITREINS_LLM_API_KEY",
+      "tool_calls": [
+        {
+          "tool": "get_task_item",
+          "command": "get_task_item {\"id\": \"OBS-OB-003\"}",
+          "exit_code": 0,
+          "output_sha": "a781ffa864522813c65182dea98106796b788931f7dfed1e6cc257fc3ad2eb3c"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara 2>/dev/null; pwd; ls",
+          "exit_code": 0,
+          "output_sha": "78fdb5a86e8270251390923c8265f59b4aec0aefeabb006f2de9ad52664f56f2"
+        },
+        {
+          "tool": "run_command",
+          "command": "ls -d /home/kara/*off*one* /home/kara/*off-by-one* 2>/dev/null; find /home/kara -maxdepth 3 -name \"off-by-one\" -type d 2>/dev/null | head -20",
+          "exit_code": 0,
+          "output_sha": "5aa7ba174247c7102c0a9e8c675c58c9bee01c30ac9cb89a0f3ac7fb68d47d4f"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && git status --short | head -40 && echo \"---LOG---\" && git log --oneline -5",
+          "exit_code": 0,
+          "output_sha": "bbd2c8718677138788bb878188e0a645756d9edb8c38efb046cfeca67fe4397a"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && ls internal/solver/ internal/cron/ 2>&1 | head -60; echo \"=== cause.go ===\"; ls -la internal/solver/cause.go internal/solver/cause_test.go internal/cron/cause_test.go 2>&1",
+          "exit_code": 0,
+          "output_sha": "82320f3c61811e96120ba3b0c6468cdb15ccad49a18a14e4b4116c0c73331bea"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"path\": \"internal/solver/cause.go\"}",
+          "exit_code": 0,
+          "output_sha": "bae162d5c9c8621a094b54972e8a6005a6358765d041f582ca9d1cbe73538a48"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"path\": \"internal/solver/cause_test.go\"}",
+          "exit_code": 0,
+          "output_sha": "11bd0286b4879d09930a57405e3341f9b92820c097cfa1191506ea8c35b51fb0"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"path\": \"internal/cron/cause_test.go\"}",
+          "exit_code": 0,
+          "output_sha": "027c9610d4afd4d043c6b3035e12a08f5db97be0fc00d1189a4ce2de49453101"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"offset\": 300, \"path\": \"internal/cron/cause_test.go\"}",
+          "exit_code": 0,
+          "output_sha": "8b8fccb3fecc2fb643492bed1b5576cc6a7bbd6c1b18637a6ddfe3cea4a236d1"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && ls internal/metrics/ && wc -l internal/metrics/*.go internal/cron/loop.go",
+          "exit_code": 0,
+          "output_sha": "83ff62fc93876cbbd60493adeb0eac497575f99328ec640518a1da05188680e4"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"path\": \"internal/metrics/prom.go\"}",
+          "exit_code": 0,
+          "output_sha": "77d30243b694e6ea3e9685349d789514ec58a33c8368d9a2601dbf74c3ef79ab"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"offset\": 400, \"path\": \"internal/metrics/prom.go\"}",
+          "exit_code": 0,
+          "output_sha": "4adfaca9221d397074accc065c147a5517179305bda9dad896f77c1c1ba70c0f"
+        },
+        {
+          "tool": "search_pattern",
+          "command": "search_pattern {\"file_glob\": \"*.go\", \"regex\": \"SolvePeakRSSBuckets|type SolveResources|PeakRSSBucketCounts|Failures\\\\s+map\\\\[string\\\\]int64\"}",
+          "exit_code": 0,
+          "output_sha": "e4572de537434ab4319c8540dcd1c8cba0174f9db56c6ced0285896d68352269"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 120, \"offset\": 20, \"path\": \"internal/metrics/metrics.go\"}",
+          "exit_code": 0,
+          "output_sha": "09c13705e199fbcefb013ab0592862cd531f36371b0207a530283ba808dfe685"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 220, \"offset\": 200, \"path\": \"internal/metrics/metrics.go\"}",
+          "exit_code": 0,
+          "output_sha": "92e596d050ad7f0601b53b6d9ad494ebe69b5b7bafda49ab966621f2189c0cfb"
+        },
+        {
+          "tool": "search_pattern",
+          "command": "search_pattern {\"file_glob\": \"*.go\", \"regex\": \"RecordFailureCause|ClassifyCause|isMemoryKill|SolveResources\"}",
+          "exit_code": 0,
+          "output_sha": "244ae1ef9345d950e86f8bd41bc49426a56bf246543dd78cee6fa5818a7abece"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 200, \"offset\": 690, \"path\": \"internal/cron/loop.go\"}",
+          "exit_code": 0,
+          "output_sha": "e601c3f9c456778a61cf438a04ef74177c2538a9844d3a0559e98d897bc421d9"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 60, \"offset\": 280, \"path\": \"cmd/off-by-one/main.go\"}",
+          "exit_code": 0,
+          "output_sha": "946eec82ecc0cf72119b2d43f20ba5d7a65c17a9f2707a61aebd3788fc4c1fed"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && go test ./internal/... -count=1 2>&1 | tail -40",
+          "exit_code": 0,
+          "output_sha": "987e365fb0f4f06d7eff4ec219895143fffd70a30d259da04ca82a6e19285da5"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && go test ./internal/cron/ -run 'TestTimeoutKillRaisesCauseTimeoutByExactlyOne|TestMemoryKillRaisesKilledTotalAndHistogram|TestTimeoutKillDoesNotCountAsMemoryKill|TestCommitFailureRaisesCauseCommit|TestStaleReapCountsStaleReaped|TestRejectionCountsRejectedAndCauseOther|TestIsMemoryKillAttribution' -count=1 -v 2>&1 | tail -40",
+          "exit_code": 0,
+          "output_sha": "d1bc9270c9dfc13a1398668e731b7c59b454c0f21203778716536a10d61ab9bf"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && go test ./internal/solver/ -run 'TestFailureCauseVocabularyIsClosed|TestClassifyCauseArbitraryStringsStayClosed|TestClassifyCause$|TestClassifyCauseAllSolverErrorsCovered|FuzzClassifyCause' -count=1 -v 2>&1 | tail -40",
+          "exit_code": 0,
+          "output_sha": "748d1a2c8da9a66266b6eb55cec296d3261d6a2b5deb34bd68a53dfb502c7538"
+        },
+        {
+          "tool": "search_pattern",
+          "command": "search_pattern {\"file_glob\": \"*.go\", \"regex\": \"metrics/prom\"}",
+          "exit_code": 0,
+          "output_sha": "29288d8902b9b917d80a115327eed94b8e11e366e4ae5eb05d8e076d89059704"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && cat > /tmp/ob003_wire_test.go <<'EOF'\npackage metrics\n\nimport (\n\t\"fmt\"\n\t\"testing\"\n)\n\nfunc TestWireDumpOBS003(t *testing.T) {\n\tobs := New(DefaultRSSAlertBytes, nil)\n\tobs.RecordSolve(SolveRecord{PeakRSSBytes: 300 << 20})\n\tobs.RecordFailureCause(\"timeout\", 1)\n\tp := NewProm(PromConfig{SolveResources: obs.SolveResources})\n\tfmt.Println(\"=== WIRE ===\")\n\tfmt.Println(serveProm(t, p))\n}\nEOF\ncp /tmp/ob003_wire_test.go internal/metrics/zz_ob003_wire_test.go && go test ./internal/metrics/ -run TestWireDumpOBS003 -count=1 -v 2>&1 | grep -E 'obo_solve_(peak_rss|killed|over_budget|rejected|failure)' ; rm -f internal/metrics/zz_ob003_wire_test.go",
+          "exit_code": 0,
+          "output_sha": "a64355a6e482231482d5ae6d1f50a53eae47ac65a12fe016047b789da3aa1b87"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"path\": \"internal/api/metrics_prom_solve_test.go\"}",
+          "exit_code": 0,
+          "output_sha": "eda6813d89b0e5d9de93113761e960e34b305cf57b1c8af1f590d1ccbc411d8e"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 30, \"offset\": 175, \"path\": \"internal/api/server.go\"}",
+          "exit_code": 0,
+          "output_sha": "e4607175e5eb80cc09014e458e388e80acbfb37cf6b5d9656799b7927981779b"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 40, \"offset\": 510, \"path\": \"internal/cron/loop.go\"}",
+          "exit_code": 0,
+          "output_sha": "e515e7aa0d1153dd25e3cc6f7ceb0c3ccab61aa4be530f1daa8fca7a34571be6"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && go test ./internal/api/ -run 'TestMetricsPromServesSolveResources' -count=1 -v 2>&1 | tail -10; echo \"=== build/vet ===\"; go build ./... 2>&1 | tail -5; echo \"build_exit=$?\"; go vet ./internal/... ./cmd/... 2>&1 | tail -10; echo \"vet_exit=$?\"",
+          "exit_code": 0,
+          "output_sha": "9557db913cf6714461cb258088d929ccf5823a3334fdecfa8491ead7743d70db"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: All five families verified on the wire via a scratch test dumping the real promhttp exposition from NewProm(PromConfig{SolveResources: obs.SolveResources}):\\n- obo_solve_peak_rss_bytes histogram with exactly 5 finite buckets le=2.68435456e+08 (256MiB), 5.36870912e+08 (512MiB), 1.073741824e+09 (1GiB), 2.68435456e+09 (2.5GiB), 4.294967296e+09 (4GiB) + +Inf. Buckets defined internal/metrics/metrics.go:41.\\n- obo_solve_killed_total, obo_solve_over_budget_total, obo_solve_rejected_total present (internal/metrics/prom.go:232-258).\\n- obo_solve_failure_total{cause} emitted for exactly the 7 closed values timeout/solver_exit/toolchain_missing/invalid_problem/commit/stale_reaped/other (internal/metrics/prom.go:580-600 iterates solver.FailureCauses; internal/solver/cause.go:70-78).\\n- Classified at failure site: internal/cron/loop.go:757 (solver_failed), :789 (rejected), :801 (commit_failed), :819 (mark-complete), :533 (stale reap batch) all call solver.ClassifyCause / RecordFailureCause with the raw error in hand; no scrape-time re-parse.\\n- Route reachable: internal/api/server.go:185 mux.HandleFunc(\\\"GET /metrics/prom\\\", s.handleMetricsProm); main.go:312 wires SolveResources: observer.SolveResources.\\n- Tests: go test ./internal/cron/ -run TestTimeoutKillRaisesCauseTimeoutByExactlyOne|TestMemoryKillRaisesKilledTotalAndHistogram -v => \\\"--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)\\\" and \\\"--- PASS: TestMemoryKillRaisesKilledTotalAndHistogram (0.00s)\\\". go test ./internal/solver/ -run TestFailureCauseVocabularyIsClosed|TestClassifyCauseArbitraryStringsStayClosed => PASS. go test ./internal/... -count=1 => exit_code 0, all 13 packages \\\"ok\\\". go build ./... exit 0, go vet exit 0.\", \"key\": \"verified_0\"}",
+          "exit_code": 0,
+          "output_sha": "581a625a7c9f31dcca3f55648244f6f5131ea3e767fdccc97241f1e19130a9e4"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && grep -n \"Observer:\" cmd/off-by-one/main.go | head -10; echo \"=== observer construction ===\"; grep -n \"observer :=\\|observer =\" cmd/off-by-one/main.go | head",
+          "exit_code": 0,
+          "output_sha": "0a9f76a61cc8833d8c8b16f83aed5a1185cdf48ed09128998d4e4934ddc341de"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && grep -n \"failure_reason\" internal/ingest/*.go sql/schema/*.sql 2>/dev/null | head -20; echo \"=== MarkFailed ===\"; grep -rn \"func.*MarkFailed\" internal/ | head",
+          "exit_code": 0,
+          "output_sha": "442827655230114ef66cf46c2d54a10a76885b989cf2ce939fc0ded8c871aff6"
+        },
+        {
+          "tool": "detect_dead_code",
+          "command": "detect_dead_code {}",
+          "exit_code": 0,
+          "output_sha": "39d9d559ad201e7193d3cd149a4035b0a27a08114595e96f9a0c242d4cd59615"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 30, \"offset\": 815, \"path\": \"internal/ingest/queue.go\"}",
+          "exit_code": 0,
+          "output_sha": "6294d05abe59e73a46d02b905affae9bc017e8fbb60cfee01a4884d3e477e908"
+        },
+        {
+          "tool": "read_lsp_diagnostics",
+          "command": "read_lsp_diagnostics {}",
+          "exit_code": 0,
+          "output_sha": "ef420cbeebd549fc8c5438d6ea41a3e521fa58e29563c4cae80f491b9bfe2143"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && grep -n \"FailureReason\" internal/api/handlers.go | head -10; echo \"=== git log for cause.go ===\"; git log --oneline -3 -- internal/solver/cause.go internal/cron/cause_test.go internal/metrics/prom.go",
+          "exit_code": 0,
+          "output_sha": "cdac46aa3d990b845674ec595b0dcb44d9044f6894e1c4c6e91c4f3cb8f11c07"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one && go test ./internal/... -count=1 2>&1 | tail -20; echo \"EXIT_CODE=$?\"",
+          "exit_code": 0,
+          "output_sha": "29424e92767da2b0648f68967dfac1cf79880012660e25974f0c5a6b0b5638b5"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"Derived criteria proposed BEFORE grading:\\nderived_0: The Observer instance the cron loop records into is the SAME instance main.go wires as the Prom SolveResources source (seam: value written == value read).\\nderived_1: The failure_reason is still persisted to the queue and surfaced to the submitter (task title says \\\"stop discarding failure_reason\\\" \\u2014 the metric must be additive, not a replacement).\\nderived_2: obo_solve_failure_total does not double-count: one failed solve yields exactly one cause sample across the whole closed set.\\nderived_3: A timeout kill must NOT increment obo_solve_killed_total (the two counters must not conflate SIGKILL causes).\\n\\nFindings:\\nderived_0 PASS: cmd/off-by-one/main.go:182 observer := metrics.New(...); :209 Observer: observer (loop); :312 SolveResources: observer.SolveResources (Prom). Same pointer.\\nderived_1 PASS: internal/cron/loop.go:756 MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error())) persists raw reason; internal/ingest/queue.go:821-828 writes failure_reason column; internal/api/handlers.go:922 surfaces FailureReason in queue status JSON. Test asserts q.failText[\\\"timeout-1\\\"] contains \\\"--solve-timeout 25s\\\".\\nderived_2 PASS: cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne sums all 7 causes and asserts total==1; PASSED.\\nderived_3 PASS: loop.go:852 isMemoryKill returns false for --solve-timeout/bwrap timeout/deadline exceeded; TestTimeoutKillDoesNotCountAsMemoryKill asserts killed_total==0; PASSED.\", \"key\": \"derived_criteria\"}",
+          "exit_code": 0,
+          "output_sha": "b4a06f51bdef9b390782d56948c377687f588cc9c2c75e8aa3747f72e0126328"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: cmd/off-by-one/main.go:182 creates observer; :209 passes it as cron Config.Observer; :312 passes observer.SolveResources as PromConfig.SolveResources. Same pointer, so what the loop records is what the scrape reads.\", \"key\": \"verified_derived_0\"}",
+          "exit_code": 0,
+          "output_sha": "83ce14490d530fe96e10799c41815bd46e4f045047915a5c99f5624cbef3285c"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: internal/cron/loop.go:756 MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error())) persists the raw solver error; internal/ingest/queue.go:821-828 UPDATE ... failure_reason = ?; internal/api/handlers.go:922 exposes FailureReason in the queue-status JSON. TestTimeoutKillRaisesCauseTimeoutByExactlyOne asserts q.failText[\\\"timeout-1\\\"] contains \\\"--solve-timeout 25s\\\" and PASSED.\", \"key\": \"verified_derived_1\"}",
+          "exit_code": 0,
+          "output_sha": "049036d91573f6174bc4e3ef6009e2ce105fb00f51a85db3afe6241bcce25dd2"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne sums obo_solve_failure_total over all 7 solver.FailureCauses and asserts total == 1 for one failed solve. Ran: \\\"--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)\\\".\", \"key\": \"verified_derived_2\"}",
+          "exit_code": 0,
+          "output_sha": "07a676f744b917ea9203c2f270356a80491a7abd9c79b64b9a908a818ac9b037"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: internal/cron/loop.go:852 isMemoryKill returns false for \\\"--solve-timeout\\\"/\\\"bwrap timeout\\\"/\\\"deadline exceeded\\\" before the SIGKILL check. TestTimeoutKillDoesNotCountAsMemoryKill asserts obo_solve_killed_total == 0 after a forced timeout; TestIsMemoryKillAttribution has 9 subtests all PASS. Ran: \\\"--- PASS: TestTimeoutKillDoesNotCountAsMemoryKill (0.00s)\\\".\", \"key\": \"verified_derived_3\"}",
+          "exit_code": 0,
+          "output_sha": "efe60998858288d5d2f23ae618a72bb0272c1d507476c9bb7b190409527798ba"
+        }
+      ]
+    }
+  },
+  "review": {
+    "reviewer_email": "totalwindupflightsystems@gmail.com",
+    "reviewer_name": "totalwindupflightsystems",
+    "commit_author_email": "totalwindupflightsystems@gmail.com",
+    "commit_author_name": "totalwindupflightsystems",
+    "self_review": true,
+    "findings": [],
+    "summary": "The diff only appends bookkeeping records (two task entries in .gitreins/tasks.yaml and one usage log line in .gitreins/usage.jsonl) with no code changes, so there is nothing to flag for correctness, wiring, tests, or convention drift."
+  },
+  "summary": "Stage tier1: PASS\n    \u2713 secrets: secrets: scanners=gitleaks+builtin cross-check\n  \u2713 tests: scanners: nice=nice -n 10\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 GET /metrics/prom on the running service exposes obo_solve_peak_rss_bytes (histogram, buckets 256MiB/512MiB/1GiB/2.5GiB/4GiB), obo_solve_killed_total, obo_solve_over_budget_total, obo_solve_rejected_total and obo_solve_failure_total{cause} whose cause label is a closed 7-value set {timeout,solver_exit,toolchain_missing,invalid_problem,commit,stale_reaped,other}, classified at the failure site (internal/solver/cause.go ClassifyCause) rather than by re-parsing stored text; a forced per-solve timeout raises obo_solve_failure_total{cause=\"timeout\"} by exactly 1 (internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne drives the real loop and the real handler), a memory kill raises obo_solve_killed_total (TestMemoryKillRaisesKilledTotalAndHistogram), and the vocabulary is closed for arbitrary error strings (internal/solver/cause_test.go TestFailureCauseVocabularyIsClosed and TestClassifyCauseArbitraryStringsStayClosed); go test ./internal/... -count=1 exits 0.: All five families confirmed on the real wire by dumping the promhttp exposition from NewProm(PromConfig{SolveResources: obs.SolveResources}): obo_solve_peak_rss_bytes histogram with exactly the 5 required finite buckets le=2.68435456e+08 (256MiB), 5.36870912e+08 (512MiB), 1.073741824e+09 (1GiB), 2.68435456e+09 (2.5GiB), 4.294967296e+09 (4GiB) plus +Inf (bounds at internal/metrics/metrics.go:41); obo_solve_killed_total / obo_solve_over_budget_total / obo_solve_rejected_total present (internal/metrics/prom.go:232-258); obo_solve_failure_total{cause} emitted for exactly the 7 closed values (internal/metrics/prom.go:580-600 iterating solver.FailureCauses, internal/solver/cause.go:70-78). Classified at the failure site with the raw error in hand, not by re-parsing stored text: internal/cron/loop.go:757 (solver_failed), :789 (rejected), :801 (commit_failed), :819 (mark-complete), :533 (stale-reap batch). Route reachable: internal/api/server.go:185 mux.HandleFunc(\"GET /metrics/prom\", s.handleMetricsProm), wired in cmd/off-by-one/main.go:312. Tests run fresh: `go test ./internal/cron/ -run 'TestTimeoutKillRaisesCauseTimeoutByExactlyOne|TestMemoryKillRaisesKilledTotalAndHistogram' -count=1 -v` => '--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)' and '--- PASS: TestMemoryKillRaisesKilledTotalAndHistogram (0.00s)'; `go test ./internal/solver/ -run 'TestFailureCauseVocabularyIsClosed|TestClassifyCauseArbitraryStringsStayClosed' -count=1 -v` => PASS (plus FuzzClassifyCause 7 seeds PASS); `go test ./internal/... -count=1` => EXIT_CODE=0 with all 13 packages 'ok'. go build ./... exit 0, go vet exit 0, LSP diagnostics empty. [resolution 0.01; internal/solver/cause.go, internal/cron/cause_test.go, internal/solver/cause_test.go]\n  \u2713 The Observer instance the cron loop records into is the same instance main.go wires as the Prom SolveResources source (seam: value written == value read): cmd/off-by-one/main.go:182 `observer := metrics.New(metrics.DefaultRSSAlertBytes, log.Default())`; :209 `Observer: observer` into the cron Config; :312 `SolveResources: observer.SolveResources` into PromConfig. One pointer, so a cause recorded by the loop is the value the scrape reads.\n  \u2713 The failure_reason is still persisted to the queue and surfaced to the submitter (the metric is additive, not a replacement for the stored text): internal/cron/loop.go:756 `MarkFailed(ctx, entry.ID, solver.FailureHint(err.Error()))` persists the raw solver error; internal/ingest/queue.go:821-828 `UPDATE queue_entries SET ... failure_reason = ?`; internal/api/handlers.go:922 exposes FailureReason in the queue-status JSON. TestTimeoutKillRaisesCauseTimeoutByExactlyOne asserts `q.failText[\"timeout-1\"]` contains \"--solve-timeout 25s\" and PASSED.\n  \u2713 obo_solve_failure_total does not double-count: one failed solve yields exactly one cause sample across the whole closed set: internal/cron/cause_test.go TestTimeoutKillRaisesCauseTimeoutByExactlyOne sums obo_solve_failure_total over all 7 solver.FailureCauses and asserts total == 1 for a single failed solve. Ran: '--- PASS: TestTimeoutKillRaisesCauseTimeoutByExactlyOne (0.00s)'.\n  \u2713 A timeout kill must NOT increment obo_solve_killed_total (the two counters must not conflate SIGKILL causes): internal/cron/loop.go:852 isMemoryKill returns false for \"--solve-timeout\"/\"bwrap timeout\"/\"deadline exceeded\" before the SIGKILL check. TestTimeoutKillDoesNotCountAsMemoryKill asserts obo_solve_killed_total == 0 after a forced timeout; TestIsMemoryKillAttribution's 9 subtests all PASS. Ran: '--- PASS: TestTimeoutKillDoesNotCountAsMemoryKill (0.00s)'.\nThe pre-screen's 0.01 probability was wrong: all five metric families are emitted on the real /metrics/prom wire with the exact 5 histogram buckets and closed 7-value cause set, causes are classified at the failure site in cron/loop.go with the raw error in hand, the loop and Prom share one Observer, failure_reason is still persisted and surfaced, and go test ./internal/... -count=1 exits 0 with every named test passing. [uncovered failure paths: failure mode 0 (A solve killed by the kernel OOM killer with an error shape outside the recognised signatures (e.g. a bare non-zero exit with no 'signal: killed'/'exit status 137' text) is counted as solver_exit rather than a memory kill, so obo_solve_killed_total under-reports): detected_by is empty \u2014 uncovered failure path]\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-17T15:43:43.483900",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-17T15:43:43.499720+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 926,
+        "truncated": false,
+        "source": "git show 1734cb00358e"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 4018,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "OBS-OB-003"
+  }
+}
