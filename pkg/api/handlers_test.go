@@ -42,6 +42,7 @@ func TestOpenAPISpec_AllEndpointsDocumented(t *testing.T) {
 		"/openapi.json",
 		"/health",
 		"/metrics",
+		"/metrics/prom",
 	}
 	for _, p := range required {
 		if _, ok := paths[p]; !ok {
