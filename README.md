@@ -572,9 +572,16 @@ gitreins guard
 prefix PATH with a repo venv. An older recipe suggested a repo venv instead
 (the repo was renamed to `~/gitreins`); where such a stale venv exists,
 putting it first on PATH makes its tools shadow the repo interpreter and
-falsely FAIL the tests lane on a clean tree. The tests lane is
-interpreter-pinned in `.gitreins/config.yaml` (`test_command`), so PATH
-ordering is irrelevant.
+falsely FAIL the tests lane on a clean tree.
+
+Which lanes run — and how — is fixed in `.gitreins/config.yaml`, not by the
+caller's PATH: `guards.test_mode: full`, the generic `guards.tests` leg is off
+and `guards.go.tests: true` (with `guards.go.build: true`) is the lane that
+actually executes. The file has no command override of any kind, so the guard
+runs its own built-in Go test invocation — the one in the gate table below —
+rather than a command selected from the environment. PATH ordering decides
+which `gitreins` binary you execute; it cannot change what gates the tests
+lane.
 
 What's checked:
 
