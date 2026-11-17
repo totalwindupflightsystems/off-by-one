@@ -457,7 +457,7 @@ release build pins it explicitly:
 linked with `go version -m ./off-by-one | head -1`.
 
 ```bash
-V=v0.2.0
+V=v0.3.0
 base=https://github.com/totalwindupflightsystems/off-by-one/releases/download/$V
 curl -fsSLO $base/off-by-one-$V-linux-amd64
 curl -fsSLO $base/SHA256SUMS
@@ -569,11 +569,10 @@ gitreins guard
 ```
 
 `gitreins` resolves through the pipx shim at `~/.local/bin/gitreins` — do NOT
-prefix PATH with a repo venv. An older recipe suggested
-`gitreins` is installed via pipx and available at `~/.local/bin/gitreins`
-(the repo was renamed to `~/gitreins`), and where a similar stale venv does
-exist, putting it first on PATH makes its tools shadow the repo interpreter
-and falsely FAIL the tests lane on a clean tree. The tests lane is
+prefix PATH with a repo venv. An older recipe suggested a repo venv instead
+(the repo was renamed to `~/gitreins`); where such a stale venv exists,
+putting it first on PATH makes its tools shadow the repo interpreter and
+falsely FAIL the tests lane on a clean tree. The tests lane is
 interpreter-pinned in `.gitreins/config.yaml` (`test_command`), so PATH
 ordering is irrelevant.
 
