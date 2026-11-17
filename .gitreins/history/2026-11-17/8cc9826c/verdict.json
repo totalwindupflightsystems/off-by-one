@@ -1,0 +1,715 @@
+{
+  "task_id": "OBS-OB-004",
+  "task_title": "Queue-age, deferral, catalogue and DB-growth gauges on /metrics/prom (cached, not per-scrape)",
+  "task_criteria": [
+    "/metrics/prom exposes obo_queue_oldest_pending_age_seconds, obo_queue_deferred_total{reason}, obo_catalog_verified_answers, obo_catalog_hit_rate, obo_discovery_requests_total{outcome}, obo_db_size_bytes{kind}; oldest_pending_age matches SQL within 60s; verified_answers matches /api/v1/stats; db_size main matches stat -c %s; scrape latency < 50ms; gauges come from a cached sampler (no SQL in the scrape handler). REJECTS: editing README.md or pkg/api/openapi.yaml."
+  ],
+  "passed": true,
+  "worktree": "/home/kara/off-by-one",
+  "branch": "master",
+  "commit": "97c479660edd3a425d9509c60ae461ab64cef64b",
+  "pass_class": "judged",
+  "tier2_skipped": false,
+  "working_tree_content_fingerprint": "11122d54122479d04cec6e4f9d5186067b57bc67bf4d2d52ba03b8ae46e3bb7b",
+  "working_tree_dirty_path_count": 1711,
+  "items": [
+    {
+      "criterion": "/metrics/prom exposes obo_queue_oldest_pending_age_seconds, obo_queue_deferred_total{reason}, obo_catalog_verified_answers, obo_catalog_hit_rate, obo_discovery_requests_total{outcome}, obo_db_size_bytes{kind}; oldest_pending_age matches SQL within 60s; verified_answers matches /api/v1/stats; db_size main matches stat -c %s; scrape latency < 50ms; gauges come from a cached sampler (no SQL in the scrape handler). REJECTS: editing README.md or pkg/api/openapi.yaml.",
+      "status": "PASS",
+      "detail": "Live proof on a scratch instance (binary built from HEAD, /tmp/ob1 -db /tmp/ob1test/t.db -port 18766, seeded 3235 classes/4869 answers). `curl -s :18766/metrics/prom` returned all six families: `obo_queue_oldest_pending_age_seconds 753.76098901`, `obo_queue_deferred_total{reason=\"load\"} 34` / `{reason=\"load+memory\"} 0` / `{reason=\"memory\"} 0`, `obo_catalog_verified_answers 4869`, `obo_catalog_hit_rate 1`, `obo_discovery_requests_total{outcome=\"hit\"} 0` / `{outcome=\"miss\"} 0`, `obo_db_size_bytes{kind=\"main\"} 4.9033216e+07` / `{kind=\"wal\"} 374952`. Agreement: SQL `SELECT (julianday('now')-julianday(MIN(created_at)))*86400 ... status IN ('pending','deferred','in_progress')` = 768.73 vs gauge 753.76 (15s cache lag, well inside 60s); /api/v1/stats `verified_answers 4869, hit_rate 1` == gauge 4869/1; `stat -c %s t.db` = 49033216 == 4.9033216e+07. Latency: `curl -w %{time_total}` on /metrics/prom = 0.000555/0.000852/0.000593 s (<50ms) while /api/v1/stats took 0.0288 s. Counters move live: after 3 discover calls hit=1/miss=2; after 5 gated ticks with a pending head deferred{reason=\"load\"}=5. No SQL in the scrape: internal/metrics/prom_db.go:180-231 dbGaugeCollector.Collect only copies dbGaugeCache.snapshot(); PromConfig.DBDerived is called solely from RefreshDB (prom_db.go:126-140), driven by StartDBRefresh from cmd/off-by-one/main.go:331-332. REJECTS honoured: `git diff --name-only fecbac11 78b47e1c | grep -E 'README.md|pkg/api/openapi.yaml'` \u2192 no output; commit fe3be63e touches only cmd/ and internal/. Gates: `go build ./...` exit 0, `go vet ./...` exit 0, `gofmt -l cmd/ internal/ pkg/ sql/` empty, `go test ./... -short -count=1 -p 1 -timeout 300s` \u2192 every package `ok` (internal/metrics 0.489s, internal/api 1.207s, internal/ingest 0.248s, internal/cron 0.137s), including TestPromDBGaugesCachedNotQueriedPerScrape and TestMetricsPromTier3AgreesWithStats. [resolution 0.17; README.md]"
+    },
+    {
+      "criterion": "The six families are reachable from the production entrypoint (cmd/off-by-one/main.go wiring + GET /metrics/prom route), not only from unit tests.",
+      "status": "PASS",
+      "detail": "cmd/off-by-one/main.go:249-320 builds metrics.NewProm with DBDerived (queue.Depth, queue.OldestPendingAge, store.Stats, os.Stat(*cfg.dbPath) and dbPath+\"-wal\"), Discovery (observer.DiscoveryCounts) and Deferrals (observer.Deferrals); main.go:320 `apiServer.Prom = prom`; route registered at internal/api/server.go:185 `mux.HandleFunc(\"GET /metrics/prom\", s.handleMetricsProm)` \u2192 server.go:397-399. Confirmed end-to-end by the live curl above, not just by unit tests.",
+      "derived": true
+    },
+    {
+      "criterion": "The DB-derived readings are refreshed on a ticker (StartDBRefresh) and the refresher is stopped on shutdown so it cannot race store.Close().",
+      "status": "PASS",
+      "detail": "cmd/off-by-one/main.go:331-332 `promCtx, promCancel := context.WithCancel(...)` + `prom.StartDBRefresh(promCtx, metrics.DefaultDBRefreshInterval)` (15s, prom_db.go:31); main.go:412 `promCancel()` runs in the SIGINT/SIGTERM handler before srv.Shutdown and before the deferred store.Close() (main.go:436 wg.Wait). internal/metrics/prom_db.go:143-166 refreshes once synchronously then on a ticker, returning on ctx.Done. `go test ./internal/metrics -run TestPromDBRefreshTicker -v` \u2192 `--- PASS: TestPromDBRefreshTicker (0.17s)` (asserts refresh on interval and no calls after cancel).",
+      "derived": true
+    },
+    {
+      "criterion": "The change does not edit README.md or pkg/api/openapi.yaml (task REJECTS clause).",
+      "status": "PASS",
+      "detail": "`git diff --name-only fecbac11 78b47e1c | grep -E 'README.md|pkg/api/openapi.yaml'` produced no output (exit 1). `git show fe3be63e --stat` lists only cmd/off-by-one/main.go, internal/api/{server.go,metrics_prom_test.go}, internal/cron/{loop.go,loop_test.go}, internal/ingest/{queue.go,queue_test.go}, internal/metrics/{metrics.go,prom.go,prom_db.go,prom_db_test.go,prom_test.go}. README.md (ae5c0280, 19:15) and pkg/api/openapi.yaml (ab6613b6, 19:28) were edited by separate sibling tasks (README-9, REVIEW-OB-024) before fe3be63e (19:45) and are not part of this task's change.",
+      "derived": true
+    },
+    {
+      "criterion": "A failed/unreadable leg is omitted rather than fabricated as 0, and the closed label vocabularies are always emitted.",
+      "status": "PASS",
+      "detail": "internal/metrics/prom_db.go:180-231 gates each leg on its own OK flag (OldestPendingOK, CatalogOK, DBSizeMainOK, DBSizeWALOK) and skips the series when false; deferredTotalCollector iterates SkipReasons (prom.go:397) and discoveryTotalCollector iterates DiscoveryOutcomes (prom.go:426), so every label is present at 0 before it fires. `go test ./internal/metrics -run 'TestDB|TestProm' -v` \u2192 PASS for TestPromDBUnreadLegsAreOmitted, TestPromTier3NilSource, TestPromDBEmptyQueueAgeIsZero, TestPromTier3ClosedVocabulary.",
+      "derived": true
+    },
+    {
+      "criterion": "The new SQL (queue.OldestPendingAge) uses the same status set as queue.Depth /api/v1/stats and clamps clock skew, so the gauge cannot disagree with the JSON surface.",
+      "status": "PASS",
+      "detail": "internal/ingest/queue.go:667-684 uses `status IN ('pending','deferred','in_progress')` \u2014 identical to Depth (queue.go:645-652) which handleStats serves (internal/api/handlers.go:861-866) \u2014 computes the age in SQL against julianday('now') (UTC, matching created_at's datetime('now')), and returns 0 for a non-positive age. `go test ./internal/ingest -run TestQueue_OldestPendingAge -v` PASSes and asserts the age covers exactly the statuses Depth counts (Depth==3, complete row excluded). Live: SQL 768.73 vs gauge 753.76.",
+      "derived": true
+    }
+  ],
+  "merge_recommendation": "no_concerns_found",
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 tests: scanners: nice=nice -n 10\n  \u2713 secrets: secrets: scanners=gitleaks+builtin cross-check",
+      "steps": [
+        {
+          "id": "tests",
+          "type": "script",
+          "passed": true,
+          "output": "scanners: nice=nice -n 10\n?   \tgithub.com/totalwindupflightsystems/off-by-one/cmd/oby-memcap\t[no test files]\nok  \tgithub.com/totalwindupflightsystems/off-by-one/cmd/off-by-one\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/api\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/cron\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/export\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/graph\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/import\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/ingest\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/metrics\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/muster\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/sandbox\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/seed\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/solver\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/tools\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/internal/web\t(cached)\nok  \tgithub.com/totalwindupflightsystems/off-by-one/pkg/api\t(cached)\n?   \tgithub.com/totalwindupflightsystems/off-by-one/sql/schema\t[no test files]\n?   \tgithub.com/totalwindupflightsystems/off-by-one/web\t[no test files]\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/off-by-one/.gitreins/logs/guard-20261117T021708.935165Z.log"
+          }
+        },
+        {
+          "id": "secrets",
+          "type": "script",
+          "passed": true,
+          "output": "secrets: scanners=gitleaks+builtin cross-check\nscanners: nice=nice -n 10\n9:32PM INF scanned ~8505322 bytes (8.51 MB) in 2.3s\n9:32PM INF no leaks found\nsecrets: gitleaks: clean\nsecrets: builtin cross-check: Scanned 6787 files \u2014 clean (excluded harness state: .gitreins/**)\nsensitive-path override applied: .env.example\nsecrets: builtin cross-check status: clean\n",
+          "error": "",
+          "data": {
+            "exit_code": 0,
+            "guard_log": "/home/kara/off-by-one/.gitreins/logs/guard-20261117T021708.935165Z.log",
+            "secrets_scanners": [
+              "gitleaks",
+              "builtin"
+            ]
+          }
+        }
+      ],
+      "coverage": "secrets+tests"
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 /metrics/prom exposes obo_queue_oldest_pending_age_seconds, obo_queue_deferred_total{reason}, obo_catalog_verified_answers, obo_catalog_hit_rate, obo_discovery_requests_total{outcome}, obo_db_size_bytes{kind}; oldest_pending_age matches SQL within 60s; verified_answers matches /api/v1/stats; db_size main matches stat -c %s; scrape latency < 50ms; gauges come from a cached sampler (no SQL in the scrape handler). REJECTS: editing README.md or pkg/api/openapi.yaml.: Live proof on a scratch instance (binary built from HEAD, /tmp/ob1 -db /tmp/ob1test/t.db -port 18766, seeded 3235 classes/4869 answers). `curl -s :18766/metrics/prom` returned all six families: `obo_queue_oldest_pending_age_seconds 753.76098901`, `obo_queue_deferred_total{reason=\"load\"} 34` / `{reason=\"load+memory\"} 0` / `{reason=\"memory\"} 0`, `obo_catalog_verified_answers 4869`, `obo_catalog_hit_rate 1`, `obo_discovery_requests_total{outcome=\"hit\"} 0` / `{outcome=\"miss\"} 0`, `obo_db_size_bytes{kind=\"main\"} 4.9033216e+07` / `{kind=\"wal\"} 374952`. Agreement: SQL `SELECT (julianday('now')-julianday(MIN(created_at)))*86400 ... status IN ('pending','deferred','in_progress')` = 768.73 vs gauge 753.76 (15s cache lag, well inside 60s); /api/v1/stats `verified_answers 4869, hit_rate 1` == gauge 4869/1; `stat -c %s t.db` = 49033216 == 4.9033216e+07. Latency: `curl -w %{time_total}` on /metrics/prom = 0.000555/0.000852/0.000593 s (<50ms) while /api/v1/stats took 0.0288 s. Counters move live: after 3 discover calls hit=1/miss=2; after 5 gated ticks with a pending head deferred{reason=\"load\"}=5. No SQL in the scrape: internal/metrics/prom_db.go:180-231 dbGaugeCollector.Collect only copies dbGaugeCache.snapshot(); PromConfig.DBDerived is called solely from RefreshDB (prom_db.go:126-140), driven by StartDBRefresh from cmd/off-by-one/main.go:331-332. REJECTS honoured: `git diff --name-only fecbac11 78b47e1c | grep -E 'README.md|pkg/api/openapi.yaml'` \u2192 no output; commit fe3be63e touches only cmd/ and internal/. Gates: `go build ./...` exit 0, `go vet ./...` exit 0, `gofmt -l cmd/ internal/ pkg/ sql/` empty, `go test ./... -short -count=1 -p 1 -timeout 300s` \u2192 every package `ok` (internal/metrics 0.489s, internal/api 1.207s, internal/ingest 0.248s, internal/cron 0.137s), including TestPromDBGaugesCachedNotQueriedPerScrape and TestMetricsPromTier3AgreesWithStats. [resolution 0.17; README.md]\n  \u2713 The six families are reachable from the production entrypoint (cmd/off-by-one/main.go wiring + GET /metrics/prom route), not only from unit tests.: cmd/off-by-one/main.go:249-320 builds metrics.NewProm with DBDerived (queue.Depth, queue.OldestPendingAge, store.Stats, os.Stat(*cfg.dbPath) and dbPath+\"-wal\"), Discovery (observer.DiscoveryCounts) and Deferrals (observer.Deferrals); main.go:320 `apiServer.Prom = prom`; route registered at internal/api/server.go:185 `mux.HandleFunc(\"GET /metrics/prom\", s.handleMetricsProm)` \u2192 server.go:397-399. Confirmed end-to-end by the live curl above, not just by unit tests.\n  \u2713 The DB-derived readings are refreshed on a ticker (StartDBRefresh) and the refresher is stopped on shutdown so it cannot race store.Close().: cmd/off-by-one/main.go:331-332 `promCtx, promCancel := context.WithCancel(...)` + `prom.StartDBRefresh(promCtx, metrics.DefaultDBRefreshInterval)` (15s, prom_db.go:31); main.go:412 `promCancel()` runs in the SIGINT/SIGTERM handler before srv.Shutdown and before the deferred store.Close() (main.go:436 wg.Wait). internal/metrics/prom_db.go:143-166 refreshes once synchronously then on a ticker, returning on ctx.Done. `go test ./internal/metrics -run TestPromDBRefreshTicker -v` \u2192 `--- PASS: TestPromDBRefreshTicker (0.17s)` (asserts refresh on interval and no calls after cancel).\n  \u2713 The change does not edit README.md or pkg/api/openapi.yaml (task REJECTS clause).: `git diff --name-only fecbac11 78b47e1c | grep -E 'README.md|pkg/api/openapi.yaml'` produced no output (exit 1). `git show fe3be63e --stat` lists only cmd/off-by-one/main.go, internal/api/{server.go,metrics_prom_test.go}, internal/cron/{loop.go,loop_test.go}, internal/ingest/{queue.go,queue_test.go}, internal/metrics/{metrics.go,prom.go,prom_db.go,prom_db_test.go,prom_test.go}. README.md (ae5c0280, 19:15) and pkg/api/openapi.yaml (ab6613b6, 19:28) were edited by separate sibling tasks (README-9, REVIEW-OB-024) before fe3be63e (19:45) and are not part of this task's change.\n  \u2713 A failed/unreadable leg is omitted rather than fabricated as 0, and the closed label vocabularies are always emitted.: internal/metrics/prom_db.go:180-231 gates each leg on its own OK flag (OldestPendingOK, CatalogOK, DBSizeMainOK, DBSizeWALOK) and skips the series when false; deferredTotalCollector iterates SkipReasons (prom.go:397) and discoveryTotalCollector iterates DiscoveryOutcomes (prom.go:426), so every label is present at 0 before it fires. `go test ./internal/metrics -run 'TestDB|TestProm' -v` \u2192 PASS for TestPromDBUnreadLegsAreOmitted, TestPromTier3NilSource, TestPromDBEmptyQueueAgeIsZero, TestPromTier3ClosedVocabulary.\n  \u2713 The new SQL (queue.OldestPendingAge) uses the same status set as queue.Depth /api/v1/stats and clamps clock skew, so the gauge cannot disagree with the JSON surface.: internal/ingest/queue.go:667-684 uses `status IN ('pending','deferred','in_progress')` \u2014 identical to Depth (queue.go:645-652) which handleStats serves (internal/api/handlers.go:861-866) \u2014 computes the age in SQL against julianday('now') (UTC, matching created_at's datetime('now')), and returns 0 for a non-positive age. `go test ./internal/ingest -run TestQueue_OldestPendingAge -v` PASSes and asserts the age covers exactly the statuses Depth counts (Depth==3, complete row excluded). Live: SQL 768.73 vs gauge 753.76.\nAll six Tier-3 families are live on /metrics/prom from a 15s cached sampler with no SQL in the scrape path, and every numeric claim (age vs SQL, verified_answers vs /api/v1/stats, db_size vs stat -c %s, <50ms latency) was verified against a running scratch instance with the full test suite green. [uncovered failure paths: failure mode 0 (DB-derived gauges can lag the store by up to one refresh interval (15s), so a just-submitted entry is invisible to obo_queue_pending/oldest_pending_age until the next tick): detected_by is empty \u2014 uncovered failure path; failure mode 1 (docs/observability-spec.md still describes the pre-change state (\"only obo_queue_pending exists\", \"Step 4 CANNOT PASS \u2014 the family does not exist\") after the families shipped): detected_by is empty \u2014 uncovered failure path]",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n\n\u2026 [5036 chars omitted \u2014 5 line(s)] \u2026\n  \u2713 The new SQL (queue.OldestPendingAge) uses the same status set as queue.Depth /api/v1/stats and clamps clock skew, so the gauge cannot disagree with the JSON surface.: internal/ingest/queue.go:667-684 uses `status IN ('pending','deferred','in_progress')` \u2014 identical to Depth (queue.go:645-652) which handleStats serves (internal/api/handlers.go:861-866) \u2014 computes the age in SQL against julianday('now') (UTC, matching created_at's datetime('now')), and returns 0 for a non-positive age. `go test ./internal/ingest -run TestQueue_OldestPendingAge -v` PASSes and asserts the age covers exactly the statuses Depth counts (Depth==3, complete row excluded). Live: SQL 768.73 vs gauge 753.76.\nAll six Tier-3 families are live on /metrics/prom from a 15s cached sampler with no SQL in the scrape path, and every numeric claim (age vs SQL, verified_answers vs /api/v1/stats, db_size vs stat -c %s, <50ms latency) was verified against a running scratch instance with the full test suite green. [uncovered failure paths: failure mode 0 (DB-derived gauges can lag the store by up to one refresh interval (15s), so a just-submitted entry is invisible to obo_queue_pending/oldest_pending_age until the next tick): detected_by is empty \u2014 uncovered failure path; failure mode 1 (docs/observability-spec.md still describes the pre-change state (\"only obo_queue_pending exists\", \"Step 4 CANNOT PASS \u2014 the family does not exist\") after the families shipped): detected_by is empty \u2014 uncovered failure path]",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "/metrics/prom exposes obo_queue_oldest_pending_age_seconds, obo_queue_deferred_total{reason}, obo_catalog_verified_answers, obo_catalog_hit_rate, obo_discovery_requests_total{outcome}, obo_db_size_bytes{kind}; oldest_pending_age matches SQL within 60s; verified_answers matches /api/v1/stats; db_size main matches stat -c %s; scrape latency < 50ms; gauges come from a cached sampler (no SQL in the scrape handler). REJECTS: editing README.md or pkg/api/openapi.yaml.",
+                "status": "PASS",
+                "detail": "Live proof on a scratch instance (binary built from HEAD, /tmp/ob1 -db /tmp/ob1test/t.db -port 18766, seeded 3235 classes/4869 answers). `curl -s :18766/metrics/prom` returned all six families: `obo_queue_oldest_pending_age_seconds 753.76098901`, `obo_queue_deferred_total{reason=\"load\"} 34` / `{reason=\"load+memory\"} 0` / `{reason=\"memory\"} 0`, `obo_catalog_verified_answers 4869`, `obo_catalog_hit_rate 1`, `obo_discovery_requests_total{outcome=\"hit\"} 0` / `{outcome=\"miss\"} 0`, `obo_db_size_bytes{kind=\"main\"} 4.9033216e+07` / `{kind=\"wal\"} 374952`. Agreement: SQL `SELECT (julianday('now')-julianday(MIN(created_at)))*86400 ... status IN ('pending','deferred','in_progress')` = 768.73 vs gauge 753.76 (15s cache lag, well inside 60s); /api/v1/stats `verified_answers 4869, hit_rate 1` == gauge 4869/1; `stat -c %s t.db` = 49033216 == 4.9033216e+07. Latency: `curl -w %{time_total}` on /metrics/prom = 0.000555/0.000852/0.000593 s (<50ms) while /api/v1/stats took 0.0288 s. Counters move live: after 3 discover calls hit=1/miss=2; after 5 gated ticks with a pending head deferred{reason=\"load\"}=5. No SQL in the scrape: internal/metrics/prom_db.go:180-231 dbGaugeCollector.Collect only copies dbGaugeCache.snapshot(); PromConfig.DBDerived is called solely from RefreshDB (prom_db.go:126-140), driven by StartDBRefresh from cmd/off-by-one/main.go:331-332. REJECTS honoured: `git diff --name-only fecbac11 78b47e1c | grep -E 'README.md|pkg/api/openapi.yaml'` \u2192 no output; commit fe3be63e touches only cmd/ and internal/. Gates: `go build ./...` exit 0, `go vet ./...` exit 0, `gofmt -l cmd/ internal/ pkg/ sql/` empty, `go test ./... -short -count=1 -p 1 -timeout 300s` \u2192 every package `ok` (internal/metrics 0.489s, internal/api 1.207s, internal/ingest 0.248s, internal/cron 0.137s), including TestPromDBGaugesCachedNotQueriedPerScrape and TestMetricsPromTier3AgreesWithStats. [resolution 0.17; README.md]",
+                "resolution_probability": 0.17,
+                "cited_path": "README.md"
+              },
+              {
+                "criterion": "The six families are reachable from the production entrypoint (cmd/off-by-one/main.go wiring + GET /metrics/prom route), not only from unit tests.",
+                "status": "PASS",
+                "detail": "cmd/off-by-one/main.go:249-320 builds metrics.NewProm with DBDerived (queue.Depth, queue.OldestPendingAge, store.Stats, os.Stat(*cfg.dbPath) and dbPath+\"-wal\"), Discovery (observer.DiscoveryCounts) and Deferrals (observer.Deferrals); main.go:320 `apiServer.Prom = prom`; route registered at internal/api/server.go:185 `mux.HandleFunc(\"GET /metrics/prom\", s.handleMetricsProm)` \u2192 server.go:397-399. Confirmed end-to-end by the live curl above, not just by unit tests.",
+                "derived": true
+              },
+              {
+                "criterion": "The DB-derived readings are refreshed on a ticker (StartDBRefresh) and the refresher is stopped on shutdown so it cannot race store.Close().",
+                "status": "PASS",
+                "detail": "cmd/off-by-one/main.go:331-332 `promCtx, promCancel := context.WithCancel(...)` + `prom.StartDBRefresh(promCtx, metrics.DefaultDBRefreshInterval)` (15s, prom_db.go:31); main.go:412 `promCancel()` runs in the SIGINT/SIGTERM handler before srv.Shutdown and before the deferred store.Close() (main.go:436 wg.Wait). internal/metrics/prom_db.go:143-166 refreshes once synchronously then on a ticker, returning on ctx.Done. `go test ./internal/metrics -run TestPromDBRefreshTicker -v` \u2192 `--- PASS: TestPromDBRefreshTicker (0.17s)` (asserts refresh on interval and no calls after cancel).",
+                "derived": true
+              },
+              {
+                "criterion": "The change does not edit README.md or pkg/api/openapi.yaml (task REJECTS clause).",
+                "status": "PASS",
+                "detail": "`git diff --name-only fecbac11 78b47e1c | grep -E 'README.md|pkg/api/openapi.yaml'` produced no output (exit 1). `git show fe3be63e --stat` lists only cmd/off-by-one/main.go, internal/api/{server.go,metrics_prom_test.go}, internal/cron/{loop.go,loop_test.go}, internal/ingest/{queue.go,queue_test.go}, internal/metrics/{metrics.go,prom.go,prom_db.go,prom_db_test.go,prom_test.go}. README.md (ae5c0280, 19:15) and pkg/api/openapi.yaml (ab6613b6, 19:28) were edited by separate sibling tasks (README-9, REVIEW-OB-024) before fe3be63e (19:45) and are not part of this task's change.",
+                "derived": true
+              },
+              {
+                "criterion": "A failed/unreadable leg is omitted rather than fabricated as 0, and the closed label vocabularies are always emitted.",
+                "status": "PASS",
+                "detail": "internal/metrics/prom_db.go:180-231 gates each leg on its own OK flag (OldestPendingOK, CatalogOK, DBSizeMainOK, DBSizeWALOK) and skips the series when false; deferredTotalCollector iterates SkipReasons (prom.go:397) and discoveryTotalCollector iterates DiscoveryOutcomes (prom.go:426), so every label is present at 0 before it fires. `go test ./internal/metrics -run 'TestDB|TestProm' -v` \u2192 PASS for TestPromDBUnreadLegsAreOmitted, TestPromTier3NilSource, TestPromDBEmptyQueueAgeIsZero, TestPromTier3ClosedVocabulary.",
+                "derived": true
+              },
+              {
+                "criterion": "The new SQL (queue.OldestPendingAge) uses the same status set as queue.Depth /api/v1/stats and clamps clock skew, so the gauge cannot disagree with the JSON surface.",
+                "status": "PASS",
+                "detail": "internal/ingest/queue.go:667-684 uses `status IN ('pending','deferred','in_progress')` \u2014 identical to Depth (queue.go:645-652) which handleStats serves (internal/api/handlers.go:861-866) \u2014 computes the age in SQL against julianday('now') (UTC, matching created_at's datetime('now')), and returns 0 for a non-positive age. `go test ./internal/ingest -run TestQueue_OldestPendingAge -v` PASSes and asserts the age covers exactly the statuses Depth counts (Depth==3, complete row excluded). Live: SQL 768.73 vs gauge 753.76.",
+                "derived": true
+              }
+            ],
+            "summary": "All six Tier-3 families are live on /metrics/prom from a 15s cached sampler with no SQL in the scrape path, and every numeric claim (age vs SQL, verified_answers vs /api/v1/stats, db_size vs stat -c %s, <50ms latency) was verified against a running scratch instance with the full test suite green. [uncovered failure paths: failure mode 0 (DB-derived gauges can lag the store by up to one refresh interval (15s), so a just-submitted entry is invisible to obo_queue_pending/oldest_pending_age until the next tick): detected_by is empty \u2014 uncovered failure path; failure mode 1 (docs/observability-spec.md still describes the pre-change state (\"only obo_queue_pending exists\", \"Step 4 CANNOT PASS \u2014 the family does not exist\") after the families shipped): detected_by is empty \u2014 uncovered failure path]",
+            "provenance": {
+              "model": "deepseek-v4-flash",
+              "base_url_source": "GITREINS_LLM_BASE_URL",
+              "api_key_source": "GITREINS_LLM_API_KEY"
+            }
+          }
+        }
+      ],
+      "model": "deepseek-v4-flash",
+      "base_url_source": "GITREINS_LLM_BASE_URL",
+      "api_key_source": "GITREINS_LLM_API_KEY",
+      "tool_calls": [
+        {
+          "tool": "get_task_item",
+          "command": "get_task_item {\"id\": \"OBS-OB-004\"}",
+          "exit_code": 0,
+          "output_sha": "ced568a44040c4a6b603d5a77f28fca4d54c8cda6fe21dd04ff5b5783e428d14"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /repo 2>/dev/null || cd .; pwd; ls; git log --oneline -5",
+          "exit_code": 0,
+          "output_sha": "748320308c15685d20dcf34880e7800d8338e23c4761b54e27ec76509948c1e0"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show --stat 78b47e1c; echo ---; git show --stat 97c47966; echo ---; git show --stat dde886da; echo ---; git show --stat f65924a8",
+          "exit_code": 0,
+          "output_sha": "27928bdf2173c5bbf53b2fae74e98149602d9ee1c12a89f6126240453a40f85e"
+        },
+        {
+          "tool": "search_pattern",
+          "command": "search_pattern {\"regex\": \"obo_queue_oldest_pending_age_seconds|obo_catalog_verified_answers|obo_db_size_bytes|obo_discovery_requests_total|obo_queue_deferred_total|obo_catalog_hit_rate\"}",
+          "exit_code": 0,
+          "output_sha": "6a818520a86e3029330603d959426ed987088b782327af048dde5c086f9ae99f"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"path\": \"internal/metrics/prom_db.go\"}",
+          "exit_code": 0,
+          "output_sha": "a8ad08a80ed8b73536411757cf461401da87e7bd721af92e4a38d429a32b5ce9"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"path\": \"internal/metrics/prom.go\"}",
+          "exit_code": 0,
+          "output_sha": "77d30243b694e6ea3e9685349d789514ec58a33c8368d9a2601dbf74c3ef79ab"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 200, \"offset\": 400, \"path\": \"internal/metrics/prom.go\"}",
+          "exit_code": 0,
+          "output_sha": "a932a050859aba3a921b6d89b16f405cf76183c8ff8e372207e69fbc1e23b813"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show 78b47e1c -- cmd/off-by-one/main.go internal/api/server.go | head -300",
+          "exit_code": 0,
+          "output_sha": "8eab45d29c73fe845d349d6ad6f1585726df919776e045310851d1e3986bd832"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git diff fecbac11 78b47e1c -- cmd/off-by-one/main.go internal/api/server.go",
+          "exit_code": 0,
+          "output_sha": "a497c6a160ae725428c37604fc80aa07ab2098b39d9470d8ab02115602a2e869"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git diff fecbac11 78b47e1c -- cmd/off-by-one/main.go internal/api/server.go | sed -n '80,260p'",
+          "exit_code": 0,
+          "output_sha": "d893b0ab8b8748b281c293b182c146893003a477014e6f2eb0a3db208622a572"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git diff fecbac11 78b47e1c -- cmd/off-by-one/main.go | sed -n '1,200p'",
+          "exit_code": 0,
+          "output_sha": "989b9843dec36e1bc8c7d34621ffd88bf3355ab768fa1afb9d18a08e05294772"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"prom\\b\\|Prom\\|apiServer.Prom\\|metrics.NewProm\" cmd/off-by-one/main.go | head -60",
+          "exit_code": 0,
+          "output_sha": "3a0e88c9655235199c147c5425773704bd258620d5da3f15891f18a2c00b9d71"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 120, \"offset\": 230, \"path\": \"cmd/off-by-one/main.go\"}",
+          "exit_code": 0,
+          "output_sha": "348ab4bdddd693ebf0dba670d9f9695598236dc9010a0f1846e34b7bb6c9beae"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"OldestPendingAge\" -r internal/ | head -20",
+          "exit_code": 0,
+          "output_sha": "2859859ba7689aefc9c0dd75bec3a13c6799dbb5c982945e9fb1beb78d44388f"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 120, \"offset\": 600, \"path\": \"internal/ingest/queue.go\"}",
+          "exit_code": 0,
+          "output_sha": "bea3bf7645a594a15cc958c4e60287154f8a7ab1b127d9e27f0142dff9f84d01"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"func (s \\*Store) Stats\" -A 60 internal/graph/store.go | head -80",
+          "exit_code": 0,
+          "output_sha": "79f433de459c1c9eea72a50daef19496ca74a5caa7d1d09a0ae5460090470b9f"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"VerifiedAnswers\\|HitRate\\|TotalAnswers\" internal/api/handlers.go | head -30",
+          "exit_code": 0,
+          "output_sha": "a967bf7ee27b310239f54ce8470d6d2a470222e84421e389cb9607116d39bee1"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"DiscoveryCounts\\|RecordDiscovery\\|Deferrals\\|RecordDeferred\\|DiscoveryOutcomes\\|SkipReasons\" -r internal/ --include=*.go | grep -v _test | head -40",
+          "exit_code": 0,
+          "output_sha": "aa487de092188660ba100d50cb78106b65212cca025a6efec14867f59dd0edb5"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -rn \"RecordDiscovery\\|DiscoveryCounts()\" --include=*.go internal/ cmd/ | head -20; echo ---; grep -rn \"verified_answers\\|hit_rate\" --include=*.go internal/api/ | grep -v _test | head -20",
+          "exit_code": 0,
+          "output_sha": "a21428fc14e6fc1a2751b7c32abd0df3c7b2beec0f98ef74f66aa185911cbb82"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 120, \"offset\": 440, \"path\": \"internal/api/handlers.go\"}",
+          "exit_code": 0,
+          "output_sha": "19de5e14d8e93cd2bd55de686d3152542e341cd019c658fabf1eaf62670cafc6"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -rn \"verified_answers\" --include=*.go . | grep -v _test | head; echo ---; grep -rn \"handleStats\" --include=*.go internal/api/ | head",
+          "exit_code": 0,
+          "output_sha": "c79d54e8132686dc895383c719ad21d3d428fd1f8d3aba84e4948054ab56443e"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 80, \"offset\": 855, \"path\": \"internal/api/handlers.go\"}",
+          "exit_code": 0,
+          "output_sha": "96ac0c950a2d98b2940c16583de3a5cbcde4672d8549976d56955cd6bdabda32"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; cat .gitreins/config.yaml 2>/dev/null | head -40; echo ---; go build ./... 2>&1 | tail -5; echo \"build exit=$?\"",
+          "exit_code": 0,
+          "output_sha": "bbf1d5a446dab55f8d60c2199b8085d6f5bab3ea4781ac363551e5cffdbf3aac"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; go test ./internal/metrics/... ./internal/api/... ./internal/ingest/... ./internal/cron/... -count=1 2>&1 | tail -30",
+          "exit_code": 0,
+          "output_sha": "a2ddff9ae14e4c85334a897d8b2db254573e2abde84db1709bd1b9eb75def486"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"Read prom_db.go, prom.go, main.go wiring, server.go, queue.OldestPendingAge, graph.Stats, handlers.go discover/stats. Build ok, tests for metrics/api/ingest/cron pass. Next: live end-to-end verification (build binary, seed scratch DB, curl /metrics/prom, compare with SQL, /api/v1/stats, stat -c %s, measure latency).\", \"key\": \"progress\"}",
+          "exit_code": 0,
+          "output_sha": "24f48311226ecf2be2f2e9880a23265d63b2b10ddfc861d77515fc2cecd19b7e"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; go build -o /tmp/ob1 ./cmd/off-by-one && echo built; /tmp/ob1 --help 2>&1 | head -40",
+          "exit_code": 0,
+          "output_sha": "a09e4170a3ee81e0fac4cc8aa5bd0190c34dec2faae85554aa752ade6a6689b5"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp; rm -rf ob1test; mkdir ob1test; cd ob1test; cp -r /home/kara/off-by-one/data . 2>/dev/null; ls data | head; OFF_BY_ONE_DB=/tmp/ob1test/t.db /tmp/ob1 seed 2>&1 | tail -5; ls -l /tmp/ob1test/t.db*",
+          "exit_code": 0,
+          "output_sha": "c6e09b8be6ad7e7d455310dc7c0fde022018239fb2065f25ca1a84cfa450076a"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; (/tmp/ob1 -db /tmp/ob1test/t.db -port 18766 -pi-agent /nonexistent-pi > /tmp/ob1test/server.log 2>&1 &) ; sleep 4; tail -20 /tmp/ob1test/server.log; echo ---; curl -s -o /dev/null -w \"%{http_code}\\n\" http://127.0.0.1:18766/health",
+          "exit_code": 0,
+          "output_sha": "d498d9fe6734065d54e3600d18de7892c9130b660ff793568e5432babba886fe"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; curl -s http://127.0.0.1:18766/metrics/prom > prom.txt; wc -l prom.txt; grep -E \"^obo_(queue_oldest_pending_age_seconds|queue_deferred_total|catalog_verified_answers|catalog_hit_rate|discovery_requests_total|db_size_bytes)\" prom.txt",
+          "exit_code": 1,
+          "output_sha": "e9e8c0a21f538612571fdafd23a275c7a1d5a5f613e7301f31811663deac37e8"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; curl -sv http://127.0.0.1:18766/metrics/prom 2>&1 | head -40",
+          "exit_code": 0,
+          "output_sha": "87a17186e000bfa5da21ef446ef76cf7bca021ab2b13a546aa07aa1180cceb3b"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; tail -30 server.log; ps aux | grep -c \"[o]b1 -db\"",
+          "exit_code": 1,
+          "output_sha": "b5dcf08a3c45de4d8bb53440afcd0cfcc550723c0a1e4e8d849ae1901b3603d7"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; nohup setsid /tmp/ob1 -db /tmp/ob1test/t.db -port 18766 -pi-agent /nonexistent-pi > /tmp/ob1test/server.log 2>&1 < /dev/null & sleep 4; curl -s -o /dev/null -w \"%{http_code}\\n\" http://127.0.0.1:18766/health",
+          "exit_code": 0,
+          "output_sha": "cd08a81ffe3e920f6dee798a8656bc38466d7243c75ec09efbd60e67a96e6193"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; curl -s http://127.0.0.1:18766/metrics/prom > prom.txt; wc -l prom.txt; grep -E \"^obo_(queue_oldest_pending_age_seconds|queue_deferred_total|catalog_verified_answers|catalog_hit_rate|discovery_requests_total|db_size_bytes)\" prom.txt",
+          "exit_code": 0,
+          "output_sha": "d10c37608bdaffa27cdab9f99be15b3bcbc433bbee12f9a617908707e22dbfd8"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; stat -c %s t.db; echo ---; curl -s http://127.0.0.1:18766/api/v1/stats; echo; echo ---; sqlite3 t.db \"SELECT (julianday('now') - julianday(MIN(created_at))) * 86400.0 FROM queue_entries WHERE status IN ('pending','deferred','in_progress');\" 2>&1; sqlite3 t.db \"select count(*) from queue_entries;\" 2>&1",
+          "exit_code": 0,
+          "output_sha": "283066b8f23b958906cb9ed4dfa2cf47a6e1688097868b250ea6c0cbbead0542"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; sqlite3 t.db \".schema queue_entries\" | head -30",
+          "exit_code": 0,
+          "output_sha": "2d849e1d4cf1e8eecaa2df589d625b7e3ead09d0597e0ef1b89c55723df0a17e"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; sqlite3 t.db \"INSERT INTO queue_entries (id, problem_class, status, created_at) VALUES ('sub_test1','0078-so-nil-pointer-deref','pending', datetime('now','-600 seconds'));\"; sqlite3 t.db \"SELECT (julianday('now') - julianday(MIN(created_at))) * 86400.0 FROM queue_entries WHERE status IN ('pending','deferred','in_progress');\"; sleep 17; curl -s http://127.0.0.1:18766/metrics/prom | grep -E \"^obo_(queue_oldest_pending_age_seconds|queue_pending)\"; echo ---; curl -s http://127.0.0.1:18766/api/v1/stats | head -c 300",
+          "exit_code": 0,
+          "output_sha": "aedb180e3ea8905eb7290af520623a3e7ef5d3f1350897afc595bcc8d56a6658"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; for i in 1 2 3 4 5; do curl -s -o /dev/null -w \"%{time_total}\\n\" http://127.0.0.1:18766/metrics/prom; done; echo ---; curl -s -o /dev/null -w \"%{time_total}\\n\" http://127.0.0.1:18766/api/v1/stats",
+          "exit_code": 0,
+          "output_sha": "c0f37a01ae6f2d064eb67bc3a03901e0fd65fcd061b763f7f7ddd5aeadcd18df"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; curl -s -X POST http://127.0.0.1:18766/api/v1/problems/discover -H 'Content-Type: application/json' -d '{\"problem_class\":\"0078-so-nil-pointer-deref\"}' | head -c 200; echo; curl -s -X POST http://127.0.0.1:18766/api/v1/problems/discover -H 'Content-Type: application/json' -d '{\"problem_class\":\"no-such-class-xyz\"}' | head -c 200; echo; sleep 1; curl -s http://127.0.0.1:18766/metrics/prom | grep -E \"^obo_discovery_requests_total\"",
+          "exit_code": 0,
+          "output_sha": "be1233b26f0e4ca64bee405bf65ba3e0bf719fc958da7b2897b52a74d885431f"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; sqlite3 t.db \"select title from problem_classes limit 3;\"; sqlite3 t.db \"select problem_class from answer_nodes limit 3;\"",
+          "exit_code": 1,
+          "output_sha": "02d2e58286ca0f635dc8989fa7c049c546f21acd3f3893de8a2a0943e3a05c20"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; curl -s -X POST http://127.0.0.1:18766/api/v1/problems/discover -H 'Content-Type: application/json' -d '{\"problem_class\":\"20261005-incremental-grammar-repair\"}' | head -c 120; echo; sleep 1; curl -s http://127.0.0.1:18766/metrics/prom | grep -E \"^obo_discovery_requests_total\"",
+          "exit_code": 0,
+          "output_sha": "6a1421b3f092b98b0c4fb7e4dbb540ca665a8b8e6b46253e37504e81b24a8c82"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; sqlite3 t.db \"UPDATE queue_entries SET status='deferred', gate_reason='load' WHERE id='sub_test1';\"; sleep 17; curl -s http://127.0.0.1:18766/metrics/prom | grep -E \"^obo_queue_deferred_total\"; echo ---; grep -n \"RecordDeferred\" -B5 -A15 /home/kara/off-by-one/internal/cron/loop.go | head -60",
+          "exit_code": 0,
+          "output_sha": "a2ce7bd391d9db5f0cd2ec7d7c216970b11569748fe92ac59d6cbf5bd12c1d3b"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 80, \"offset\": 620, \"path\": \"internal/cron/loop.go\"}",
+          "exit_code": 0,
+          "output_sha": "65be8f6169c846a4c3295824d908305de5d9bf178ffc224bb7c754f80c2eefe2"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"deferQueueHead\" -r internal/cron/*.go | head; echo ---; grep -n \"func (l \\*Loop) Tick\" -A 60 internal/cron/loop.go | head -80",
+          "exit_code": 0,
+          "output_sha": "2f803ea1e39d8196d7d8ca6ca95059b70dc058d0cf15ab53173316d23981283d"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"func (q \\*Queue) PeekPending\" -A 25 internal/ingest/queue.go",
+          "exit_code": 0,
+          "output_sha": "6fcf2a4c86d07292d7146af6a15ca5d5cf6dddac44e9c73d601a227342576c64"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; sqlite3 t.db \"UPDATE queue_entries SET status='pending', stage='queued', gate_reason='' WHERE id='sub_test1';\"; sleep 1; curl -s http://127.0.0.1:18766/metrics/prom | grep -E \"^obo_(queue_deferred_total|cron_skip_reason_total|queue_oldest_pending_age_seconds)\"; echo ---; tail -5 server.log",
+          "exit_code": 0,
+          "output_sha": "cf573cc977ed63ccea2715975e9bd33d29ecec32632780eb228894861fbe0a47"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"func (l \\*Loop) Run\" -A 40 internal/cron/loop.go | head -50",
+          "exit_code": 0,
+          "output_sha": "28c3fde6e2fcb66c1cef1c74e61e991a546065b72811cb4c5938d9744d4e31d4"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; pkill -f \"ob1 -db /tmp/ob1test\" ; sleep 1; nohup setsid /tmp/ob1 -db /tmp/ob1test/t.db -port 18766 -pi-agent /nonexistent-pi -cron-interval 3s > /tmp/ob1test/server2.log 2>&1 < /dev/null & sleep 8; tail -12 /tmp/ob1test/server2.log; echo ---; curl -s http://127.0.0.1:18766/metrics/prom | grep -E \"^obo_(queue_deferred_total|cron_skip_reason_total|queue_oldest_pending_age_seconds|queue_pending)\"",
+          "exit_code": -15,
+          "output_sha": "bc12056ed1569109b7bb484a46a7efa9436d89c154c09e80f5c3d1890f9a9e1a"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; ps aux | grep \"[o]b1 -db\" | head; tail -12 server2.log 2>/dev/null",
+          "exit_code": 1,
+          "output_sha": "55b88bc8a4b4f61f67df24bf2bf849771cd6b47d973eb03fd02e81520dc1750b"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; nohup setsid /tmp/ob1 -db /tmp/ob1test/t.db -port 18766 -pi-agent /nonexistent-pi -cron-interval 3s > /tmp/ob1test/server2.log 2>&1 < /dev/null & sleep 10; tail -12 /tmp/ob1test/server2.log",
+          "exit_code": 0,
+          "output_sha": "f0556dd49b20bbf74377ea55978e7c6531f340ea12ac8df34e57967ef72ae4a4"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; curl -s http://127.0.0.1:18766/metrics/prom | grep -E \"^obo_(queue_deferred_total|cron_skip_reason_total|queue_oldest_pending_age_seconds|queue_pending)\"; echo ---; sqlite3 t.db \"select id,status,gate_reason from queue_entries;\"",
+          "exit_code": 0,
+          "output_sha": "710195918b3dd4ff82523b0a771b18e9e1fb34744b6b965d66bdf3e134887135"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"LIVE VERIFICATION (scratch DB /tmp/ob1test/t.db, binary /tmp/ob1, port 18766):\\n- All six families present: obo_queue_oldest_pending_age_seconds, obo_queue_deferred_total{reason=load|memory|load+memory}, obo_catalog_verified_answers, obo_catalog_hit_rate, obo_discovery_requests_total{outcome=hit|miss}, obo_db_size_bytes{kind=main|wal}.\\n- oldest_pending_age: SQL 600.66 vs gauge 616.37 (15s cache lag, within 60s); after restart 663.7 vs SQL.\\n- verified_answers gauge 4869 == /api/v1/stats verified_answers 4869; hit_rate 1 == stats hit_rate 1.\\n- db_size main gauge 4.9033216e+07 == stat -c %s 49033216.\\n- scrape latency: 0.000593/0.000536/0.000548/0.000708/0.000587 s (<50ms); /api/v1/stats 0.0288s.\\n- discovery counters move: hit 1 / miss 2 after discover calls.\\n- deferral counter moves: obo_queue_deferred_total{reason=load} 5 after 5 gated ticks with a pending head.\\n- No SQL in scrape: dbGaugeCollector.Collect only reads dbGaugeCache snapshot (prom_db.go:180-231); DBDerived called only from RefreshDB (prom_db.go:126-140), driven by StartDBRefresh ticker from main.go:332.\\n- README.md / pkg/api/openapi.yaml not touched by 78b47e1c (stat shows only cmd/, internal/).\", \"key\": \"verified_0\"}",
+          "exit_code": 0,
+          "output_sha": "6d2fafbd72a9383366348569e6a6f3e3b0dac3db1f5d3c2d9a47823799937b4b"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git diff --stat fecbac11 78b47e1c; echo ---; git log --oneline fecbac11..HEAD -- README.md pkg/api/openapi.yaml",
+          "exit_code": 0,
+          "output_sha": "f6f6ef806df531b65d1975267f93b23e8289a98112b27471758120952eddb733"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show ae5c0280 --stat; git show ae5c0280 | head -30; echo ===; git log --oneline fecbac11..HEAD -- pkg/api/openapi.yaml",
+          "exit_code": 0,
+          "output_sha": "f80606d23602f7ade36f4251e4536c61f50f666e73f312ff0863f4993c346466"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git log --oneline -3 --format='%h %ci %s' ae5c0280; echo ---; git log --oneline -3 --format='%h %ci %s' fe3be63e; echo ---; git log --oneline -3 --format='%h %ci %s' 78b47e1c; echo ---; git log --oneline -3 --format='%h %ci %s' fecbac11",
+          "exit_code": 0,
+          "output_sha": "6c588519055104b6b1d6d236e6867abe2ebc15f398600b05bab550bca8e7254d"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show --stat ab6613b6 | head -20; echo ===; git show ab6613b6 -- pkg/api/openapi.yaml | head -60",
+          "exit_code": 0,
+          "output_sha": "3b7ad7aae708fbe9f753242b79420f294451eb91a234f03fa09bfad16f333654"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show ab6613b6 --stat | tail -10; echo ===; git show ae5c0280 --stat | tail -5",
+          "exit_code": 0,
+          "output_sha": "88734bd2525166c3b8dd247efd0ab9a0a9b29a8c91901ee5f6a900a54f7e0c5f"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show ae5c0280 -- README.md | sed -n '1,40p'",
+          "exit_code": 0,
+          "output_sha": "acecbc3dd3692a9069d4817c1b8f2f55cba4bbb19d4f50f69a08813685f90226"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show 97c47966 -- docs/observability-spec.md",
+          "exit_code": 0,
+          "output_sha": "22f9455e16c565de981645926ff2ebf08babac297f7be09536601c41601fdd01"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show 97c47966 -- docs/observability-spec.md | grep -n \"3.4\" -A 6 | head -40",
+          "exit_code": 0,
+          "output_sha": "e754b5194897aa872bbc2dba47cbf9ca1fa882ddd495efe48ff14a9908e5d378"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show f65924a8 --stat; git show c91c27e7 --stat | tail -5; git show c91c27e7 --format='%ci' --no-patch",
+          "exit_code": 0,
+          "output_sha": "7a5115a8a18285d2b73e57fdb277d88b40d7566c8e2baf8b41151078ba249894"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git show c91c27e7 -- docs/observability-spec.md | grep -nE \"^\\+.*(obo_queue_oldest_pending_age_seconds|obo_db_size_bytes|obo_catalog_verified_answers|obo_discovery_requests_total|obo_queue_deferred_total|obo_catalog_hit_rate)\" | head -30",
+          "exit_code": 0,
+          "output_sha": "424a2e9f8ec0a85e785990731da702a7d682d9c5336f12423e8cde65167ffec9"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; sed -n '295,330p' docs/observability-spec.md; echo ...; sed -n '365,380p' docs/observability-spec.md; echo ...; sed -n '430,450p' docs/observability-spec.md",
+          "exit_code": 0,
+          "output_sha": "f50c34663040bf094f3b18a40945e05d2966978a16f115d2f7569034ac466761"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; sed -n '330,365p' docs/observability-spec.md",
+          "exit_code": 0,
+          "output_sha": "83c36429658d0a57b070692df0890493f623087e53bdf0e98de129810f0ffaf7"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"per-scrape\\|ticker\\|15 s\\|15s\\|cache\" docs/observability-spec.md | head -30",
+          "exit_code": 0,
+          "output_sha": "f4c6942c9c491f06b88768a8a0307a9c6ff2aa74f19e5410d691862fa41bd57a"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; sed -n '225,245p' docs/observability-spec.md",
+          "exit_code": 0,
+          "output_sha": "20360e9b9c19524ed8d9a54e3be9084eb8d9094a0c3e3520b755cdb4f67a2c4a"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"func (s \\*Server) handleMetricsProm\" -A 20 internal/api/server.go; echo ---; grep -n \"metrics/prom\" internal/api/server.go",
+          "exit_code": 0,
+          "output_sha": "e932b4c4ae103822bdb6186e7919b7090dacced86be5dc550cd9dbe82a13fea3"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; go test ./... -short -count=1 -p 1 -timeout 300s 2>&1 | tail -25",
+          "exit_code": 0,
+          "output_sha": "aace69b50dfdc9d2af546105e1629cb5b7484636de712459178c3394035f8189"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; go test ./internal/metrics/ -run 'TestDB|TestProm' -v -count=1 2>&1 | grep -E \"^(=== RUN|--- (PASS|FAIL)|ok|FAIL)\" | head -40",
+          "exit_code": 0,
+          "output_sha": "144ad9eb1c286cea8d5d6c2485c790df8fd9deb70a5b5a2062cc0f8ed73971f5"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; sed -n '200,260p' internal/metrics/prom_db_test.go",
+          "exit_code": 0,
+          "output_sha": "7740d3f3795d68c36eb51eadea6c406f77bd72f53b5285cc23657f0c9779d119"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; sed -n '60,110p' internal/api/metrics_prom_test.go",
+          "exit_code": 0,
+          "output_sha": "0251da53097f4317bb1a260d13bd81dd80a1a03a76a65d40b03310f458980931"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"Derived criteria:\\nd0: The six families are reachable from the production entrypoint (cmd/off-by-one/main.go wiring + GET /metrics/prom route), not only from unit tests.\\nd1: The DB-derived readings are refreshed on a ticker (StartDBRefresh) and the refresher is stopped on shutdown so it cannot race store.Close().\\nd2: The change does not edit README.md or pkg/api/openapi.yaml (task REJECTS clause).\\nd3: A failed/unreadable leg is omitted rather than fabricated as 0 (honesty of the gauge), and the closed label vocabularies are always emitted.\\nd4: The new SQL (queue.OldestPendingAge) uses the same status set as queue.Depth /api/v1/stats and clamps clock skew, so the gauge cannot disagree with the JSON surface.\", \"key\": \"derived_0\"}",
+          "exit_code": 0,
+          "output_sha": "97cc3b489f3d0e1eb3db3cc17b562d4b984759e04c1da2c2b597afc4885fc055"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; sed -n '1150,1210p' internal/ingest/queue_test.go",
+          "exit_code": 0,
+          "output_sha": "2e210db37b9fe87dc76fd895dff4fe5fc3ecf9efd68268097be2a45ef69cbe0c"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: queue.OldestPendingAge (internal/ingest/queue.go:667-684) uses status IN ('pending','deferred','in_progress') \\u2014 identical to Depth (queue.go:645-652) which /api/v1/stats serves; julianday('now') UTC arithmetic, negative clamped to 0. Test TestQueue_OldestPendingAge (internal/ingest/queue_test.go:1161-1205) PASSes and asserts age covers exactly the statuses Depth counts (Depth==3). Live: SQL 600.66 vs gauge 616.37 (15s cache lag).\", \"key\": \"verified_derived_4\"}",
+          "exit_code": 0,
+          "output_sha": "9c662c2611c0c0d63b94e2b8119a028564d10fc05eeeeb8bfd161772af3e13fb"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; sed -n '270,360p' internal/metrics/prom_db_test.go",
+          "exit_code": 0,
+          "output_sha": "9c287e38b9f6d19fb7cd629843c2b102fb80c1fe8017661dbbd7e79f62840901"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: prom_db.go:180-231 dbGaugeCollector.Collect reads only cache.snapshot(); each leg gated on its OK flag (OldestPendingOK/CatalogOK/DBSizeMainOK/DBSizeWALOK) so an unread leg is omitted, never 0. Tests TestPromDBUnreadLegsAreOmitted, TestPromTier3NilSource, TestPromDBEmptyQueueAgeIsZero all PASS (go test ./internal/metrics -run 'TestDB|TestProm' -v). Closed vocabularies always emitted: deferredTotalCollector iterates SkipReasons (prom.go:397), discoveryTotalCollector iterates DiscoveryOutcomes (prom.go:426).\", \"key\": \"verified_derived_3\"}",
+          "exit_code": 0,
+          "output_sha": "c7c747d96e26888594c08659486647736ad9942c2e5717acf7a5d82627320e79"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"promCancel\\|StartDBRefresh\\|store.Close\\|promCtx\" cmd/off-by-one/main.go",
+          "exit_code": 0,
+          "output_sha": "74533cb683267c8d048fb2784536247620b959bc44771921e64f9abfde441323"
+        },
+        {
+          "tool": "read_file",
+          "command": "read_file {\"limit\": 50, \"offset\": 395, \"path\": \"cmd/off-by-one/main.go\"}",
+          "exit_code": 0,
+          "output_sha": "fa089f0361451f5d54d26f86435860b79258070f282d7cc3d8ea5b947906f7bf"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: main.go:331-332 promCtx/promCancel + prom.StartDBRefresh(promCtx, metrics.DefaultDBRefreshInterval=15s); main.go:412 promCancel() in the SIGINT/SIGTERM handler before srv.Shutdown and before the deferred store.Close() (main.go:436 wg.Wait). TestPromDBRefreshTicker PASSes (refreshes on interval, stops on cancel).\", \"key\": \"verified_derived_1\"}",
+          "exit_code": 0,
+          "output_sha": "ee9d32ea29bb097dd1d6e024b2f94c97943cfb58bc724fa76db35ec0d462f519"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; git diff --name-only fecbac11 78b47e1c | grep -E \"README.md|pkg/api/openapi.yaml\" ; echo \"exit=$?\"; echo ---; git show fe3be63e --stat | tail -15",
+          "exit_code": 0,
+          "output_sha": "ca402992376ec2142a600f70105b1b4ce5507599fa1c7132c952378c0f8e0a93"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: `git diff --name-only fecbac11 78b47e1c | grep -E \\\"README.md|pkg/api/openapi.yaml\\\"` \\u2192 no output (exit 1). The OBS-OB-004 commit fe3be63e touches only cmd/off-by-one/main.go, internal/api/{server.go,metrics_prom_test.go}, internal/cron/{loop.go,loop_test.go}, internal/ingest/{queue.go,queue_test.go}, internal/metrics/{metrics.go,prom.go,prom_db.go,prom_db_test.go,prom_test.go}. README.md (ae5c0280, 19:15) and pkg/api/openapi.yaml (ab6613b6, 19:28) were edited by separate sibling tasks (README-9, REVIEW-OB-024) BEFORE fe3be63e (19:45) and are not part of this task's change.\", \"key\": \"verified_derived_2\"}",
+          "exit_code": 0,
+          "output_sha": "84c54417e801d1194a069ff3c06956a4c6efef77a1c222f55ba7415dafc51854"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; grep -n \"DiscoveryCounts\\|Deferrals\\|RecordDeferred\" -A 18 internal/metrics/metrics.go | sed -n '1,80p'",
+          "exit_code": 0,
+          "output_sha": "b007b9666bae0e3afa7b4e7d6c6e9e49c902872a9b76ca93edf7ea9c7f3779af"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"PASS: reachable from the production entrypoint. main.go:249-320 builds metrics.NewProm with DBDerived (queue.Depth, queue.OldestPendingAge, store.Stats, os.Stat(dbPath) + \\\"-wal\\\"), Discovery (observer.DiscoveryCounts) and Deferrals (observer.Deferrals); main.go:320 apiServer.Prom = prom; route GET /metrics/prom registered at internal/api/server.go:185 \\u2192 handleMetricsProm (server.go:397-399). Live proof on scratch instance :18766: all six families present in the exposition (see verified_0).\", \"key\": \"verified_derived_0\"}",
+          "exit_code": 0,
+          "output_sha": "158c2eb178fe1abfa9108f49ef3f4369daff8597c2a645eb82e43b7fd274d8b0"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /home/kara/off-by-one; go vet ./... 2>&1 | tail -5; echo \"vet exit=$?\"; gofmt -l cmd/ internal/ pkg/ sql/ | head",
+          "exit_code": 0,
+          "output_sha": "ed9950898f5775c3fd979595c2ce0598e2e4b269a6fa14fea4e99a3428ff0427"
+        },
+        {
+          "tool": "read_lsp_diagnostics",
+          "command": "read_lsp_diagnostics {}",
+          "exit_code": 0,
+          "output_sha": "ef420cbeebd549fc8c5438d6ea41a3e521fa58e29563c4cae80f491b9bfe2143"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; curl -s http://127.0.0.1:18766/metrics/prom | grep -E \"^obo_(queue_oldest_pending_age_seconds|queue_deferred_total|catalog_verified_answers|catalog_hit_rate|discovery_requests_total|db_size_bytes)\"; echo ---; stat -c %s t.db; sqlite3 t.db \"SELECT (julianday('now') - julianday(MIN(created_at))) * 86400.0 FROM queue_entries WHERE status IN ('pending','deferred','in_progress');\"; curl -s http://127.0.0.1:18766/api/v1/stats | python3 -c \"import json,sys; d=json.load(sys.stdin); print('verified_answers',d['verified_answers'],'hit_rate',d['hit_rate'])\"",
+          "exit_code": 0,
+          "output_sha": "49458721a04b3d3165304d3ac45207dfcbb07d1701cf4b5d7e1764fd731fb7cf"
+        },
+        {
+          "tool": "run_command",
+          "command": "cd /tmp/ob1test; stat -c %s t.db-wal; for i in 1 2 3; do curl -s -o /dev/null -w \"%{time_total}\\n\" http://127.0.0.1:18766/metrics/prom; done; pkill -f \"ob1 -db /tmp/ob1test\"; echo killed",
+          "exit_code": -15,
+          "output_sha": "42836b132c1ddb685c182974e738f7c3155669c43561d262146cd79e318de869"
+        },
+        {
+          "tool": "sandbox_write",
+          "command": "sandbox_write {\"content\": \"FINAL: all criteria PASS. Live evidence on scratch instance :18766 (DB /tmp/ob1test/t.db, 3235 classes / 4869 answers):\\n- six families present; oldest_pending_age 753.76 vs SQL 768.73 (15s cache lag, <60s); verified_answers 4869 == /api/v1/stats 4869; hit_rate 1 == stats 1; db_size main 4.9033216e+07 == stat -c %s 49033216; wal 374952 vs stat 436752 (cache lag).\\n- scrape latency 0.00055-0.00085 s (<50ms); /api/v1/stats 0.0288 s.\\n- discovery hit/miss and deferred{reason=load} counters move live.\\n- no SQL in scrape: prom_db.go Collect reads cache only; DBDerived called only from RefreshDB.\\n- go build ./... exit 0; go vet ./... exit 0; gofmt -l empty; go test ./... -short -count=1 -p 1 \\u2192 all packages ok.\\n- README.md / pkg/api/openapi.yaml not touched by fe3be63e/78b47e1c.\\nMinor (not a criterion): docs/observability-spec.md \\u00a74.4 (lines 303-322) and \\u00a76 Step 4 (lines 374, 440) still describe the pre-OBS-OB-004 state (\\\"only obo_queue_pending exists\\\", \\\"Step 4 CANNOT PASS\\\") \\u2014 stale doc, outside the task's scope and not a rejected file.\", \"key\": \"final\"}",
+          "exit_code": 0,
+          "output_sha": "d4cff1740f82ffc4f5344fd204604f466d0ad304e379f1df38cf7b42c61bad55"
+        }
+      ]
+    }
+  },
+  "review": {
+    "reviewer_email": "totalwindupflightsystems@gmail.com",
+    "reviewer_name": "totalwindupflightsystems",
+    "commit_author_email": "totalwindupflightsystems@gmail.com",
+    "commit_author_name": "totalwindupflightsystems",
+    "self_review": true,
+    "findings": [],
+    "summary": "The diff only appends bookkeeping records (two completed task entries in .gitreins/tasks.yaml and three usage log lines in .gitreins/usage.jsonl) with no code, config, or wiring changes, so there is nothing to flag."
+  },
+  "summary": "Stage tier1: PASS\n    \u2713 tests: scanners: nice=nice -n 10\n  \u2713 secrets: secrets: scanners=gitleaks+builtin cross-check\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 /metrics/prom exposes obo_queue_oldest_pending_age_seconds, obo_queue_deferred_total{reason}, obo_catalog_verified_answers, obo_catalog_hit_rate, obo_discovery_requests_total{outcome}, obo_db_size_bytes{kind}; oldest_pending_age matches SQL within 60s; verified_answers matches /api/v1/stats; db_size main matches stat -c %s; scrape latency < 50ms; gauges come from a cached sampler (no SQL in the scrape handler). REJECTS: editing README.md or pkg/api/openapi.yaml.: Live proof on a scratch instance (binary built from HEAD, /tmp/ob1 -db /tmp/ob1test/t.db -port 18766, seeded 3235 classes/4869 answers). `curl -s :18766/metrics/prom` returned all six families: `obo_queue_oldest_pending_age_seconds 753.76098901`, `obo_queue_deferred_total{reason=\"load\"} 34` / `{reason=\"load+memory\"} 0` / `{reason=\"memory\"} 0`, `obo_catalog_verified_answers 4869`, `obo_catalog_hit_rate 1`, `obo_discovery_requests_total{outcome=\"hit\"} 0` / `{outcome=\"miss\"} 0`, `obo_db_size_bytes{kind=\"main\"} 4.9033216e+07` / `{kind=\"wal\"} 374952`. Agreement: SQL `SELECT (julianday('now')-julianday(MIN(created_at)))*86400 ... status IN ('pending','deferred','in_progress')` = 768.73 vs gauge 753.76 (15s cache lag, well inside 60s); /api/v1/stats `verified_answers 4869, hit_rate 1` == gauge 4869/1; `stat -c %s t.db` = 49033216 == 4.9033216e+07. Latency: `curl -w %{time_total}` on /metrics/prom = 0.000555/0.000852/0.000593 s (<50ms) while /api/v1/stats took 0.0288 s. Counters move live: after 3 discover calls hit=1/miss=2; after 5 gated ticks with a pending head deferred{reason=\"load\"}=5. No SQL in the scrape: internal/metrics/prom_db.go:180-231 dbGaugeCollector.Collect only copies dbGaugeCache.snapshot(); PromConfig.DBDerived is called solely from RefreshDB (prom_db.go:126-140), driven by StartDBRefresh from cmd/off-by-one/main.go:331-332. REJECTS honoured: `git diff --name-only fecbac11 78b47e1c | grep -E 'README.md|pkg/api/openapi.yaml'` \u2192 no output; commit fe3be63e touches only cmd/ and internal/. Gates: `go build ./...` exit 0, `go vet ./...` exit 0, `gofmt -l cmd/ internal/ pkg/ sql/` empty, `go test ./... -short -count=1 -p 1 -timeout 300s` \u2192 every package `ok` (internal/metrics 0.489s, internal/api 1.207s, internal/ingest 0.248s, internal/cron 0.137s), including TestPromDBGaugesCachedNotQueriedPerScrape and TestMetricsPromTier3AgreesWithStats. [resolution 0.17; README.md]\n  \u2713 The six families are reachable from the production entrypoint (cmd/off-by-one/main.go wiring + GET /metrics/prom route), not only from unit tests.: cmd/off-by-one/main.go:249-320 builds metrics.NewProm with DBDerived (queue.Depth, queue.OldestPendingAge, store.Stats, os.Stat(*cfg.dbPath) and dbPath+\"-wal\"), Discovery (observer.DiscoveryCounts) and Deferrals (observer.Deferrals); main.go:320 `apiServer.Prom = prom`; route registered at internal/api/server.go:185 `mux.HandleFunc(\"GET /metrics/prom\", s.handleMetricsProm)` \u2192 server.go:397-399. Confirmed end-to-end by the live curl above, not just by unit tests.\n  \u2713 The DB-derived readings are refreshed on a ticker (StartDBRefresh) and the refresher is stopped on shutdown so it cannot race store.Close().: cmd/off-by-one/main.go:331-332 `promCtx, promCancel := context.WithCancel(...)` + `prom.StartDBRefresh(promCtx, metrics.DefaultDBRefreshInterval)` (15s, prom_db.go:31); main.go:412 `promCancel()` runs in the SIGINT/SIGTERM handler before srv.Shutdown and before the deferred store.Close() (main.go:436 wg.Wait). internal/metrics/prom_db.go:143-166 refreshes once synchronously then on a ticker, returning on ctx.Done. `go test ./internal/metrics -run TestPromDBRefreshTicker -v` \u2192 `--- PASS: TestPromDBRefreshTicker (0.17s)` (asserts refresh on interval and no calls after cancel).\n  \u2713 The change does not edit README.md or pkg/api/openapi.yaml (task REJECTS clause).: `git diff --name-only fecbac11 78b47e1c | grep -E 'README.md|pkg/api/openapi.yaml'` produced no output (exit 1). `git show fe3be63e --stat` lists only cmd/off-by-one/main.go, internal/api/{server.go,metrics_prom_test.go}, internal/cron/{loop.go,loop_test.go}, internal/ingest/{queue.go,queue_test.go}, internal/metrics/{metrics.go,prom.go,prom_db.go,prom_db_test.go,prom_test.go}. README.md (ae5c0280, 19:15) and pkg/api/openapi.yaml (ab6613b6, 19:28) were edited by separate sibling tasks (README-9, REVIEW-OB-024) before fe3be63e (19:45) and are not part of this task's change.\n  \u2713 A failed/unreadable leg is omitted rather than fabricated as 0, and the closed label vocabularies are always emitted.: internal/metrics/prom_db.go:180-231 gates each leg on its own OK flag (OldestPendingOK, CatalogOK, DBSizeMainOK, DBSizeWALOK) and skips the series when false; deferredTotalCollector iterates SkipReasons (prom.go:397) and discoveryTotalCollector iterates DiscoveryOutcomes (prom.go:426), so every label is present at 0 before it fires. `go test ./internal/metrics -run 'TestDB|TestProm' -v` \u2192 PASS for TestPromDBUnreadLegsAreOmitted, TestPromTier3NilSource, TestPromDBEmptyQueueAgeIsZero, TestPromTier3ClosedVocabulary.\n  \u2713 The new SQL (queue.OldestPendingAge) uses the same status set as queue.Depth /api/v1/stats and clamps clock skew, so the gauge cannot disagree with the JSON surface.: internal/ingest/queue.go:667-684 uses `status IN ('pending','deferred','in_progress')` \u2014 identical to Depth (queue.go:645-652) which handleStats serves (internal/api/handlers.go:861-866) \u2014 computes the age in SQL against julianday('now') (UTC, matching created_at's datetime('now')), and returns 0 for a non-positive age. `go test ./internal/ingest -run TestQueue_OldestPendingAge -v` PASSes and asserts the age covers exactly the statuses Depth counts (Depth==3, complete row excluded). Live: SQL 768.73 vs gauge 753.76.\nAll six Tier-3 families are live on /metrics/prom from a 15s cached sampler with no SQL in the scrape path, and every numeric claim (age vs SQL, verified_answers vs /api/v1/stats, db_size vs stat -c %s, <50ms latency) was verified against a running scratch instance with the full test suite green. [uncovered failure paths: failure mode 0 (DB-derived gauges can lag the store by up to one refresh interval (15s), so a just-submitted entry is invisible to obo_queue_pending/oldest_pending_age until the next tick): detected_by is empty \u2014 uncovered failure path; failure mode 1 (docs/observability-spec.md still describes the pre-change state (\"only obo_queue_pending exists\", \"Step 4 CANNOT PASS \u2014 the family does not exist\") after the families shipped): detected_by is empty \u2014 uncovered failure path]\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-11-17T02:36:29.341053",
+  "supersedes": null,
+  "superseded_by": null,
+  "evidence": {
+    "collected_at": "2026-11-17T02:36:29.362668+00:00",
+    "items": [
+      {
+        "name": "patch",
+        "label": "Landed commit patch",
+        "file": "commit.patch",
+        "bytes": 6101,
+        "truncated": false,
+        "source": "git show 97c479660edd"
+      },
+      {
+        "name": "worktree",
+        "label": "Working-tree diff (graded)",
+        "file": "worktree.patch",
+        "bytes": 3397,
+        "truncated": false,
+        "source": "git diff HEAD (working tree)"
+      }
+    ],
+    "task_id": "OBS-OB-004"
+  }
+}
