@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3235 problem classes · 4869 verified answers** · exported 2026-11-17 10:00 UTC
+**3236 problem classes · 4870 verified answers** · exported 2026-11-18 13:18 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3241,3 +3241,4 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3322 | python3-asn1-der-length-confusion-prefix-oracle-tlv-desync | 1 | python3 |
 | 3323 | git-push-shallow-clone-fixture-rejected | 1 | python |
 | 3324 | pytest-monkeypatch-os-kill-breaks-cleanup | 1 | python |
+| 3325 | gitreins-guard-test-timeout-ignores-config | 1 | go |
