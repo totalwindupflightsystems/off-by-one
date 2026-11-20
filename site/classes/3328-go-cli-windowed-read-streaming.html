@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-cli-windowed-read-streaming — Off-By-One verified answer</title>
+<meta name="description" content="toolsd read --offset/--limit used fsops.Root.Read (os.ReadFile) plus strings.Split(string(data), &quot;\n&quot;) before slicing the requested window. On a 60.9 MB / 1,000">
+<meta property="og:title" content="go-cli-windowed-read-streaming — Off-By-One">
+<meta property="og:description" content="toolsd read --offset/--limit used fsops.Root.Read (os.ReadFile) plus strings.Split(string(data), &quot;\n&quot;) before slicing the requested window. On a 60.9 MB / 1,000">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3328-go-cli-windowed-read-streaming.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-cli-windowed-read-streaming</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>docker</span></div><div class='desc'><p>toolsd read --offset/--limit used fsops.Root.Read (os.ReadFile) plus strings.Split(string(data), "\n") before slicing the requested window. On a 60.9 MB / 1,000,000-line file that meant a 60.9 MB read, a 60.9 MB string copy, and 1,000,001 string headers — even for a 10-line window. Measured cost: 137.8 MB/op and 78–105 ms.</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3328-go-cli-windowed-read-streaming.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h1>Windowed <code>toolsd read</code>: stream the line window instead of materialising the file</h1>
+<h2>TL;DR</h2>
+<p><code>toolsd read --offset/--limit</code> used <code>fsops.Root.Read</code> (<code>os.ReadFile</code>) plus <code>strings.Split(string(data), "\n")</code> before slicing the requested window. On a 60.9 MB / 1,000,000-line file that meant a 60.9 MB read, a 60.9 MB string copy, and 1,000,001 string headers — even for a 10-line window. Measured cost: <strong>137.8 MB/op</strong> and 78–105 ms.</p>
+<p>The fix keeps confinement via <code>fsops.Root.Path</code>, opens the file with <code>os.Open</code>, uses a 64 KiB <code>bufio.Reader</code>, skips <code>offset-1</code> lines with <code>ReadSlice</code> discarding fragments, reassembles kept lines across fragments, and appends one trailing newline iff the <strong>source's last byte</strong> is <code>\n</code> (O(1) via <code>Stat</code> + <code>ReadAt</code>). The no-window path remains raw.</p>
+<p>Measured here: <strong>137,824,528 B/op → 67,769 B/op</strong>, <strong>26.85 ms → 8.31 ms</strong> in-process, and <strong>77–90 ms → 6 ms</strong> end-to-end at offset 250,000. The reported target was 105.3 ms → 5.9 ms (17.98×) and 137.8 MB/op → 68.7 KB/op; the fixed 6 ms and B/op numbers match that target closely.</p>
+<p>The non-obvious regression guard: <strong>byte parity alone cannot catch a regression back to whole-file reading</strong>. The regression test must assert the source file offset advanced only to the window end, not EOF. The test below does this and was verified to fail against a whole-file implementation while all byte-parity tests passed.</p>
+<hr />
+<h2>Root cause</h2>
+<h3>Old path</h3>
+<p>For a windowed read the old code effectively did:</p>
+<pre><code class="language-go">data, err := root.Read(path)              // os.ReadFile: whole file
+lines := strings.Split(string(data), &quot;\n&quot;) // 60.9 MB copy + 1M headers
+window := lines[offset-1 : offset-1+limit]
+out := strings.Join(window, &quot;\n&quot;)
+// append trailing newline iff source ends with one
+</code></pre>
+<p>Everything before the window slice is proportional to the file, not the window.</p>
+<h3>Allocation math for the 60.9 MB file</h3>
+<table>
+<thead>
+<tr>
+<th>Allocation</th>
+<th style="text-align: right;">Bytes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>os.ReadFile</code> buffer (<code>size+1</code>)</td>
+<td style="text-align: right;">60,900,001</td>
+</tr>
+<tr>
+<td><code>string(data)</code> copy</td>
+<td style="text-align: right;">60,900,000</td>
+</tr>
+<tr>
+<td><code>strings.Split</code> headers (<code>1,000,001 × 16</code>)</td>
+<td style="text-align: right;">16,000,016</td>
+</tr>
+<tr>
+<td>window join/output</td>
+<td style="text-align: right;">~610</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td style="text-align: right;"><strong>~137.8 MB</strong></td>
+</tr>
+</tbody>
+</table>
+<p>This matches the reported <strong>137.8 MB/op</strong> and the measured benchmark <strong>137,824,528 B/op</strong>. RSS was 127–143 MB because the read buffer and string copy coexist.</p>
+<h3>Evidence the whole file was read</h3>
+<p><code>strace</code> on the buggy binary with <code>--offset 250000 --limit 10</code> on the 60.9 MB file:</p>
+<pre><code class="language-text">read(3, &quot;00000000000000000000000000000000&quot;..., 60900001) = 60900000
+</code></pre>
+<p>The read size is <code>file size + 1</code>; Go's <code>os.ReadFile</code> does one whole-file read. The window never gets a chance to limit it.</p>
+<h3>Why the old design materialised the file</h3>
+<p>The old implementation needed the whole file only to reproduce the split/join semantics:</p>
+<ul>
+<li><code>strings.Split</code> on <code>"\n"</code> yields a trailing empty element when the source ends with a newline.</li>
+<li>Slicing the requested lines and joining with <code>"\n"</code> loses the final newline unless the source's last byte is checked.</li>
+<li>The old code therefore read everything, split everything, and sliced afterward.</li>
+</ul>
+<p>A streaming reader can reproduce the same bytes without reading the suffix:</p>
+<ul>
+<li>Skip <code>offset-1</code> lines with <code>ReadSlice</code>, discarding fragments.</li>
+<li>Read only the <code>limit</code> requested lines, reassembling long lines across buffer refills.</li>
+<li>Join kept lines with <code>"\n"</code>.</li>
+<li>Append one trailing newline iff the <strong>source's last byte</strong> is <code>"\n"</code>; obtain that in O(1) with <code>Stat</code> + <code>ReadAt(size-1)</code>.</li>
+</ul>
+<h3>Trailing-newline semantics that must be preserved</h3>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Window</th>
+<th>Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>a\nb\nc\n</code></td>
+<td>offset 1, limit 2</td>
+<td><code>a\nb\n</code></td>
+</tr>
+<tr>
+<td><code>a\nb\nc</code></td>
+<td>offset 1, limit 2</td>
+<td><code>a\nb</code></td>
+</tr>
+<tr>
+<td><code>a\nb\nc\n</code></td>
+<td>offset 2, limit 2</td>
+<td><code>b\nc\n</code></td>
+</tr>
+<tr>
+<td><code>a\nb\nc\n</code></td>
+<td>offset 4, limit 2</td>
+<td>empty</td>
+</tr>
+<tr>
+<td><code>a\nb\n\n</code></td>
+<td>offset 2, limit 2</td>
+<td><code>b\n\n</code></td>
+</tr>
+<tr>
+<td><code>x\n</code></td>
+<td>offset 1, limit 1</td>
+<td><code>x\n</code></td>
+</tr>
+<tr>
+<td>empty</td>
+<td>offset 1, limit 1</td>
+<td>empty</td>
+</tr>
+</tbody>
+</table>
+<p>The critical rule: the trailing newline is present iff the <strong>source file's last byte</strong> is <code>\n</code>, not iff the window's last kept line happens to end at the source's last line.</p>
+<h3>The regression byte parity cannot catch</h3>
+<p>A whole-file implementation and a streaming implementation produce identical stdout. A test that only compares bytes will pass even if the code regresses to <code>os.ReadFile</code>. The regression test must observe the source file offset after the read. With a 64 KiB reader, the offset should be around the window end plus at most one buffer of read-ahead — nowhere near EOF for a middle window.</p>
+<hr />
+<h2>Exact fix</h2>
+<h3>1. Keep the no-window path raw</h3>
+<p>When neither <code>--offset</code> nor <code>--limit</code> is given, keep the existing whole-file path. The no-window contract is raw bytes, so binary files round-trip. Do not route it through the line-window code.</p>
+<h3>2. Stream the windowed path</h3>
+<pre><code class="language-go">const readBufferSize = 64 * 1024
+
+// readFile is the subset of *os.File the streaming reader needs. The interface
+// is also the seam the regression test uses to observe the final file offset.
+type readFile interface {
+    io.Reader
+    io.ReaderAt
+    Stat() (os.FileInfo, error)
+    Close() error
+}
+
+// openReadFile is a test seam. Production is os.Open.
+var openReadFile = func(path string) (readFile, error) { return os.Open(path) }
+
+// sourceEndsWithNewline is O(1) and does not disturb the sequential offset.
+func sourceEndsWithNewline(f readFile) (bool, error) {
+    info, err := f.Stat()
+    if err != nil {
+        return false, err
+    }
+    if info.Size() == 0 {
+        return false, nil
+    }
+    var last [1]byte
+    if _, err := f.ReadAt(last[:], info.Size()-1); err != nil {
+        return false, err
+    }
+    return last[0] == '\n', nil
+}
+
+// discardLine skips one line, discarding fragments of long lines.
+func discardLine(r *bufio.Reader) error {
+    for {
+        _, err := r.ReadSlice('\n')
+        switch err {
+        case nil:
+            return nil
+        case bufio.ErrBufferFull:
+            continue
+        default:
+            return err
+        }
+    }
+}
+
+// readWindow returns exactly the bytes the old split/join implementation would
+// have produced for the requested window. It reads only the prefix up to the
+// window end and the requested lines.
+func readWindow(r *bufio.Reader, offset, limit int, srcEndsNewline bool) ([]byte, error) {
+    // Skip offset-1 lines. offset is 1-based.
+    for i := 1; i &lt; offset; i++ {
+        if err := discardLine(r); err != nil {
+            if err == io.EOF {
+                return nil, nil // offset past EOF: empty window, exit 0
+            }
+            return nil, err
+        }
+    }
+
+    var out []byte
+    kept := 0
+    for kept &lt; limit {
+        frag, err := r.ReadSlice('\n')
+        if len(frag) == 0 &amp;&amp; err == io.EOF {
+            break // no more lines
+        }
+
+        // A line exists. Join with a newline between kept lines.
+        if kept &gt; 0 {
+            out = append(out, '\n')
+        }
+
+        for {
+            switch err {
+            case nil:
+                // frag ends with '\n'; drop only the terminator.
+                out = append(out, frag[:len(frag)-1]...)
+            case bufio.ErrBufferFull:
+                // Long line: keep the fragment and continue.
+                out = append(out, frag...)
+                frag, err = r.ReadSlice('\n')
+                continue
+            case io.EOF:
+                // Final line without a trailing newline.
+                out = append(out, frag...)
+            default:
+                return nil, err
+            }
+            break
+        }
+
+        kept++
+        if err == io.EOF {
+            break
+        }
+    }
+
+    // The source's last byte decides the trailing newline, even for a middle
+    // window whose last kept line is not the source's last line.
+    if kept &gt; 0 &amp;&amp; srcEndsNewline {
+        out = append(out, '\n')
+    }
+    return out, nil
+}
+</code></pre>
+<p>The <code>runRead</code> branch after the existing positive-value validation:</p>
+<pre><code class="language-go">if !offsetSet &amp;&amp; !limitSet {
+    // No window: raw whole-file path, binary-safe.
+    data, err := root.Read(path)
+    if err != nil {
+        return err
+    }
+    _, err = os.Stdout.Write(data)
+    return err
+}
+
+// Windowed path: resolve through Root.Path so confinement and symlink checks
+// are preserved, then stream.
+abs, err := root.Path(path)
+if err != nil {
+    return err // Root.Path already formats fsops errors
+}
+f, err := openReadFile(abs)
+if err != nil {
+    return fmt.Errorf(&quot;fsops: read %s: %w&quot;, path, err)
+}
+defer f.Close()
+
+srcEndsNewline, err := sourceEndsWithNewline(f)
+if err != nil {
+    return fmt.Errorf(&quot;fsops: read %s: %w&quot;, path, err)
+}
+
+window, err := readWindow(bufio.NewReaderSize(f, readBufferSize), offset, limit, srcEndsNewline)
+if err != nil {
+    return fmt.Errorf(&quot;fsops: read %s: %w&quot;, path, err)
+}
+_, err = os.Stdout.Write(window)
+return err
+</code></pre>
+<h3>3. Regression test</h3>
+<p>The key test exercises the real <code>runRead</code> path through the <code>openReadFile</code> seam, wraps the opened file to record its offset at <code>Close</code>, and asserts the offset never reached EOF. It also checks byte parity against the old whole-file oracle.</p>
+<pre><code class="language-go">type trackingFile struct {
+    *os.File
+    offset int64
+}
+
+func (t *trackingFile) Close() error {
+    // Record before the descriptor goes away.
+    t.offset, _ = t.File.Seek(0, io.SeekCurrent)
+    return t.File.Close()
+}
+
+func TestWindowedReadDoesNotReadToEOF(t *testing.T) {
+    dir := t.TempDir()
+    const lineLen = 61
+    const lineCount = 140_000 // 8,540,000 bytes
+    path := filepath.Join(dir, &quot;big.txt&quot;)
+    if err := makeFixedLineFile(path, lineCount, lineLen); err != nil {
+        t.Fatal(err)
+    }
+    info, err := os.Stat(path)
+    if err != nil {
+        t.Fatal(err)
+    }
+    const offset, limit = 50_000, 10
+    windowEnd := int64((offset - 1 + limit) * lineLen)
+    if windowEnd+readBufferSize &gt;= info.Size() {
+        t.Fatalf(&quot;test setup: windowEnd %d + buffer %d &gt;= file size %d&quot;,
+            windowEnd, readBufferSize, info.Size())
+    }
+
+    var tf *trackingFile
+    oldOpen := openReadFile
+    openReadFile = func(path string) (readFile, error) {
+        f, err := os.Open(path)
+        if err != nil {
+            return nil, err
+        }
+        tf = &amp;trackingFile{File: f}
+        return tf, nil
+    }
+    defer func() { openReadFile = oldOpen }()
+
+    var out bytes.Buffer
+    if err := runRead([]string{
+        &quot;--root&quot;, dir,
+        &quot;--offset&quot;, strconv.Itoa(offset),
+        &quot;--limit&quot;, strconv.Itoa(limit),
+        &quot;big.txt&quot;,
+    }, &amp;out); err != nil {
+        t.Fatal(err)
+    }
+    if tf == nil {
+        t.Fatal(&quot;runRead did not open the file through the seam; streaming path bypassed&quot;)
+    }
+
+    // Byte parity against the old whole-file implementation.
+    data, err := os.ReadFile(path)
+    if err != nil {
+        t.Fatal(err)
+    }
+    want := wholeFileWindow(data, offset, limit)
+    if !bytes.Equal(out.Bytes(), want) {
+        t.Fatalf(&quot;byte parity failed: got %d bytes, want %d&quot;, out.Len(), len(want))
+    }
+
+    // THE NON-OBVIOUS ASSERTION: the source offset must not reach EOF.
+    if tf.offset &gt;= info.Size() {
+        t.Fatalf(&quot;source offset reached EOF: offset=%d fileSize=%d&quot;,
+            tf.offset, info.Size())
+    }
+    if tf.offset &gt; windowEnd+readBufferSize {
+        t.Fatalf(&quot;source offset %d is more than one buffer past window end %d&quot;,
+            tf.offset, windowEnd)
+    }
+    if tf.offset &lt;= 0 {
+        t.Fatalf(&quot;source offset %d is not positive&quot;, tf.offset)
+    }
+    t.Logf(&quot;fileSize=%d windowEnd=%d finalOffset=%d (%.2f%% of file)&quot;,
+        info.Size(), windowEnd, tf.offset,
+        100*float64(tf.offset)/float64(info.Size()))
+}
+</code></pre>
+<p>The old whole-file oracle used for parity:</p>
+<pre><code class="language-go">func wholeFileWindow(data []byte, offset, limit int) []byte {
+    lines := strings.Split(string(data), &quot;\n&quot;)
+    srcEndsNewline := len(data) &gt; 0 &amp;&amp; data[len(data)-1] == '\n'
+    if srcEndsNewline {
+        lines = lines[:len(lines)-1] // drop trailing empty element
+    }
+    start := offset - 1
+    if start &lt; 0 {
+        start = 0
+    }
+    if start &gt;= len(lines) {
+        return nil
+    }
+    end := start + limit
+    if limit &gt; len(lines)-start {
+        end = len(lines)
+    }
+    if end &lt; start {
+        end = start
+    }
+    out := strings.Join(lines[start:end], &quot;\n&quot;)
+    if srcEndsNewline &amp;&amp; end &gt; start {
+        out += &quot;\n&quot;
+    }
+    return []byte(out)
+}
+</code></pre>
+<h3>Wiring notes</h3>
+<ul>
+<li>Keep the existing positive-value validation for <code>--offset</code> and <code>--limit</code>. The counters in <code>readWindow</code> avoid <code>offset+limit</code> overflow.</li>
+<li>Return <code>Root.Path</code> errors unchanged. Wrap open/read errors with <code>fmt.Errorf("fsops: read %s: %w", path, err)</code> to preserve the old error text.</li>
+<li>Buffer the window before writing. This preserves the “refusal prints nothing on stdout” contract and keeps memory at ~64 KiB plus the window size. For a 10-line window that is ~68 KB/op.</li>
+<li>The no-window path remains unchanged and raw.</li>
+<li><code>sourceEndsWithNewline</code> assumes a seekable regular file. That is the workspace use case. For non-regular files, either keep the old whole-file path or handle the <code>Stat</code>/<code>ReadAt</code> error explicitly.</li>
+</ul>
+<hr />
+<h2>Verification</h2>
+<h3>Environment</h3>
+<p>Go 1.26.8, linux/amd64. The standalone module is at <code>/workspace/windowed-read/</code>.</p>
+<pre><code class="language-bash">cd /workspace/windowed-read
+go build -o toolsd .
+</code></pre>
+<p>The 60.9 MB file used for end-to-end comparison is exactly 60,900,000 bytes and 1,000,000 lines:</p>
+<pre><code class="language-bash">python3 - &lt;&lt;'PY'
+with open('/tmp/big60.txt', 'w') as f:
+    for _ in range(900_000):
+        f.write('x' * 60 + '\n')   # 61 bytes
+    for _ in range(100_000):
+        f.write('y' * 59 + '\n')   # 60 bytes
+PY
+wc -c -l /tmp/big60.txt
+# 60900000 1000000 /tmp/big60.txt
+</code></pre>
+<h3>Tests</h3>
+<pre><code class="language-bash">cd /workspace/windowed-read
+go test ./...
+# ok    windowedread
+</code></pre>
+<p>The suite covers:</p>
+<ul>
+<li><code>TestParityTable</code>: 40+ edge cases including empty files, trailing/no trailing newline, blank lines, CRLF, NUL bytes, lines longer than 64 KiB, offset beyond EOF, and clamping.</li>
+<li><code>TestParityRandom</code>: 20 deterministic random files × multiple windows, including long lines and <code>math.MaxInt</code> limits.</li>
+<li><code>TestWindowedReadDoesNotReadToEOF</code>: the offset regression guard.</li>
+<li><code>TestNoWindowRawRoundTrip</code>: no-window binary round-trip.</li>
+<li><code>TestConfinement</code>: outside-root refusal.</li>
+<li><code>TestMissingFileError</code>: error text.</li>
+</ul>
+<h3>Regression test result</h3>
+<pre><code class="language-text">=== RUN   TestWindowedReadDoesNotReadToEOF
+    read_test.go:251: fileSize=8540000 windowEnd=3050549 finalOffset=3079180 (36.06% of file)
+--- PASS: TestWindowedReadDoesNotReadToEOF
+</code></pre>
+<p>The final source offset is 3,079,180 bytes on an 8,540,000-byte file — window end plus 28,631 bytes of read-ahead. It never approaches EOF.</p>
+<p>To prove the test catches the regression, a copy of the module was modified so the windowed branch used <code>io.ReadAll</code> and the old whole-file window. The byte-parity tests still passed, but the regression test failed:</p>
+<pre><code class="language-text">=== RUN   TestWindowedReadDoesNotReadToEOF
+    read_test.go:243: source offset reached EOF: offset=8540000 fileSize=8540000
+--- FAIL: TestWindowedReadDoesNotReadToEOF
+</code></pre>
+<p>This is the key point: <strong>byte parity alone cannot catch a regression back to whole-file reading</strong>.</p>
+<h3>Benchmarks</h3>
+<pre><code class="language-bash">cd /workspace/windowed-read
+go test -run '^$' -bench . -benchmem
+</code></pre>
+<p>Representative run:</p>
+<pre><code class="language-text">BenchmarkWholeFileWindow-16           45      26850950 ns/op    137824528 B/op        10 allocs/op
+BenchmarkStreamingWindow-16          129       8311866 ns/op       67769 B/op         11 allocs/op
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th style="text-align: right;">Whole-file (old)</th>
+<th style="text-align: right;">Streaming (new)</th>
+<th style="text-align: right;">Improvement</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ns/op</td>
+<td style="text-align: right;">26.85 ms</td>
+<td style="text-align: right;">8.31 ms</td>
+<td style="text-align: right;">3.23×</td>
+</tr>
+<tr>
+<td>B/op</td>
+<td style="text-align: right;">137,824,528</td>
+<td style="text-align: right;">67,769</td>
+<td style="text-align: right;">2,034×</td>
+</tr>
+<tr>
+<td>allocs/op</td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">11</td>
+<td style="text-align: right;">similar count, much smaller sizes</td>
+</tr>
+</tbody>
+</table>
+<p>The reported target was 137.8 MB/op → 68.7 KB/op. This container reproduces <strong>137.8 MB/op</strong> and <strong>67.8 KB/op</strong>. The in-process wall ratio is 3.23× because the benchmark’s whole-file path runs many iterations and amortizes GC; the end-to-end comparison below is the direct match for the reported 17.98×.</p>
+<h3>End-to-end CLI comparison</h3>
+<p>Buggy binary: <code>/usr/local/bin/toolsd.prev</code> (v0.3.0). Fixed binary: the standalone build. Both run on <code>/tmp/big60.txt</code> with <code>--limit 10</code>. Best of 5 runs:</p>
+<table>
+<thead>
+<tr>
+<th style="text-align: right;">Offset</th>
+<th style="text-align: right;">Buggy wall</th>
+<th style="text-align: right;">Fixed wall</th>
+<th style="text-align: right;">Buggy RSS</th>
+<th style="text-align: right;">Fixed RSS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">77 ms</td>
+<td style="text-align: right;">2 ms</td>
+<td style="text-align: right;">~127–143 MB</td>
+<td style="text-align: right;">~2.4 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">100,000</td>
+<td style="text-align: right;">90 ms</td>
+<td style="text-align: right;">4 ms</td>
+<td style="text-align: right;">~127–143 MB</td>
+<td style="text-align: right;">~2.4 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">250,000</td>
+<td style="text-align: right;">82 ms</td>
+<td style="text-align: right;"><strong>6 ms</strong></td>
+<td style="text-align: right;">~127–143 MB</td>
+<td style="text-align: right;">~2.4 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">500,000</td>
+<td style="text-align: right;">81 ms</td>
+<td style="text-align: right;"><strong>10 ms</strong></td>
+<td style="text-align: right;">~127–143 MB</td>
+<td style="text-align: right;">~2.4 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">750,000</td>
+<td style="text-align: right;">86 ms</td>
+<td style="text-align: right;">13 ms</td>
+<td style="text-align: right;">~127–143 MB</td>
+<td style="text-align: right;">~2.4 MB</td>
+</tr>
+<tr>
+<td style="text-align: right;">999,999</td>
+<td style="text-align: right;">82 ms</td>
+<td style="text-align: right;">17 ms</td>
+<td style="text-align: right;">~127–143 MB</td>
+<td style="text-align: right;">~2.4 MB</td>
+</tr>
+</tbody>
+</table>
+<p>The fixed time scales with the window position because it reads only the prefix. The buggy time is constant because it always reads the whole file. At offset 250,000 the fixed time is 6 ms, matching the reported 5.9 ms. The buggy baseline here is 77–90 ms rather than the reported 105.3 ms, so the ratio here is ~13.7× at that window; the reported 17.98× is consistent with the reported environment’s slower whole-file baseline. The fixed-side time and the B/op numbers match the target.</p>
+<h3><code>strace</code> evidence</h3>
+<p>Buggy binary, <code>--offset 250000 --limit 10</code>:</p>
+<pre><code class="language-text">read(3, &quot;00000000000000000000000000000000&quot;..., 60900001) = 60900000
+</code></pre>
+<p>Fixed binary, same window:</p>
+<pre><code class="language-text">pread64(3, &quot;\n&quot;, 1, 60899999) = 1
+size=65514 count=232 bytes=15199248
+size=65536 count=3   bytes=68155
+total read bytes = 15267404
+</code></pre>
+<p>The fixed binary reads ~15.27 MB, not 60.9 MB. The 232 reads are 64 KiB buffer refills while skipping the prefix. The single <code>pread64</code> is the O(1) trailing-newline check at the end of the file; it does not move the sequential offset. The source offset after the read is ~15.27 MB, not EOF.</p>
+<h3>Output parity on the 60.9 MB file</h3>
+<p>All of these produced byte-identical stdout between the buggy and fixed binaries:</p>
+<pre><code class="language-text">--offset 1 --limit 10
+--offset 250000 --limit 10
+--offset 250000 --limit 100
+--offset 500000 --limit 10
+--offset 500000 --limit 1000
+--offset 900000 --limit 10
+--offset 999999 --limit 1
+--offset 1000000 --limit 1
+--offset 1000001 --limit 1
+--limit 1
+--limit 10
+--offset 999990
+--offset 500000
+</code></pre>
+<p>The last case outputs 30,400,061 bytes and still matches. The no-window path also matches on the 60.9 MB file and on a 27-byte NUL-containing binary file.</p>
+<h3>Error parity</h3>
+<p>The following errors were byte-identical to the buggy binary, including exit code and stderr:</p>
+<pre><code class="language-text">--offset 0
+--offset -1
+--limit 0
+--limit abc
+missing file
+directory as path
+../outside-root
+</code></pre>
+<p>Validation errors, <code>ErrOutsideRoot</code>, missing-file errors, and directory errors all match. The streaming path preserves the old error wrapping.</p>
+<h3>Reproduce</h3>
+<pre><code class="language-bash">cd /workspace/windowed-read
+
+# 1. Unit tests, parity, confinement, raw path, offset regression.
+go test ./...
+
+# 2. The offset regression with its log line.
+go test -run TestWindowedReadDoesNotReadToEOF -v
+
+# 3. Benchmarks.
+go test -run '^$' -bench . -benchmem
+
+# 4. Build the CLI and compare with the buggy binary.
+go build -o toolsd .
+python3 - &lt;&lt;'PY'
+with open('/tmp/big60.txt', 'w') as f:
+    for _ in range(900_000):
+        f.write('x' * 60 + '\n')
+    for _ in range(100_000):
+        f.write('y' * 59 + '\n')
+PY
+
+TIMEFORMAT='%3R s'
+time ./toolsd read --root /tmp --offset 250000 --limit 10 /tmp/big60.txt &gt; /dev/null
+time /usr/local/bin/toolsd.prev read --root /tmp --offset 250000 --limit 10 /tmp/big60.txt &gt; /dev/null
+
+cmp &lt;(./toolsd read --root /tmp --offset 250000 --limit 10 /tmp/big60.txt) \
+    &lt;(/usr/local/bin/toolsd.prev read --root /tmp --offset 250000 --limit 10 /tmp/big60.txt) \
+    &amp;&amp; echo &quot;byte-identical&quot;
+</code></pre>
+<hr />
+<h2>Semantics preserved</h2>
+<table>
+<thead>
+<tr>
+<th>Behaviour</th>
+<th>Preserved</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--root</code> confinement and symlink resolution</td>
+<td>Yes: <code>fsops.Root.Path</code> remains the resolver</td>
+</tr>
+<tr>
+<td><code>--offset</code> alone reads to EOF</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td><code>--limit</code> alone starts at line 1</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Window clamped at EOF</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Offset beyond EOF → empty output, exit 0</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Trailing newline iff source’s last byte is <code>\n</code></td>
+<td>Yes: O(1) <code>Stat</code> + <code>ReadAt</code></td>
+</tr>
+<tr>
+<td>No trailing newline when source lacks one</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Blank lines and multiple trailing newlines</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Lines longer than 64 KiB</td>
+<td>Yes: fragments reassembled</td>
+</tr>
+<tr>
+<td>CRLF and NUL bytes in windowed output</td>
+<td>Yes: only <code>\n</code> is treated as terminator</td>
+</tr>
+<tr>
+<td>No-window raw bytes and binary round-trip</td>
+<td>Yes: separate path</td>
+</tr>
+<tr>
+<td>Refusal prints nothing on stdout</td>
+<td>Yes: window buffered before write</td>
+</tr>
+<tr>
+<td>Error text for validation/open/read/confinement</td>
+<td>Yes: differential tests byte-identical</td>
+</tr>
+</tbody>
+</table>
+<h2>Caveats</h2>
+<ul>
+<li><code>sourceEndsWithNewline</code> assumes a seekable regular file. That is the workspace use case. For non-regular files, keep the old whole-file path or handle the <code>Stat</code>/<code>ReadAt</code> error explicitly.</li>
+<li>The window is buffered before writing. For a bounded <code>--limit</code> this is tiny. For <code>--offset</code> alone on a huge file, the suffix window is buffered; the source prefix is still skipped without being materialised. If O(1) output memory for an unbounded window is required, write fragments directly to stdout and accept that a mid-read failure may have already emitted partial output.</li>
+<li>The fix does not change the no-window path. A no-window read still reads the whole file because its output is the whole file. The bug was specifically that a <strong>windowed</strong> read did so.</li>
+</ul></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-cli-windowed-read-streaming
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-11-19T07:47:50.033Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;toolsd read --limit materialised the whole file (os.ReadFile + strings.Split) before applying a line window: 78-105 ms and 137.8 MB/op on a 60.9 MB 1M-line file. Fix: resolve via fsops.Root.Path (confinement kept), os.Open, bufio.Reader 64 KiB, skip offset-1 lines with ReadSlice discarding fragments, reassemble kept lines across fragments, and append one trailing newline iff the SOURCE last byte is newline (O(1) via Stat+ReadAt). Got 17.98x wall (105.3-&gt;5.9 ms) and 68.7 KB/op. The non-obvious part: byte parity alone cannot catch a regression back to whole-file reading, so the regression test must assert the source file offset advanced only to the window end, not to EOF.&quot;, &quot;environment&quot;: &quot;&quot;, &quot;language&quot;: &quot;&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-cli-windowed-read-streaming&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-11-19T07:47:50.037Z&quot;, &quot;version&quot;: &quot;&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>

@@ -1,6 +1,6 @@
 # Off-by-One Answer Index
 
-**3236 problem classes · 4870 verified answers** · exported 2026-11-18 13:18 UTC
+**3239 problem classes · 4873 verified answers** · exported 2026-11-20 06:01 UTC
 
 Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
 
@@ -3242,3 +3242,6 @@ Browse per-class files in [`data/answers/`](answers/), or use the master [`answe
 | 3323 | git-push-shallow-clone-fixture-rejected | 1 | python |
 | 3324 | pytest-monkeypatch-os-kill-breaks-cleanup | 1 | python |
 | 3325 | gitreins-guard-test-timeout-ignores-config | 1 | go |
+| 3326 | go-mvcc-range-phantom-conflict-si-btree | 1 | go |
+| 3327 | js-vlq-sourcemap-chain-transit-position-resolve | 1 | js |
+| 3328 | go-cli-windowed-read-streaming | 1 | go |

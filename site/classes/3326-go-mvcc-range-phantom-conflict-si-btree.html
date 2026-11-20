@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>go-mvcc-range-phantom-conflict-si-btree — Off-By-One verified answer</title>
+<meta name="description" content="## Done — diagnosed, implemented, and verified The deliverable is **`~/SOLUTION.md`** (self-contained, 1,282 lines), backed by the working reference implementat">
+<meta property="og:title" content="go-mvcc-range-phantom-conflict-si-btree — Off-By-One">
+<meta property="og:description" content="## Done — diagnosed, implemented, and verified The deliverable is **`~/SOLUTION.md`** (self-contained, 1,282 lines), backed by the working reference implementat">
+<meta property="og:type" content="article">
+<link rel="canonical" href="https://ob1.it.com/classes/3326-go-mvcc-range-phantom-conflict-si-btree.html">
+<style>
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#e6edf3;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:#38bdf8;text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:860px;margin:0 auto;padding:24px 20px 60px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:26px}
+.logo{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.logo em{font-style:normal;color:#a78bfa}
+.crumb{font-size:13px;color:#8b93a7}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;margin:0 0 8px}
+.meta{font-size:13px;color:#8b93a7;margin-bottom:22px;display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11.5px;font-weight:700;padding:3px 10px;border-radius:6px;background:rgba(56,189,248,.12);color:#38bdf8}
+.badge.g{background:rgba(74,222,128,.12);color:#4ade80}
+.badge.v{background:rgba(167,139,250,.12);color:#a78bfa}
+.desc{font-size:15px;color:#cbd5e1;margin-bottom:26px}
+.src{margin-bottom:26px}
+.src a{color:#38bdf8;text-decoration:none;font-size:13.5px}
+.src a:hover{text-decoration:underline}
+.answer{background:#14141d;border:1px solid #262637;border-radius:14px;padding:22px;margin-bottom:18px}
+.answer h2{font-size:15px;margin:0 0 10px;color:#f1f5f9;letter-spacing:.02em;text-transform:uppercase;font-size:12.5px;color:#8b93a7}
+.answer pre{background:#0d0d14;border:1px solid #262637;border-radius:10px;padding:14px;overflow-x:auto;font-size:12.5px;line-height:1.6}
+.answer code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.answer p code,.answer li code,.answer td code{background:#1b1b28;padding:1px 5px;border-radius:4px;font-size:12.5px}
+.answer table{border-collapse:collapse;width:100%;margin:12px 0;font-size:13px}
+.answer th,.answer td{border:1px solid #2f3040;padding:7px 10px;text-align:left}
+.answer th{background:#1b1b28}
+.answer blockquote{border-left:3px solid #38bdf8;margin:10px 0;padding:2px 14px;color:#8b93a7}
+.answer img{max-width:100%}
+.evidence{background:#0d0d14;border:1px solid #262637;border-radius:14px;padding:18px;margin-top:4px;font-size:13px;color:#cbd5e1}
+.evidence h2{font-size:12.5px;text-transform:uppercase;letter-spacing:.02em;color:#8b93a7;margin:0 0 10px}
+.evidence pre{white-space:pre-wrap;word-break:break-word;margin:0;font-size:12px}
+.foot{margin-top:40px;padding-top:18px;border-top:1px solid #1f1f2b;font-size:12px;color:#565b6d;display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="top"><span class="logo">◐ Off-<em>By</em>-One</span></div>
+<div class='crumb'><a href='/'>◐ Off-By-One</a> · answer catalog</div><h1>go-mvcc-range-phantom-conflict-si-btree</h1><div class='meta'><span class='badge'>1 answer(s)</span><span class='badge g'>go</span><span class='badge v'>go1.26</span></div><div class='desc'><p>go-mvcc-range-phantom-conflict-si-btree</p></div><div class='src'><a href='https://github.com/totalwindupflightsystems/off-by-one/blob/master/data/answers/3326-go-mvcc-range-phantom-conflict-si-btree.json'>📦 Source in repository (JSON)</a></div><div class='answer'><h2>Answer</h2><h2>Done — diagnosed, implemented, and verified</h2>
+<p>The deliverable is <strong><code>~/SOLUTION.md</code></strong> (self-contained, 1,282 lines), backed by the working reference implementation in <strong><code>~/go-mvcc/</code></strong>.</p>
+<h3>Root cause</h3>
+<p>Snapshot isolation over a COW B-tree already gives stable, repeatable reads (immutable pages + atomic root swap), but it protects <strong>data items, not predicates</strong>. A transaction that does <code>SCAN [a,z)</code> and later commits has no record that it read that range, and the store keeps no version index of committed writes. So a concurrent <code>PUT m</code> inside <code>[a,z)</code> is never tested against the reader — the classic phantom. Full-range locks and commit-time re-scans don't fix this (deadlock/no composition, and they yield the current set, not the exact changed-key set).</p>
+<h3>The fix</h3>
+<p>Four pieces plus one commit-time check (all in <code>txn.go</code>, <code>versionmap.go</code>, <code>btree.go</code>, <code>store.go</code>):</p>
+<ol>
+<li><strong>Append-only page log + pinning</strong> — immutable pages; every snapshot pins the pages it traverses.</li>
+<li><strong>COW B-tree</strong> — path-copying insert with root/child splits; <code>inOrder</code> range traversal.</li>
+<li><strong>Version interval map</strong> — <code>key → []commitTS</code> boundaries, indexed by sorted key list; answers "any key in <code>[lo,hi)</code> written in <code>(from,to]</code>" in two binary searches, no range locks.</li>
+<li><strong>Read predicates</strong> — every <code>Get</code> records a point key, every <code>Scan</code> records <code>[lo,hi)</code>.</li>
+<li><strong>Commit protocol</strong> — under the single tree commit mutex, allocate <code>commitTS</code>, check all predicates in <code>(snapTS, commitTS]</code>, abort with the sorted de-duplicated <code>*ConflictError.Keys</code>, otherwise apply COW writes atomically.</li>
+</ol>
+<h3>Verification</h3>
+<pre><code class="language-text">go test -race -v -count=5 ./...
+ok      go-mvcc (17/17 tests, race-clean, stable)
+</code></pre>
+<p>I also <strong>re-extracted the source back out of the markdown</strong> and ran it from a clean directory — it reproduces the exact files and all tests pass, proving the document is directly usable. Key tests include <code>TestPhantomConflictOnRangeInsert</code> (exact <code>Keys == [m]</code>), <code>TestExactConflictingKeySet</code> (<code>[b m y]</code>), boundary semantics (<code>lo</code> conflicts, <code>hi</code> doesn't), concurrent delete-as-phantom, aborted writes not leaking, pin release, and 8-way concurrent committers with no lost updates.</p></div><div class='evidence'><h2>Evidence &amp; signatures</h2><pre># Evidence
+- Problem class: go-mvcc-range-phantom-conflict-si-btree
+- Model: openrouter/deepseek/deepseek-v4.1-flash
+- Solved: 2026-11-19T02:41:10.967Z
+- Verification: solution produced by pi in sandbox; see signatures.json
+</pre><pre>{&quot;description&quot;: &quot;Implement a copy-on-write B-tree keyed range store with snapshot isolation on top of an append-only page log. Range scans under a snapshot must detect phantom conflicts when a concurrent transaction inserts a key inside the scanned range, and commit must abort with the exact conflicting key set. Hard part: PhantomRead detection over range predicates without full-range locks, using per-snapshot page pinning and a version interval map.&quot;, &quot;environment&quot;: &quot;go1.26&quot;, &quot;language&quot;: &quot;go&quot;, &quot;model&quot;: &quot;openrouter/deepseek/deepseek-v4.1-flash&quot;, &quot;problem_class&quot;: &quot;go-mvcc-range-phantom-conflict-si-btree&quot;, &quot;provider&quot;: &quot;openrouter&quot;, &quot;solved_at&quot;: &quot;2026-11-19T02:41:10.970Z&quot;, &quot;version&quot;: &quot;1.26&quot;}</pre></div>
+<div class="foot"><span>Generated from the verified corpus · MIT licensed</span><a href="/">Back to the catalog</a></div>
+</div>
+</body>
+</html>
