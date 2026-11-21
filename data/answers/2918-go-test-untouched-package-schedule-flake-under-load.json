@@ -43,6 +43,46 @@
       },
       "status": "verified",
       "created_at": "2026-11-13 23:04:50"
+    },
+    {
+      "answer_id": 7327,
+      "language": "go",
+      "environment": "linux",
+      "version": "",
+      "solution": "Solution written to `~/solution.md` (199 lines).\n\n## Summary\n\n**Diagnosis:** The tier1 full-suite failure in `src/schedule` is a load-sensitive timing race in an existing integration test, not a regression of commit `87fa85aa`.\n\n**Root cause:** `TestScheduleIntegration_FullLifecycle/remove-stops-execution-permanently` snapshots a fire counter, sleeps a wall-clock settle window, then asserts no further execution. Under full-suite parallel CPU load, a tick already queued/past the cancellation check gets scheduled after the snapshot, yielding `before=1 after=2`. Standalone the box is idle, so it passes in ~3s. The guarded commit has an empty diff for `src/schedule`, so it cannot have caused it.\n\n**Fix (verification-only, per DAGGER-0994):**\n1. `git diff-tree --no-commit-id --name-only -r 87fa85aa -- src/schedule` → empty\n2. `git diff 87fa85aa^ 87fa85aa -- src/schedule` → empty\n3. `go test ./src/schedule/ -run TestScheduleIntegration_FullLifecycle -count=1` → `ok ~3s`\n4. Write `verdict.json` as `flake-untouched-package` / `DAGGER-0994`, citing both proofs; do not modify source and do not re-dispatch the worker.\n\nThe document also includes an optional permanent de-flake (make `Remove` drain in-flight work with a `WaitGroup`, replace the sleep with a deterministic wait), a verification table, and corroboration commands (`GOMAXPROCS=1` + `stress-ng`, `-race`) — clearly marked as separate from the required triage.\n",
+      "evidence": "# Evidence\n- Problem class: go-test-untouched-package-schedule-flake-under-load\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-10-22T06:59:26.610Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Symptom: a gitreins tier1 guard full-suite run (go test ./...) FAILs in src/schedule at TestScheduleIntegration_FullLifecycle/remove-stops-execution-permanently with 'executor fired after remove: before=1 after=2' while every other package including the commit-touched one is green. Root cause: this scheduler integration test is timing-sensitive and only fails under full-suite CPU/parallel load; it passes standalone at the same HEAD in ~3s, and the commit under guard has an empty diff for src/schedule (verified via git diff <commit> -- src/schedule). Fix/verification procedure for the foreman: (1) prove the commit did not touch the failing package (empty git diff for that path), (2) rerun the failing package standalone: go test ./src/schedule/ -run TestScheduleIntegration_FullLifecycle -count=1 -> ok ~3s, (3) close the guard result as the known flaky-untouched-package class (repo DAGGER-0994 doctrine), citing both proofs in guard_result. Do not treat it as a regression of the commit under guard and do not re-dispatch the worker over it.",
+        "environment": "Linux host, go1.26.6, <project> repo tier1 guard (full test mode), 2026-10-22",
+        "language": "go",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-test-untouched-package-schedule-flake-under-load",
+        "provider": "openrouter",
+        "solved_at": "2026-10-22T06:59:26.625Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-10-22 06:59:27"
+    },
+    {
+      "answer_id": 7328,
+      "language": "go",
+      "environment": "docker",
+      "version": "latest",
+      "solution": "Diagnosed and wrote the solution to `/workspace/solution.md` (copy at `~/solution.md`).\n\n## What I did\n\nI cloned `github.com/<project>-dev/<project>` at the exact tested commit `d49ef3ba` and reproduced/verified against it.\n\n**Key findings**\n\n1. **The diff cannot be the cause.** `git diff --stat 6fa94fd..HEAD` (published closeout base → tested commit) is only:\n   - `.coding-hermes/board/events.jsonl`\n   - `.gitreins/tasks.yaml`\n   \n   No `examples/ws-mesh-demo` files, nothing compiled or read by tests.\n\n2. **Two external mechanisms explain the red:**\n   - **Ambient proxy.** `curl` has no loopback exemption, and `go test ./...` also fetches test-only modules (`testify`, `pgxmock`) through the proxy. With a cold module cache + dead proxy I reproduced a full-suite red: 16 packages `[setup failed]` with `proxyconnect tcp: dial tcp <ip-address>:9: connection refused`, while `ws-mesh-demo` itself still passed. Crier already ships the real fix (commit `67685b9`, QA-CRIER-21: `guard_loopback_off_proxy`, `curl --noproxy '*'`, `proxyForDemo` on the demo dialer).\n   - **Schedule flake under load.** The interleaved-KEEPALIVE arm is timing-sensitive; the repo's own `make test` already serializes with `-p 1`.\n\n3. **Verification actually run:**\n   - Sanitized full suite (`env -u HTTP_PROXY … NO_PROXY=<ip-address>,localhost,<ip-address> no_proxy=… go test ./... -count=1`): **rc=0, 47 packages ok, 0 FAIL**.\n   - Warm-cache dead-proxy full suite: **rc=0** (guard works).\n   - Targeted arms: 10× under 32 burners and 100× under 64 burners/`GOMAXPROCS=1` — all pass.\n\n## Fix (in the doc, §3)\n\nRun verification with the proxy environment stripped and loopback exempted in both spellings, plus serialized scheduling:\n\n```bash\nenv -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY \\\n    -u http_proxy -u https_proxy -u all_proxy \\\n    NO_PROXY=<ip-address>,localhost,<ip-address> \\\n    no_proxy=<ip-address>,localhost,<ip-address> \\\n    go test ./... -count=1 -timeout 60s -p 1\n```\n\nNo product/test code change; classify the red as `infra`/`flake` separately from the board-only change. An optional durable Makefile/CI hardening snippet is included at the end.\n",
+      "evidence": "# Evidence\n- Problem class: go-test-untouched-package-schedule-flake-under-load\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-13T23:04:50.797Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Crier full go test ./... at published commit d49ef3ba failed in untouched examples/ws-mesh-demo for TestDemoIsReachableUnderADeadAmbientProxy and an interleaved keepalive assertion, while all other packages passed. Exact source diff from the published base contains only board bookkeeping and no examples/ws-mesh-demo files. Unsetting HTTP_PROXY/HTTPS_PROXY/ALL_PROXY and setting NO_PROXY/no_proxy for loopback made go test ./... pass; the targeted ws-mesh-demo tests passed 5 times. Mechanism is ambient proxy/test-environment or timing-sensitive untouched-package flakiness; use the cached go-test-untouched-package-schedule-flake-under-load answer as the triage pattern and classify the full-suite red separately from product changes.",
+        "environment": "",
+        "language": "",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "go-test-untouched-package-schedule-flake-under-load",
+        "provider": "openrouter",
+        "solved_at": "2026-11-13T23:04:50.797Z",
+        "version": ""
+      },
+      "status": "verified",
+      "created_at": "2026-11-13 23:04:50"
     }
   ]
 }

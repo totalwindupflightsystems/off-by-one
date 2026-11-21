@@ -23,6 +23,26 @@
       },
       "status": "verified",
       "created_at": "2026-11-15 21:18:56"
+    },
+    {
+      "answer_id": 7627,
+      "language": "shell",
+      "environment": "bash",
+      "version": "5.2",
+      "solution": "Done. The verified solution is written to **`~/bash-pipeline-supervisor.md`**.\n\n## What it contains\n\n**Root-cause analysis** of six independent failure modes:\n\n1. **Job control off** ⇒ the background pipeline shares the supervisor's process group; `kill -- -$$` would kill the supervisor, and killing only the launcher orphans the stages (I reproduced this: the shell dies `143` instantly while `sleep` survives).\n2. **`set -e` + `pipefail` short-circuit** ⇒ the shell exits `141` before `PIPESTATUS` can be read.\n3. **Trap args** ⇒ `trap on_signal TERM` passes no `$1`; under `set -u` the handler aborts and leaks the sink.\n4. **`kill -0`-gated `wait`** ⇒ bash auto-reaps on `SIGCHLD`, so the gate is already false and the recorded status is skipped (`rc` stays 0).\n5. **The exit-status race** ⇒ a second signal interrupts the handler's `wait`, which returns `128+sig`, losing the real `141`.\n6. **TERM-ignoring stages** ⇒ need SIGKILL escalation.\n\n**The fix** (`supervisor.sh`): `setsid` pipeline in its own process group; a `track` wrapper records each stage's real PID and resets signal dispositions; the inner runner keeps `-e` off, captures `PIPESTATUS` to a file, and ignores TERM/INT so it survives teardown; the trap does `kill -0` probing + bounded grace + SIGKILL escalation, blocks re-entrant signals, and reaps with an unconditional `wait ... || rc=$?`; `final_status` decides from the persisted statuses (`141` re-raised for a mid-stage SIGPIPE, otherwise the sink's code).\n\n**Verification section** with two self-contained harnesses (embedded in the doc and confirmed byte-accurate against the tested scripts):\n- `selfverify.sh` — 10/10 checks pass (SIGPIPE→141, sink 7→7, sink 42→42, SIGPIPE beats sink 3, orphan/fd release on SIGTERM, grace→SIGKILL, repeated-signal non-reentrancy).\n- `race_demo.sh` — naive handler exits `137` (loses `141`); hardened handler exits `141`.\n\nAlso documented: the `SIGINT`-ignored-for-background-jobs caveat, `setsid`/`pgrep` dependencies, the `SIGKILL`-can't-be-trapped limitation, and the deliberate SIGPIPE-over-sink precedence.\n",
+      "evidence": "# Evidence\n- Problem class: bash-pipeline-sigpipe-backpressure-trap-reraise-exit-propagation\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-15T21:18:56.370Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "Write a bash supervisor that runs a multi-stage pipeline (generator | transformer | sink) under set -euo pipefail, installs a SIGTERM/SIGINT trap that tears down the WHOLE pipeline, and must guarantee three invariants: (1) the sink never survives as an orphan holding the output fd when the trap fires mid-write, (2) a SIGPIPE-induced death of a mid-pipeline stage is re-raised with the correct 128+13 exit status rather than being swallowed by pipefail short-circuit, and (3) the supervisor returns the sink (not the shell) exit status as the final result. The trap must use kill -0 probing plus a bounded grace window with SIGKILL escalation, and submissions must explain the exit-status race where the trap handler itself receiving a signal during wait causes the re-raise to be lost. Must work under bash 5 with job control off, non-interactive.",
+        "environment": "bash",
+        "language": "shell",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "bash-pipeline-sigpipe-backpressure-trap-reraise-exit-propagation",
+        "provider": "openrouter",
+        "solved_at": "2026-11-15T21:18:56.370Z",
+        "version": "5.2"
+      },
+      "status": "verified",
+      "created_at": "2026-11-15 21:18:56"
     }
   ]
 }

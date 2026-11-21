@@ -23,6 +23,26 @@
       },
       "status": "verified",
       "created_at": "2026-11-16 07:40:02"
+    },
+    {
+      "answer_id": 7632,
+      "language": "js",
+      "environment": "node20",
+      "version": "20",
+      "solution": "Done. The verified solution is in **`~/mvcc-solution/SOLUTION.md`** (self-contained: full fixed module, repro, and verifier are embedded and were re-extracted and run clean).\n\n## Diagnosis\n\nThe compactor's predicate is snapshot-blind: it drops a version whenever *a newer version exists*, ignoring active read snapshots. That removes the version an active snapshot is pinned to.\n\n**Minimal interleaving (4 ops):**\n\n| # | op | chain `k` | active |\n|---|----|-----------|--------|\n| 1 | `put(\"k\",\"old\")` (seq 1) | `old@1` | — |\n| 2 | `S = beginSnapshot()` (ts=1) | `old@1` | `S(ts=1)` |\n| 3 | `put(\"k\",\"new\")` (seq 2) | `old@1, new@2` | `S(ts=1)` |\n| 4 | `compact()` *(buggy)* | **`new@2`** | `S(ts=1)` |\n| 5 | `read(S,\"k\")` | → `\"new\"` (expected `\"old\"`) | **SI violated** |\n\nA second read-path defect — falling back to the *oldest surviving* version when no version `<= ts` exists — turns \"lost version\" into \"silently sees newer data,\" and produces phantom creates:\n\n```\nput(k,\"v0\") -> del(k) -> S=begin(ts=2) -> put(k,\"v1\") -> compact()\nread(S,\"k\") == \"v1\"   // key was deleted at snapshot time\n```\n\n## Fix\n\n1. Track active snapshots; `W = min(ts)` (or `seq` if none).\n2. Per key retain the **anchor** = newest version with `seq <= W`, plus every version with `seq > W`; drop only versions older than the anchor. GC a chain whose anchor is a tombstone with nothing newer.\n3. Reads must be **strict** (`newest seq <= ts`, else `ABSENT`); never substitute a newer version.\n\n```js\n_compactFixed() {\n  const W = this.lowWatermark();\n  for (const [key, chain] of this.data) {\n    const after = retentionForChain(chain, W); // anchor + suffix(>W)\n    if (after.length === 0) this.data.delete(key);\n    else this.data.set(key, after);\n  }\n}\n```\n\n**Memory:** with no snapshots `W = seq` so chains collapse to ≤1 version; tombstones below `W` are deleted. While a snapshot lives it retains only the anchor plus versions committed since it began — the required working set. `endSnapshot()` must delete the registry entry so `W` advances.\n\n## Proof (no needed version dropped)\n\nFor any `ts >= W`, fix the newest version `v <= ts` in chain `C`. If `v.seq <= W` it is the anchor (nothing lives in `(v.seq, W]`, else `v` wouldn't be newest), so `v ∈ R`. If `v.seq > W`, `R` contains the entire `> W` suffix, so `v ∈ R`. Nothing after `v` is `<= ts`, so `R` selects `v` too. Tombstone-GC preserves `ABSENT`. ∎\n\n## Verification (all passing)\n\n- `node repro.js` — shows the 3 bug interleavings and the fixed behavior.\n- `node verify.js` — **20 random schedules** with `verifyRetention()` after *every* compaction, plus an **exhaustive check of every `ts ∈ [W, seq]`** against a never-compacted model: `PASS`.\n- Buggy compactor produces **2168** SI violations; `nearest` fallback independently reproduces the phantom create.\n- Memory tests: 1000 writes → 1 version; deleted key GC'd; long snapshot keeps anchor + suffix then collapses to 1; 5000-iteration rotate/compact steady state stays `<= 2` versions.\n\nFiles: `SOLUTION.md` (deliverable), `mvcc.js`, `repro.js`, `verify.js`.\n",
+      "evidence": "# Evidence\n- Problem class: node20-mvcc-compactor-snapshot-read-skew-version-reclaim\n- Model: openrouter/deepseek/deepseek-v4.1-flash\n- Solved: 2026-11-16T07:40:02.438Z\n- Verification: solution produced by pi in sandbox; see signatures.json\n",
+      "signatures": {
+        "description": "A single-node MVCC key-value store in Node.js serves snapshot-isolated reads, but a background compactor aggressively reclaims old versions whenever a newer version exists for a key. Long-lived read snapshots silently observe newer data mid-transaction (read skew / lost-version anomalies), and under a specific interleaving a reader can see a key created after its snapshot began. Find the minimal interleaving that breaks snapshot isolation, then fix the compactor to defer reclamation without leaking memory (and prove no version needed by an active snapshot is ever dropped).",
+        "environment": "node20",
+        "language": "js",
+        "model": "openrouter/deepseek/deepseek-v4.1-flash",
+        "problem_class": "node20-mvcc-compactor-snapshot-read-skew-version-reclaim",
+        "provider": "openrouter",
+        "solved_at": "2026-11-16T07:40:02.438Z",
+        "version": "20"
+      },
+      "status": "verified",
+      "created_at": "2026-11-16 07:40:02"
     }
   ]
 }
