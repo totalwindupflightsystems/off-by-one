@@ -1,4 +1,4 @@
-.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test tick-closeout tick-closeout-selftest connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest check-corpus-hygiene check-corpus-hygiene-selftest check-distribute-deploy deploy-distribute check-distribute-deploy-selftest check-readme-release-pin check-readme-release-pin-selftest install-hooks install-hooks-selftest clean
+.PHONY: build test test-short check-binary-fresh check-deploy gate-deploy check-deploy-test tick-closeout tick-closeout-selftest connect-muster transport-retry-selftest pi-agent-watchdog-selftest export-exclusions-selftest export-hostpaths-selftest site-redaction-selftest corpus-jsonl corpus-jsonl-check corpus-jsonl-selftest check-corpus-hygiene check-corpus-hygiene-selftest check-distribute-deploy deploy-distribute check-distribute-deploy-selftest check-readme-release-pin check-readme-release-pin-selftest install-hooks install-hooks-selftest clean
 
 # Off-by-One Makefile
 # Build, test, and Muster integration targets.
@@ -280,6 +280,30 @@ check-corpus-hygiene:
 # "real tree passes" arm.
 check-corpus-hygiene-selftest:
 	bash scripts/tests/check-corpus-hygiene-selftest.sh
+
+# OBS-OB-006 — data/answers.jsonl (one answer per line, whole corpus) is a
+# GENERATED ~56 MB local artifact, untracked and gitignored. The tracked,
+# canonical distribution form is the per-class corpus data/answers/*.json;
+# `corpus-jsonl` rebuilds the monolith from it deterministically (byte-identical
+# to the file the repo used to commit), and `corpus-jsonl-check` fails when the
+# on-disk copy is missing or no longer matches a fresh rebuild. Consumers that
+# still want the bulk file (grep/jq over one stream) run `make corpus-jsonl`
+# first instead of cloning it.
+corpus-jsonl:
+	python3 scripts/build-answers-jsonl.py
+
+corpus-jsonl-check:
+	python3 scripts/build-answers-jsonl.py --check
+
+# Regression proof for the rebuild + the monolith-absent consumer paths: the
+# builder reproduces the last tracked monolith byte-for-byte, --check is red on
+# a missing/stale file, check-corpus-hygiene / check-corpus-tokens /
+# check-public-pii / normalize-corpus-tokens all work with data/answers.jsonl
+# absent (and still catch planted violations), and the sync path cannot stage
+# the untracked artifact. Hermetic: temp trees + git objects only, no network,
+# no DB, no credentials.
+corpus-jsonl-selftest:
+	python3 scripts/tests/build_answers_jsonl_test.py
 
 # README-11 — the README's "Install from a release" first-run snippet pins the
 # release tag in a shell literal (`V=vX.Y.Z`). That literal rotted twice
