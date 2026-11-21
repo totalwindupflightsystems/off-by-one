@@ -34,9 +34,9 @@ func TestPromSolveResourceFamilies(t *testing.T) {
 		"# HELP obo_solve_over_budget_total",
 		"# HELP obo_solve_rejected_total",
 		"# HELP obo_solve_failure_total",
-		`obo_solve_failure_total{cause="timeout"}`,
-		`obo_solve_failure_total{cause="toolchain_missing"}`,
-		`obo_solve_failure_total{cause="stale_reaped"}`,
+		`obo_solve_failure_total{cause="timeout",` + wantConstLabels + `}`,
+		`obo_solve_failure_total{cause="toolchain_missing",` + wantConstLabels + `}`,
+		`obo_solve_failure_total{cause="stale_reaped",` + wantConstLabels + `}`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("exposition missing %q", want)

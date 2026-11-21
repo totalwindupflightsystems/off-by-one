@@ -9,18 +9,37 @@ import (
 	"github.com/totalwindupflightsystems/off-by-one/internal/metrics"
 )
 
-// promGauge scans a Prometheus text exposition for an unlabelled
-// sample line ("name value") and returns its value.
+// promProductLabels is the rendered product/service const label set
+// every obo_* series carries (OBS-OB-005). Literal on purpose: the
+// expectations must fail if the emission changes.
+const promProductLabels = `product="off-by-one",service="off-by-one"`
+
+// promGauge scans a Prometheus text exposition for a single-series
+// sample line and returns its value. It accepts both the bare
+// "name value" form and the labelled "name{...} value" form every
+// obo_* family uses since OBS-OB-005.
 func promGauge(t *testing.T, body, name string) float64 {
 	t.Helper()
 	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, name+" ") {
-			v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(line, name)), 64)
-			if err != nil {
-				t.Fatalf("parse %q line %q: %v", name, line, err)
-			}
-			return v
+		rest, ok := strings.CutPrefix(line, name)
+		if !ok {
+			continue
 		}
+		if rest != "" && !strings.HasPrefix(rest, "{") && !strings.HasPrefix(rest, " ") {
+			continue // a longer family name sharing this prefix
+		}
+		i := strings.LastIndex(rest, " ")
+		if i < 0 {
+			t.Fatalf("parse %q line %q: no value", name, line)
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(rest[i:]), 64)
+		if err != nil {
+			t.Fatalf("parse %q line %q: %v", name, line, err)
+		}
+		if !strings.Contains(rest[:i], promProductLabels) {
+			t.Fatalf("sample %q is missing the product label set %q", line, promProductLabels)
+		}
+		return v
 	}
 	t.Fatalf("no sample line for %s in exposition", name)
 	return 0
@@ -105,20 +124,20 @@ func TestMetricsPromNilSafe(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		"obo_http_up 1",
-		"obo_cron_loop_running 0",
-		`obo_solves_total{outcome="succeeded"} 0`,
-		"obo_queue_pending 0",
+		"obo_http_up{" + promProductLabels + "} 1",
+		"obo_cron_loop_running{" + promProductLabels + "} 0",
+		`obo_solves_total{outcome="succeeded",` + promProductLabels + `} 0`,
+		"obo_queue_pending{" + promProductLabels + "} 0",
 		"obo_solve_duration_seconds_bucket",
 		// OBS-OB-003: the solve resource / failure-cause families are
 		// served even with no observer wired, at zero.
 		"obo_solve_peak_rss_bytes_bucket",
-		"obo_solve_peak_rss_bytes_count 0",
-		"obo_solve_killed_total 0",
-		"obo_solve_over_budget_total 0",
-		"obo_solve_rejected_total 0",
-		`obo_solve_failure_total{cause="timeout"} 0`,
-		`obo_solve_failure_total{cause="commit"} 0`,
+		"obo_solve_peak_rss_bytes_count{" + promProductLabels + "} 0",
+		"obo_solve_killed_total{" + promProductLabels + "} 0",
+		"obo_solve_over_budget_total{" + promProductLabels + "} 0",
+		"obo_solve_rejected_total{" + promProductLabels + "} 0",
+		`obo_solve_failure_total{cause="timeout",` + promProductLabels + `} 0`,
+		`obo_solve_failure_total{cause="commit",` + promProductLabels + `} 0`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("nil-safe exposition missing %q", want)
@@ -145,7 +164,7 @@ func TestMetricsPromReadOnlyPassthrough(t *testing.T) {
 	if ct := rr.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/plain; version=0.0.4") {
 		t.Fatalf("read-only Content-Type %q — sanitizer mangled the exposition", ct)
 	}
-	if !strings.Contains(rr.Body.String(), "obo_http_up 1") {
+	if !strings.Contains(rr.Body.String(), "obo_http_up{"+promProductLabels+"} 1") {
 		t.Error("read-only exposition missing obo_http_up 1")
 	}
 }

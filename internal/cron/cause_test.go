@@ -26,20 +26,65 @@ func scrapeProm(t *testing.T, p *metrics.Prom) string {
 	return rr.Body.String()
 }
 
-// promSample reads the value of one exact series line
-// (`name` or `name{labels}`) out of an exposition body. It fails when
-// the series is absent: for OBS-OB-003 every family is always present,
-// so a missing series is a contract break, not a zero.
+// splitSeries parses `name` or `name{k="v",...}` into its parts.
+func splitSeries(t *testing.T, series string) (string, map[string]string) {
+	t.Helper()
+	i := strings.IndexByte(series, '{')
+	if i < 0 {
+		return series, nil
+	}
+	labels := map[string]string{}
+	for _, part := range strings.Split(strings.TrimSuffix(series[i+1:], "}"), ",") {
+		if part == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			t.Fatalf("bad selector %q: label %q has no '='", series, part)
+		}
+		labels[k] = strings.Trim(v, `"`)
+	}
+	return series[:i], labels
+}
+
+// promSample reads the value of one series out of an exposition body.
+// The selector is `name` or `name{labels...}` and matches on the metric
+// name plus every selected label, in ANY position: since OBS-OB-005
+// every sample also carries the registry's const labels
+// (product/service), which sort in among the family's own labels and
+// are appended before a histogram's generated `le`. It fails when the
+// series is absent: for OBS-OB-003 every family is always present, so a
+// missing series is a contract break, not a zero.
 func promSample(t *testing.T, body, series string) float64 {
 	t.Helper()
+	wantName, wantLabels := splitSeries(t, series)
 	for _, line := range strings.Split(body, "\n") {
-		if strings.HasPrefix(line, series+" ") {
-			v, err := strconv.ParseFloat(strings.TrimSpace(strings.TrimPrefix(line, series)), 64)
-			if err != nil {
-				t.Fatalf("parse %q from line %q: %v", series, line, err)
-			}
-			return v
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
 		}
+		sp := strings.LastIndexByte(line, ' ')
+		if sp < 0 {
+			continue
+		}
+		gotName, gotLabels := splitSeries(t, line[:sp])
+		if gotName != wantName {
+			continue
+		}
+		match := true
+		for k, want := range wantLabels {
+			if gotLabels[k] != want {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+		v, err := strconv.ParseFloat(strings.TrimSpace(line[sp:]), 64)
+		if err != nil {
+			t.Fatalf("parse value from line %q: %v", line, err)
+		}
+		return v
 	}
 	t.Fatalf("series %q absent from exposition", series)
 	return 0

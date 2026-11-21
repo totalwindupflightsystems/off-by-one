@@ -13,6 +13,12 @@ import (
 	"github.com/prometheus/common/model"
 )
 
+// wantConstLabels is the rendered product/service label set every obo_*
+// series carries (OBS-OB-005). Written out literally, not derived from
+// metrics.PromConstLabels, so a change to the labels must be a
+// deliberate change to the expectations too.
+const wantConstLabels = `product="off-by-one",service="off-by-one"`
+
 // serveProm performs a scrape against p's handler and returns the
 // response body as text.
 func serveProm(t *testing.T, p *Prom) string {

@@ -381,11 +381,13 @@ decompose; if per-status depth is wanted later, it needs three `Depth`-style cou
 
 ## 5. Collection path
 
-**Status 2026-11-16: exposition side DONE (`62b1c03b` + `e066e203` + `6c4e09aa` + `fe3be63e`), collection side OPEN.**
-Everything below the line is the audit's recommendation and still stands, with one measured change: the endpoint
-exists now, so the open question is purely "who scrapes it". Nothing in this repository configures a scrape — no
-`job_name`, `scrape_configs` or `remote_write` appears in any tracked `*.yaml`/`*.yml`/`*.toml`/`*.md`, and `deploy/`
-contains only `off-by-one.service`. Tracked as board row **OBS-OB-005** ("the monitoring stack is out of repo scope").
+**Status 2026-11-21: exposition side DONE (`62b1c03b` + `e066e203` + `6c4e09aa` + `fe3be63e`), series labelling
+DONE (§5.1), seed completion record DONE (§5.2), collection side OPEN.** Everything below the line is the audit's
+recommendation and still stands, with one measured change: the endpoint exists now, so the open question is purely
+"who scrapes it". Nothing in this repository configures a scrape — no `job_name`, `scrape_configs` or
+`remote_write` appears in any tracked `*.yaml`/`*.yml`/`*.toml`/`*.md`, and `deploy/` contains only
+`off-by-one.service`. That remainder is tracked as board row **OBS-OB-005** ("the monitoring stack is out of repo
+scope").
 
 The fleet posture (given): agents **push** to Prometheus via `remote_write`; anything
 scrape-only needs either a new scrape job in the fleet Prometheus config or push.
@@ -399,10 +401,13 @@ scrape-only needs either a new scrape job in the fleet Prometheus config or push
     static_configs:
       - targets: ["off-by-one.internal:8766"]
         labels:
-          product: off-by-one
-          service: off-by-one
           host: <hostname>
   ```
+
+  `product`/`service` are **not** needed here any more: the registry emits them on every
+  series itself (§5.1). Setting them in the job is harmless (same values) but would hide a real
+  regression — a job-level label masks the series-level one, so keep them out and let a missing
+  label fail the scrape as it should.
 
   This config lives on `fleet-monitor` and is **out of scope for this audit** — it must be
   added by whoever owns the monitoring stack, not by this product.
@@ -416,6 +421,77 @@ scrape-only needs either a new scrape job in the fleet Prometheus config or push
   bind change or a local scrape agent. `main.go` already warns loudly when binding
   non-loopback because there is no auth — so **prefer the local-agent push/scrape** over
   exposing the port.
+
+### 5.1 Metric labels — emitted by the registry, not by the scrape job
+
+Every `obo_*` series carries two constant labels, attached to the private registry at construction
+(`internal/metrics/prom.go`: `PromConstLabels` handed to `prometheus.WrapRegistererWith`), so one
+family cannot be added without them and no collector repeats them per series:
+
+```text
+obo_http_up{product="off-by-one",service="off-by-one"} 1
+obo_solves_total{outcome="succeeded",product="off-by-one",service="off-by-one"} 0
+obo_solve_peak_rss_bytes_bucket{product="off-by-one",service="off-by-one",le="+Inf"} 0
+```
+
+- `product="off-by-one"` — the required label: product identity, stable across hosts and
+  restarts, so series from several instances aggregate per product without relabelling.
+- `service="off-by-one"` — the fleet's second convention label, same value by design (spec §5's
+  scrape-job label set, now satisfied at the source).
+- **Order matters when asserting text**: exposition labels are alphabetical over the merged set,
+  so `product` sits between family labels when their names sort around it
+  (`{product="off-by-one",reason="load",service="off-by-one"}`), while a histogram's generated
+  `le` is appended last by the encoder (`{product=...,service=...,le="+Inf"}`).
+- Gate (measured on a running instance built from this tree):
+  `curl -s 127.0.0.1:8766/metrics/prom | grep -c 'product="off-by-one"'` must be **≥ 12**;
+  `TestPromEverySeriesCarriesProductLabels` (`internal/metrics/prom_labels_test.go`) enforces it
+  per sample — every gauge, counter, histogram child and bucket — and fails if any sample line
+  lacks the label.
+
+### 5.2 Seed completion record — a textfile, because `seed` is one-shot
+
+The API process owns every other `obo_*` family; `off-by-one seed` runs once at install/refresh
+time and then exits, so its outcome cannot live in a scrape. It is published as a Prometheus
+**textfile** instead:
+
+- **Path** (the textfile): `obo_seed_completion.prom`, written **next to the database** the seed
+  loaded (`-db ./off-by-one.db` → `./obo_seed_completion.prom`, i.e. `filepath.Dir(db)` +
+  `obo_seed_completion.prom`). Override with `-record PATH` or the `OFF_BY_ONE_SEED_RECORD`
+  environment variable (the flag's default); `-record -` disables the write.
+- **Written atomically** (temp file in the same directory, then rename) and **rewritten** on every
+  run — never appended, so each family carries exactly one sample and it always describes the
+  LAST run. Mode 0644 so a collector running as another user can read it.
+- **Labels**: the same `product`/`service` pair as §5.1 — the record is part of the `obo_*` series
+  set, not a side channel.
+- **Families** (all gauges):
+
+| metric | meaning |
+| --- | --- |
+| `obo_seed_last_exit_status` | 0 = success, 1 = failed (the flag-parse path exits 2 before any record exists) |
+| `obo_seed_last_run_timestamp_seconds` | completion time, fractional unix seconds, whatever the outcome |
+| `obo_seed_files_loaded` | corpus files (`data/answers/*.json`) read by the run |
+| `obo_seed_classes_loaded` | classes in the catalogue after the run (created + already existing) |
+| `obo_seed_answers_loaded` | answers in the catalogue after the run (created + already present) |
+| `obo_seed_answers_created` | answers newly inserted (0 on an unchanged re-run) |
+| `obo_seed_answers_skipped` | answers already present and untouched |
+| `obo_seed_edges_created` | similar-graph edges written (0 on a re-run) |
+
+A failed run records zero counts **plus** `obo_seed_last_exit_status 1`: the status, not the
+counts, says why the numbers are zero. A record-write failure never fails an otherwise successful
+seed (the corpus is already committed); it is logged with the path so it is not silent.
+
+Consumption is the monitoring stack's job, not this product's. node_exporter's textfile collector
+example — the directory must be the one holding the record:
+
+```bash
+node_exporter --collector.textfile.directory /var/lib/off-by-one
+```
+
+Verify the record directly, without any exporter:
+
+```bash
+./off-by-one seed -db /tmp/obo.db -dir data && cat /tmp/obo_seed_completion.prom
+```
 
 ---
 

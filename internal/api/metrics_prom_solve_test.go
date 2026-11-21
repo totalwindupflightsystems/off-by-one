@@ -31,12 +31,14 @@ func TestMetricsPromServesSolveResources(t *testing.T) {
 	}
 	body := rr.Body.String()
 	for _, want := range []string{
-		`obo_solve_failure_total{cause="timeout"} 3`,
-		`obo_solve_failure_total{cause="solver_exit"} 1`,
-		`obo_solve_failure_total{cause="toolchain_missing"} 0`,
-		"obo_solve_killed_total 1",
-		"obo_solve_peak_rss_bytes_count 2",
-		`obo_solve_peak_rss_bytes_bucket{le="+Inf"} 2`,
+		`obo_solve_failure_total{cause="timeout",` + promProductLabels + `} 3`,
+		`obo_solve_failure_total{cause="solver_exit",` + promProductLabels + `} 1`,
+		`obo_solve_failure_total{cause="toolchain_missing",` + promProductLabels + `} 0`,
+		"obo_solve_killed_total{" + promProductLabels + "} 1",
+		"obo_solve_peak_rss_bytes_count{" + promProductLabels + "} 2",
+		// Histogram bucket lines carry the const labels first and the
+		// generated le label LAST (expfmt appends it while writing).
+		`obo_solve_peak_rss_bytes_bucket{` + promProductLabels + `,le="+Inf"} 2`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("exposition missing %q\nbody:\n%s", want, body)

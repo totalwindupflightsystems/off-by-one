@@ -65,13 +65,15 @@ func TestPromTier3Families(t *testing.T) {
 		"# TYPE obo_discovery_requests_total counter",
 		"# HELP obo_db_size_bytes",
 		"# TYPE obo_db_size_bytes gauge",
-		`obo_queue_deferred_total{reason="load"} 1`,
-		`obo_queue_deferred_total{reason="memory"} 2`,
-		`obo_queue_deferred_total{reason="load+memory"} 0`,
-		`obo_discovery_requests_total{outcome="hit"} 1`,
-		`obo_discovery_requests_total{outcome="miss"} 3`,
-		`obo_db_size_bytes{kind="main"}`,
-		`obo_db_size_bytes{kind="wal"}`,
+		// Label order is alphabetical across the whole set, so the const
+		// labels interleave with `reason` (product < reason < service).
+		`obo_queue_deferred_total{product="off-by-one",reason="load",service="off-by-one"} 1`,
+		`obo_queue_deferred_total{product="off-by-one",reason="memory",service="off-by-one"} 2`,
+		`obo_queue_deferred_total{product="off-by-one",reason="load+memory",service="off-by-one"} 0`,
+		`obo_discovery_requests_total{outcome="hit",` + wantConstLabels + `} 1`,
+		`obo_discovery_requests_total{outcome="miss",` + wantConstLabels + `} 3`,
+		`obo_db_size_bytes{kind="main",` + wantConstLabels + `}`,
+		`obo_db_size_bytes{kind="wal",` + wantConstLabels + `}`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("exposition missing %q", want)

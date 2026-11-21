@@ -30,6 +30,26 @@ import (
 	"github.com/totalwindupflightsystems/off-by-one/internal/solver"
 )
 
+// ProductValue is the value of the const `product` label carried by
+// every obo_* series (OBS-OB-005). It is the product identity, not the
+// host name: one series set can be scraped from several instances and
+// still aggregate correctly per product.
+const ProductValue = "off-by-one"
+
+// PromConstLabels are attached to EVERY series of the private registry
+// via prometheus.WrapRegistererWith, so collectors never need to repeat
+// them and a new family cannot forget them (OBS-OB-005). Emitting them
+// at the source means the scrape config does not have to inject
+// product/service labels, and a push/remote_write path keeps them too.
+//
+// `service` duplicates `product` deliberately: the fleet convention
+// (spec §5) labels scrape targets with both, and a series carrying them
+// already is unchanged by the scrape job's own label set.
+var PromConstLabels = prometheus.Labels{
+	"product": ProductValue,
+	"service": ProductValue,
+}
+
 // solveDurationBuckets are the obo_solve_duration_seconds bucket
 // boundaries (seconds). Chosen around the observed solve-time mean of
 // ~226s over 3354 completed solves (spec §3.1).
@@ -125,16 +145,23 @@ type Prom struct {
 // It never fails: MustRegister panics only on a programming error
 // (duplicate/invalid descriptor), which the fixed definitions below
 // cannot produce.
+//
+// Every family is registered through a registerer wrapping the private
+// registry with PromConstLabels (product/service), so all obo_* series
+// inherit those labels without a single collector repeating them
+// (OBS-OB-005). The wrap happens at construction, not at scrape time:
+// a family added later gets the labels by construction too.
 func NewProm(cfg PromConfig) *Prom {
 	reg := prometheus.NewRegistry()
+	regr := prometheus.WrapRegistererWith(PromConstLabels, reg)
 	p := &Prom{registry: reg, dbSrc: cfg.DBDerived, db: newDBGaugeCache()}
 
-	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+	regr.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "obo_http_up",
 		Help: "Whether the off-by-one HTTP API process is answering (always 1 when this exposition is served).",
 	}, func() float64 { return 1 }))
 
-	reg.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
+	regr.MustRegister(prometheus.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "obo_cron_loop_running",
 		Help: "Whether the cron solve loop was started (1) or the process took the no-solver-available branch (0).",
 	}, func() float64 {
@@ -144,7 +171,7 @@ func NewProm(cfg PromConfig) *Prom {
 		return 0
 	}))
 
-	reg.MustRegister(&solvesTotalCollector{
+	regr.MustRegister(&solvesTotalCollector{
 		src: cfg.SolveCounts,
 		desc: prometheus.NewDesc(
 			"obo_solves_total",
@@ -157,7 +184,7 @@ func NewProm(cfg PromConfig) *Prom {
 	// Prom.db, which only the refresher writes. Collect() never touches
 	// SQLite or the filesystem, so a scrape storm cannot become a SQL
 	// storm and the 50ms scrape budget holds regardless of DB size.
-	reg.MustRegister(&dbGaugeCollector{
+	regr.MustRegister(&dbGaugeCollector{
 		cache: p.db,
 		pendingDesc: prometheus.NewDesc(
 			"obo_queue_pending",
@@ -186,7 +213,7 @@ func NewProm(cfg PromConfig) *Prom {
 		),
 	})
 
-	reg.MustRegister(&deferredTotalCollector{
+	regr.MustRegister(&deferredTotalCollector{
 		src: cfg.Deferrals,
 		desc: prometheus.NewDesc(
 			"obo_queue_deferred_total",
@@ -195,7 +222,7 @@ func NewProm(cfg PromConfig) *Prom {
 		),
 	})
 
-	reg.MustRegister(&discoveryTotalCollector{
+	regr.MustRegister(&discoveryTotalCollector{
 		src: cfg.Discovery,
 		desc: prometheus.NewDesc(
 			"obo_discovery_requests_total",
@@ -215,12 +242,12 @@ func NewProm(cfg PromConfig) *Prom {
 	for _, outcome := range solveOutcomes {
 		p.duration.WithLabelValues(outcome)
 	}
-	reg.MustRegister(p.duration)
+	regr.MustRegister(p.duration)
 
 	// Tier 2 — solve resources and failure causes (OBS-OB-003, spec
 	// §3.3). Sourced from the Observer's cumulative totals, which never
 	// go backwards even though its per-solve record window is bounded.
-	reg.MustRegister(&solvePeakRSSCollector{
+	regr.MustRegister(&solvePeakRSSCollector{
 		src: cfg.SolveResources,
 		desc: prometheus.NewDesc(
 			"obo_solve_peak_rss_bytes",
@@ -228,7 +255,7 @@ func NewProm(cfg PromConfig) *Prom {
 			nil, nil,
 		),
 	})
-	reg.MustRegister(&solveCountersCollector{
+	regr.MustRegister(&solveCountersCollector{
 		src: cfg.SolveResources,
 		specs: []solveCounterSpec{
 			{
@@ -257,7 +284,7 @@ func NewProm(cfg PromConfig) *Prom {
 			},
 		},
 	})
-	reg.MustRegister(&solveFailureCollector{
+	regr.MustRegister(&solveFailureCollector{
 		src: cfg.SolveResources,
 		desc: prometheus.NewDesc(
 			"obo_solve_failure_total",
@@ -270,7 +297,7 @@ func NewProm(cfg PromConfig) *Prom {
 	// This is the tier that makes "the loop is alive and answering HTTP
 	// but never solving" visible: idle_gated ticks plus a fresh
 	// last-tick timestamp while solves_total stays flat.
-	reg.MustRegister(&schedulerHealthCollector{
+	regr.MustRegister(&schedulerHealthCollector{
 		src: cfg.Scheduler,
 		tickDesc: prometheus.NewDesc(
 			"obo_cron_ticks_total",
