@@ -4,6 +4,13 @@
 Gitleaks scans credentials, but the answer corpus is allowlisted for example
 secrets. This independent guard checks structured corpus text plus rendered
 HTML. It reports only category, file, and count — never matched values.
+
+data/answers.jsonl is a GENERATED local artifact (gitignored, rebuilt with
+scripts/build-answers-jsonl.py / `make corpus-jsonl`), so a fresh clone does not
+have it. The tracked per-class corpus data/answers/*.json carries every answer
+the monolith would and is scanned unconditionally, so an absent monolith cannot
+hide a violation; the monolith is scanned as an extra surface only when it is
+present. Non-JSON corpus docs and rendered site HTML are always scanned as text.
 """
 import ipaddress
 import json
@@ -120,6 +127,7 @@ def main():
 
     data = os.path.join(ROOT, "data")
     jsonl = os.path.join(data, "answers.jsonl")
+    scanned_jsonl = False
     if os.path.isfile(jsonl):
         with open(jsonl, encoding="utf-8") as stream:
             for line_number, line in enumerate(stream, 1):
@@ -131,8 +139,10 @@ def main():
                     failures.append((os.path.relpath(jsonl, ROOT), "invalid JSON line", line_number))
                     continue
                 record(jsonl, scan_json(item))
+        scanned_jsonl = True
 
     answers = os.path.join(data, "answers")
+    scanned_classes = False
     if os.path.isdir(answers):
         for directory, _, names in os.walk(answers):
             for name in names:
@@ -146,6 +156,11 @@ def main():
                     failures.append((os.path.relpath(path, ROOT), "invalid JSON file", 1))
                     continue
                 record(path, scan_json(item))
+        scanned_classes = True
+
+    if not scanned_jsonl and scanned_classes:
+        print(f"note: {jsonl} absent (generated artifact, `make corpus-jsonl`) — "
+              f"scanned the canonical per-class corpus {answers} instead")
 
     # Non-JSON catalog files (index/readme/count docs) and generated HTML are
     # scanned as text. JSON data is parsed first so serialization escapes do

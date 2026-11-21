@@ -3,7 +3,10 @@
 Export the verified answer corpus from SQLite into flat files for distribution.
 
 Outputs (relative to repo root):
-  data/answers.jsonl            — master bulk file, one answer per line (JSON)
+  data/answers.jsonl            — bulk file, one answer per line (JSON). LOCAL
+                                  BUILD ARTIFACT: untracked + gitignored, since
+                                  it is 100% derivable from the per-class files
+                                  (rebuild with `make corpus-jsonl`).
   data/answers/<slug>.json      — one file per problem class (PR-friendly)
   data/INDEX.md                 — human-readable catalog of problem classes
   data/COUNTS.md                — live corpus counts (auto-stamped every export)
@@ -441,7 +444,13 @@ def main() -> None:
 
     os.makedirs(ANSWERS_DIR, exist_ok=True)
 
-    # 1. Master JSONL (one answer per line, class metadata embedded)
+    # 1. Bulk JSONL (one answer per line, class metadata embedded).
+    # This file is a LOCAL BUILD ARTIFACT, not a tracked source: it is
+    # gitignored and regenerable from the per-class files with
+    # `make corpus-jsonl` (scripts/build-answers-jsonl.py). Keep writing it
+    # here so local consumers that want one stream still get it, but never
+    # `git add -f` it — it used to be committed and cost history tens of MB
+    # per export (OBS-OB-006).
     jsonl_path = os.path.join(DATA_DIR, "answers.jsonl")
     n_answers = 0
     with open(jsonl_path, "w") as f:
@@ -487,8 +496,11 @@ def main() -> None:
         f.write(f"# Off-by-One Answer Index\n\n")
         f.write(f"**{len(classes)} problem classes · {n_answers} verified answers** · "
                 f"exported {now}\n\n")
-        f.write("Browse per-class files in [`data/answers/`](answers/), or use the "
-                "master [`answers.jsonl`](answers.jsonl).\n\n")
+        f.write("Browse per-class files in [`data/answers/`](answers/) — that is "
+                "the canonical, tracked form. Need the whole corpus as one JSONL "
+                "stream? Rebuild it locally with `make corpus-jsonl` "
+                "(`data/answers.jsonl` is a generated artifact, not tracked in "
+                "git).\n\n")
         f.write("| Class ID | Problem | Answers | Languages |\n")
         f.write("|----------|---------|---------|-----------|\n")
         for cls in sorted(classes.values(), key=lambda x: -len(x["answers"])):
@@ -518,8 +530,8 @@ no SQLite, no setup** needed to consume or contribute.
 
 | Path | Content |
 |------|---------|
-| `answers.jsonl` | Master file — one verified answer per line (JSON) |
-| `answers/` | One JSON file per problem class — browse, diff, PR |
+| `answers/` | **Canonical, tracked** — one JSON file per problem class — browse, diff, PR |
+| `answers.jsonl` | Generated bulk view — one verified answer per line. **Not tracked**: rebuild locally with `make corpus-jsonl` |
 | `INDEX.md` | Catalog of every problem class + language coverage |
 | `COUNTS.md` | Live corpus counts — auto-stamped every export |
 
@@ -542,7 +554,8 @@ curl -O https://raw.githubusercontent.com/totalwindupflightsystems/off-by-one/ma
 **2. Clone everything:**
 ```bash
 git clone --depth 1 https://github.com/totalwindupflightsystems/off-by-one
-# answers in data/answers.jsonl
+# answers live in data/answers/*.json
+make corpus-jsonl   # optional: materialise data/answers.jsonl (bulk, one line per answer)
 ```
 
 **3. Search locally (no server):**
@@ -553,7 +566,7 @@ jq '.answers[0].solution' data/answers/0001-unknown.json  # read a solution
 
 ## Record shape
 
-Each line of `answers.jsonl` (and each entry in `answers/*.json`):
+Each entry in `answers/*.json` (and each line of the generated `answers.jsonl`):
 
 ```json
 {
@@ -576,7 +589,8 @@ Each line of `answers.jsonl` (and each entry in `answers/*.json`):
 ## Contribute
 
 Add or fix an answer? Open a PR that adds/updates a file under `answers/`
-(or appends to `answers.jsonl`) — maintainers verify and merge.
+(the per-class files are the tracked source of truth) — maintainers verify and
+merge.
 
 ## Freshness
 
@@ -584,10 +598,16 @@ Exported from the live lab's SQLite store. Regenerate with:
 ```bash
 python3 scripts/export-answers.py
 ```
+
+`answers.jsonl` is a generated local build artifact (gitignored, not part of the
+clone). Rebuild it from the tracked per-class files at any time with
+`make corpus-jsonl`; `make corpus-jsonl-check` proves a local copy matches a
+fresh rebuild.
 """)
 
     print(f"Exported {len(classes)} classes / {n_answers} answers → {DATA_DIR}")
-    print(f"  {jsonl_path}")
+    print(f"  {jsonl_path} (local build artifact — untracked and gitignored; "
+          f"regenerate with `make corpus-jsonl`)")
     print(f"  {ANSWERS_DIR}/ (per-class files)")
     print(f"  {index_path}")
     print(f"  {counts_path}")

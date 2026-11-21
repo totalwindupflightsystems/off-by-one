@@ -628,7 +628,7 @@ off-by-one/
 ├── deploy/off-by-one.service # Vendored systemd unit (make check-deploy-test guards it)
 ├── worker/                  # Cloudflare Worker `off-by-one-seo` (bots -> static, browsers -> app)
 ├── site/                    # Generated static mirror (one page per class + sitemap/robots)
-├── data/                    # Flat answer corpus (answers.jsonl, answers/, INDEX.md, COUNTS.md)
+├── data/                    # Flat answer corpus (answers/ per class = tracked; answers.jsonl = generated local artifact)
 ├── web/                     # Frontend assets (go:embed)
 │   ├── index.html
 │   ├── css/style.css
@@ -674,8 +674,8 @@ MIT
 The pre-solve lab has verified answers for thousands of problem classes across 20+ domains — published as **flat files in this repo** so anyone can use them without running a server (canonical corpus counts: [`data/INDEX.md`](data/INDEX.md) and [`data/COUNTS.md`](data/COUNTS.md), auto-regenerated every sync; live API counts: `GET /api/v1/stats`):
 
 - **🌐 [Live public catalog — ob1.it.com](https://ob1.it.com)** — searchable web UI with rendered markdown, tables, and mermaid diagrams; read-only community instance, synced from the lab every 6h
-- **[data/answers.jsonl](data/answers.jsonl)** — Master file, one verified answer per line (JSON)
-- **[data/answers/](data/answers/)** — One JSON file per problem class — browse, diff, contribute via PR
+- **[data/answers/](data/answers/)** — One JSON file per problem class — browse, diff, contribute via PR (the tracked source of truth)
+- **`data/answers.jsonl`** — bulk single-file view, one verified answer per line. **Not committed** (it is 100% derived from `data/answers/`): `make corpus-jsonl` rebuilds it locally, `make corpus-jsonl-check` proves your copy matches a fresh rebuild
 - **[data/INDEX.md](data/INDEX.md)** — Catalog of every problem class + language coverage
 
 **Privacy-by-default:** the publication path replaces personal home-directory roots, email addresses, phone numbers, and IPv4/IPv6 addresses with neutral placeholders in the flat corpus, Git-subtree exports, and the read-only public API. A fail-closed CI guard scans generated `data/` and `site/` artifacts. Gitleaks continues scanning secrets, but its corpus allowlist means it is not the general PII detector.

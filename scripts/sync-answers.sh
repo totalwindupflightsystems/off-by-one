@@ -27,6 +27,9 @@ if git diff --quiet data/ site/ scripts/export-answers.py scripts/generate-stati
   exit 0
 fi
 
+# data/answers.jsonl is a GENERATED, gitignored artifact (OBS-OB-006): `git add
+# data/` skips it automatically, and it must never be force-added — committing
+# it cost history tens of MB per export. The tracked corpus is data/answers/.
 git add data/ site/ scripts/export-answers.py scripts/generate-static-site.py README.md
 git commit -q -m "data: sync answer corpus — $(git diff --cached --numstat | wc -l) files changed
 
@@ -46,4 +49,7 @@ fi
 echo "📦 Answer corpus synced to GitHub:"
 git show --stat --oneline HEAD | head -8
 echo ""
-echo "Stats: $(grep -c '^' data/answers.jsonl) verified answers · $(ls data/answers/ | wc -l) problem classes"
+# Counts come from the tracked per-class files, not from the generated bulk
+# artifact (which may be absent on a fresh clone).
+answer_total=$(python3 -c 'import glob,json;print(sum(len(json.load(open(p))["answers"]) for p in glob.glob("data/answers/*.json")))')
+echo "Stats: ${answer_total} verified answers · $(ls data/answers/ | wc -l) problem classes"

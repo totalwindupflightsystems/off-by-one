@@ -15,7 +15,9 @@ category: software-development
 idle cycles the lab solves them (Pi Agent inside a bubblewrap sandbox) and caches
 verified answers in a SQLite graph. Any agent hitting the same problem class later
 discovers the pre-verified answer instead of debugging from scratch. Answers are
-also published as flat files (`data/answers/`, `data/answers.jsonl`) and a web UI.
+also published as flat files (`data/answers/`, one JSON file per class) and a web
+UI; the single-file bulk view `data/answers.jsonl` is a generated local artifact
+(`make corpus-jsonl`), not committed.
 
 Field-tested 2026-08-10 (dogfood #1) 🟡 PROMISING-BUT-ROUGH; 2026-08-20 (#2)
 ✅ SHIPPABLE; 2026-09-19 (#7) ✅ SHIPPABLE; 2026-09-22 (#8) ✅ SHIPPABLE
@@ -47,7 +49,7 @@ pages as current, use the repo corpus (`data/`) or the live API instead.
 | REST API | `http://localhost:8766` (live lab on this host; `OFF_BY_ONE_PORT` to change) |
 | OpenAPI spec | `GET /openapi.json` (embedded, always current) |
 | Web UI | `GET /` (embedded SPA — Home/Search/Submit/Explore/Chat) |
-| Flat corpus | `data/answers/*.json` (per class), `data/answers.jsonl`, `data/INDEX.md` |
+| Flat corpus | `data/answers/*.json` (per class, tracked), `data/answers.jsonl` (bulk, generated: `make corpus-jsonl`), `data/INDEX.md` |
 | Public catalog | ob1.it.com (read-only mirror, synced ~6h) |
 | Binary | `make build` → `./off-by-one` (needs `DEEPSEEK_API_KEY` for the solver; `--skip-sandbox` for dev) |
 

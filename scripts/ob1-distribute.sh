@@ -55,6 +55,9 @@ python3 scripts/export-answers.py >/tmp/ob1_export.log 2>&1 || {
 }
 
 if ! git diff --quiet data/ site/ scripts/export-answers.py scripts/generate-static-site.py README.md; then
+  # data/answers.jsonl is a GENERATED, gitignored bulk artifact (OBS-OB-006):
+  # `git add data/` skips it by itself, and it must never be force-added — the
+  # tracked corpus is data/answers/ (rebuilt locally via `make corpus-jsonl`).
   git add data/ site/ scripts/export-answers.py scripts/generate-static-site.py README.md
   # FAIL LOUD (OB-DIST-001). The previous form was `git commit ... || true`, so a
   # rejected commit (hook, index lock, killed process) degraded the whole

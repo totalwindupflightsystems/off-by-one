@@ -2,7 +2,7 @@
 
 **3249 problem classes · 7450 verified answers** · exported 2026-11-21 08:12 UTC
 
-Browse per-class files in [`data/answers/`](answers/), or use the master [`answers.jsonl`](answers.jsonl).
+Browse per-class files in [`data/answers/`](answers/) — that is the canonical, tracked form. Need the whole corpus as one JSONL stream? Rebuild it locally with `make corpus-jsonl` (`data/answers.jsonl` is a generated artifact, not tracked in git).
 
 | Class ID | Problem | Answers | Languages |
 |----------|---------|---------|-----------|

@@ -8,8 +8,8 @@ no SQLite, no setup** needed to consume or contribute.
 
 | Path | Content |
 |------|---------|
-| `answers.jsonl` | Master file — one verified answer per line (JSON) |
-| `answers/` | One JSON file per problem class — browse, diff, PR |
+| `answers/` | **Canonical, tracked** — one JSON file per problem class — browse, diff, PR |
+| `answers.jsonl` | Generated bulk view — one verified answer per line. **Not tracked**: rebuild locally with `make corpus-jsonl` |
 | `INDEX.md` | Catalog of every problem class + language coverage |
 | `COUNTS.md` | Live corpus counts — auto-stamped every export |
 
@@ -32,7 +32,8 @@ curl -O https://raw.githubusercontent.com/totalwindupflightsystems/off-by-one/ma
 **2. Clone everything:**
 ```bash
 git clone --depth 1 https://github.com/totalwindupflightsystems/off-by-one
-# answers in data/answers.jsonl
+# answers live in data/answers/*.json
+make corpus-jsonl   # optional: materialise data/answers.jsonl (bulk, one line per answer)
 ```
 
 **3. Search locally (no server):**
@@ -43,7 +44,7 @@ jq '.answers[0].solution' data/answers/0001-unknown.json  # read a solution
 
 ## Record shape
 
-Each line of `answers.jsonl` (and each entry in `answers/*.json`):
+Each entry in `answers/*.json` (and each line of the generated `answers.jsonl`):
 
 ```json
 {
@@ -66,7 +67,8 @@ Each line of `answers.jsonl` (and each entry in `answers/*.json`):
 ## Contribute
 
 Add or fix an answer? Open a PR that adds/updates a file under `answers/`
-(or appends to `answers.jsonl`) — maintainers verify and merge.
+(the per-class files are the tracked source of truth) — maintainers verify and
+merge.
 
 ## Freshness
 
@@ -74,3 +76,8 @@ Exported from the live lab's SQLite store. Regenerate with:
 ```bash
 python3 scripts/export-answers.py
 ```
+
+`answers.jsonl` is a generated local build artifact (gitignored, not part of the
+clone). Rebuild it from the tracked per-class files at any time with
+`make corpus-jsonl`; `make corpus-jsonl-check` proves a local copy matches a
+fresh rebuild.
