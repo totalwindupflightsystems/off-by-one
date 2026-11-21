@@ -47,8 +47,8 @@ database. Commit hashes are from `git log --oneline` in the same worktree and ea
 | §3.4 | Queue age, deferrals, catalogue, discovery, DB size (6 families) | **LANDED — `fe3be63e`** *"obs(OBS-OB-004): ship Tier-3 DB-derived gauges on /metrics/prom"* (commit stamp 2026-11-16 19:38 -0500; merged into `master` at `78b47e1c`, 21:14) | Registration `internal/metrics/prom.go:160-205` (`dbGaugeCollector`, `deferredTotalCollector`, `discoveryTotalCollector`); sampler `internal/metrics/prom_db.go` (`dbGaugeCache` `:85-104`, `RefreshDB` `:111-122`, `StartDBRefresh` `:129-149`, `Collect` `:174-231`); **15 s** ticker `prom_db.go:29`, started at `cmd/off-by-one/main.go:332`; **no SQL and no `stat()` inside the scrape handler** — `Collect` copies the cached struct only. Verified live 2026-11-16 on a scratch process (port 18966, DB copy, no solver): all six families present, `obo_queue_oldest_pending_age_seconds` 59322.92 vs 59323.2 from SQL, `obo_catalog_verified_answers` 5033 = SQL 5033, `obo_db_size_bytes{kind="main"}` 59064320 = `stat` 59064320, scrape 0.48-0.57 ms | Board row **OBS-OB-004** |
 | §4.1 | In-process `client_golang` + `promhttp`, private registry, `/metrics/prom` as a new path, JSON `/metrics` preserved | **LANDED as recommended — `62b1c03b`** | `github.com/prometheus/client_golang v1.25.0` is in `go.mod:7` (the dependency was genuinely absent on 2026-11-03); private registry `internal/metrics/prom.go:129`, served by `promhttp.HandlerFor` at `:302`; JSON `/metrics` untouched at `internal/api/server.go:380-387` |
 | §4.2 | Wire the previously-dead `internal/cron.Metrics` counters into the registry | **LANDED** — `62b1c03b` (loop counters), `e066e203` (resources), `6c4e09aa` (scheduler), `fe3be63e` (DB-derived) | `cmd/off-by-one/main.go:249-319` builds `PromConfig` from `loop.Metrics().Snapshot()` (`:298-309`) plus `observer.SolveResources` (`:312`) and `observer.SchedulerHealth` (`:318`); `main.go:322` feeds the duration histogram through `SetDurationObserver`; `main.go:332` starts the DB-gauge refresher |
-| §5 | Fleet scrape job, `up{}`, product/service/host registry labels | **OPEN — out of repo scope** | No `job_name`, `scrape_configs` or `remote_write` anywhere in this repo (checked `*.yaml`, `*.yml`, `*.toml`, `*.md`); `deploy/` holds only `off-by-one.service`. Board row **OBS-OB-005** |
-| §6 | Steps 0-4 verification | **Steps 0-4 have their series and were run against a scratch process; the deployed unit and the scrape job are still OPEN** | Step 0's three assertions are enforced by `TestMetricsPromEndpoint` (`internal/api/metrics_prom_test.go:33`) and were also measured live (§3.4 row: HTTP 200, `Content-Type: text/plain; version=0.0.4…`). Steps 1-4's series are asserted family-by-family in `internal/metrics/prom_test.go`, `prom_scheduler_test.go`, `prom_db_test.go` and `internal/api/metrics_prom_solve_test.go`, and all 21 families appeared in one live exposition. Still open: the *running deployment* (no restart since 2026-11-04) and the fleet scrape job (§5, OBS-OB-005) — see §6 |
+| §5 | Product/service registry labels; fleet scrape job, `up{}`, `host` label | **Labels LANDED 2026-11-21 — `66386b3d`** *"feat(obs): label every obo_* series with product/service and record seed completion. Addresses OBS-OB-005."* (merged `7a6f9624`; **OBS-OB-005** closed) — **collection half still OPEN — out of repo scope** | Labels: `PromConstLabels` (`internal/metrics/prom.go:48`) applied to the whole private registry by `prometheus.WrapRegistererWith` (`:156`), gate `TestPromEverySeriesCarriesProductLabels` (`internal/metrics/prom_labels_test.go`); measured on a scratch instance built from the merged tree — 77 `obo_*` series, all 77 with `product="off-by-one"`, all 77 with `service="off-by-one"`, 0 without (§5.1). Collection half: no `job_name`, `scrape_configs` or `remote_write` anywhere in this repo (checked `*.yaml`, `*.yml`, `*.toml`, `*.md`); `deploy/` holds only `off-by-one.service`. Open work is board row **OBS-OB-007** |
+| §6 | Steps 0-4 verification | **Steps 0-4 have their series and were run against a scratch process; the deployed unit and the scrape job are still OPEN** | Step 0's three assertions are enforced by `TestMetricsPromEndpoint` (`internal/api/metrics_prom_test.go:33`) and were also measured live (§3.4 row: HTTP 200, `Content-Type: text/plain; version=0.0.4…`). Steps 1-4's series are asserted family-by-family in `internal/metrics/prom_test.go`, `prom_scheduler_test.go`, `prom_db_test.go` and `internal/api/metrics_prom_solve_test.go`, and all 21 families appeared in one live exposition. Still open: the *running deployment* (no restart since 2026-11-04) and the fleet scrape job (§5, OBS-OB-007) — see §6 |
 
 **Emitted family count: 21.** 5 Tier-1 (§3.1) + 6 Tier-3 DB-derived (§3.4) + 5 solve-resource/cause (§3.3) + 5
 scheduler (§3.2). `promhttp` drives one private registry, so the families on the wire are exactly the ones registered in
@@ -382,12 +382,17 @@ decompose; if per-status depth is wanted later, it needs three `Depth`-style cou
 ## 5. Collection path
 
 **Status 2026-11-21: exposition side DONE (`62b1c03b` + `e066e203` + `6c4e09aa` + `fe3be63e`), series labelling
-DONE (§5.1), seed completion record DONE (§5.2), collection side OPEN.** Everything below the line is the audit's
-recommendation and still stands, with one measured change: the endpoint exists now, so the open question is purely
-"who scrapes it". Nothing in this repository configures a scrape — no `job_name`, `scrape_configs` or
-`remote_write` appears in any tracked `*.yaml`/`*.yml`/`*.toml`/`*.md`, and `deploy/` contains only
-`off-by-one.service`. That remainder is tracked as board row **OBS-OB-005** ("the monitoring stack is out of repo
-scope").
+DONE (`66386b3d`, merged `7a6f9624`; OBS-OB-005 — §5.1), seed completion record DONE (§5.2), collection side OPEN.**
+Everything below the line is the audit's recommendation and still stands, with one measured change: the endpoint
+exists now, so the open question is purely "who scrapes it". The label half is measured, not asserted: a scratch
+instance built from the merged tree served **77** `obo_*` series, all 77 carrying `product="off-by-one"` and all 77
+carrying `service="off-by-one"` (`curl -s 127.0.0.1:18766/metrics/prom | grep -c 'product="off-by-one"'` → **77**);
+the mechanism is §5.1. Nothing in this repository configures a scrape — no `job_name`, `scrape_configs` or
+`remote_write` appears in any tracked `*.yaml`/`*.yml`/`*.toml`/`*.md` (the only matches are this section's own
+recommended example and its prose describing the fleet posture and this absence), and `deploy/` contains only
+`off-by-one.service`. That remainder — a fleet scrape job, so `up{}` and the `host` label exist — is tracked as
+board row **OBS-OB-007**;
+`OBS-OB-005` is `complete` and covers the landed labels and seed record, not the collection work.
 
 The fleet posture (given): agents **push** to Prometheus via `remote_write`; anything
 scrape-only needs either a new scrape job in the fleet Prometheus config or push.
@@ -546,10 +551,12 @@ obo_queue_pending                                        # matches /api/v1/stats
 histogram_quantile(0.95, rate(obo_solve_duration_seconds_bucket[1h]))   # sane (< 3600)
 ```
 
-**Label caveat (verified 2026-11-16):** no `obo_*` family carries a `product`/`service`/`host` label of its own — every
-descriptor in `internal/metrics/prom.go` uses `nil` variable labels. The `{product="off-by-one"}` selectors above only
-work once the scrape job attaches those as target labels (§5) or Prometheus adds them via `external_labels`. Against a
-bare `curl` of the process, drop the selector. Likewise `sum by (outcome)` yields `succeeded|failed|rejected`, not
+**Label caveat (corrected 2026-11-21 — `66386b3d`):** every `obo_*` series now carries `product="off-by-one"` and
+`service="off-by-one"` from the registry itself (`PromConstLabels`, `internal/metrics/prom.go:48`, applied by
+`prometheus.WrapRegistererWith` at `:156`), so the `{product="off-by-one"}` selectors above match on a bare `curl` of
+the process — measured 77/77 series on a scratch instance (§5.1). **Still true:** no family carries a `host` label of
+its own; `host` comes from the scrape job's target labels (§5) or Prometheus `external_labels`, and that job is still
+open (OBS-OB-007). Likewise `sum by (outcome)` yields `succeeded|failed|rejected`, not
 `success`.
 
 Cross-check against the JSON surface, which is the current ground truth:
@@ -592,7 +599,7 @@ SELECT ROUND((julianday('now') - julianday(MIN(created_at))) * 86400, 1)
 — a 0.3 s difference, i.e. the age of the cached reading, not a disagreement. So `> 21600` is evaluable from a scrape.
 
 **Residual gap, stated exactly:** the *deployed* unit cannot answer it yet (no restart since 2026-11-04, above), and
-nothing scrapes `/metrics/prom` (§5, OBS-OB-005). The gap is the deployment and the scrape job — **not** the family.
+nothing scrapes `/metrics/prom` (§5, OBS-OB-007). The gap is the deployment and the scrape job — **not** the family.
 An empty result is now diagnostic in only two ways: the binary predates `fe3be63e`, or the refresher has not completed
 a read (check the `…OK` flags in `prom_db.go`); it no longer means "the family does not exist".
 
@@ -604,7 +611,7 @@ with ≥ 21 `obo_*` families (the exact set §0 counts: 5 Tier-1 + 6 Tier-3 + 5 
 plus one alert rule firing on Step 2 in a deliberately gated
 repro (run with `-load-threshold 0.1` and confirm the alert fires, then restore).
 Note that this done-condition spans two owners: the family count is this repo's work and is testable now; `up{}`, the
-`job` label and the alert rule all require the fleet scrape job (§5, OBS-OB-005), which is outside this repository.
+`job` label and the alert rule all require the fleet scrape job (§5, OBS-OB-007), which is outside this repository.
 
 ---
 
@@ -633,11 +640,13 @@ Note that this done-condition spans two owners: the family count is this repo's 
 
 ## 8. Open questions this audit could not resolve
 
-- **Scrape job — OPEN, re-checked 2026-11-16.** Whether the fleet Prometheus has any `off-by-one` scrape job.
+- **Scrape job — OPEN, re-checked 2026-11-21.** Whether the fleet Prometheus has any `off-by-one` scrape job.
   Inside this repo the answer is definitionally no: no `job_name`, `scrape_configs` or `remote_write` appears in any
   tracked config-like file, and `deploy/` holds only the systemd unit. The 2026-11-03 evidence (0 scraper traffic,
-  process up 1h29m, `solve_count: 0`, no scrape series) still points the same way, and board row OBS-OB-005 is still
-  `pending` with the note "the monitoring stack is out of repo scope". **What would close it:** the `fleet-monitor`
+  process up 1h29m, `solve_count: 0`, no scrape series) still points the same way, and board row **OBS-OB-007** is
+  still `pending` with the note "the monitoring stack is out of repo scope". The label half that used to ride this
+  question is settled: `product`/`service` are emitted by the registry itself (OBS-OB-005, `66386b3d`, merged
+  `7a6f9624` — 77/77 series measured, §5.1), so only collection is left. **What would close it:** the `fleet-monitor`
   Prometheus config containing `job_name: off-by-one` with `metrics_path: /metrics/prom`, plus a live query returning
   `up{job="off-by-one"} == 1`. Neither is obtainable from inside this repository, so it stays OPEN here rather than
   being asserted either way.
