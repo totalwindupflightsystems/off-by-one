@@ -594,13 +594,14 @@ What's checked:
 
 ### CI/CD
 
-GitHub Actions runs on every push to `master`, on every PR, and on `v*` tag pushes — seven jobs in `.github/workflows/ci.yml` (`build`, `transport-retry-selftest`, `deploy-gate-selftest`, `binary-seed-probe`, `corpus-hygiene`, `readme-release-pin`, `golangci-lint`), listed below in file order:
+GitHub Actions runs on every push to `master`, on every PR, and on `v*` tag pushes — eight jobs in `.github/workflows/ci.yml` (`build`, `transport-retry-selftest`, `deploy-gate-selftest`, `binary-seed-probe`, `corpus-hygiene`, `corpus-jsonl`, `readme-release-pin`, `golangci-lint`), listed below in file order:
 
 - **`Test (short)`** (`build`) — single-leg matrix pinned to **Go 1.26.11** (the exact `go.mod` patch, so CI and local builds link the same stdlib — OB-GAP-088); steps: Checkout → Setup Go → Cache modules → Build → Vet → *Install bubblewrap* → *Lift the AppArmor unprivileged-userns restriction* → *Ensure setuid-root bwrap fallback* → Test (short).
 - **`Transport retry self-test`** — runs `scripts/tests/transport-retry-selftest.sh` against a scratch DB (needs `sqlite3`).
 - **`Deploy gate self-test`** — `make check-deploy-test` against an unshallowed checkout so the version stamp resolves.
 - **`Binary seed probe`** — builds the binary, seeds a throwaway DB from the bundled corpus, and probes discovery (OB-GAP-065) so a broken seed path cannot reach the deployed artifact.
 - **`Corpus host-path hygiene`** — `make check-corpus-hygiene` plus its non-vacuity self-test, the export sanitizer mapping test, and the static-site slug/title redaction test (OB-GAP-093), so absolute host paths cannot leak into the corpus or the generated site.
+- **`Corpus bulk artifact rebuild`** (`corpus-jsonl`) — checks out with `fetch-depth: 0` (the reproduction arm reads the historical blob; a shallow clone would fall onto its loud-SKIP path) and runs `make corpus-jsonl-selftest`, rebuilding `data/answers.jsonl` from the tracked per-class corpus and proving every consumer still works with the monolith absent (OBS-OB-006).
 - **`README release pin`** (`readme-release-pin`) — checks out with `fetch-depth: 0` so local tags exist (a shallow clone would force the guard onto its loud-SKIP path), then runs `make check-readme-release-pin` and `make check-readme-release-pin-selftest`, so the README's release install pin cannot drift from the latest tag (README-11).
 - **`golangci-lint`** — runs `golangci-lint run --timeout=2m ./...` (QA-OFF-BY-ONE-25) so the errcheck/staticcheck battery cannot regress.
 
