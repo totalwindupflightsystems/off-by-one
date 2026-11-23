@@ -753,6 +753,26 @@ curl -sS http://localhost:8766/metrics
 
 ---
 
+### `GET /metrics/prom`
+
+Prometheus text-format exposition of the server's runtime metrics, scraped from the same process that serves the API. The `Content-Type` is `text/plain; version=0.0.4; charset=utf-8; escaping=underscores` (standard Prometheus text format, UTF-8).
+
+Unlike `GET /metrics`, this endpoint always answers `200` with a Prometheus body — it never returns the `metrics_disabled` `404` when the JSON metrics observer is not configured.
+
+**Response `200 OK`**
+
+Prometheus text format with a set of `obo_*` metric families (counters and gauges) covering solves, discover requests, queue depth, cron ticks, host load/memory, and catalog coverage. The per-metric family contract is documented in `docs/observability-spec.md` section 3; this guide does not duplicate it.
+
+**Status codes:** `200` (always; this route does not depend on the metrics observer configuration).
+
+**Example**
+
+```bash
+curl -fsS http://localhost:8766/metrics/prom | grep -E '^# TYPE' | head
+```
+
+---
+
 ## Read-only catalog mode
 
 When the server is started with `--readonly` (or `OFF_BY_ONE_READONLY=1`), these mutating endpoints return `403 Forbidden`:

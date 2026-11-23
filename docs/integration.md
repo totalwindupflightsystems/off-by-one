@@ -16,8 +16,9 @@ Base URL: `http://localhost:8766` (or wherever the binary is listening).
 8. [Read-Only Catalog Mode](#read-only-catalog-mode)
 9. [MCP / Muster Auto-Discovery](#mcp--muster-auto-discovery)
 10. [Seeding the Answer Corpus](#seeding-the-answer-corpus)
-11. [Join a community answers repo (empty-node bootstrap)](#join-a-community-answers-repo-empty-node-bootstrap)
-12. [Configuration Reference](#configuration-reference)
+12. [Join a community answers repo (empty-node bootstrap)](#join-a-community-answers-repo-empty-node-bootstrap)
+13. [Monitoring Metrics](#monitoring-metrics)
+14. [Configuration Reference](#configuration-reference)
 
 ---
 
@@ -432,6 +433,16 @@ The `seed` subcommand loads the bundled flat answer corpus (`data/answers/*.json
 ```
 
 Database path resolution: the `-db` flag wins, then the `OFF_BY_ONE_DB` environment variable (see [Configuration Reference](#configuration-reference)), then the default `./off-by-one.db`. The `-dir` flag defaults to `./data` and only needs to change if the corpus lives elsewhere.
+
+---
+
+## Monitoring Metrics
+
+For scraping, the server serves Prometheus text format at `GET /metrics/prom` — standard `text/plain; version=0.0.4` exposition with `obo_*` metric families (solves, discover requests, queue depth, cron ticks, host load). It always answers `200` and never 404s, so a Prometheus job targeting it needs no special 404 handling. See `docs/api-reference.md` for the endpoint details and `docs/observability-spec.md` section 3 for the metric family contract.
+
+```bash
+curl -fsS http://localhost:8766/metrics/prom | grep -E '^# TYPE' | head
+```
 
 ---
 
