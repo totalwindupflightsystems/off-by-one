@@ -349,7 +349,7 @@ def landing_index(classes, counts, gen_date=None):
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Off-By-One — The Pre-Solve Lab · {total_classes} verified answers, open source</title>
+<title>Off-By-One — The Pre-Solve Lab · {total_answers} verified answers, open source</title>
 <meta name="description" content="Off-By-One is a pre-solve lab: {total_classes} problem classes with {total_answers} verified answers — solved on idle compute, judged by real criteria, published with evidence. Open catalog, MIT licensed.">
 <meta property="og:title" content="Off-By-One — The Pre-Solve Lab">
 <meta property="og:description" content="{total_classes} problem classes · {total_answers} verified answers · 100% hit rate. Open source, MIT.">
