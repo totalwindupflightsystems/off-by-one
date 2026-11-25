@@ -110,7 +110,7 @@
     // Environment vocabulary must cover the values the bundled corpus and
     // API ship (docker, linux) in addition to the generic deploy targets, or
     // the Submit form cannot express classes the corpus already carries.
-    // ch:trace row=DF-OFF-BY-ONE-54 spec=none:current-row-contract wave=off-by-one-foreman-2026-10-21-21-32-28#serial test=internal/api/handlers_test.go::TestSubmit_DedupVerifiedAnswer doc=none:ui-option-contract prompt=/tmp/off-by-one-foreman-2026-10-21-21-32-28-DF-OFF-BY-ONE-54-brief.txt evidence=web/js/submit.js witness=commit:5ddccd4f207b573ecf1d9b7f18cf69295523b0a3 verdict=none:pending commit=5ddccd4f207b573ecf1d9b7f18cf69295523b0a3 memory=none:pending
+    // ch:trace row=DF-OFF-BY-ONE-54 spec=none:current-row-contract wave=off-by-one-foreman-2026-10-21-21-32-28#serial test=internal/api/handlers_test.go::TestSubmit_DedupVerifiedAnswer doc=none:ui-option-contract prompt=none:ephemeral-brief evidence=web/js/submit.js witness=none:commit-sha-not-a-witness-form verdict=5d4cf7c9 commit=5ddccd4f207b573ecf1d9b7f18cf69295523b0a3 memory=none:pending
     [
       { v: '', l: '— Any —' },
       { v: 'dev', l: 'Dev' },
