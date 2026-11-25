@@ -3,7 +3,9 @@
 > **Version:** 1.0.0  
 > **Target file:** `docs/index.html`  
 > **Constraint:** Single HTML file, embedded CSS, zero JavaScript dependencies  
-> **Status:** Specification — ready for implementation  
+> **Status:** Historical specification — superseded by the shipped page; do not implement from this document as written  
+>
+> **⚠️ Divergence notice (2026-11-25):** The target file `docs/index.html` shipped at commit `7c284d8d` (2026-07-24, "docs: landing page for GitHub Pages") and **diverged from this specification**. Missing on the shipped page: spec sections **7.1 Navbar**, **7.3 Stats Bar**, **7.7 Quick Start**, and **7.8 Footer** (as specified). Added on the shipped page without a matching spec section: **"Speaks Your Language"** (runner-language showcase). This document remains as a historical design reference; the shipped page is authoritative for what is live.
 
 ---
 
