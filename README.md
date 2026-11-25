@@ -327,7 +327,7 @@ go run ./cmd/off-by-one --help
 | `--solve-mem-mb` | Per-solve memory cap in MiB, applied to the sandboxed command via the `oby-memcap` wrapper (RLIMIT_AS); 0 = unlimited (env `OFF_BY_ONE_SOLVE_MEM_MB`) |
 | `--solve-reject-rss-mb` | Reject a solve whose observed peak RSS exceeds this many MiB even when it returned success (-1 = auto: 80% of `--solve-mem-mb`; 0 = disabled; env `OFF_BY_ONE_SOLVE_REJECT_RSS_MB`) |
 | `--solve-timeout` | Per-solve timeout cap (env `OFF_BY_ONE_SOLVE_TIMEOUT`) |
-| `--version` | Print the build stamp (e.g. `off-by-one 0287082`) and exit |
+| `--version` | Print the version string and exit: `off-by-one 0.3.0-dev` from source; release builds inject the tag via `-ldflags` (e.g. `off-by-one v0.3.0`) |
 
 ## Read-only catalog mode
 
