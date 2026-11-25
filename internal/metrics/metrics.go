@@ -44,8 +44,9 @@ var SolvePeakRSSBuckets = []uint64{256 << 20, 512 << 20, 1 << 30, 2684354560, 4 
 // The unit-level cap (DF-OFF-BY-ONE-30) bounds a single solve at
 // RLIMIT_AS = 6 GiB by default; a solve that peaks above 4 GiB is
 // surviving the cap but is close enough to it (and to the host's
-// swap) that it must page someone. Configurable via
-// -rss-alert-mb / OFF_BY_ONE_RSS_ALERT_MB.
+// swap) that it must page someone. The threshold is fixed at
+// construction time in cmd/off-by-one/main.go; there is no flag or
+// env override.
 const DefaultRSSAlertBytes uint64 = 4 << 30
 
 // SolveRecord is one solve's resource footprint. PeakRSSBytes is the
