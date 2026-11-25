@@ -36,7 +36,7 @@
 # Hermetic regression test (no live-service contact):
 #   scripts/tests/tick-closeout-test.sh   (make tick-closeout-selftest)
 #
-# ch:trace row=DF-OFF-BY-ONE-52 spec=docs/dogfood/diagnostics.md#tick-close-out-enforcement wave=none:serial-tick test=scripts/tests/tick-closeout-test.sh::caller-invokes-gate-and-propagates-verdict doc=docs/dogfood/diagnostics.md prompt=none:worker-brief evidence=scripts/tests/tick-closeout-test.sh witness=none:repository-local-verification verdict=none:pending-foreman-judge commit=none:pending-foreman-trace memory=none:pending-foreman-memory
+# ch:trace row=DF-OFF-BY-ONE-52 spec=docs/dogfood/diagnostics.md#tick-close-out-enforcement wave=none:serial-tick test=scripts/tests/tick-closeout-test.sh::caller-invokes-gate-and-propagates-verdict doc=docs/dogfood/diagnostics.md prompt=none:worker-brief evidence=scripts/tests/tick-closeout-test.sh witness=none:repository-local-verification verdict=cf7e2094 commit=25aad6a0 memory=none:not-written
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
